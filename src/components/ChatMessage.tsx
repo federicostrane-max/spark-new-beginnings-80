@@ -37,17 +37,15 @@ export const ChatMessage = ({ id, role, content, isStreaming }: ChatMessageProps
   const isTTSPlaying = currentMessageId === id && status === 'playing';
 
   return (
-    <div
-      className={cn(
-        "flex gap-2 md:gap-3 p-3 md:p-4",
-        isUser ? "bg-muted/50" : "bg-background"
-      )}
-    >
-      <div className="flex-shrink-0 w-7 h-7 md:w-8 md:h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs md:text-sm font-medium">
-        {isUser ? "U" : "AI"}
-      </div>
-
-      <div className="flex-1 min-w-0">
+    <div className={cn("mb-4 flex w-full", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[85%] rounded-2xl px-4 py-3 shadow-sm",
+          isUser 
+            ? "bg-primary text-primary-foreground" 
+            : "bg-muted text-foreground"
+        )}
+      >
         <div className={cn("prose prose-sm max-w-none dark:prose-invert", !isExpanded && isLong && "line-clamp-3")}>
           <div className="text-sm md:text-base">
             {isUser ? (
@@ -64,23 +62,23 @@ export const ChatMessage = ({ id, role, content, isStreaming }: ChatMessageProps
         </div>
 
         {!isUser && !isStreaming && content && (
-          <div className="mt-2 flex gap-2 flex-wrap">
+          <div className="mt-3 pt-2 border-t border-border/50 flex gap-2 flex-wrap">
             <Button
               variant="ghost"
               size="sm"
               onClick={handleCopy}
-              className="h-8 px-2 min-h-[44px] md:min-h-0"
+              className="h-8 px-2"
             >
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             </Button>
             
             <Button
               variant="ghost"
               size="sm"
               onClick={handleTTS}
-              className="h-8 px-2 min-h-[44px] md:min-h-0"
+              className="h-8 px-2"
             >
-              {isTTSPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {isTTSPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
             </Button>
 
             {isLong && (
@@ -88,9 +86,9 @@ export const ChatMessage = ({ id, role, content, isStreaming }: ChatMessageProps
                 variant="ghost"
                 size="sm"
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="h-8 px-2 min-h-[44px] md:min-h-0"
+                className="h-8 px-2"
               >
-                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </Button>
             )}
           </div>

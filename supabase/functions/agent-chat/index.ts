@@ -20,6 +20,13 @@ interface ToolUseBlock {
   };
 }
 
+interface Attachment {
+  url: string;
+  name: string;
+  type: string;
+  extracted_text?: string;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -44,7 +51,7 @@ Deno.serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const { conversationId, message, agentSlug } = await req.json();
+    const { conversationId, message, agentSlug, attachments } = await req.json();
 
     console.log('Processing chat for agent:', agentSlug);
 
@@ -87,13 +94,27 @@ Deno.serve(async (req) => {
       conversation = data;
     }
 
+    // Process attachments and build context
+    let attachmentContext = '';
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments as Attachment[]) {
+        if (att.extracted_text) {
+          attachmentContext += `\n\n[Content from ${att.name}]:\n${att.extracted_text}`;
+        }
+      }
+    }
+
+    const finalUserMessage = attachmentContext 
+      ? `${message}${attachmentContext}`
+      : message;
+
     // Save user message
     const { error: userMsgError } = await supabase
       .from('agent_messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
-        content: message
+        content: finalUserMessage
       });
 
     if (userMsgError) throw userMsgError;
@@ -149,8 +170,28 @@ Deno.serve(async (req) => {
         };
 
         try {
+          // Create placeholder message in DB
+          const { data: placeholderMsg, error: placeholderError } = await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: conversation.id,
+              role: 'assistant',
+              content: ''
+            })
+            .select()
+            .single();
+
+          if (placeholderError) throw placeholderError;
+
+          // Send message_start event with message ID
+          sendSSE(JSON.stringify({ 
+            type: 'message_start', 
+            messageId: placeholderMsg.id 
+          }));
+
           let fullResponse = '';
           let toolCalls: ToolUseBlock[] = [];
+          let lastUpdateTime = Date.now();
           
           const anthropicMessages = messages.map(m => ({
             role: m.role,
@@ -205,7 +246,17 @@ Deno.serve(async (req) => {
                 if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                   const text = parsed.delta.text;
                   fullResponse += text;
-                  sendSSE(JSON.stringify({ type: 'token', content: text }));
+                  sendSSE(JSON.stringify({ type: 'content', text }));
+
+                  // Periodic DB update (every 500ms)
+                  const now = Date.now();
+                  if (now - lastUpdateTime > 500) {
+                    await supabase
+                      .from('agent_messages')
+                      .update({ content: fullResponse })
+                      .eq('id', placeholderMsg.id);
+                    lastUpdateTime = now;
+                  }
                 } else if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
                   toolCalls.push(parsed.content_block);
                 }
@@ -222,7 +273,6 @@ Deno.serve(async (req) => {
             for (const toolCall of toolCalls) {
               const { question, consulted_agent_slug } = toolCall.input;
               
-              // Get consulted agent
               const { data: consultedAgent } = await supabase
                 .from('agents')
                 .select('*')
@@ -230,7 +280,6 @@ Deno.serve(async (req) => {
                 .single();
 
               if (consultedAgent) {
-                // Call consulted agent
                 const consultResponse = await fetch('https://api.anthropic.com/v1/messages', {
                   method: 'POST',
                   headers: {
@@ -251,7 +300,6 @@ Deno.serve(async (req) => {
                   ? consultData.content[0].text 
                   : '';
 
-                // Save inter-agent message
                 await supabase
                   .from('inter_agent_messages')
                   .insert({
@@ -268,17 +316,14 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Save assistant response
+          // Final update to DB
           await supabase
             .from('agent_messages')
-            .insert({
-              conversation_id: conversation.id,
-              role: 'assistant',
-              content: fullResponse
-            });
+            .update({ content: fullResponse })
+            .eq('id', placeholderMsg.id);
 
           sendSSE(JSON.stringify({ 
-            type: 'done', 
+            type: 'complete', 
             conversationId: conversation.id 
           }));
           

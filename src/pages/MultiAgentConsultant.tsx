@@ -5,9 +5,10 @@ import { UserMenu } from "@/components/UserMenu";
 import { AgentChatList } from "@/components/AgentChatList";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
+import { ChatSidebar } from "@/components/ChatSidebar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu } from "lucide-react";
+import { Loader2, Menu, Settings } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -41,12 +42,31 @@ export default function MultiAgentConsultant() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const { toast } = useToast();
 
+  // Intelligent auto-scroll
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    
+    setIsUserAtBottom(distanceFromBottom < 50);
+    
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = setTimeout(() => {
+      setIsUserAtBottom(true);
+    }, 3000);
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (isUserAtBottom && !isStreaming) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, isUserAtBottom, isStreaming]);
 
   const handleSelectAgent = async (agent: Agent, conversationId: string | null) => {
     setCurrentAgent(agent);
@@ -108,7 +128,7 @@ export default function MultiAgentConsultant() {
     return data.id;
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>) => {
     if (!currentAgent || !session?.access_token) return;
 
     let conversationId = currentConversation?.id;
@@ -130,14 +150,14 @@ export default function MultiAgentConsultant() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    
+    // Create placeholder for assistant message
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+    
     setIsStreaming(true);
 
     try {
-      const messageHistory = [
-        ...messages.map((m) => ({ role: m.role, content: m.content })),
-        { role: "user" as const, content: text },
-      ];
-
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
         {
@@ -147,9 +167,10 @@ export default function MultiAgentConsultant() {
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            messages: messageHistory,
+            message: text,
             conversationId,
             agentSlug: currentAgent.slug,
+            attachments,
           }),
         }
       );
@@ -161,8 +182,7 @@ export default function MultiAgentConsultant() {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantMessage = "";
-      let assistantId = crypto.randomUUID();
+      let accumulatedText = "";
 
       if (!reader) throw new Error("No reader");
 
@@ -183,17 +203,21 @@ export default function MultiAgentConsultant() {
           try {
             const parsed = JSON.parse(data);
 
-            if (parsed.type === "token" && parsed.content) {
-              assistantMessage += parsed.content;
-              setMessages((prev) => {
-                const lastMsg = prev[prev.length - 1];
-                if (lastMsg?.role === "assistant" && lastMsg.id === assistantId) {
-                  return prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: assistantMessage } : m
-                  );
-                }
-                return [...prev, { id: assistantId, role: "assistant", content: assistantMessage }];
-              });
+            if (parsed.type === "message_start") {
+              // Backend created placeholder, we already have one in UI
+              console.log("Message started:", parsed.messageId);
+            } else if (parsed.type === "content" && parsed.text) {
+              accumulatedText += parsed.text;
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: accumulatedText } : m
+                )
+              );
+            } else if (parsed.type === "complete") {
+              // Stream complete
+              if (parsed.conversationId && !currentConversation) {
+                setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
+              }
             } else if (parsed.type === "error") {
               throw new Error(parsed.error);
             }
@@ -205,29 +229,40 @@ export default function MultiAgentConsultant() {
     } catch (error: any) {
       console.error("Error sending message:", error);
       toast({ title: "Error", description: error.message, variant: "destructive" });
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
     } finally {
       setIsStreaming(false);
     }
   };
 
-  const sidebarContent = (
-    <>
-      <UserMenu />
-      <AgentChatList
-        currentAgentId={currentAgent?.id || null}
-        currentConversationId={currentConversation?.id || null}
-        onSelectAgent={handleSelectAgent}
-      />
-    </>
-  );
+  const handleNewChat = () => {
+    setCurrentConversation(null);
+    setMessages([]);
+  };
 
   return (
-    <div className="flex h-screen w-full">
-      {/* Desktop Sidebar */}
-      {!isMobile && (
+    <div className="flex h-screen w-full overflow-hidden">
+      {/* Desktop Sidebar with ChatSidebar */}
+      {!isMobile && currentAgent && (
+        <div className="w-[280px] flex-shrink-0 flex flex-col border-r bg-background">
+          <ChatSidebar
+            currentConversationId={currentConversation?.id || null}
+            currentAgentId={currentAgent?.id || null}
+            onSelectConversation={loadConversation}
+            onNewChat={handleNewChat}
+          />
+        </div>
+      )}
+
+      {/* Desktop Agent List (when no agent selected) */}
+      {!isMobile && !currentAgent && (
         <div className="w-80 flex-shrink-0 flex flex-col border-r border-border">
-          {sidebarContent}
+          <UserMenu />
+          <AgentChatList
+            currentAgentId={null}
+            currentConversationId={null}
+            onSelectAgent={handleSelectAgent}
+          />
         </div>
       )}
 
@@ -235,41 +270,60 @@ export default function MultiAgentConsultant() {
       {isMobile && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
           <SheetContent side="left" className="w-80 p-0">
-            {sidebarContent}
+            {currentAgent ? (
+              <ChatSidebar
+                currentConversationId={currentConversation?.id || null}
+                currentAgentId={currentAgent?.id || null}
+                onSelectConversation={loadConversation}
+                onNewChat={handleNewChat}
+              />
+            ) : (
+              <>
+                <UserMenu />
+                <AgentChatList
+                  currentAgentId={null}
+                  currentConversationId={null}
+                  onSelectAgent={handleSelectAgent}
+                />
+              </>
+            )}
           </SheetContent>
         </Sheet>
       )}
 
-      <div className="flex flex-1 flex-col">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20">
         {currentAgent ? (
           <>
-            {/* Header with hamburger on mobile */}
-            <div className="border-b border-border bg-background p-3 md:p-4">
-              <div className="flex items-center gap-2 md:gap-3">
+            {/* Header with Settings */}
+            <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
+              <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
                 {isMobile && (
-                  <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-                    <SheetTrigger asChild>
-                      <Button variant="ghost" size="icon" className="flex-shrink-0">
-                        <Menu className="h-5 w-5" />
-                      </Button>
-                    </SheetTrigger>
-                  </Sheet>
+                  <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
+                    <Menu className="h-5 w-5" />
+                  </Button>
                 )}
-                <div className="text-2xl md:text-3xl">{currentAgent.avatar || "🤖"}</div>
-                <div className="min-w-0 flex-1">
-                  <h1 className="text-base md:text-xl font-semibold truncate">{currentAgent.name}</h1>
-                  <p className="text-xs md:text-sm text-muted-foreground truncate">{currentAgent.description}</p>
+                <div className="flex items-center gap-3 flex-1">
+                  <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
+                  <div className="min-w-0">
+                    <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
+                    <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
+                  </div>
                 </div>
+                <Button variant="ghost" size="icon">
+                  <Settings className="h-5 w-5" />
+                </Button>
               </div>
             </div>
 
-            <ScrollArea className="flex-1">
+            {/* Messages Container - CENTERED with max-width */}
+            <ScrollArea className="flex-1" onScroll={handleScroll}>
               {loadingMessages ? (
                 <div className="flex h-full items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="pb-4">
+                <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
                   {messages.length === 0 ? (
                     <div className="flex h-full items-center justify-center p-6 md:p-8 text-center">
                       <div>
@@ -296,24 +350,25 @@ export default function MultiAgentConsultant() {
               )}
             </ScrollArea>
 
-            <ChatInput
-              onSend={handleSendMessage}
-              disabled={isStreaming || loadingMessages}
-              placeholder={`Ask ${currentAgent.name}...`}
-            />
+            {/* Chat Input - FIXED BOTTOM with max-width */}
+            <div className="border-t bg-background/95 backdrop-blur">
+              <div className="max-w-4xl mx-auto px-4 md:px-6 py-4">
+                <ChatInput
+                  onSend={handleSendMessage}
+                  disabled={isStreaming || loadingMessages}
+                  placeholder={`Message ${currentAgent.name}...`}
+                />
+              </div>
+            </div>
           </>
         ) : (
           <div className="flex h-full items-center justify-center p-4">
             <div className="text-center">
               {isMobile && (
-                <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-                  <SheetTrigger asChild>
-                    <Button variant="outline" size="lg" className="mb-4">
-                      <Menu className="h-5 w-5 mr-2" />
-                      Open Menu
-                    </Button>
-                  </SheetTrigger>
-                </Sheet>
+                <Button variant="outline" size="lg" className="mb-4" onClick={() => setDrawerOpen(true)}>
+                  <Menu className="h-5 w-5 mr-2" />
+                  Open Menu
+                </Button>
               )}
               <h2 className="text-xl md:text-2xl font-semibold mb-2">Select an AI Consultant</h2>
               <p className="text-sm md:text-base text-muted-foreground">
