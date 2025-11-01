@@ -67,6 +67,8 @@ Deno.serve(async (req) => {
       throw new Error('Agent not found');
     }
 
+    console.log('Agent ID for RAG filtering:', agent.id);
+
     // Get or create conversation
     let conversation;
     if (conversationId) {

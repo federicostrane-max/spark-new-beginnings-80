@@ -313,7 +313,13 @@ export default function MultiAgentConsultant() {
             </TabsList>
             
             <TabsContent value="knowledge">
-              <KnowledgeBaseManager />
+              {currentAgent ? (
+                <KnowledgeBaseManager agentId={currentAgent.id} agentName={currentAgent.name} />
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  Select an agent to manage its knowledge base
+                </div>
+              )}
             </TabsContent>
             
             <TabsContent value="agents">

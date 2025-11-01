@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
+import { Loader2, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { chunkText } from "@/lib/textChunking";
 
 interface Agent {
   id: string;
@@ -26,32 +27,81 @@ interface CreateAgentModalProps {
 export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentModalProps) => {
   const { toast } = useToast();
   const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [avatar, setAvatar] = useState("🤖");
+  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // Auto-generate slug from name
-  useEffect(() => {
-    if (name) {
-      const autoSlug = name.toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
-      setSlug(autoSlug);
-    }
-  }, [name]);
 
   // Reset form when dialog closes
   useEffect(() => {
     if (!open) {
       setName("");
-      setSlug("");
       setDescription("");
       setSystemPrompt("");
-      setAvatar("🤖");
+      setPdfFiles([]);
     }
   }, [open]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      setPdfFiles(prev => [...prev, ...Array.from(files)]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setPdfFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const processPDFsForAgent = async (agentId: string, files: File[]) => {
+    for (const file of files) {
+      try {
+        // Upload to Supabase Storage
+        const fileName = `${agentId}/${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('knowledge-pdfs')
+          .upload(fileName, file);
+
+        if (uploadError) throw uploadError;
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('knowledge-pdfs')
+          .getPublicUrl(fileName);
+
+        // Read file as text (for PDF we'd normally use a library, but for demo we'll use FileReader)
+        const fileContent = await file.text();
+
+        // Chunk text
+        const chunks = chunkText(fileContent, 1000, 200);
+
+        // Generate embeddings and insert
+        for (const chunk of chunks) {
+          const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke('generate-embedding', {
+            body: { text: chunk }
+          });
+
+          if (embeddingError) throw embeddingError;
+
+          await supabase.from('agent_knowledge').insert({
+            agent_id: agentId,
+            document_name: file.name,
+            content: chunk,
+            category: 'uploaded',
+            summary: null,
+            embedding: embeddingData.embedding
+          });
+        }
+      } catch (error) {
+        console.error(`Error processing ${file.name}:`, error);
+        toast({ 
+          title: "Warning", 
+          description: `Failed to process ${file.name}. Agent created but knowledge base incomplete.`,
+          variant: "destructive" 
+        });
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,40 +111,52 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
       toast({ title: "Name too short", description: "Agent name must be at least 3 characters", variant: "destructive" });
       return;
     }
-    
-    if (!slug) {
-      toast({ title: "Slug required", variant: "destructive" });
-      return;
-    }
 
-    // Check slug uniqueness
-    const { data: existing } = await supabase
-      .from("agents")
-      .select("id")
-      .eq("slug", slug)
-      .single();
-    
-    if (existing) {
-      toast({ title: "Slug already exists", description: "Please choose a different slug", variant: "destructive" });
+    if (!systemPrompt) {
+      toast({ title: "System prompt required", variant: "destructive" });
       return;
     }
 
     setLoading(true);
     try {
+      // Auto-generate slug
+      let autoSlug = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+
+      // Check slug uniqueness
+      const { data: existing } = await supabase
+        .from("agents")
+        .select("id")
+        .eq("slug", autoSlug)
+        .maybeSingle();
+      
+      if (existing) {
+        // Append timestamp to make it unique
+        autoSlug = `${autoSlug}-${Date.now()}`;
+      }
+
+      // Create agent
       const { data, error } = await supabase
         .from("agents")
         .insert({
           name,
-          slug,
+          slug: autoSlug,
           description,
           system_prompt: systemPrompt,
-          avatar,
+          avatar: null,
           active: true
         })
         .select()
         .single();
 
       if (error) throw error;
+
+      // Process PDF files if present
+      if (pdfFiles.length > 0) {
+        toast({ title: "Processing documents...", description: "Agent created, uploading knowledge base..." });
+        await processPDFsForAgent(data.id, pdfFiles);
+      }
 
       toast({ title: "Success", description: "Agent created successfully!" });
       onSuccess(data);
@@ -124,34 +186,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Marketing Guru"
               required
-            />
-          </div>
-
-          {/* Slug */}
-          <div>
-            <Label htmlFor="slug">Slug (URL identifier) *</Label>
-            <Input 
-              id="slug"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="marketing-guru"
-              pattern="[a-z0-9-]+"
-              required
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Lowercase, no spaces (auto-generated from name)
-            </p>
-          </div>
-
-          {/* Avatar */}
-          <div>
-            <Label htmlFor="avatar">Avatar (Emoji)</Label>
-            <Input 
-              id="avatar"
-              value={avatar}
-              onChange={(e) => setAvatar(e.target.value)}
-              placeholder="🤖"
-              maxLength={4}
+              disabled={loading}
             />
           </div>
 
@@ -164,12 +199,13 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Describe what this agent specializes in..."
               rows={3}
+              disabled={loading}
             />
           </div>
 
           {/* System Prompt */}
           <div>
-            <Label htmlFor="systemPrompt">System Prompt</Label>
+            <Label htmlFor="systemPrompt">System Prompt *</Label>
             <Textarea 
               id="systemPrompt"
               value={systemPrompt}
@@ -177,10 +213,59 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
               placeholder="You are a marketing expert specialized in..."
               rows={6}
               className="font-mono text-sm"
+              required
+              disabled={loading}
             />
             <p className="text-xs text-muted-foreground mt-1">
               Define the agent's personality, expertise, and behavior
             </p>
+          </div>
+
+          {/* Knowledge Base PDF Upload */}
+          <div>
+            <Label htmlFor="pdf-upload">Knowledge Base (PDF files)</Label>
+            <div className="border-2 border-dashed rounded-lg p-6 text-center">
+              <Input 
+                id="pdf-upload"
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={handleFileChange}
+                disabled={loading}
+                className="hidden"
+              />
+              <label 
+                htmlFor="pdf-upload" 
+                className="cursor-pointer flex flex-col items-center gap-2"
+              >
+                <Upload className="h-8 w-8 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
+                  Click to upload PDF documents
+                </p>
+              </label>
+              
+              {pdfFiles.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {pdfFiles.map((file, index) => (
+                    <div 
+                      key={index} 
+                      className="flex items-center justify-between bg-muted p-2 rounded text-sm"
+                    >
+                      <span className="truncate">📄 {file.name}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFile(index)}
+                        disabled={loading}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Submit */}
@@ -197,7 +282,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
+                  {pdfFiles.length > 0 ? "Creating agent and processing documents..." : "Creating..."}
                 </>
               ) : (
                 "Create Agent"

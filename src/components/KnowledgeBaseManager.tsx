@@ -19,7 +19,12 @@ interface KnowledgeDocument {
   created_at: string;
 }
 
-export const KnowledgeBaseManager = () => {
+interface KnowledgeBaseManagerProps {
+  agentId: string;
+  agentName: string;
+}
+
+export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManagerProps) => {
   const { toast } = useToast();
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,7 +35,7 @@ export const KnowledgeBaseManager = () => {
 
   useEffect(() => {
     loadDocuments();
-  }, []);
+  }, [agentId]);
 
   const loadDocuments = async () => {
     setLoading(true);
@@ -38,6 +43,7 @@ export const KnowledgeBaseManager = () => {
       const { data, error } = await supabase
         .from("agent_knowledge")
         .select("id, document_name, category, summary, created_at")
+        .eq("agent_id", agentId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -115,13 +121,14 @@ export const KnowledgeBaseManager = () => {
 
         if (embeddingError) throw embeddingError;
 
-        const { error: insertError } = await supabase.from('agent_knowledge').insert({
-          document_name: selectedFile.name,
-          content: chunk,
-          category: category,
-          summary: summary || analysis.summary || null,
-          embedding: embeddingData.embedding
-        });
+          const { error: insertError } = await supabase.from('agent_knowledge').insert({
+            agent_id: agentId,
+            document_name: selectedFile.name,
+            content: chunk,
+            category: category,
+            summary: summary || analysis.summary || null,
+            embedding: embeddingData.embedding
+          });
 
         if (insertError) throw insertError;
       }
@@ -148,6 +155,7 @@ export const KnowledgeBaseManager = () => {
       const { error } = await supabase
         .from("agent_knowledge")
         .delete()
+        .eq("agent_id", agentId)
         .eq("document_name", documentName);
 
       if (error) throw error;
@@ -161,11 +169,17 @@ export const KnowledgeBaseManager = () => {
   };
 
   return (
-    <Tabs defaultValue="upload" className="w-full">
-      <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="upload">Upload Document</TabsTrigger>
-        <TabsTrigger value="list">Documents List</TabsTrigger>
-      </TabsList>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-lg font-semibold">Knowledge Base for {agentName}</h3>
+        <p className="text-sm text-muted-foreground">Manage documents specific to this agent</p>
+      </div>
+      
+      <Tabs defaultValue="upload" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="upload">Upload Document</TabsTrigger>
+          <TabsTrigger value="list">Documents List</TabsTrigger>
+        </TabsList>
 
       {/* Upload Tab */}
       <TabsContent value="upload" className="space-y-4 mt-4">
@@ -271,6 +285,7 @@ export const KnowledgeBaseManager = () => {
           </Table>
         )}
       </TabsContent>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
