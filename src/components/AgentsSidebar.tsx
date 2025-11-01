@@ -4,9 +4,27 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, LogOut } from "lucide-react";
+import { Plus, LogOut, MoreVertical, BookOpen, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Agent {
   id: string;
@@ -31,6 +49,8 @@ export const AgentsSidebar = ({
   const { toast } = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
+  const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
 
   useEffect(() => {
     loadAgents();
@@ -58,6 +78,26 @@ export const AgentsSidebar = ({
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/auth";
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!agentToDelete) return;
+    
+    try {
+      const { error } = await supabase
+        .from("agents")
+        .update({ active: false })
+        .eq("id", agentToDelete.id);
+
+      if (error) throw error;
+
+      toast({ title: "Success", description: `${agentToDelete.name} deleted successfully` });
+      setAgentToDelete(null);
+      loadAgents();
+    } catch (error: any) {
+      console.error("Error deleting agent:", error);
+      toast({ title: "Error", description: "Failed to delete agent", variant: "destructive" });
+    }
   };
 
   return (
@@ -99,24 +139,54 @@ export const AgentsSidebar = ({
             <div className="text-sm text-sidebar-foreground/70 text-center py-4">No agents yet</div>
           ) : (
             agents.map((agent) => (
-              <button
+              <div
                 key={agent.id}
-                onClick={() => onSelectAgent(agent)}
                 className={cn(
-                  "w-full text-left p-3 rounded-lg transition-colors",
+                  "group relative w-full rounded-lg transition-colors",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                 )}
               >
-                <div className="flex items-center gap-3">
-                  <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{agent.name}</p>
-                    <p className="text-xs opacity-70 truncate">{agent.description}</p>
+                <button
+                  onClick={() => onSelectAgent(agent)}
+                  className="w-full text-left p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{agent.name}</p>
+                      <p className="text-xs opacity-70 truncate">{agent.description}</p>
+                    </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-2 top-2 h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setSelectedAgentForKB(agent)}>
+                      <BookOpen className="mr-2 h-4 w-4" />
+                      Manage Knowledge Base
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={() => setAgentToDelete(agent)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Agent
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             ))
           )}
         </div>
@@ -133,6 +203,39 @@ export const AgentsSidebar = ({
           Logout
         </Button>
       </div>
+
+      {/* Knowledge Base Manager Dialog */}
+      <Dialog open={!!selectedAgentForKB} onOpenChange={(open) => !open && setSelectedAgentForKB(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>Knowledge Base - {selectedAgentForKB?.name}</DialogTitle>
+          </DialogHeader>
+          {selectedAgentForKB && (
+            <KnowledgeBaseManager 
+              agentId={selectedAgentForKB.id} 
+              agentName={selectedAgentForKB.name} 
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!agentToDelete} onOpenChange={(open) => !open && setAgentToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete "{agentToDelete?.name}". All conversations and knowledge base data will be preserved but the agent will be deactivated.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteAgent} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
