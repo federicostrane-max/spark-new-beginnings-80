@@ -1,16 +1,18 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import { UserMenu } from "@/components/UserMenu";
-import { AgentChatList } from "@/components/AgentChatList";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
-import { ChatSidebar } from "@/components/ChatSidebar";
+import { AgentsSidebar } from "@/components/AgentsSidebar";
+import { CreateAgentModal } from "@/components/CreateAgentModal";
+import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Menu, Settings } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 
 interface Agent {
@@ -42,6 +44,8 @@ export default function MultiAgentConsultant() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -68,16 +72,35 @@ export default function MultiAgentConsultant() {
     }
   }, [messages, isUserAtBottom, isStreaming]);
 
-  const handleSelectAgent = async (agent: Agent, conversationId: string | null) => {
+  const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
-    setDrawerOpen(false); // Close drawer on mobile after selection
+    setDrawerOpen(false);
+    setCurrentConversation(null);
     
-    if (conversationId) {
-      await loadConversation(conversationId);
-    } else {
-      setCurrentConversation(null);
+    // Try to load the most recent conversation for this agent
+    try {
+      const { data, error } = await supabase
+        .from("agent_conversations")
+        .select("*")
+        .eq("agent_id", agent.id)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (!error && data) {
+        await loadConversation(data.id);
+      }
+    } catch (err) {
+      // No existing conversation, that's fine
+      console.log("No existing conversation for agent:", agent.slug);
     }
+  };
+
+  const handleAgentCreated = (newAgent: Agent) => {
+    // Auto-select the newly created agent
+    handleSelectAgent(newAgent);
+    toast({ title: "Success", description: `${newAgent.name} created successfully!` });
   };
 
   const loadConversation = async (conversationId: string) => {
@@ -242,26 +265,13 @@ export default function MultiAgentConsultant() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
-      {/* Desktop Sidebar with ChatSidebar */}
-      {!isMobile && currentAgent && (
-        <div className="w-[280px] flex-shrink-0 flex flex-col border-r bg-background">
-          <ChatSidebar
-            currentConversationId={currentConversation?.id || null}
+      {/* Desktop Sidebar - Always show AgentsSidebar */}
+      {!isMobile && (
+        <div className="w-[280px] flex-shrink-0 flex flex-col border-r bg-sidebar">
+          <AgentsSidebar
             currentAgentId={currentAgent?.id || null}
-            onSelectConversation={loadConversation}
-            onNewChat={handleNewChat}
-          />
-        </div>
-      )}
-
-      {/* Desktop Agent List (when no agent selected) */}
-      {!isMobile && !currentAgent && (
-        <div className="w-80 flex-shrink-0 flex flex-col border-r border-border">
-          <UserMenu />
-          <AgentChatList
-            currentAgentId={null}
-            currentConversationId={null}
             onSelectAgent={handleSelectAgent}
+            onCreateAgent={() => setShowCreateModal(true)}
           />
         </div>
       )}
@@ -270,26 +280,50 @@ export default function MultiAgentConsultant() {
       {isMobile && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
           <SheetContent side="left" className="w-80 p-0">
-            {currentAgent ? (
-              <ChatSidebar
-                currentConversationId={currentConversation?.id || null}
-                currentAgentId={currentAgent?.id || null}
-                onSelectConversation={loadConversation}
-                onNewChat={handleNewChat}
-              />
-            ) : (
-              <>
-                <UserMenu />
-                <AgentChatList
-                  currentAgentId={null}
-                  currentConversationId={null}
-                  onSelectAgent={handleSelectAgent}
-                />
-              </>
-            )}
+            <AgentsSidebar
+              currentAgentId={currentAgent?.id || null}
+              onSelectAgent={handleSelectAgent}
+              onCreateAgent={() => {
+                setShowCreateModal(true);
+                setDrawerOpen(false);
+              }}
+            />
           </SheetContent>
         </Sheet>
       )}
+
+      {/* Create Agent Modal */}
+      <CreateAgentModal
+        open={showCreateModal}
+        onOpenChange={setShowCreateModal}
+        onSuccess={handleAgentCreated}
+      />
+
+      {/* Settings Dialog */}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>Settings</DialogTitle>
+          </DialogHeader>
+          
+          <Tabs defaultValue="knowledge" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
+              <TabsTrigger value="agents">Agents</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="knowledge">
+              <KnowledgeBaseManager />
+            </TabsContent>
+            
+            <TabsContent value="agents">
+              <div className="text-center py-8 text-muted-foreground">
+                Agent management coming soon...
+              </div>
+            </TabsContent>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20">
@@ -310,7 +344,7 @@ export default function MultiAgentConsultant() {
                     <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
                   </div>
                 </div>
-                <Button variant="ghost" size="icon">
+                <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)}>
                   <Settings className="h-5 w-5" />
                 </Button>
               </div>
