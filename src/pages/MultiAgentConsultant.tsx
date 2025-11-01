@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
+import { ConversationList } from "@/components/ConversationList";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
@@ -272,6 +273,21 @@ export default function MultiAgentConsultant() {
         </div>
       )}
 
+      {/* Desktop Conversations Sidebar */}
+      {!isMobile && currentAgent && (
+        <div className="w-[240px] flex-shrink-0 border-r bg-sidebar/50">
+          <div className="p-3 border-b">
+            <h3 className="font-semibold text-sm text-sidebar-foreground">Conversations</h3>
+          </div>
+          <ConversationList
+            agentId={currentAgent.id}
+            currentConversationId={currentConversation?.id || null}
+            onSelectConversation={(conv) => loadConversation(conv.id)}
+            onNewConversation={handleNewChat}
+          />
+        </div>
+      )}
+
       {/* Mobile Drawer */}
       {isMobile && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -284,6 +300,25 @@ export default function MultiAgentConsultant() {
                 setDrawerOpen(false);
               }}
             />
+            {currentAgent && (
+              <div className="border-t">
+                <div className="p-3 border-b">
+                  <h3 className="font-semibold text-sm">Conversations</h3>
+                </div>
+                <ConversationList
+                  agentId={currentAgent.id}
+                  currentConversationId={currentConversation?.id || null}
+                  onSelectConversation={(conv) => {
+                    loadConversation(conv.id);
+                    setDrawerOpen(false);
+                  }}
+                  onNewConversation={() => {
+                    handleNewChat();
+                    setDrawerOpen(false);
+                  }}
+                />
+              </div>
+            )}
           </SheetContent>
         </Sheet>
       )}
