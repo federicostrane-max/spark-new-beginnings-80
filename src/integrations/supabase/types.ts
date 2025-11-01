@@ -196,6 +196,7 @@ export type Database = {
           name: string
           slug: string
           system_prompt: string
+          user_id: string | null
         }
         Insert: {
           active?: boolean | null
@@ -206,6 +207,7 @@ export type Database = {
           name: string
           slug: string
           system_prompt: string
+          user_id?: string | null
         }
         Update: {
           active?: boolean | null
@@ -216,6 +218,7 @@ export type Database = {
           name?: string
           slug?: string
           system_prompt?: string
+          user_id?: string | null
         }
         Relationships: []
       }

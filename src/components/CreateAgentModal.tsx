@@ -136,6 +136,10 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
         autoSlug = `${autoSlug}-${Date.now()}`;
       }
 
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+
       // Create agent
       const { data, error } = await supabase
         .from("agents")
@@ -145,7 +149,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
           description,
           system_prompt: systemPrompt,
           avatar: null,
-          active: true
+          active: true,
+          user_id: user.id
         })
         .select()
         .single();
