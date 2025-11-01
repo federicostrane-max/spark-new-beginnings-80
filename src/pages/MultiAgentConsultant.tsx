@@ -284,6 +284,7 @@ export default function MultiAgentConsultant() {
                     messages.map((msg) => (
                       <ChatMessage
                         key={msg.id}
+                        id={msg.id}
                         role={msg.role}
                         content={msg.content}
                         isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}

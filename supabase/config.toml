@@ -5,3 +5,18 @@ verify_jwt = false
 
 [functions.agent-chat-demo]
 verify_jwt = false
+
+[functions.transcribe-audio]
+verify_jwt = false
+
+[functions.text-to-speech]
+verify_jwt = false
+
+[functions.ocr-image]
+verify_jwt = false
+
+[functions.analyze-document]
+verify_jwt = false
+
+[functions.semantic-search]
+verify_jwt = false

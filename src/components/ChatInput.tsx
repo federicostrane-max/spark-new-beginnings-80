@@ -2,21 +2,25 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send } from "lucide-react";
+import { VoiceInput } from "./VoiceInput";
+import { AttachmentUpload } from "./AttachmentUpload";
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>) => void;
   disabled?: boolean;
   placeholder?: string;
 }
 
 export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..." }: ChatInputProps) => {
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Array<{ url: string; name: string; type: string }>>([]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !disabled) {
-      onSend(input.trim());
+      onSend(input.trim(), attachments.length > 0 ? attachments : undefined);
       setInput("");
+      setAttachments([]);
     }
   };
 
@@ -27,9 +31,19 @@ export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..
     }
   };
 
+  const handleTranscription = (text: string) => {
+    setInput(prev => prev + (prev ? ' ' : '') + text);
+  };
+
+  const handleAttachment = (url: string, name: string, type: string) => {
+    setAttachments(prev => [...prev, { url, name, type }]);
+  };
+
   return (
     <form onSubmit={handleSubmit} className="border-t border-border bg-background p-3 md:p-4">
       <div className="flex gap-2">
+        <VoiceInput onTranscription={handleTranscription} disabled={disabled} />
+        <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
         <Textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}

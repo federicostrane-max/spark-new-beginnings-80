@@ -14,6 +14,32 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_config: {
+        Row: {
+          agent_id: string
+          custom_system_prompt: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          custom_system_prompt?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          custom_system_prompt?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_config_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_conversations: {
         Row: {
           agent_id: string
@@ -42,6 +68,47 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "agent_conversations_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_knowledge: {
+        Row: {
+          agent_id: string | null
+          category: string
+          content: string
+          created_at: string | null
+          document_name: string
+          embedding: string | null
+          id: string
+          summary: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          category: string
+          content: string
+          created_at?: string | null
+          document_name: string
+          embedding?: string | null
+          id?: string
+          summary?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          category?: string
+          content?: string
+          created_at?: string | null
+          document_name?: string
+          embedding?: string | null
+          id?: string
+          summary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_knowledge_agent_id_fkey"
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
@@ -204,15 +271,94 @@ export type Database = {
           },
         ]
       }
+      pdf_exports: {
+        Row: {
+          conversations_count: number | null
+          created_at: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes: number | null
+          id: string
+          messages_count: number | null
+          public_url: string
+          user_id: string
+        }
+        Insert: {
+          conversations_count?: number | null
+          created_at?: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes?: number | null
+          id?: string
+          messages_count?: number | null
+          public_url: string
+          user_id: string
+        }
+        Update: {
+          conversations_count?: number | null
+          created_at?: string | null
+          file_name?: string
+          file_path?: string
+          file_size_bytes?: number | null
+          id?: string
+          messages_count?: number | null
+          public_url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      match_documents: {
+        Args: {
+          filter_agent_id?: string
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          category: string
+          content: string
+          document_name: string
+          id: string
+          similarity: number
+          summary: string
+        }[]
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -339,6 +485,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+    },
   },
 } as const
