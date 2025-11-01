@@ -28,7 +28,7 @@ export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..
   };
 
   return (
-    <form onSubmit={handleSubmit} className="border-t border-border bg-background p-4">
+    <form onSubmit={handleSubmit} className="border-t border-border bg-background p-3 md:p-4">
       <div className="flex gap-2">
         <Textarea
           value={input}
@@ -36,16 +36,16 @@ export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           disabled={disabled}
-          className="min-h-[60px] max-h-[200px] resize-none"
+          className="min-h-[50px] md:min-h-[60px] max-h-[200px] resize-none"
           rows={2}
         />
         <Button
           type="submit"
           disabled={disabled || !input.trim()}
           size="icon"
-          className="h-[60px] w-[60px] flex-shrink-0"
+          className="h-[50px] w-[50px] md:h-[60px] md:w-[60px] flex-shrink-0"
         >
-          <Send className="h-5 w-5" />
+          <Send className="h-4 w-4 md:h-5 md:w-5" />
         </Button>
       </div>
     </form>

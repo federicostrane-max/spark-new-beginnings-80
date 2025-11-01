@@ -86,7 +86,7 @@ export const ConversationList = ({
     <div className="space-y-2 p-2">
       <Button
         onClick={onNewConversation}
-        className="w-full justify-start gap-2"
+        className="w-full justify-start gap-2 min-h-[44px]"
         variant="outline"
         size="sm"
       >
@@ -95,14 +95,14 @@ export const ConversationList = ({
       </Button>
 
       {conversations.length > 0 && (
-        <ScrollArea className="h-[200px]">
+        <ScrollArea className="max-h-[200px] md:max-h-[300px]">
           <div className="space-y-1">
             {conversations.map((conv) => (
               <div
                 key={conv.id}
                 onClick={() => onSelectConversation(conv)}
                 className={cn(
-                  "group flex items-center justify-between rounded-md p-2 text-sm cursor-pointer transition-colors",
+                  "group flex items-center justify-between rounded-md p-2 text-xs md:text-sm cursor-pointer transition-colors min-h-[44px]",
                   "hover:bg-sidebar-accent",
                   currentConversationId === conv.id
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -113,7 +113,7 @@ export const ConversationList = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                  className="h-8 w-8 md:h-6 md:w-6 p-0 opacity-0 group-hover:opacity-100"
                   onClick={(e) => deleteConversation(conv.id, e)}
                 >
                   <Trash2 className="h-3 w-3" />

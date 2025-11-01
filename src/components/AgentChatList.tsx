@@ -61,10 +61,10 @@ export const AgentChatList = ({ currentAgentId, currentConversationId, onSelectA
   }
 
   return (
-    <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar">
-      <div className="border-b border-sidebar-border p-4">
-        <h2 className="text-lg font-semibold text-sidebar-primary">AI Consultants</h2>
-        <p className="text-sm text-sidebar-foreground">Select an expert to chat with</p>
+    <div className="flex h-full flex-col bg-sidebar">
+      <div className="border-b border-sidebar-border p-3 md:p-4">
+        <h2 className="text-base md:text-lg font-semibold text-sidebar-primary">AI Consultants</h2>
+        <p className="text-xs md:text-sm text-sidebar-foreground">Select an expert to chat with</p>
       </div>
 
       <ScrollArea className="flex-1">
@@ -83,7 +83,7 @@ export const AgentChatList = ({ currentAgentId, currentConversationId, onSelectA
                     }
                   }}
                   className={cn(
-                    "w-full rounded-lg p-3 text-left transition-colors",
+                    "w-full rounded-lg p-2.5 md:p-3 text-left transition-colors min-h-[44px]",
                     "hover:bg-sidebar-accent",
                     isActive
                       ? "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -96,9 +96,9 @@ export const AgentChatList = ({ currentAgentId, currentConversationId, onSelectA
                     ) : (
                       <ChevronRight className="h-4 w-4 mt-1 flex-shrink-0" />
                     )}
-                    <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
+                    <div className="text-xl md:text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{agent.name}</div>
+                      <div className="text-sm md:text-base font-medium truncate">{agent.name}</div>
                       <div className="text-xs opacity-80 line-clamp-2">{agent.description}</div>
                     </div>
                   </div>

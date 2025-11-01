@@ -7,7 +7,10 @@ import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, Menu } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 
 interface Agent {
   id: string;
@@ -31,11 +34,13 @@ interface Conversation {
 
 export default function MultiAgentConsultant() {
   const { session } = useAuth();
+  const isMobile = useIsMobile();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -46,6 +51,7 @@ export default function MultiAgentConsultant() {
   const handleSelectAgent = async (agent: Agent, conversationId: string | null) => {
     setCurrentAgent(agent);
     setMessages([]);
+    setDrawerOpen(false); // Close drawer on mobile after selection
     
     if (conversationId) {
       await loadConversation(conversationId);
@@ -205,26 +211,54 @@ export default function MultiAgentConsultant() {
     }
   };
 
+  const sidebarContent = (
+    <>
+      <UserMenu />
+      <AgentChatList
+        currentAgentId={currentAgent?.id || null}
+        currentConversationId={currentConversation?.id || null}
+        onSelectAgent={handleSelectAgent}
+      />
+    </>
+  );
+
   return (
     <div className="flex h-screen w-full">
-      <div className="w-80 flex-shrink-0 flex flex-col">
-        <UserMenu />
-        <AgentChatList
-          currentAgentId={currentAgent?.id || null}
-          currentConversationId={currentConversation?.id || null}
-          onSelectAgent={handleSelectAgent}
-        />
-      </div>
+      {/* Desktop Sidebar */}
+      {!isMobile && (
+        <div className="w-80 flex-shrink-0 flex flex-col border-r border-border">
+          {sidebarContent}
+        </div>
+      )}
+
+      {/* Mobile Drawer */}
+      {isMobile && (
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent side="left" className="w-80 p-0">
+            {sidebarContent}
+          </SheetContent>
+        </Sheet>
+      )}
 
       <div className="flex flex-1 flex-col">
         {currentAgent ? (
           <>
-            <div className="border-b border-border bg-background p-4">
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
-                <div>
-                  <h1 className="text-xl font-semibold">{currentAgent.name}</h1>
-                  <p className="text-sm text-muted-foreground">{currentAgent.description}</p>
+            {/* Header with hamburger on mobile */}
+            <div className="border-b border-border bg-background p-3 md:p-4">
+              <div className="flex items-center gap-2 md:gap-3">
+                {isMobile && (
+                  <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+                    <SheetTrigger asChild>
+                      <Button variant="ghost" size="icon" className="flex-shrink-0">
+                        <Menu className="h-5 w-5" />
+                      </Button>
+                    </SheetTrigger>
+                  </Sheet>
+                )}
+                <div className="text-2xl md:text-3xl">{currentAgent.avatar || "🤖"}</div>
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-base md:text-xl font-semibold truncate">{currentAgent.name}</h1>
+                  <p className="text-xs md:text-sm text-muted-foreground truncate">{currentAgent.description}</p>
                 </div>
               </div>
             </div>
@@ -237,11 +271,11 @@ export default function MultiAgentConsultant() {
               ) : (
                 <div className="pb-4">
                   {messages.length === 0 ? (
-                    <div className="flex h-full items-center justify-center p-8 text-center">
+                    <div className="flex h-full items-center justify-center p-6 md:p-8 text-center">
                       <div>
-                        <div className="text-4xl mb-4">{currentAgent.avatar || "🤖"}</div>
-                        <h2 className="text-xl font-semibold mb-2">Start a conversation</h2>
-                        <p className="text-muted-foreground">
+                        <div className="text-3xl md:text-4xl mb-3 md:mb-4">{currentAgent.avatar || "🤖"}</div>
+                        <h2 className="text-lg md:text-xl font-semibold mb-2">Start a conversation</h2>
+                        <p className="text-sm md:text-base text-muted-foreground">
                           Ask {currentAgent.name} anything about {currentAgent.description.toLowerCase()}
                         </p>
                       </div>
@@ -268,10 +302,22 @@ export default function MultiAgentConsultant() {
             />
           </>
         ) : (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex h-full items-center justify-center p-4">
             <div className="text-center">
-              <h2 className="text-2xl font-semibold mb-2">Select an AI Consultant</h2>
-              <p className="text-muted-foreground">Choose an expert from the sidebar to start chatting</p>
+              {isMobile && (
+                <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+                  <SheetTrigger asChild>
+                    <Button variant="outline" size="lg" className="mb-4">
+                      <Menu className="h-5 w-5 mr-2" />
+                      Open Menu
+                    </Button>
+                  </SheetTrigger>
+                </Sheet>
+              )}
+              <h2 className="text-xl md:text-2xl font-semibold mb-2">Select an AI Consultant</h2>
+              <p className="text-sm md:text-base text-muted-foreground">
+                Choose an expert from the {isMobile ? "menu" : "sidebar"} to start chatting
+              </p>
             </div>
           </div>
         )}

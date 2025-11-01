@@ -16,18 +16,18 @@ export const UserMenu = () => {
   if (!user) return null;
 
   return (
-    <div className="border-b border-sidebar-border bg-sidebar p-4">
+    <div className="border-b border-sidebar-border bg-sidebar p-3 md:p-4">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent">
-            <User className="h-4 w-4" />
-            <span className="truncate">{user.email}</span>
+          <Button variant="ghost" className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent min-h-[44px]">
+            <User className="h-4 w-4 flex-shrink-0" />
+            <span className="truncate text-sm md:text-base">{user.email}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuLabel>My Account</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => signOut()}>
+          <DropdownMenuItem onClick={() => signOut()} className="min-h-[44px]">
             <LogOut className="mr-2 h-4 w-4" />
             <span>Sign Out</span>
           </DropdownMenuItem>
