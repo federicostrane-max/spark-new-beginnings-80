@@ -166,7 +166,7 @@ export const AgentsSidebar = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="absolute right-2 top-2 h-8 w-8 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      className="absolute right-2 top-2 h-8 w-8 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreVertical className="h-4 w-4" />
