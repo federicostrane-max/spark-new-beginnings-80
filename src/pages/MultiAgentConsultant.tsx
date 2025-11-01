@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { UserMenu } from "@/components/UserMenu";
 import { AgentChatList } from "@/components/AgentChatList";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
@@ -28,6 +30,7 @@ interface Conversation {
 }
 
 export default function MultiAgentConsultant() {
+  const { session } = useAuth();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -36,19 +39,83 @@ export default function MultiAgentConsultant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSelectAgent = async (agent: Agent) => {
+  const handleSelectAgent = async (agent: Agent, conversationId: string | null) => {
     setCurrentAgent(agent);
-    setMessages([]); // Reset messages for demo mode
-    setLoadingMessages(false);
+    setMessages([]);
+    
+    if (conversationId) {
+      await loadConversation(conversationId);
+    } else {
+      setCurrentConversation(null);
+    }
+  };
+
+  const loadConversation = async (conversationId: string) => {
+    setLoadingMessages(true);
+    try {
+      const { data: conv, error: convError } = await supabase
+        .from("agent_conversations")
+        .select("*")
+        .eq("id", conversationId)
+        .single();
+
+      if (convError) throw convError;
+      setCurrentConversation(conv);
+
+      const { data: msgs, error: msgsError } = await supabase
+        .from("agent_messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .order("created_at");
+
+      if (msgsError) throw msgsError;
+      setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content })));
+    } catch (error: any) {
+      console.error("Error loading conversation:", error);
+      toast({ title: "Error", description: "Failed to load conversation", variant: "destructive" });
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  const createConversation = async (firstMessage: string): Promise<string> => {
+    if (!currentAgent || !session?.user) throw new Error("No agent or user");
+
+    const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
+
+    const { data, error } = await supabase
+      .from("agent_conversations")
+      .insert({
+        agent_id: currentAgent.id,
+        user_id: session.user.id,
+        title,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    setCurrentConversation(data);
+    return data.id;
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!currentAgent) return;
+    if (!currentAgent || !session?.access_token) return;
+
+    let conversationId = currentConversation?.id;
+
+    if (!conversationId) {
+      try {
+        conversationId = await createConversation(text);
+      } catch (error: any) {
+        console.error("Error creating conversation:", error);
+        toast({ title: "Error", description: "Failed to create conversation", variant: "destructive" });
+        return;
+      }
+    }
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -60,22 +127,22 @@ export default function MultiAgentConsultant() {
     setIsStreaming(true);
 
     try {
-      // Build message history for demo mode (only role and content, no id)
       const messageHistory = [
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-        { role: "user" as const, content: text }
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user" as const, content: text },
       ];
 
-      // Call demo edge function (no auth required)
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat-demo`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             messages: messageHistory,
+            conversationId,
             agentSlug: currentAgent.slug,
           }),
         }
@@ -86,7 +153,6 @@ export default function MultiAgentConsultant() {
         throw new Error(errorData.error || "Failed to get response");
       }
 
-      // Parse SSE stream
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let assistantMessage = "";
@@ -133,7 +199,6 @@ export default function MultiAgentConsultant() {
     } catch (error: any) {
       console.error("Error sending message:", error);
       toast({ title: "Error", description: error.message, variant: "destructive" });
-      // Remove user message on error
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
     } finally {
       setIsStreaming(false);
@@ -142,9 +207,11 @@ export default function MultiAgentConsultant() {
 
   return (
     <div className="flex h-screen w-full">
-      <div className="w-80 flex-shrink-0">
+      <div className="w-80 flex-shrink-0 flex flex-col">
+        <UserMenu />
         <AgentChatList
           currentAgentId={currentAgent?.id || null}
+          currentConversationId={currentConversation?.id || null}
           onSelectAgent={handleSelectAgent}
         />
       </div>
@@ -152,14 +219,6 @@ export default function MultiAgentConsultant() {
       <div className="flex flex-1 flex-col">
         {currentAgent ? (
           <>
-            {/* Demo Mode Banner */}
-            <div className="bg-primary/10 border-b border-primary/20 px-4 py-2">
-              <p className="text-sm text-center text-primary font-medium">
-                🎯 Demo Mode - Messages won't be saved
-              </p>
-            </div>
-
-            {/* Header */}
             <div className="border-b border-border bg-background p-4">
               <div className="flex items-center gap-3">
                 <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
@@ -170,7 +229,6 @@ export default function MultiAgentConsultant() {
               </div>
             </div>
 
-            {/* Messages */}
             <ScrollArea className="flex-1">
               {loadingMessages ? (
                 <div className="flex h-full items-center justify-center">
@@ -203,7 +261,6 @@ export default function MultiAgentConsultant() {
               )}
             </ScrollArea>
 
-            {/* Input */}
             <ChatInput
               onSend={handleSendMessage}
               disabled={isStreaming || loadingMessages}
