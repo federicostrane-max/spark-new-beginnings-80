@@ -5,12 +5,9 @@ import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
-import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu, Settings } from "lucide-react";
+import { Loader2, Menu } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -45,7 +42,6 @@ export default function MultiAgentConsultant() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -299,37 +295,6 @@ export default function MultiAgentConsultant() {
         onSuccess={handleAgentCreated}
       />
 
-      {/* Settings Dialog */}
-      <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
-          <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
-          </DialogHeader>
-          
-          <Tabs defaultValue="knowledge" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
-              <TabsTrigger value="agents">Agents</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="knowledge">
-              {currentAgent ? (
-                <KnowledgeBaseManager agentId={currentAgent.id} agentName={currentAgent.name} />
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  Select an agent to manage its knowledge base
-                </div>
-              )}
-            </TabsContent>
-            
-            <TabsContent value="agents">
-              <div className="text-center py-8 text-muted-foreground">
-                Agent management coming soon...
-              </div>
-            </TabsContent>
-          </Tabs>
-        </DialogContent>
-      </Dialog>
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20">
@@ -350,9 +315,6 @@ export default function MultiAgentConsultant() {
                     <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setShowSettings(true)}>
-                  <Settings className="h-5 w-5" />
-                </Button>
               </div>
             </div>
 
