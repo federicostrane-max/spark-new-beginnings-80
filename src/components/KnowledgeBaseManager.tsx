@@ -86,20 +86,32 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
     setUploading(true);
     
     try {
+      console.log('Starting upload process for:', selectedFile.name);
+      
       // 1. Upload file to Supabase Storage
       const fileName = `${Date.now()}_${selectedFile.name}`;
+      console.log('Uploading to storage with filename:', fileName);
+      
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('knowledge-pdfs')
         .upload(fileName, selectedFile);
       
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Storage upload error:', uploadError);
+        throw uploadError;
+      }
+      
+      console.log('File uploaded successfully:', uploadData);
 
       // 2. Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('knowledge-pdfs')
         .getPublicUrl(fileName);
+      
+      console.log('Public URL generated:', publicUrl);
 
       // 3. Analyze document
+      console.log('Calling analyze-document function...');
       const { data: analysis, error: analysisError } = await supabase.functions.invoke('analyze-document', {
         body: { 
           fileUrl: publicUrl,
@@ -108,30 +120,47 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
         }
       });
 
-      if (analysisError) throw analysisError;
+      if (analysisError) {
+        console.error('Analysis error:', analysisError);
+        throw analysisError;
+      }
+      
+      console.log('Document analyzed:', analysis);
 
       // 4. Chunk text
+      console.log('Chunking text, content length:', analysis.content?.length);
       const chunks = chunkText(analysis.content, 1000, 200);
+      console.log('Created chunks:', chunks.length);
 
       // 5. Generate embeddings and insert
-      for (const chunk of chunks) {
+      for (let i = 0; i < chunks.length; i++) {
+        console.log(`Processing chunk ${i + 1}/${chunks.length}`);
+        
         const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke('generate-embedding', {
-          body: { text: chunk }
+          body: { text: chunks[i] }
         });
 
-        if (embeddingError) throw embeddingError;
+        if (embeddingError) {
+          console.error('Embedding error:', embeddingError);
+          throw embeddingError;
+        }
 
-          const { error: insertError } = await supabase.from('agent_knowledge').insert({
-            agent_id: agentId,
-            document_name: selectedFile.name,
-            content: chunk,
-            category: category,
-            summary: summary || analysis.summary || null,
-            embedding: embeddingData.embedding
-          });
+        const { error: insertError } = await supabase.from('agent_knowledge').insert({
+          agent_id: agentId,
+          document_name: selectedFile.name,
+          content: chunks[i],
+          category: category,
+          summary: summary || analysis.summary || null,
+          embedding: embeddingData.embedding
+        });
 
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.error('Insert error:', insertError);
+          throw insertError;
+        }
       }
+      
+      console.log('All chunks processed successfully');
 
       toast({ title: "Success", description: "Document uploaded successfully!" });
       setSelectedFile(null);
