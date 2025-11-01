@@ -11,9 +11,20 @@ interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  isSelected?: boolean;
+  selectionMode?: boolean;
+  onToggleSelection?: () => void;
 }
 
-export const ChatMessage = ({ id, role, content, isStreaming }: ChatMessageProps) => {
+export const ChatMessage = ({ 
+  id, 
+  role, 
+  content, 
+  isStreaming, 
+  isSelected = false,
+  selectionMode = false,
+  onToggleSelection 
+}: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const { currentMessageId, status, playMessage, pause } = useTTS();
@@ -37,13 +48,35 @@ export const ChatMessage = ({ id, role, content, isStreaming }: ChatMessageProps
   const isTTSPlaying = currentMessageId === id && status === 'playing';
 
   return (
-    <div className={cn("mb-4 flex w-full", isUser ? "justify-end" : "justify-start")}>
+    <div 
+      className={cn(
+        "mb-4 flex w-full group relative",
+        isUser ? "justify-end" : "justify-start"
+      )}
+      onClick={selectionMode ? onToggleSelection : undefined}
+    >
+      {selectionMode && (
+        <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10">
+          <div
+            className={cn(
+              "h-6 w-6 rounded-full border-2 flex items-center justify-center transition-all",
+              isSelected
+                ? "bg-primary border-primary"
+                : "bg-background border-muted-foreground/30"
+            )}
+          >
+            {isSelected && <Check className="h-4 w-4 text-primary-foreground" />}
+          </div>
+        </div>
+      )}
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-4 py-3 shadow-sm",
+          "max-w-[85%] rounded-2xl px-4 py-3 shadow-sm transition-all",
           isUser 
             ? "bg-primary text-primary-foreground" 
-            : "bg-muted text-foreground"
+            : "bg-muted text-foreground",
+          selectionMode && "ml-10",
+          isSelected && "ring-2 ring-primary"
         )}
       >
         <div className={cn("prose prose-sm max-w-none dark:prose-invert", !isExpanded && isLong && "line-clamp-3")}>

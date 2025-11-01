@@ -6,9 +6,10 @@ import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { ConversationList } from "@/components/ConversationList";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
+import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu } from "lucide-react";
+import { Loader2, Menu, Forward, X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,10 @@ export default function MultiAgentConsultant() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showForwardDialog, setShowForwardDialog] = useState(false);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const { toast } = useToast();
@@ -258,6 +262,45 @@ export default function MultiAgentConsultant() {
   const handleNewChat = () => {
     setCurrentConversation(null);
     setMessages([]);
+    setSelectionMode(false);
+    setSelectedMessages(new Set());
+  };
+
+  const toggleMessageSelection = (messageId: string) => {
+    const newSelection = new Set(selectedMessages);
+    if (newSelection.has(messageId)) {
+      newSelection.delete(messageId);
+    } else {
+      newSelection.add(messageId);
+    }
+    setSelectedMessages(newSelection);
+  };
+
+  const handleStartSelection = () => {
+    setSelectionMode(true);
+    setSelectedMessages(new Set());
+  };
+
+  const handleCancelSelection = () => {
+    setSelectionMode(false);
+    setSelectedMessages(new Set());
+  };
+
+  const handleForward = () => {
+    if (selectedMessages.size === 0) {
+      toast({ 
+        title: "Attenzione", 
+        description: "Seleziona almeno un messaggio", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    setShowForwardDialog(true);
+  };
+
+  const handleForwardComplete = () => {
+    setSelectionMode(false);
+    setSelectedMessages(new Set());
   };
 
   return (
@@ -330,6 +373,15 @@ export default function MultiAgentConsultant() {
         onSuccess={handleAgentCreated}
       />
 
+      {/* Forward Message Dialog */}
+      <ForwardMessageDialog
+        open={showForwardDialog}
+        onOpenChange={setShowForwardDialog}
+        messages={messages.filter(m => selectedMessages.has(m.id))}
+        currentAgentId={currentAgent?.id || ""}
+        onForwardComplete={handleForwardComplete}
+      />
+
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20">
@@ -338,18 +390,52 @@ export default function MultiAgentConsultant() {
             {/* Header with Settings */}
             <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
               <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
-                {isMobile && (
-                  <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
-                    <Menu className="h-5 w-5" />
-                  </Button>
+                {!selectionMode ? (
+                  <>
+                    {isMobile && (
+                      <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
+                        <Menu className="h-5 w-5" />
+                      </Button>
+                    )}
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
+                      <div className="min-w-0">
+                        <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
+                        <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
+                      </div>
+                    </div>
+                    {messages.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleStartSelection}
+                        className="gap-2"
+                      >
+                        <Forward className="h-4 w-4" />
+                        <span className="hidden md:inline">Inoltra</span>
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="icon" onClick={handleCancelSelection}>
+                      <X className="h-5 w-5" />
+                    </Button>
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="font-semibold">
+                        {selectedMessages.size} selezionat{selectedMessages.size === 1 ? "o" : "i"}
+                      </span>
+                    </div>
+                    <Button
+                      onClick={handleForward}
+                      disabled={selectedMessages.size === 0}
+                      className="gap-2"
+                    >
+                      <Forward className="h-4 w-4" />
+                      Inoltra
+                    </Button>
+                  </>
                 )}
-                <div className="flex items-center gap-3 flex-1">
-                  <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
-                  <div className="min-w-0">
-                    <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
-                    <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -379,6 +465,9 @@ export default function MultiAgentConsultant() {
                         role={msg.role}
                         content={msg.content}
                         isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}
+                        selectionMode={selectionMode}
+                        isSelected={selectedMessages.has(msg.id)}
+                        onToggleSelection={() => toggleMessageSelection(msg.id)}
                       />
                     ))
                   )}
