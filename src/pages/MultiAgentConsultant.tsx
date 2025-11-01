@@ -43,71 +43,12 @@ export default function MultiAgentConsultant() {
 
   const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);
-    setLoadingMessages(true);
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({ title: "Error", description: "Please login to continue", variant: "destructive" });
-        return;
-      }
-
-      // Find or create conversation
-      let { data: conversations, error: convError } = await supabase
-        .from("agent_conversations")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("agent_id", agent.id)
-        .order("updated_at", { ascending: false })
-        .limit(1);
-
-      if (convError) throw convError;
-
-      let conversation: Conversation;
-
-      if (conversations && conversations.length > 0) {
-        conversation = conversations[0];
-      } else {
-        // Create new conversation
-        const { data: newConv, error: createError } = await supabase
-          .from("agent_conversations")
-          .insert({
-            user_id: user.id,
-            agent_id: agent.id,
-            title: `Chat with ${agent.name}`,
-          })
-          .select()
-          .single();
-
-        if (createError) throw createError;
-        conversation = newConv;
-      }
-
-      setCurrentConversation(conversation);
-
-      // Load messages
-      const { data: msgs, error: msgsError } = await supabase
-        .from("agent_messages")
-        .select("*")
-        .eq("conversation_id", conversation.id)
-        .order("created_at", { ascending: true });
-
-      if (msgsError) throw msgsError;
-      setMessages((msgs || []).map(m => ({
-        id: m.id,
-        role: m.role as "user" | "assistant",
-        content: m.content
-      })));
-    } catch (error: any) {
-      console.error("Error loading conversation:", error);
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    } finally {
-      setLoadingMessages(false);
-    }
+    setMessages([]); // Reset messages for demo mode
+    setLoadingMessages(false);
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!currentAgent || !currentConversation) return;
+    if (!currentAgent) return;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -119,28 +60,22 @@ export default function MultiAgentConsultant() {
     setIsStreaming(true);
 
     try {
-      // Save user message
-      await supabase.from("agent_messages").insert({
-        conversation_id: currentConversation.id,
-        role: "user",
-        content: text,
-      });
+      // Build message history for demo mode (only role and content, no id)
+      const messageHistory = [
+        ...messages.map(m => ({ role: m.role, content: m.content })),
+        { role: "user" as const, content: text }
+      ];
 
-      // Call edge function with streaming
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error("No session");
-
+      // Call demo edge function (no auth required)
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat-demo`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
-            conversationId: currentConversation.id,
-            message: text,
+            messages: messageHistory,
             agentSlug: currentAgent.slug,
           }),
         }
@@ -217,6 +152,13 @@ export default function MultiAgentConsultant() {
       <div className="flex flex-1 flex-col">
         {currentAgent ? (
           <>
+            {/* Demo Mode Banner */}
+            <div className="bg-primary/10 border-b border-primary/20 px-4 py-2">
+              <p className="text-sm text-center text-primary font-medium">
+                🎯 Demo Mode - Messages won't be saved
+              </p>
+            </div>
+
             {/* Header */}
             <div className="border-b border-border bg-background p-4">
               <div className="flex items-center gap-3">
