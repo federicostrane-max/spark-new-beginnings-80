@@ -171,7 +171,7 @@ export const AgentsSidebar = ({
 
       {/* Knowledge Base Manager Dialog */}
       <Dialog open={!!selectedAgentForKB} onOpenChange={(open) => !open && setSelectedAgentForKB(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
+        <DialogContent className="max-w-4xl max-h-[90vh]" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Knowledge Base - {selectedAgentForKB?.name}</DialogTitle>
           </DialogHeader>
