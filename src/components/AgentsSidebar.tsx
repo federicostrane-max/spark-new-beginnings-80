@@ -162,24 +162,17 @@ export const AgentsSidebar = ({
                   </div>
                 </button>
 
-                {/* Three dots menu - ALWAYS VISIBLE */}
+                {/* Menu actions button */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-9 w-9 flex-shrink-0 border-2 border-foreground/20 bg-background hover:bg-accent hover:text-accent-foreground"
+                    <button
+                      className="flex items-center justify-center h-8 w-8 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors flex-shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <MoreVertical className="h-5 w-5" />
-                      <span className="sr-only">Menu</span>
-                    </Button>
+                      <MoreVertical className="h-4 w-4 text-primary" />
+                    </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent 
-                    align="end" 
-                    sideOffset={5}
-                    className="w-48 z-[100]"
-                  >
+                  <DropdownMenuContent align="end" className="w-48">
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
                       Modifica Agente
