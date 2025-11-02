@@ -29,8 +29,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         toast.error(`${file.name} non è un PDF`);
         continue;
       }
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error(`${file.name} supera i 10MB`);
+      if (file.size > 50 * 1024 * 1024) {
+        toast.error(`${file.name} supera i 50MB`);
         continue;
       }
       validFiles.push(file);

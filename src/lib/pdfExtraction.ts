@@ -44,7 +44,7 @@ export async function extractTextFromPDF(file: File): Promise<string> {
  * @param maxSizeMB - Maximum file size in MB (default: 10MB)
  * @returns Validation result
  */
-export function validatePDFFile(file: File, maxSizeMB: number = 10): { valid: boolean; error?: string } {
+export function validatePDFFile(file: File, maxSizeMB: number = 50): { valid: boolean; error?: string } {
   // Check file type
   if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
     return { valid: false, error: 'File must be a PDF' };
