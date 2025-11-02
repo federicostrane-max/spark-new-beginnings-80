@@ -88,34 +88,29 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Send chunks in batches (parallel processing on edge function)
-          const BATCH_SIZE = 10; // Further reduced for very large files
-          const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
-          let processedChunks = 0;
+          // Step 3: Send chunks ONE AT A TIME to avoid edge function timeout
+          // Processing them sequentially with small delays ensures we don't exceed the 60s timeout
+          const totalChunks = chunks.length;
           
-          for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-            const start = batchIndex * BATCH_SIZE;
-            const end = Math.min(start + BATCH_SIZE, chunks.length);
-            const batchChunks = chunks.slice(start, end);
-            
-            console.log(`Processing batch ${batchIndex + 1}/${totalBatches} for ${file.name} (${batchChunks.length} chunks)`);
+          for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            const chunk = chunks[chunkIndex];
             
             // Calculate progress correctly: each file gets equal portion of 100%
             const fileProgressStart = (fileIndex / totalFiles) * 100;
             const fileProgressRange = (1 / totalFiles) * 100;
-            const batchProgressWithinFile = (batchIndex / totalBatches) * fileProgressRange;
-            const totalProgress = Math.min(99, fileProgressStart + batchProgressWithinFile);
+            const chunkProgressWithinFile = (chunkIndex / totalChunks) * fileProgressRange;
+            const totalProgress = Math.min(99, fileProgressStart + chunkProgressWithinFile);
             setProgress(totalProgress);
             
             let retries = 0;
-            const MAX_RETRIES = 5;
-            let batchSuccess = false;
+            const MAX_RETRIES = 3;
+            let chunkSuccess = false;
             
-            while (!batchSuccess && retries <= MAX_RETRIES) {
+            while (!chunkSuccess && retries <= MAX_RETRIES) {
               try {
                 const { data, error } = await supabase.functions.invoke('process-chunks', {
                   body: {
-                    chunks: batchChunks,
+                    chunks: [chunk], // Send ONE chunk at a time
                     agentId: agentId,
                     fileName: file.name,
                     category: "General"
@@ -130,25 +125,32 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
                   throw new Error('Risposta imprevista dal server');
                 }
                 
-                batchSuccess = true;
-                processedChunks += batchChunks.length;
-                console.log(`Batch ${batchIndex + 1}/${totalBatches} completed. Total processed: ${processedChunks}/${chunks.length}`);
+                chunkSuccess = true;
                 
-              } catch (batchError: any) {
-                retries++;
-                console.error(`Error in batch ${batchIndex + 1}, retry ${retries}/${MAX_RETRIES}:`, batchError);
-                
-                if (retries > MAX_RETRIES) {
-                  throw new Error(`Batch ${batchIndex + 1} fallito dopo ${MAX_RETRIES} tentativi: ${batchError.message}`);
+                if ((chunkIndex + 1) % 10 === 0 || chunkIndex === totalChunks - 1) {
+                  console.log(`Progress: ${chunkIndex + 1}/${totalChunks} chunks processed for ${file.name}`);
                 }
                 
-                // Wait longer before retry (exponential backoff)
-                await new Promise(resolve => setTimeout(resolve, 2000 * retries));
+              } catch (chunkError: any) {
+                retries++;
+                console.error(`Error processing chunk ${chunkIndex + 1}, retry ${retries}/${MAX_RETRIES}:`, chunkError);
+                
+                if (retries > MAX_RETRIES) {
+                  throw new Error(`Chunk ${chunkIndex + 1} fallito dopo ${MAX_RETRIES} tentativi: ${chunkError.message}`);
+                }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
               }
+            }
+            
+            // Small delay between chunks to avoid overwhelming the edge function
+            if (chunkIndex < totalChunks - 1) {
+              await new Promise(resolve => setTimeout(resolve, 100));
             }
           }
           
-          console.log(`✓ ${file.name} processed successfully - ${processedChunks} chunks created in ${totalBatches} batches`);
+          console.log(`✓ ${file.name} processed successfully - ${totalChunks} chunks created`);
           successCount++;
           // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
