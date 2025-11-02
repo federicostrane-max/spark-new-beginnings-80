@@ -185,15 +185,15 @@ export const ForwardMessageDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background overflow-hidden">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>Inoltra {messages.length} messaggio{messages.length > 1 ? "i" : ""}</DialogTitle>
           <DialogDescription>
             Seleziona una o più destinazioni
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex-1 flex flex-col space-y-4 overflow-hidden min-h-0">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -205,11 +205,11 @@ export const ForwardMessageDialog = ({
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-8">
+            <div className="flex items-center justify-center py-8 flex-1">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <ScrollArea className="max-h-[50vh] min-h-[200px]">
+            <ScrollArea className="flex-1 overflow-auto">
               <div className="space-y-4 pr-4">
                 {/* All Agents */}
                 {filteredAgents.length > 0 ? (
@@ -255,7 +255,7 @@ export const ForwardMessageDialog = ({
             </ScrollArea>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-shrink-0 pt-4 border-t">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
