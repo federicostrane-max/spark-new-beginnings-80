@@ -144,7 +144,7 @@ export const AgentsSidebar = ({
               <div
                 key={agent.id}
                 className={cn(
-                  "flex items-center gap-2 w-full rounded-lg p-3 transition-colors",
+                  "group flex items-center gap-2 w-full rounded-lg p-3 transition-colors",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
@@ -162,37 +162,38 @@ export const AgentsSidebar = ({
                   </div>
                 </button>
 
-                {/* Three dots menu */}
+                {/* Three dots menu - ALWAYS VISIBLE */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 flex-shrink-0 hover:bg-accent"
+                      className="h-9 w-9 flex-shrink-0 opacity-100"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <MoreVertical className="h-4 w-4" />
+                      <MoreVertical className="h-5 w-5" />
+                      <span className="sr-only">Menu</span>
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent 
                     align="end" 
                     sideOffset={5}
-                    className="z-[100] bg-popover border border-border"
+                    className="w-48 z-[100]"
                   >
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
-                      Edit Agent
+                      Modifica Agente
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setSelectedAgentForKB(agent)}>
                       <BookOpen className="mr-2 h-4 w-4" />
-                      Manage Knowledge Base
+                      Gestisci Knowledge Base
                     </DropdownMenuItem>
                     <DropdownMenuItem 
                       onClick={() => setAgentToDelete(agent)}
                       className="text-destructive focus:text-destructive"
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Delete Agent
+                      Elimina Agente
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
