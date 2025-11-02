@@ -83,7 +83,7 @@ export const AgentsSidebar = ({
     try {
       const { error } = await supabase
         .from("agents")
-        .update({ active: false })
+        .delete()
         .eq("id", agentToDelete.id);
 
       if (error) throw error;
