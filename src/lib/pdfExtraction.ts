@@ -1,12 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configure PDF.js worker for Vite
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url
-  ).href;
-}
+// Configure PDF.js worker - use CDN version that works in browser
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 /**
  * Extract text from a PDF file

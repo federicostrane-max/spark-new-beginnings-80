@@ -149,7 +149,7 @@ export const AgentsSidebar = ({
                 <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{agent.name}</p>
-                  <p className="text-xs opacity-70 truncate">{agent.description}</p>
+                  <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
                 </div>
               </button>
             ))
