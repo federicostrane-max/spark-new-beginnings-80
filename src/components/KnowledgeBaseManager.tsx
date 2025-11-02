@@ -25,6 +25,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("upload");
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     loadDocuments();
@@ -47,10 +48,13 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       console.log('📄 LOAD DOCUMENTS SUCCESS, found:', data?.length || 0, 'documents');
       setDocuments(data || []);
       
-      // Switch to list tab after documents are loaded if there are any
-      if (data && data.length > 0) {
-        console.log('📄 Switching to list tab');
+      // Switch to list tab ONLY on initial load if there are documents
+      if (isInitialLoad && data && data.length > 0) {
+        console.log('📄 Initial load: Switching to list tab');
         setActiveTab("list");
+        setIsInitialLoad(false);
+      } else if (isInitialLoad) {
+        setIsInitialLoad(false);
       }
     } catch (error: any) {
       console.error('❌ Error loading documents:', error);
