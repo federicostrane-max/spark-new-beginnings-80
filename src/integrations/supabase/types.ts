@@ -336,6 +336,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_distinct_documents: {
+        Args: { p_agent_id: string }
+        Returns: {
+          category: string
+          created_at: string
+          document_name: string
+          id: string
+          summary: string
+        }[]
+      }
       get_or_create_conversation: {
         Args: { p_agent_id: string; p_user_id: string }
         Returns: string
