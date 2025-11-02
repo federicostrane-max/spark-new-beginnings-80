@@ -66,12 +66,15 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         setCurrentFile(file.name);
         
         try {
-          console.log(`[${fileIndex + 1}/${totalFiles}] Processing ${file.name}...`);
+          console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
+          console.log(`File type: ${file.type}`);
           
           // Step 1: Extract text from PDF in browser
           setProgress((fileIndex / totalFiles) * 100 + 10);
+          console.log(`Extracting text from ${file.name}...`);
           const text = await extractTextFromPDF(file);
+          console.log(`✓ Extraction complete: ${text.length} characters`);
           
           console.log(`Extracted ${text.length} characters from ${file.name}`);
           
