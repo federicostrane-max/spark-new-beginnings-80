@@ -28,8 +28,17 @@ async function extractTextFromPDF(fileUrl: string): Promise<string> {
     
     // Download the PDF file
     const response = await fetch(fileUrl);
+    console.log('Download response status:', response.status);
+    console.log('Content-Type:', response.headers.get('content-type'));
+    
     if (!response.ok) {
-      throw new Error(`Failed to download PDF: ${response.statusText}`);
+      throw new Error(`Failed to download PDF: ${response.status} ${response.statusText}`);
+    }
+
+    // Verify content type
+    const contentType = response.headers.get('content-type');
+    if (!contentType?.includes('pdf') && !contentType?.includes('octet-stream')) {
+      console.warn('Unexpected content type:', contentType);
     }
     
     const arrayBuffer = await response.arrayBuffer();
@@ -67,14 +76,19 @@ async function extractTextFromPDF(fileUrl: string): Promise<string> {
 }
 
 serve(async (req) => {
+  console.log('=== ANALYZE-DOCUMENT EDGE FUNCTION INVOKED ===');
+  
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { fileUrl, fileName, agentId, category, summary } = await req.json();
+    const requestBody = await req.json();
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    console.log('Processing document:', { fileName, agentId, category, hasFileUrl: !!fileUrl });
+    const { fileUrl, fileName, agentId, category, summary } = requestBody;
+    
+    console.log('Processing document:', { fileName, agentId, category, hasFileUrl: !!fileUrl, fileUrl });
     
     if (!fileName || !agentId) {
       throw new Error('fileName and agentId are required');
@@ -108,17 +122,29 @@ serve(async (req) => {
     let successfulChunks = 0;
     let failedChunks = 0;
 
-    // Process each chunk
-    for (let i = 0; i < chunks.length; i++) {
+    // Process each chunk (limit to first 10 for initial test to avoid timeout)
+    const maxChunks = Math.min(chunks.length, 10);
+    console.log(`Processing ${maxChunks} chunks (total available: ${chunks.length})`);
+    
+    for (let i = 0; i < maxChunks; i++) {
       const chunk = chunks[i];
       
       try {
-        console.log(`Processing chunk ${i + 1}/${chunks.length}, length: ${chunk.length}`);
+        console.log(`Processing chunk ${i + 1}/${maxChunks}, length: ${chunk.length}`);
         
-        // Generate embedding for this chunk
-        const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke('generate-embedding', {
+        // Generate embedding for this chunk with timeout
+        const embeddingPromise = supabase.functions.invoke('generate-embedding', {
           body: { text: chunk }
         });
+        
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Embedding generation timeout (30s)')), 30000)
+        );
+        
+        const { data: embeddingData, error: embeddingError } = await Promise.race([
+          embeddingPromise,
+          timeoutPromise
+        ]) as any;
 
         if (embeddingError) {
           console.error(`Error generating embedding for chunk ${i + 1}:`, embeddingError);
@@ -178,9 +204,16 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in analyze-document:', error);
+    console.error('=== ERROR IN ANALYZE-DOCUMENT ===');
+    console.error('Error type:', error?.constructor?.name);
+    console.error('Error message:', error instanceof Error ? error.message : String(error));
+    console.error('Error stack:', error instanceof Error ? error.stack : 'N/A');
+    
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        details: error instanceof Error ? error.stack : String(error)
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

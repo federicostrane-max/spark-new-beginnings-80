@@ -40,10 +40,16 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       return;
     }
 
+    console.log('=== START PDF UPLOAD ===');
+    console.log('File:', selectedFile.name, selectedFile.size, 'bytes');
+    console.log('AgentId:', agentId);
+    console.log('Category:', category);
+
     setUploading(true);
     
     try {
       // Step 1: Upload PDF to storage
+      console.log('Step 1: Uploading to storage bucket...');
       const fileExt = selectedFile.name.split('.').pop();
       const fileName = `${agentId}/${Date.now()}.${fileExt}`;
       
@@ -51,16 +57,23 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         .from('knowledge-pdfs')
         .upload(fileName, selectedFile);
 
-      if (uploadError) throw uploadError;
+      console.log('Upload result:', { uploadData, uploadError });
+
+      if (uploadError) {
+        console.error('Storage upload error:', uploadError);
+        throw uploadError;
+      }
 
       // Step 2: Get public URL
+      console.log('Step 2: Getting public URL...');
       const { data: { publicUrl } } = supabase.storage
         .from('knowledge-pdfs')
         .getPublicUrl(fileName);
 
-      console.log('File uploaded to:', publicUrl);
+      console.log('Public URL:', publicUrl);
 
       // Step 3: Call analyze-document edge function
+      console.log('Step 3: Invoking analyze-document edge function...');
       const { data, error } = await supabase.functions.invoke('analyze-document', {
         body: {
           fileUrl: publicUrl,
@@ -71,9 +84,14 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         }
       });
 
-      if (error) throw error;
+      console.log('Edge function response:', { data, error });
 
-      console.log('Document analyzed:', data);
+      if (error) {
+        console.error('Edge function error:', error);
+        throw error;
+      }
+
+      console.log('Document analyzed successfully:', data);
 
       toast.success(`PDF caricato con successo! ${data.chunks || 0} chunk creati.`);
       
@@ -86,10 +104,11 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       onUploadComplete();
 
     } catch (error: any) {
-      console.error('Error uploading PDF:', error);
+      console.error('=== ERROR IN PDF UPLOAD ===', error);
       toast.error(error.message || "Errore durante il caricamento del PDF");
     } finally {
       setUploading(false);
+      console.log('=== END PDF UPLOAD ===');
     }
   };
 
