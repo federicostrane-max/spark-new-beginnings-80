@@ -79,16 +79,18 @@ export const ChatMessage = ({
           isSelected && "ring-2 ring-primary"
         )}
       >
-        <div className={cn("prose prose-sm max-w-none dark:prose-invert", !isExpanded && isLong && "line-clamp-3")}>
-          <div className="text-sm md:text-base">
+        <div className={cn("prose prose-sm max-w-none dark:prose-invert break-words overflow-wrap-anywhere", !isExpanded && isLong && "line-clamp-3")}>
+          <div className="text-sm md:text-base break-words">
             {isUser ? (
               <div className="whitespace-pre-wrap break-words">
                 {content}
               </div>
             ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content}
-              </ReactMarkdown>
+              <div className="break-words overflow-wrap-anywhere">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {content}
+                </ReactMarkdown>
+              </div>
             )}
           </div>
           {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
