@@ -35,7 +35,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       
       // Use RPC to get distinct documents efficiently
       const { data, error } = await supabase
-        .rpc('get_distinct_documents', { p_agent_id: agentId });
+        .rpc('get_distinct_documents', { p_agent_id: agentId }) as { 
+          data: KnowledgeDocument[] | null, 
+          error: any 
+        };
 
       if (error) throw error;
 
