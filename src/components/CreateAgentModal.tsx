@@ -9,6 +9,7 @@ import { Loader2, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { chunkText } from "@/lib/textChunking";
 import { extractTextFromPDF, validatePDFFile } from "@/lib/pdfExtraction";
+import * as pdfjsLib from 'pdfjs-dist';
 
 interface Agent {
   id: string;
@@ -62,15 +63,23 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   };
 
   const processPDFsForAgent = async (agentId: string, files: File[]) => {
-    console.log(`Starting to process ${files.length} PDF file(s) for agent ${agentId}`);
+    console.log('=== PDF PROCESSING START ===');
+    console.log('Agent ID:', agentId);
+    console.log('Files to process:', files.length);
+    console.log('Files:', files.map(f => ({ name: f.name, size: f.size, type: f.type })));
+    console.log('PDF.js version:', pdfjsLib.version);
+    console.log('PDF.js worker source:', pdfjsLib.GlobalWorkerOptions.workerSrc);
     
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
+      console.log(`\n=== PROCESSING FILE ${i + 1}/${files.length} ===`);
+      console.log('File details:', { name: file.name, size: file.size, type: file.type });
       
       try {
-        // Step 1: Validate PDF
+        // Step 1: Validate
+        console.log('→ Step 1: Validating PDF...');
         const validation = validatePDFFile(file, 10);
+        console.log('Validation result:', validation);
         if (!validation.valid) {
           throw new Error(validation.error);
         }
@@ -80,28 +89,38 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           description: `Extracting text...` 
         });
 
-        // Step 2: Extract text from PDF IN BROWSER
-        console.log('Extracting text from PDF...');
+        // Step 2: Extract text
+        console.log('→ Step 2: Extracting text from PDF...');
+        console.log('Calling extractTextFromPDF...');
         const text = await extractTextFromPDF(file);
+        console.log('Text extraction complete. Length:', text.length);
+        console.log('First 200 chars:', text.substring(0, 200));
         
         if (!text || text.length < 10) {
           throw new Error('PDF is empty or unreadable');
         }
-        
-        console.log(`Extracted ${text.length} characters from PDF`);
 
-        // Step 3: Chunk text IN BROWSER
-        console.log('Chunking text...');
+        // Step 3: Chunk text
+        console.log('→ Step 3: Chunking text...');
         const chunks = chunkText(text, 1000, 200);
-        console.log(`Created ${chunks.length} chunks`);
+        console.log('Chunks created:', chunks.length);
+        console.log('First chunk preview:', chunks[0].substring(0, 100));
 
         toast({ 
           title: `Processing ${file.name}...`, 
           description: `Generating embeddings for ${chunks.length} chunks...` 
         });
 
-        // Step 4: Send chunks to edge function for embedding generation
-        console.log('Sending chunks to process-chunks function...');
+        // Step 4: Call edge function
+        console.log('→ Step 4: Calling process-chunks edge function...');
+        console.log('Request body:', {
+          chunksCount: chunks.length,
+          agentId,
+          fileName: file.name,
+          category: 'uploaded',
+          summary: description || null
+        });
+        
         const { data, error } = await supabase.functions.invoke('process-chunks', {
           body: {
             chunks: chunks,
@@ -112,32 +131,42 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           }
         });
 
+        console.log('Edge function response:', { data, error });
+
         if (error) {
-          console.error('Edge function error:', error);
+          console.error('❌ Edge function error:', error);
           throw new Error(`Failed to process chunks: ${error.message}`);
         }
 
         if (!data || !data.success) {
+          console.error('❌ Processing failed, data:', data);
           throw new Error('Processing failed');
         }
 
-        console.log(`Successfully processed ${file.name}: ${data.chunks} chunks stored`);
+        console.log('✅ Success! Chunks stored:', data.chunks);
         toast({ 
           title: "Success", 
           description: `${file.name} processed successfully (${data.chunks} chunks)` 
         });
 
       } catch (error) {
-        console.error(`Error processing ${file.name}:`, error);
+        console.error('❌ ERROR PROCESSING FILE:', error);
+        console.error('Error type:', error?.constructor?.name);
+        console.error('Error message:', error instanceof Error ? error.message : 'Unknown');
+        console.error('Error stack:', error instanceof Error ? error.stack : 'N/A');
+        
         toast({ 
           title: "Error processing PDF", 
           description: `${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
           variant: "destructive" 
         });
+        
+        // Re-throw per fermare il processo
+        throw error;
       }
     }
     
-    console.log('Finished processing all PDF files');
+    console.log('=== PDF PROCESSING COMPLETE ===');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -173,8 +202,20 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         // Process PDF files if present
         if (pdfFiles.length > 0) {
+          console.log('Starting PDF processing...');
           toast({ title: "Processing documents...", description: "Agent updated, uploading knowledge base..." });
-          await processPDFsForAgent(data.id, pdfFiles);
+          try {
+            await processPDFsForAgent(data.id, pdfFiles);
+            console.log('PDF processing completed successfully');
+          } catch (pdfError) {
+            console.error('PDF processing failed:', pdfError);
+            toast({
+              title: "PDF Processing Failed",
+              description: pdfError instanceof Error ? pdfError.message : "Unknown error processing PDFs",
+              variant: "destructive"
+            });
+            throw pdfError;
+          }
         }
 
         toast({ title: "Success", description: "Agent updated successfully!" });
@@ -221,7 +262,19 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         // Process PDF files BEFORE closing modal
         if (pdfFiles.length > 0) {
-          await processPDFsForAgent(data.id, pdfFiles);
+          console.log('Starting PDF processing...');
+          try {
+            await processPDFsForAgent(data.id, pdfFiles);
+            console.log('PDF processing completed successfully');
+          } catch (pdfError) {
+            console.error('PDF processing failed:', pdfError);
+            toast({
+              title: "PDF Processing Failed",
+              description: pdfError instanceof Error ? pdfError.message : "Unknown error processing PDFs",
+              variant: "destructive"
+            });
+            throw pdfError;
+          }
         }
 
         toast({ 
