@@ -112,6 +112,11 @@ export const ForwardMessageDialog = ({
 
       // Inoltra a tutti gli agenti selezionati (ottieni o crea la conversazione unica)
       for (const agentId of selectedAgents) {
+        console.log('[ForwardMessage] Getting/creating conversation for:', {
+          userId: session.session.user.id,
+          agentId
+        });
+
         // Ottieni o crea la conversazione unica per questo agente
         const { data: conversationId, error: rpcError } = await supabase.rpc(
           'get_or_create_conversation',
@@ -121,7 +126,16 @@ export const ForwardMessageDialog = ({
           }
         );
 
-        if (rpcError) throw rpcError;
+        console.log('[ForwardMessage] RPC result:', { conversationId, rpcError });
+
+        if (rpcError) {
+          console.error('[ForwardMessage] RPC error details:', rpcError);
+          throw rpcError;
+        }
+
+        if (!conversationId) {
+          throw new Error('No conversation ID returned from RPC');
+        }
 
         // Inserisci i messaggi inoltrati
         const messagesToInsert = messages.map((msg) => ({
