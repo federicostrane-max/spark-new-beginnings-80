@@ -35,7 +35,7 @@ serve(async (req) => {
       throw new Error('agentId and fileName are required');
     }
 
-    console.log(`Starting background processing of ${chunks.length} chunks for agent ${agentId}`);
+    console.log(`Received batch of ${chunks.length} chunks for ${fileName} - Starting background processing for agent ${agentId}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
