@@ -15,7 +15,7 @@ verify_jwt = false
 [functions.ocr-image]
 verify_jwt = false
 
-[functions.analyze-document]
+[functions.process-chunks]
 verify_jwt = false
 
 [functions.semantic-search]

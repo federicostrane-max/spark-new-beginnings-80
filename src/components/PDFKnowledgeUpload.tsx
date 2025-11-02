@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
+import { extractTextFromPDF } from "@/lib/pdfExtraction";
+import { chunkText } from "@/lib/textChunking";
 
 interface PDFKnowledgeUploadProps {
   agentId: string;
@@ -40,7 +42,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       return;
     }
 
-    console.log('=== START PDF UPLOAD ===');
+    console.log('=== START PDF UPLOAD (NEW SYSTEM) ===');
     console.log('File:', selectedFile.name, selectedFile.size, 'bytes');
     console.log('AgentId:', agentId);
     console.log('Category:', category);
@@ -48,37 +50,29 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
     setUploading(true);
     
     try {
-      // Step 1: Upload PDF to storage
-      console.log('Step 1: Uploading to storage bucket...');
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${agentId}/${Date.now()}.${fileExt}`;
+      // Step 1: Extract text from PDF in browser
+      console.log('Step 1: Extracting text from PDF in browser...');
+      const text = await extractTextFromPDF(selectedFile);
       
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('knowledge-pdfs')
-        .upload(fileName, selectedFile);
-
-      console.log('Upload result:', { uploadData, uploadError });
-
-      if (uploadError) {
-        console.error('Storage upload error:', uploadError);
-        throw uploadError;
+      console.log('Extracted text length:', text.length);
+      
+      if (!text || text.length < 10) {
+        throw new Error('PDF vuoto o non leggibile');
       }
 
-      // Step 2: Get public URL
-      console.log('Step 2: Getting public URL...');
-      const { data: { publicUrl } } = supabase.storage
-        .from('knowledge-pdfs')
-        .getPublicUrl(fileName);
+      // Step 2: Chunk text in browser
+      console.log('Step 2: Chunking text...');
+      const chunks = chunkText(text, 1000, 200);
+      
+      console.log('Created chunks:', chunks.length);
 
-      console.log('Public URL:', publicUrl);
-
-      // Step 3: Call analyze-document edge function
-      console.log('Step 3: Invoking analyze-document edge function...');
-      const { data, error } = await supabase.functions.invoke('analyze-document', {
+      // Step 3: Send chunks to edge function for embedding generation
+      console.log('Step 3: Sending chunks to edge function...');
+      const { data, error } = await supabase.functions.invoke('process-chunks', {
         body: {
-          fileUrl: publicUrl,
-          fileName: selectedFile.name,
+          chunks: chunks,
           agentId: agentId,
+          fileName: selectedFile.name,
           category: category,
           summary: summary || undefined
         }
@@ -91,7 +85,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         throw error;
       }
 
-      console.log('Document analyzed successfully:', data);
+      console.log('Document processed successfully:', data);
 
       toast.success(`PDF caricato con successo! ${data.chunks || 0} chunk creati.`);
       
