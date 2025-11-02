@@ -174,7 +174,11 @@ export const AgentsSidebar = ({
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="z-50 bg-popover">
+                  <DropdownMenuContent 
+                    align="start" 
+                    sideOffset={5}
+                    className="z-[100] bg-popover border border-border"
+                  >
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
                       Edit Agent

@@ -539,6 +539,28 @@ export default function MultiAgentConsultant() {
           ...editingAgent,
           system_prompt: editingAgent.system_prompt || ""
         } : null}
+        onDelete={async (agentId) => {
+          try {
+            const { error } = await supabase
+              .from("agents")
+              .update({ active: false })
+              .eq("id", agentId);
+
+            if (error) throw error;
+
+            toast({ title: "Success", description: "Agent deleted successfully" });
+            
+            // Clear current agent if it's the one being deleted
+            if (currentAgent?.id === agentId) {
+              setCurrentAgent(null);
+              setMessages([]);
+              setCurrentConversation(null);
+            }
+          } catch (error: any) {
+            console.error("Error deleting agent:", error);
+            toast({ title: "Error", description: "Failed to delete agent", variant: "destructive" });
+          }
+        }}
       />
       
       {/* Forward Message Dialog */}

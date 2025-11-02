@@ -24,9 +24,10 @@ interface CreateAgentModalProps {
   onOpenChange: (open: boolean) => void;
   onSuccess: (agent: Agent) => void;
   editingAgent?: Agent | null;
+  onDelete?: (agentId: string) => void;
 }
 
-export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent }: CreateAgentModalProps) => {
+export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, onDelete }: CreateAgentModalProps) => {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -364,27 +365,44 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent }
           </div>
 
           {/* Submit */}
-          <div className="flex gap-2 justify-end">
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => onOpenChange(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {pdfFiles.length > 0 
-                    ? `${editingAgent ? 'Updating' : 'Creating'} agent and processing documents...` 
-                    : `${editingAgent ? 'Updating' : 'Creating'}...`}
-                </>
-              ) : (
-                editingAgent ? "Update Agent" : "Create Agent"
+          <div className="flex gap-2 justify-between">
+            <div>
+              {editingAgent && onDelete && (
+                <Button 
+                  type="button" 
+                  variant="destructive" 
+                  onClick={() => {
+                    onDelete(editingAgent.id);
+                    onOpenChange(false);
+                  }}
+                  disabled={loading}
+                >
+                  Delete Agent
+                </Button>
               )}
-            </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => onOpenChange(false)}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {pdfFiles.length > 0 
+                      ? `${editingAgent ? 'Updating' : 'Creating'} agent and processing documents...` 
+                      : `${editingAgent ? 'Updating' : 'Creating'}...`}
+                  </>
+                ) : (
+                  editingAgent ? "Update Agent" : "Create Agent"
+                )}
+              </Button>
+            </div>
           </div>
         </form>
       </DialogContent>
