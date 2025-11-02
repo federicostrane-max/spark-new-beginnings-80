@@ -24,6 +24,7 @@ interface KnowledgeBaseManagerProps {
 export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManagerProps) => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("upload");
 
   useEffect(() => {
     loadDocuments();
@@ -43,6 +44,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       if (error) throw error;
 
       setDocuments(data || []);
+      
+      // Switch to list tab after documents are loaded if there are any
+      if (data && data.length > 0) {
+        setActiveTab("list");
+      }
     } catch (error: any) {
       console.error('Error loading documents:', error);
       toast.error("Errore nel caricamento dei documenti");
@@ -75,7 +81,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
         <p className="text-sm text-muted-foreground">Gestisci i documenti specifici per questo agente</p>
       </div>
 
-      <Tabs defaultValue="upload" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="upload">Carica Documento</TabsTrigger>
           <TabsTrigger value="list">Lista Documenti</TabsTrigger>
