@@ -69,69 +69,69 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
       
       try {
-        // Validate file size and type
-        if (file.size > 10 * 1024 * 1024) {
-          throw new Error(`${file.name} is too large (max 10MB)`);
+        // Step 1: Validate PDF
+        const validation = validatePDFFile(file, 10);
+        if (!validation.valid) {
+          throw new Error(validation.error);
         }
-
-        if (!file.type.includes('pdf')) {
-          throw new Error(`${file.name} is not a PDF file`);
-        }
-
-        toast({ 
-          title: `Uploading ${file.name}...`, 
-          description: `File ${i + 1}/${files.length}` 
-        });
-
-        // Upload to Supabase Storage
-        const fileName = `${agentId}/${Date.now()}_${file.name}`;
-        console.log(`Uploading to storage: ${fileName}`);
-        const { error: uploadError } = await supabase.storage
-          .from('knowledge-pdfs')
-          .upload(fileName, file);
-
-        if (uploadError) {
-          console.error('Storage upload error:', uploadError);
-          throw new Error(`Failed to upload: ${uploadError.message}`);
-        }
-
-        // Get public URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('knowledge-pdfs')
-          .getPublicUrl(fileName);
-        console.log(`File uploaded successfully: ${publicUrl}`);
 
         toast({ 
           title: `Processing ${file.name}...`, 
-          description: `Extracting text and generating embeddings...` 
+          description: `Extracting text...` 
         });
 
-        // Call edge function to process the PDF
-        console.log(`Calling process-agent-knowledge for ${file.name}`);
-        const { data, error } = await supabase.functions.invoke('process-agent-knowledge', {
+        // Step 2: Extract text from PDF IN BROWSER
+        console.log('Extracting text from PDF...');
+        const text = await extractTextFromPDF(file);
+        
+        if (!text || text.length < 10) {
+          throw new Error('PDF is empty or unreadable');
+        }
+        
+        console.log(`Extracted ${text.length} characters from PDF`);
+
+        // Step 3: Chunk text IN BROWSER
+        console.log('Chunking text...');
+        const chunks = chunkText(text, 1000, 200);
+        console.log(`Created ${chunks.length} chunks`);
+
+        toast({ 
+          title: `Processing ${file.name}...`, 
+          description: `Generating embeddings for ${chunks.length} chunks...` 
+        });
+
+        // Step 4: Send chunks to edge function for embedding generation
+        console.log('Sending chunks to process-chunks function...');
+        const { data, error } = await supabase.functions.invoke('process-chunks', {
           body: {
-            agentId,
-            fileUrl: publicUrl,
+            chunks: chunks,
+            agentId: agentId,
             fileName: file.name,
-            category: 'uploaded'
+            category: 'uploaded',
+            summary: description || null
           }
         });
 
         if (error) {
-          console.error('Processing error:', error);
-          throw new Error(`Failed to process: ${error.message}`);
+          console.error('Edge function error:', error);
+          throw new Error(`Failed to process chunks: ${error.message}`);
+        }
+
+        if (!data || !data.success) {
+          throw new Error('Processing failed');
         }
 
         console.log(`Successfully processed ${file.name}: ${data.chunks} chunks stored`);
         toast({ 
           title: "Success", 
-          description: `${file.name} processed (${data.chunks} chunks)` 
+          description: `${file.name} processed successfully (${data.chunks} chunks)` 
         });
+
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error);
         toast({ 
-          title: "Error", 
-          description: `Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          title: "Error processing PDF", 
+          description: `${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
           variant: "destructive" 
         });
       }
