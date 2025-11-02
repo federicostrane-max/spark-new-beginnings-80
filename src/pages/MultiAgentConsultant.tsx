@@ -20,7 +20,7 @@ interface Agent {
   slug: string;
   description: string;
   avatar: string | null;
-  system_prompt?: string;
+  system_prompt: string;
 }
 
 interface Message {
@@ -109,7 +109,33 @@ export default function MultiAgentConsultant() {
   const handleAgentCreated = (newAgent: Agent) => {
     // Auto-select the newly created agent
     handleSelectAgent(newAgent);
-    toast({ title: "Success", description: `${newAgent.name} created successfully!` });
+    toast({ title: "Success", description: `${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully!` });
+    setEditingAgent(null);
+  };
+
+  const handleDeleteAgent = async (agentId: string) => {
+    try {
+      const { error } = await supabase
+        .from("agents")
+        .delete()
+        .eq("id", agentId);
+
+      if (error) throw error;
+
+      toast({ title: "Success", description: "Agent deleted successfully!" });
+      
+      // Reset current agent if it was deleted
+      if (currentAgent?.id === agentId) {
+        setCurrentAgent(null);
+        setCurrentConversation(null);
+        setMessages([]);
+      }
+      
+      setEditingAgent(null);
+    } catch (error: any) {
+      console.error("Error deleting agent:", error);
+      toast({ title: "Error", description: "Failed to delete agent", variant: "destructive" });
+    }
   };
 
   const loadConversation = async (conversationId: string) => {
@@ -328,8 +354,13 @@ export default function MultiAgentConsultant() {
       {/* Create Agent Modal */}
       <CreateAgentModal
         open={showCreateModal}
-        onOpenChange={setShowCreateModal}
+        onOpenChange={(open) => {
+          setShowCreateModal(open);
+          if (!open) setEditingAgent(null);
+        }}
         onSuccess={handleAgentCreated}
+        editingAgent={editingAgent}
+        onDelete={handleDeleteAgent}
       />
 
       {/* Forward Message Dialog */}

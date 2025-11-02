@@ -224,8 +224,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </p>
           </div>
 
-          {/* Knowledge Base Upload */}
-          {!createdAgentId ? (
+          {/* Knowledge Base Upload - Solo per nuovi agenti */}
+          {!editingAgent && !createdAgentId && (
             <div>
               <Label htmlFor="pdfFiles">Knowledge Base (PDF files - Opzionale)</Label>
               <p className="text-xs text-muted-foreground mb-2">
@@ -259,7 +259,9 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 </div>
               )}
             </div>
-          ) : (
+          )}
+          
+          {!editingAgent && createdAgentId && (
             <div className="space-y-2">
               <Label>Carica Knowledge Base</Label>
               <p className="text-xs text-muted-foreground mb-2">

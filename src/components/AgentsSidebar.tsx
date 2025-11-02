@@ -26,6 +26,7 @@ interface Agent {
   slug: string;
   description: string;
   avatar: string | null;
+  system_prompt: string;
 }
 
 interface AgentsSidebarProps {
