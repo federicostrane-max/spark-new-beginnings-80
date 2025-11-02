@@ -31,8 +31,8 @@ serve(async (req) => {
       throw new Error('Chunks array is required and must not be empty');
     }
 
-    if (!agentId || !fileName || !category) {
-      throw new Error('agentId, fileName, and category are required');
+    if (!agentId || !fileName) {
+      throw new Error('agentId and fileName are required');
     }
 
     console.log(`Processing ${chunks.length} chunks for agent ${agentId}`);
@@ -79,9 +79,9 @@ serve(async (req) => {
           .from('agent_knowledge')
           .insert({
             agent_id: agentId,
-            document_name: `${fileName} (chunk ${i + 1}/${chunks.length})`,
+            document_name: fileName,
             content: chunk,
-            category: category,
+            category: category || 'General',
             summary: summary || null,
             embedding: embeddingData.embedding
           });

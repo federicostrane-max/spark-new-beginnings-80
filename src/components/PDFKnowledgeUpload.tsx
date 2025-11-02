@@ -2,11 +2,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Upload } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 import { extractTextFromPDF } from "@/lib/pdfExtraction";
 import { chunkText } from "@/lib/textChunking";
 
@@ -18,6 +17,8 @@ interface PDFKnowledgeUploadProps {
 export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUploadProps) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [currentFile, setCurrentFile] = useState<string>("");
+  const [progress, setProgress] = useState(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -53,44 +54,62 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
     console.log('AgentId:', agentId);
 
     setUploading(true);
+    setProgress(0);
     let successCount = 0;
     let errorCount = 0;
+    const totalFiles = selectedFiles.length;
     
     try {
-      for (const file of selectedFiles) {
+      for (let fileIndex = 0; fileIndex < selectedFiles.length; fileIndex++) {
+        const file = selectedFiles[fileIndex];
+        setCurrentFile(file.name);
+        
         try {
-          console.log(`Processing ${file.name}...`);
+          console.log(`[${fileIndex + 1}/${totalFiles}] Processing ${file.name}...`);
           
           // Step 1: Extract text from PDF in browser
+          setProgress((fileIndex / totalFiles) * 100 + 10);
           const text = await extractTextFromPDF(file);
+          
+          console.log(`Extracted ${text.length} characters from ${file.name}`);
           
           if (!text || text.length < 10) {
             throw new Error('PDF vuoto o non leggibile');
           }
 
           // Step 2: Chunk text in browser
+          setProgress((fileIndex / totalFiles) * 100 + 20);
           const chunks = chunkText(text, 1000, 200);
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
           // Step 3: Send chunks to edge function for embedding generation
+          setProgress((fileIndex / totalFiles) * 100 + 30);
+          console.log(`Calling process-chunks for ${file.name}...`);
+          
           const { data, error } = await supabase.functions.invoke('process-chunks', {
             body: {
               chunks: chunks,
               agentId: agentId,
               fileName: file.name,
-              category: "General",
-              summary: undefined
+              category: "General"
             }
           });
+
+          console.log(`Response for ${file.name}:`, { data, error });
 
           if (error) {
             console.error(`Error processing ${file.name}:`, error);
             errorCount++;
-            toast.error(`Errore con ${file.name}`);
-          } else {
-            console.log(`${file.name} processed successfully`);
+            toast.error(`Errore con ${file.name}: ${error.message || 'Errore sconosciuto'}`);
+          } else if (data?.success) {
+            console.log(`${file.name} processed successfully - ${data.chunks} chunks created`);
             successCount++;
+            setProgress(((fileIndex + 1) / totalFiles) * 100);
+          } else {
+            console.error(`Unexpected response for ${file.name}:`, data);
+            errorCount++;
+            toast.error(`Errore imprevisto con ${file.name}`);
           }
 
         } catch (error: any) {
@@ -101,11 +120,16 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       }
 
       if (successCount > 0) {
-        toast.success(`${successCount} PDF caricati con successo!`);
+        toast.success(`✓ ${successCount} PDF caricati con successo!`);
+      }
+      if (errorCount > 0) {
+        toast.error(`✗ ${errorCount} PDF hanno generato errori`);
       }
       
       // Reset form
       setSelectedFiles([]);
+      setCurrentFile("");
+      setProgress(0);
       
       // Notify parent
       onUploadComplete();
@@ -115,6 +139,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       toast.error(error.message || "Errore durante il caricamento");
     } finally {
       setUploading(false);
+      setCurrentFile("");
+      setProgress(0);
       console.log(`=== END UPLOAD === Success: ${successCount}, Errors: ${errorCount}`);
     }
   };
@@ -132,7 +158,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             onChange={handleFileChange}
             disabled={uploading}
           />
-          {selectedFiles.length > 0 && (
+          {selectedFiles.length > 0 && !uploading && (
             <div className="mt-3 space-y-2">
               <p className="text-sm font-medium">File selezionati ({selectedFiles.length}):</p>
               {selectedFiles.map((file, index) => (
@@ -153,6 +179,24 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         </div>
       </div>
 
+      {uploading && (
+        <div className="space-y-3 p-4 bg-muted rounded-lg">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm font-medium">Caricamento in corso...</span>
+          </div>
+          {currentFile && (
+            <p className="text-sm text-muted-foreground">
+              Elaborando: {currentFile}
+            </p>
+          )}
+          <Progress value={progress} className="h-2" />
+          <p className="text-xs text-muted-foreground text-right">
+            {Math.round(progress)}%
+          </p>
+        </div>
+      )}
+
 
       <Button
         onClick={handleUpload}
@@ -160,7 +204,10 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         className="w-full"
       >
         {uploading ? (
-          <>Caricamento in corso...</>
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            Caricamento in corso...
+          </>
         ) : (
           <>
             <Upload className="w-4 h-4 mr-2" />
