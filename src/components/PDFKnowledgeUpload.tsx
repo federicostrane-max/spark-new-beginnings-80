@@ -58,6 +58,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
     let successCount = 0;
     let errorCount = 0;
     const totalFiles = selectedFiles.length;
+    const errors: string[] = [];
     
     try {
       for (let fileIndex = 0; fileIndex < selectedFiles.length; fileIndex++) {
@@ -66,6 +67,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         
         try {
           console.log(`[${fileIndex + 1}/${totalFiles}] Processing ${file.name}...`);
+          console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
           // Step 1: Extract text from PDF in browser
           setProgress((fileIndex / totalFiles) * 100 + 10);
@@ -143,14 +145,17 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             }
           }
           
-          console.log(`${file.name} processed successfully - ${processedChunks} chunks created in ${totalBatches} batches`);
+          console.log(`✓ ${file.name} processed successfully - ${processedChunks} chunks created in ${totalBatches} batches`);
           successCount++;
-          setProgress(((fileIndex + 1) / totalFiles) * 100);
+          // Update progress based on successfully completed files
+          setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
 
         } catch (error: any) {
-          console.error(`Error with ${file.name}:`, error);
+          console.error(`✗ Error with ${file.name}:`, error);
           errorCount++;
-          toast.error(`Errore con ${file.name}: ${error.message}`);
+          errors.push(`${file.name}: ${error.message}`);
+          // Update progress even on error
+          setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
         }
       }
 
@@ -158,7 +163,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         toast.success(`✓ ${successCount} PDF caricati con successo!`);
       }
       if (errorCount > 0) {
-        toast.error(`✗ ${errorCount} PDF hanno generato errori`);
+        console.error('Upload errors:', errors);
+        toast.error(`✗ ${errorCount} PDF hanno generato errori. Controlla la console per i dettagli.`);
       }
       
       // Reset form
