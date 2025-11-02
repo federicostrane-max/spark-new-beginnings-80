@@ -387,38 +387,38 @@ export default function MultiAgentConsultant() {
                         <Menu className="h-5 w-5" />
                       </Button>
                     )}
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="text-3xl">{currentAgent.avatar || "🤖"}</div>
-                      <div className="min-w-0">
-                        <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
-                        <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEditingAgent(currentAgent);
-                          setShowCreateModal(true);
-                        }}
-                        className="gap-2"
-                      >
-                        <Edit className="h-4 w-4" />
-                        <span className="hidden md:inline">Modifica</span>
-                      </Button>
-                      {messages.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleStartSelection}
-                          className="gap-2"
-                        >
-                          <Forward className="h-4 w-4" />
-                          <span className="hidden md:inline">Inoltra</span>
-                        </Button>
-                      )}
-                    </div>
+                     <div className="flex items-center gap-3 flex-1 min-w-0 mr-2">
+                       <div className="text-3xl flex-shrink-0">{currentAgent.avatar || "🤖"}</div>
+                       <div className="min-w-0 flex-1">
+                         <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
+                         <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
+                       </div>
+                     </div>
+                     <div className="flex items-center gap-2 flex-shrink-0">
+                       <Button
+                         variant="outline"
+                         size="sm"
+                         onClick={() => {
+                           setEditingAgent(currentAgent);
+                           setShowCreateModal(true);
+                         }}
+                         className="gap-2"
+                       >
+                         <Edit className="h-4 w-4" />
+                         <span className="hidden md:inline">Modifica</span>
+                       </Button>
+                       {messages.length > 0 && (
+                         <Button
+                           variant="ghost"
+                           size="sm"
+                           onClick={handleStartSelection}
+                           className="gap-2"
+                         >
+                           <Forward className="h-4 w-4" />
+                           <span className="hidden md:inline">Inoltra</span>
+                         </Button>
+                       )}
+                     </div>
                   </>
                 ) : (
                   <>
