@@ -126,33 +126,6 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         </div>
       </div>
 
-      <div>
-        <Label htmlFor="category">Categoria</Label>
-        <Select value={category} onValueChange={setCategory} disabled={uploading}>
-          <SelectTrigger id="category">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="General">Generale</SelectItem>
-            <SelectItem value="Technical">Tecnico</SelectItem>
-            <SelectItem value="Marketing">Marketing</SelectItem>
-            <SelectItem value="Legal">Legale</SelectItem>
-            <SelectItem value="Financial">Finanziario</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div>
-        <Label htmlFor="summary">Sommario (Opzionale)</Label>
-        <Textarea
-          id="summary"
-          placeholder="Breve descrizione del documento..."
-          value={summary}
-          onChange={(e) => setSummary(e.target.value)}
-          disabled={uploading}
-          className="h-20"
-        />
-      </div>
 
       <Button
         onClick={handleUpload}
