@@ -112,20 +112,20 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
               Nessun documento caricato
             </div>
           ) : (
-            <div className="w-full overflow-x-auto">
-              <Table>
+            <div className="w-full overflow-hidden">
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[200px] max-w-[400px]">Nome Documento</TableHead>
-                    <TableHead className="w-[140px]">Creato</TableHead>
-                    <TableHead className="w-[80px] text-right">Azioni</TableHead>
+                    <TableHead className="w-[45%]">Nome Documento</TableHead>
+                    <TableHead className="w-[35%]">Creato</TableHead>
+                    <TableHead className="w-[20%] text-right">Azioni</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {documents.map((doc) => (
                     <TableRow key={doc.id}>
                       <TableCell className="font-medium">
-                        <div className="flex items-center gap-2 min-w-0 max-w-[400px]">
+                        <div className="flex items-center gap-2 min-w-0 max-w-full">
                           <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                           <span className="truncate" title={doc.document_name}>
                             {doc.document_name}
