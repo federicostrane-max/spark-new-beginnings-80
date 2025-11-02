@@ -9,7 +9,7 @@ import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu, Forward, X } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -363,17 +363,31 @@ export default function MultiAgentConsultant() {
                         <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
                       </div>
                     </div>
-                    {messages.length > 0 && (
+                    <div className="flex items-center gap-2">
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        onClick={handleStartSelection}
+                        onClick={() => {
+                          setEditingAgent(currentAgent);
+                          setShowCreateModal(true);
+                        }}
                         className="gap-2"
                       >
-                        <Forward className="h-4 w-4" />
-                        <span className="hidden md:inline">Inoltra</span>
+                        <Edit className="h-4 w-4" />
+                        <span className="hidden md:inline">Modifica</span>
                       </Button>
-                    )}
+                      {messages.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleStartSelection}
+                          className="gap-2"
+                        >
+                          <Forward className="h-4 w-4" />
+                          <span className="hidden md:inline">Inoltra</span>
+                        </Button>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>

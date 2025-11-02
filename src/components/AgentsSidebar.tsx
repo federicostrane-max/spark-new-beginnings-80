@@ -4,15 +4,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, LogOut, MoreVertical, BookOpen, Trash2, Edit } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -141,56 +135,22 @@ export const AgentsSidebar = ({
             <div className="text-sm text-sidebar-foreground/70 text-center py-4">No agents yet</div>
           ) : (
             agents.map((agent) => (
-              <div
+              <button
                 key={agent.id}
+                onClick={() => onSelectAgent(agent)}
                 className={cn(
-                  "group flex items-center gap-2 w-full rounded-lg p-3 transition-colors",
+                  "flex items-center gap-3 w-full rounded-lg p-3 transition-colors text-left",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                 )}
               >
-                {/* Agent Info - clickable */}
-                <button
-                  onClick={() => onSelectAgent(agent)}
-                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                >
-                  <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{agent.name}</p>
-                    <p className="text-xs opacity-70 truncate">{agent.description}</p>
-                  </div>
-                </button>
-
-                {/* Menu actions button */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className="flex items-center justify-center h-8 w-8 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors flex-shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreVertical className="h-4 w-4 text-primary" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
-                    <DropdownMenuItem onClick={() => onEditAgent(agent)}>
-                      <Edit className="mr-2 h-4 w-4" />
-                      Modifica Agente
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setSelectedAgentForKB(agent)}>
-                      <BookOpen className="mr-2 h-4 w-4" />
-                      Gestisci Knowledge Base
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={() => setAgentToDelete(agent)}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Elimina Agente
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
+                <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{agent.name}</p>
+                  <p className="text-xs opacity-70 truncate">{agent.description}</p>
+                </div>
+              </button>
             ))
           )}
         </div>
