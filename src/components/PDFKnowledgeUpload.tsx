@@ -84,7 +84,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
           // Step 3: Send chunks in batches to avoid timeout for large files
-          const BATCH_SIZE = 50; // Process 50 chunks at a time
+          const BATCH_SIZE = 20; // Reduced batch size to avoid timeouts
           const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
           let processedChunks = 0;
           
@@ -99,27 +99,45 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             const batchProgress = (batchIndex / totalBatches) * 60;
             setProgress(progressBase + batchProgress);
             
-            const { data, error } = await supabase.functions.invoke('process-chunks', {
-              body: {
-                chunks: batchChunks,
-                agentId: agentId,
-                fileName: file.name,
-                category: "General"
-              }
-            });
+            let retries = 0;
+            const MAX_RETRIES = 2;
+            let batchSuccess = false;
+            
+            while (!batchSuccess && retries <= MAX_RETRIES) {
+              try {
+                const { data, error } = await supabase.functions.invoke('process-chunks', {
+                  body: {
+                    chunks: batchChunks,
+                    agentId: agentId,
+                    fileName: file.name,
+                    category: "General"
+                  }
+                });
 
-            if (error) {
-              console.error(`Error processing batch ${batchIndex + 1} of ${file.name}:`, error);
-              throw new Error(`Errore batch ${batchIndex + 1}: ${error.message || 'Errore sconosciuto'}`);
+                if (error) {
+                  throw error;
+                }
+                
+                if (!data?.success) {
+                  throw new Error('Risposta imprevista dal server');
+                }
+                
+                batchSuccess = true;
+                processedChunks += batchChunks.length;
+                console.log(`Batch ${batchIndex + 1}/${totalBatches} completed. Total processed: ${processedChunks}/${chunks.length}`);
+                
+              } catch (batchError: any) {
+                retries++;
+                console.error(`Error in batch ${batchIndex + 1}, retry ${retries}/${MAX_RETRIES}:`, batchError);
+                
+                if (retries > MAX_RETRIES) {
+                  throw new Error(`Batch ${batchIndex + 1} fallito dopo ${MAX_RETRIES} tentativi: ${batchError.message}`);
+                }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+              }
             }
-            
-            if (!data?.success) {
-              console.error(`Unexpected response for batch ${batchIndex + 1} of ${file.name}:`, data);
-              throw new Error(`Risposta imprevista per batch ${batchIndex + 1}`);
-            }
-            
-            processedChunks += batchChunks.length;
-            console.log(`Batch ${batchIndex + 1}/${totalBatches} completed. Total processed: ${processedChunks}/${chunks.length}`);
           }
           
           console.log(`${file.name} processed successfully - ${processedChunks} chunks created in ${totalBatches} batches`);
