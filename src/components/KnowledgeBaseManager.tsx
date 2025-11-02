@@ -40,6 +40,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
+      console.log(`📚 Raw data from DB (${data?.length} rows):`, data?.map(d => d.document_name));
+
       // Group by exact document name to show unique documents
       const uniqueDocs = new Map<string, KnowledgeDocument>();
       data?.forEach(doc => {
@@ -48,7 +50,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
         }
       });
 
-      setDocuments(Array.from(uniqueDocs.values()));
+      const uniqueDocsArray = Array.from(uniqueDocs.values());
+      console.log(`📚 Unique documents (${uniqueDocsArray.length}):`, uniqueDocsArray.map(d => d.document_name));
+      
+      setDocuments(uniqueDocsArray);
     } catch (error: any) {
       console.error('Error loading documents:', error);
       toast.error("Errore nel caricamento dei documenti");
