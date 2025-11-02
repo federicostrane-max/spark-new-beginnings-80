@@ -38,24 +38,13 @@ export default function Auth() {
         : await signUp(validated.email, validated.password);
 
       if (error) {
-        toast({
-          title: "Error",
-          description: error.message,
-          variant: "destructive",
-        });
+        console.error("Auth error:", error.message);
       } else {
-        toast({
-          title: mode === "signin" ? "Welcome back!" : "Account created!",
-          description: mode === "signin" ? "Successfully signed in." : "Successfully signed up.",
-        });
+        console.log(mode === "signin" ? "User signed in" : "Account created");
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
-        toast({
-          title: "Validation Error",
-          description: error.errors[0].message,
-          variant: "destructive",
-        });
+        console.error("Validation error:", error.errors[0].message);
       }
     } finally {
       setIsLoading(false);

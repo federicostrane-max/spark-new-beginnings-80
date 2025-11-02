@@ -109,7 +109,7 @@ export default function MultiAgentConsultant() {
   const handleAgentCreated = (newAgent: Agent) => {
     // Auto-select the newly created agent
     handleSelectAgent(newAgent);
-    toast({ title: "Success", description: `${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully!` });
+    console.log(`${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully`);
     setEditingAgent(null);
   };
 
@@ -122,7 +122,7 @@ export default function MultiAgentConsultant() {
 
       if (error) throw error;
 
-      toast({ title: "Success", description: "Agent deleted successfully!" });
+      console.log("Agent deleted successfully");
       
       // Reset current agent if it was deleted
       if (currentAgent?.id === agentId) {
@@ -134,7 +134,6 @@ export default function MultiAgentConsultant() {
       setEditingAgent(null);
     } catch (error: any) {
       console.error("Error deleting agent:", error);
-      toast({ title: "Error", description: "Failed to delete agent", variant: "destructive" });
     }
   };
 
@@ -160,7 +159,6 @@ export default function MultiAgentConsultant() {
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content })));
     } catch (error: any) {
       console.error("Error loading conversation:", error);
-      toast({ title: "Error", description: "Failed to load conversation", variant: "destructive" });
     } finally {
       setLoadingMessages(false);
     }
@@ -172,7 +170,7 @@ export default function MultiAgentConsultant() {
     const conversationId = currentConversation?.id;
 
     if (!conversationId) {
-      toast({ title: "Error", description: "No active conversation", variant: "destructive" });
+      console.error("No active conversation");
       return;
     }
 
@@ -261,7 +259,6 @@ export default function MultiAgentConsultant() {
       }
     } catch (error: any) {
       console.error("Error sending message:", error);
-      toast({ title: "Error", description: error.message, variant: "destructive" });
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
     } finally {
       setIsStreaming(false);

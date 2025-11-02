@@ -74,11 +74,6 @@ export const ForwardMessageDialog = ({
       setAgents(agentsData || []);
     } catch (error) {
       console.error("Error loading agents:", error);
-      toast({ 
-        title: "Errore", 
-        description: "Impossibile caricare gli agenti", 
-        variant: "destructive" 
-      });
     } finally {
       setLoading(false);
     }
@@ -96,11 +91,7 @@ export const ForwardMessageDialog = ({
 
   const handleForward = async () => {
     if (selectedAgents.size === 0) {
-      toast({ 
-        title: "Attenzione", 
-        description: "Seleziona almeno un agente", 
-        variant: "destructive" 
-      });
+      console.warn("Seleziona almeno un agente");
       return;
     }
 
@@ -157,20 +148,12 @@ export const ForwardMessageDialog = ({
           .eq("id", conversationId);
       }
 
-      toast({ 
-        title: "Successo", 
-        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}` 
-      });
+      console.log(`${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}`);
       
       onForwardComplete();
       onOpenChange(false);
     } catch (error: any) {
       console.error("Error forwarding messages:", error);
-      toast({ 
-        title: "Errore", 
-        description: error.message || "Impossibile inoltrare i messaggi", 
-        variant: "destructive" 
-      });
     } finally {
       setForwarding(false);
     }

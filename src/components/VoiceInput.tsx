@@ -39,11 +39,6 @@ export const VoiceInput = ({ onTranscription, disabled }: VoiceInputProps) => {
       setIsRecording(true);
     } catch (error) {
       console.error('Error starting recording:', error);
-      toast({
-        title: "Errore Microfono",
-        description: "Impossibile accedere al microfono",
-        variant: "destructive",
-      });
     }
   };
 
@@ -71,19 +66,11 @@ export const VoiceInput = ({ onTranscription, disabled }: VoiceInputProps) => {
 
         if (data?.text) {
           onTranscription(data.text);
-          toast({
-            title: "Trascrizione Completata",
-            description: "Audio convertito in testo",
-          });
+          console.log("Trascrizione completata");
         }
       };
     } catch (error) {
       console.error('Transcription error:', error);
-      toast({
-        title: "Errore Trascrizione",
-        description: "Impossibile convertire l'audio",
-        variant: "destructive",
-      });
     } finally {
       setIsProcessing(false);
     }

@@ -20,21 +20,13 @@ export const AttachmentUpload = ({ onAttachmentAdded, disabled }: AttachmentUplo
     // Validate file type (images and PDFs only)
     const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
     if (!validTypes.includes(file.type)) {
-      toast({
-        title: "Tipo File Non Valido",
-        description: "Solo immagini (JPG, PNG, WEBP) e PDF sono supportati",
-        variant: "destructive",
-      });
+      console.warn("Tipo file non valido, sono supportati solo immagini (JPEG, PNG, WEBP) o PDF");
       return;
     }
 
     // Validate file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
-      toast({
-        title: "File Troppo Grande",
-        description: "Il file deve essere inferiore a 10MB",
-        variant: "destructive",
-      });
+      console.warn("File troppo grande, il limite è 10MB");
       return;
     }
 
@@ -64,17 +56,9 @@ export const AttachmentUpload = ({ onAttachmentAdded, disabled }: AttachmentUplo
 
       onAttachmentAdded(publicUrl, file.name, file.type);
 
-      toast({
-        title: "File Caricato",
-        description: `${file.name} caricato con successo`,
-      });
+      console.log(`File caricato: ${file.name}`);
     } catch (error) {
       console.error('Upload error:', error);
-      toast({
-        title: "Errore Caricamento",
-        description: "Impossibile caricare il file",
-        variant: "destructive",
-      });
     } finally {
       setUploading(false);
     }

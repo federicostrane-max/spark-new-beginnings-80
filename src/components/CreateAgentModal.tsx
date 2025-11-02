@@ -98,7 +98,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        toast({ title: "Success", description: "Agent updated successfully!" });
+        console.log("Agent updated successfully");
         onSuccess(data);
         onOpenChange(false);
       } else {
@@ -141,10 +141,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        toast({ 
-          title: "Success", 
-          description: "Agent created successfully!" 
-        });
+        console.log("Agent created successfully");
         
         // If there are files to upload, set the agent ID for upload
         if (selectedFiles.length > 0) {
@@ -163,7 +160,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       }
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
-      toast({ title: "Error", description: error.message || `Failed to ${editingAgent ? 'update' : 'create'} agent`, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -281,7 +277,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               <PDFKnowledgeUpload
                 agentId={createdAgentId}
                 onUploadComplete={() => {
-                  toast({ title: "Successo", description: "Knowledge base caricata!" });
+                  console.log("Knowledge base caricata");
                   setSelectedFiles([]);
                   setCreatedAgentId(null);
                   onSuccess({ id: createdAgentId } as Agent);
