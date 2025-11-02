@@ -73,20 +73,20 @@ export const ChatMessage = ({
         className={cn(
           "rounded-2xl px-4 py-3 shadow-sm transition-all",
           selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[75%]",
+          "min-w-0",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
           isSelected && "ring-2 ring-primary"
         )}
-        style={{ wordBreak: 'break-word', overflowWrap: 'break-word', minWidth: 0 }}
       >
         {isUser ? (
-          <div className={cn("whitespace-pre-wrap", !isExpanded && isLong && "line-clamp-3")}>
+          <pre className={cn("whitespace-pre-wrap break-words text-sm font-sans", !isExpanded && isLong && "line-clamp-3")}>
             {content}
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
-          </div>
+          </pre>
         ) : (
-          <div className={cn("[&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-all [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2", !isExpanded && isLong && "line-clamp-3")}>
+          <div className={cn("prose prose-sm max-w-none dark:prose-invert [&_*]:break-words", !isExpanded && isLong && "line-clamp-3")}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content}
             </ReactMarkdown>
