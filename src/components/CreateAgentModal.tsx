@@ -180,6 +180,9 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
         </DialogHeader>
 
+        {/* Invisible element to intercept autofocus */}
+        <div tabIndex={0} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Name */}
           <div>
