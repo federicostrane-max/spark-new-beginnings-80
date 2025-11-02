@@ -123,10 +123,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
               <TableBody>
                 {documents.map((doc) => (
                   <TableRow key={doc.id}>
-                    <TableCell className="font-medium">
+                    <TableCell className="font-medium max-w-[300px]">
                       <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                        {doc.document_name}
+                        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate" title={doc.document_name}>
+                          {doc.document_name}
+                        </span>
                       </div>
                     </TableCell>
                     <TableCell>
