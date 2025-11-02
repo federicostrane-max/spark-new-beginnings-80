@@ -83,34 +83,48 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Send chunks to edge function for embedding generation
-          setProgress((fileIndex / totalFiles) * 100 + 30);
-          console.log(`Calling process-chunks for ${file.name}...`);
+          // Step 3: Send chunks in batches to avoid timeout for large files
+          const BATCH_SIZE = 50; // Process 50 chunks at a time
+          const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
+          let processedChunks = 0;
           
-          const { data, error } = await supabase.functions.invoke('process-chunks', {
-            body: {
-              chunks: chunks,
-              agentId: agentId,
-              fileName: file.name,
-              category: "General"
+          for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+            const start = batchIndex * BATCH_SIZE;
+            const end = Math.min(start + BATCH_SIZE, chunks.length);
+            const batchChunks = chunks.slice(start, end);
+            
+            console.log(`Processing batch ${batchIndex + 1}/${totalBatches} for ${file.name} (${batchChunks.length} chunks)`);
+            
+            const progressBase = (fileIndex / totalFiles) * 100 + 30;
+            const batchProgress = (batchIndex / totalBatches) * 60;
+            setProgress(progressBase + batchProgress);
+            
+            const { data, error } = await supabase.functions.invoke('process-chunks', {
+              body: {
+                chunks: batchChunks,
+                agentId: agentId,
+                fileName: file.name,
+                category: "General"
+              }
+            });
+
+            if (error) {
+              console.error(`Error processing batch ${batchIndex + 1} of ${file.name}:`, error);
+              throw new Error(`Errore batch ${batchIndex + 1}: ${error.message || 'Errore sconosciuto'}`);
             }
-          });
-
-          console.log(`Response for ${file.name}:`, { data, error });
-
-          if (error) {
-            console.error(`Error processing ${file.name}:`, error);
-            errorCount++;
-            toast.error(`Errore con ${file.name}: ${error.message || 'Errore sconosciuto'}`);
-          } else if (data?.success) {
-            console.log(`${file.name} processed successfully - ${data.chunks} chunks created`);
-            successCount++;
-            setProgress(((fileIndex + 1) / totalFiles) * 100);
-          } else {
-            console.error(`Unexpected response for ${file.name}:`, data);
-            errorCount++;
-            toast.error(`Errore imprevisto con ${file.name}`);
+            
+            if (!data?.success) {
+              console.error(`Unexpected response for batch ${batchIndex + 1} of ${file.name}:`, data);
+              throw new Error(`Risposta imprevista per batch ${batchIndex + 1}`);
+            }
+            
+            processedChunks += batchChunks.length;
+            console.log(`Batch ${batchIndex + 1}/${totalBatches} completed. Total processed: ${processedChunks}/${chunks.length}`);
           }
+          
+          console.log(`${file.name} processed successfully - ${processedChunks} chunks created in ${totalBatches} batches`);
+          successCount++;
+          setProgress(((fileIndex + 1) / totalFiles) * 100);
 
         } catch (error: any) {
           console.error(`Error with ${file.name}:`, error);
