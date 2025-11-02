@@ -166,15 +166,15 @@ export const AgentsSidebar = ({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon"
-                      className="h-8 w-8 flex-shrink-0"
+                      className="h-8 w-8 flex-shrink-0 border-2 hover:bg-accent"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreVertical className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="z-50">
+                  <DropdownMenuContent align="end" className="z-50 bg-popover">
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
                       Edit Agent
