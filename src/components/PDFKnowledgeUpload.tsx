@@ -88,69 +88,30 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Send chunks ONE AT A TIME to avoid edge function timeout
-          // Processing them sequentially with small delays ensures we don't exceed the 60s timeout
-          const totalChunks = chunks.length;
+          // Step 3: Process all chunks in parallel by sending them to edge function
+          // The edge function will handle them efficiently
+          console.log(`Sending ${chunks.length} chunks to edge function for processing...`);
           
-          for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-            const chunk = chunks[chunkIndex];
-            
-            // Calculate progress correctly: each file gets equal portion of 100%
-            const fileProgressStart = (fileIndex / totalFiles) * 100;
-            const fileProgressRange = (1 / totalFiles) * 100;
-            const chunkProgressWithinFile = (chunkIndex / totalChunks) * fileProgressRange;
-            const totalProgress = Math.min(99, fileProgressStart + chunkProgressWithinFile);
-            setProgress(totalProgress);
-            
-            let retries = 0;
-            const MAX_RETRIES = 3;
-            let chunkSuccess = false;
-            
-            while (!chunkSuccess && retries <= MAX_RETRIES) {
-              try {
-                const { data, error } = await supabase.functions.invoke('process-chunks', {
-                  body: {
-                    chunks: [chunk], // Send ONE chunk at a time
-                    agentId: agentId,
-                    fileName: file.name,
-                    category: "General"
-                  }
-                });
+          setProgress((fileIndex / totalFiles) * 100 + 30);
+          
+          const { data, error } = await supabase.functions.invoke('process-chunks', {
+            body: {
+              chunks: chunks,
+              agentId: agentId,
+              fileName: file.name,
+              category: "General"
+            }
+          });
 
-                if (error) {
-                  throw error;
-                }
-                
-                if (!data?.success) {
-                  throw new Error('Risposta imprevista dal server');
-                }
-                
-                chunkSuccess = true;
-                
-                if ((chunkIndex + 1) % 10 === 0 || chunkIndex === totalChunks - 1) {
-                  console.log(`Progress: ${chunkIndex + 1}/${totalChunks} chunks processed for ${file.name}`);
-                }
-                
-              } catch (chunkError: any) {
-                retries++;
-                console.error(`Error processing chunk ${chunkIndex + 1}, retry ${retries}/${MAX_RETRIES}:`, chunkError);
-                
-                if (retries > MAX_RETRIES) {
-                  throw new Error(`Chunk ${chunkIndex + 1} fallito dopo ${MAX_RETRIES} tentativi: ${chunkError.message}`);
-                }
-                
-                // Wait before retry
-                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-              }
-            }
-            
-            // Small delay between chunks to avoid overwhelming the edge function
-            if (chunkIndex < totalChunks - 1) {
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
+          if (error) {
+            throw error;
           }
           
-          console.log(`✓ ${file.name} processed successfully - ${totalChunks} chunks created`);
+          if (!data?.success) {
+            throw new Error('Risposta imprevista dal server');
+          }
+          
+          console.log(`✓ ${file.name} processed successfully - ${chunks.length} chunks created`);
           successCount++;
           // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
