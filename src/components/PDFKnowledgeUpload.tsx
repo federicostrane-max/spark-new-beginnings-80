@@ -158,8 +158,10 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       setCurrentFile("");
       setProgress(0);
       
-      // Notify parent
-      onUploadComplete();
+      // Wait a bit for background processing to complete before reloading the document list
+      setTimeout(() => {
+        onUploadComplete();
+      }, 2000);
 
     } catch (error: any) {
       console.error('=== ERROR IN PDF UPLOAD ===', error);
