@@ -32,7 +32,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showKnowledgeUpload, setShowKnowledgeUpload] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
 
   // Load agent data when editing
   useEffect(() => {
@@ -40,14 +41,34 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
-      setShowKnowledgeUpload(false);
+      setCreatedAgentId(editingAgent.id);
     } else if (!open) {
       setName("");
       setDescription("");
       setSystemPrompt("");
-      setShowKnowledgeUpload(false);
+      setSelectedFiles([]);
+      setCreatedAgentId(null);
     }
   }, [open, editingAgent]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const pdfFiles = files.filter(file => file.type === 'application/pdf');
+    
+    if (pdfFiles.length !== files.length) {
+      toast({ 
+        title: "Solo file PDF", 
+        description: "Puoi caricare solo file PDF", 
+        variant: "destructive" 
+      });
+    }
+    
+    setSelectedFiles(prev => [...prev, ...pdfFiles]);
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,15 +148,22 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           title: "Success", 
           description: "Agent created successfully!" 
         });
-        onSuccess(data);
-        onOpenChange(false);
+        
+        // If there are files to upload, set the agent ID for upload
+        if (selectedFiles.length > 0) {
+          setCreatedAgentId(data.id);
+        } else {
+          onSuccess(data);
+          onOpenChange(false);
+        }
       }
       
-      // Reset form
-      setName("");
-      setDescription("");
-      setSystemPrompt("");
-      setShowKnowledgeUpload(false);
+      // Reset form only if no files to upload
+      if (selectedFiles.length === 0) {
+        setName("");
+        setDescription("");
+        setSystemPrompt("");
+      }
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
       toast({ title: "Error", description: error.message || `Failed to ${editingAgent ? 'update' : 'create'} agent`, variant: "destructive" });
@@ -196,42 +224,57 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </p>
           </div>
 
-          {/* Knowledge Base Upload - Only shown after agent is created */}
-          {editingAgent && (
+          {/* Knowledge Base Upload */}
+          {!createdAgentId ? (
             <div>
-              <Label>Knowledge Base (PDF files)</Label>
+              <Label htmlFor="pdfFiles">Knowledge Base (PDF files - Opzionale)</Label>
               <p className="text-xs text-muted-foreground mb-2">
-                Upload PDF documents to enhance the agent's knowledge
+                Carica documenti PDF per arricchire la conoscenza dell'agente
               </p>
-              {!showKnowledgeUpload ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowKnowledgeUpload(true)}
-                  className="w-full"
-                >
-                  Add Knowledge Base Documents
-                </Button>
-              ) : (
-                <div className="space-y-2">
-                  <PDFKnowledgeUpload
-                    agentId={editingAgent.id}
-                    onUploadComplete={() => {
-                      setShowKnowledgeUpload(false);
-                      toast({ title: "Success", description: "Knowledge base updated" });
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowKnowledgeUpload(false)}
-                    className="w-full"
-                  >
-                    Cancel
-                  </Button>
+              <Input
+                id="pdfFiles"
+                type="file"
+                accept="application/pdf"
+                multiple
+                onChange={handleFileChange}
+                disabled={loading}
+                className="cursor-pointer"
+              />
+              {selectedFiles.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {selectedFiles.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{file.name}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFile(index)}
+                        disabled={loading}
+                      >
+                        Rimuovi
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Carica Knowledge Base</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Agente creato! Ora carica i documenti PDF
+              </p>
+              <PDFKnowledgeUpload
+                agentId={createdAgentId}
+                onUploadComplete={() => {
+                  toast({ title: "Successo", description: "Knowledge base caricata!" });
+                  setSelectedFiles([]);
+                  setCreatedAgentId(null);
+                  onSuccess({ id: createdAgentId } as Agent);
+                  onOpenChange(false);
+                }}
+              />
             </div>
           )}
 
