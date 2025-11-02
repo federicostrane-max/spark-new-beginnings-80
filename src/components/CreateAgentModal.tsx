@@ -262,18 +262,31 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         // Process PDF files BEFORE closing modal
         if (pdfFiles.length > 0) {
-          console.log('Starting PDF processing...');
+          console.log('[CreateAgent] About to process PDFs. Count:', pdfFiles.length);
+          console.log('[CreateAgent] Agent ID:', data.id);
+          console.log('[CreateAgent] Files:', pdfFiles.map(f => ({
+            name: f.name,
+            size: f.size,
+            type: f.type
+          })));
+          
+          toast({ 
+            title: "Processing PDFs...", 
+            description: `Starting to process ${pdfFiles.length} file(s)...` 
+          });
+          
           try {
             await processPDFsForAgent(data.id, pdfFiles);
-            console.log('PDF processing completed successfully');
+            console.log('[CreateAgent] PDF processing completed successfully');
           } catch (pdfError) {
-            console.error('PDF processing failed:', pdfError);
+            console.error('[CreateAgent] PDF processing failed:', pdfError);
             toast({
               title: "PDF Processing Failed",
               description: pdfError instanceof Error ? pdfError.message : "Unknown error processing PDFs",
               variant: "destructive"
             });
-            throw pdfError;
+            // Non lanciare l'errore per permettere all'agente di essere creato comunque
+            // throw pdfError;
           }
         }
 
