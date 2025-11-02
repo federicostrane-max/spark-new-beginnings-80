@@ -88,31 +88,50 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Process all chunks in parallel by sending them to edge function
-          // The edge function will handle them efficiently
-          console.log(`Sending ${chunks.length} chunks to edge function for processing...`);
+          // Step 3: Send chunks in batches to avoid "payload too large" errors
+          // Each batch is processed in background by the edge function
+          const CLIENT_BATCH_SIZE = 100; // Send max 100 chunks per request
+          const totalBatches = Math.ceil(chunks.length / CLIENT_BATCH_SIZE);
           
-          setProgress((fileIndex / totalFiles) * 100 + 30);
+          console.log(`Will send ${chunks.length} chunks in ${totalBatches} batches of max ${CLIENT_BATCH_SIZE} chunks each`);
           
-          const { data, error } = await supabase.functions.invoke('process-chunks', {
-            body: {
-              chunks: chunks,
-              agentId: agentId,
-              fileName: file.name,
-              category: "General"
-            }
-          });
+          for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+            const batchStart = batchIndex * CLIENT_BATCH_SIZE;
+            const batchEnd = Math.min(batchStart + CLIENT_BATCH_SIZE, chunks.length);
+            const batchChunks = chunks.slice(batchStart, batchEnd);
+            
+            console.log(`Sending batch ${batchIndex + 1}/${totalBatches} (${batchChunks.length} chunks) for ${file.name}...`);
+            
+            // Update progress
+            const batchProgress = ((fileIndex + (batchIndex / totalBatches)) / totalFiles) * 100;
+            setProgress(Math.min(99, batchProgress));
+            
+            const { data, error } = await supabase.functions.invoke('process-chunks', {
+              body: {
+                chunks: batchChunks,
+                agentId: agentId,
+                fileName: file.name,
+                category: "General"
+              }
+            });
 
-          if (error) {
-            throw error;
+            if (error) {
+              throw new Error(`Batch ${batchIndex + 1} failed: ${error.message}`);
+            }
+            
+            if (!data?.success) {
+              throw new Error(`Batch ${batchIndex + 1}: Risposta imprevista dal server`);
+            }
+            
+            console.log(`✓ Batch ${batchIndex + 1}/${totalBatches} sent successfully - ${batchChunks.length} chunks processing in background`);
+            
+            // Small delay between client batches
+            if (batchIndex < totalBatches - 1) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
           }
           
-          if (!data?.success) {
-            throw new Error('Risposta imprevista dal server');
-          }
-          
-          console.log(`✓ ${file.name} processing started - ${chunks.length} chunks being processed in background`);
-          console.log(`Estimated time: ${data.estimatedTime || 'calculating...'}`);
+          console.log(`✓ ${file.name} - all ${chunks.length} chunks sent successfully (${totalBatches} batches)`);
           successCount++;
           // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
