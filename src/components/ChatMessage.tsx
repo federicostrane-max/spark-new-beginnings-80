@@ -71,14 +71,14 @@ export const ChatMessage = ({
       )}
       <div
         className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm transition-all overflow-hidden break-words",
+          "rounded-2xl px-4 py-3 shadow-sm transition-all break-words",
           selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[75%]",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
-          isSelected && "ring-2 ring-primary",
-          "word-break-break-word overflow-wrap-break-word"
+          isSelected && "ring-2 ring-primary"
         )}
+        style={{ overflowWrap: 'break-word', wordBreak: 'break-word' }}
       >
         {isUser ? (
           <div className={cn("whitespace-pre-wrap break-words overflow-wrap-anywhere", !isExpanded && isLong && "line-clamp-3")}>
