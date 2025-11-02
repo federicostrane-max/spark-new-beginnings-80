@@ -5,11 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2, Upload, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { chunkText } from "@/lib/textChunking";
-import { extractTextFromPDF, validatePDFFile } from "@/lib/pdfExtraction";
-import * as pdfjsLib from 'pdfjs-dist';
+import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 
 interface Agent {
   id: string;
@@ -33,8 +31,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showKnowledgeUpload, setShowKnowledgeUpload] = useState(false);
 
   // Load agent data when editing
   useEffect(() => {
@@ -42,90 +40,14 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
-      setPdfFiles([]);
+      setShowKnowledgeUpload(false);
     } else if (!open) {
       setName("");
       setDescription("");
       setSystemPrompt("");
-      setPdfFiles([]);
+      setShowKnowledgeUpload(false);
     }
   }, [open, editingAgent]);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      setPdfFiles(prev => [...prev, ...Array.from(files)]);
-    }
-  };
-
-  const removeFile = (index: number) => {
-    setPdfFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const processPDFsForAgent = async (agentId: string, files: File[]) => {
-    for (const file of files) {
-      try {
-        // Validate PDF
-        const validation = validatePDFFile(file, 10);
-        if (!validation.valid) {
-          throw new Error(validation.error);
-        }
-
-        toast({ 
-          title: `Processing ${file.name}...`, 
-          description: `Extracting text from PDF` 
-        });
-
-        // Extract text from PDF
-        const text = await extractTextFromPDF(file);
-        
-        if (!text || text.length < 10) {
-          throw new Error('PDF is empty or unreadable');
-        }
-
-        // Chunk the text
-        const chunks = chunkText(text, 1000, 200);
-
-        toast({ 
-          title: `Processing ${file.name}...`, 
-          description: `Creating ${chunks.length} knowledge chunks...` 
-        });
-
-        // Call edge function to process chunks
-        const { data, error } = await supabase.functions.invoke('process-chunks', {
-          body: {
-            chunks: chunks,
-            agentId: agentId,
-            fileName: file.name,
-            category: 'uploaded',
-            summary: description || null
-          }
-        });
-
-        if (error) {
-          throw new Error(`Failed to process chunks: ${error.message}`);
-        }
-
-        if (!data || !data.success) {
-          throw new Error('Processing failed');
-        }
-
-        toast({ 
-          title: "Success", 
-          description: `${file.name} processed successfully (${data.chunks} chunks)` 
-        });
-
-      } catch (error) {
-        console.error('Error processing PDF:', error);
-        toast({ 
-          title: "Error processing PDF", 
-          description: `${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          variant: "destructive" 
-        });
-        throw error;
-      }
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,23 +80,9 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        // Process PDF files if present
-        if (pdfFiles.length > 0) {
-          toast({ title: "Processing documents...", description: "Agent updated, uploading knowledge base..." });
-          try {
-            await processPDFsForAgent(data.id, pdfFiles);
-          } catch (pdfError) {
-            toast({
-              title: "PDF Processing Failed",
-              description: pdfError instanceof Error ? pdfError.message : "Unknown error processing PDFs",
-              variant: "destructive"
-            });
-            throw pdfError;
-          }
-        }
-
         toast({ title: "Success", description: "Agent updated successfully!" });
         onSuccess(data);
+        onOpenChange(false);
       } else {
         // Create new agent
         // Auto-generate slug
@@ -215,42 +123,19 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        // Process PDF files BEFORE closing modal
-        if (pdfFiles.length > 0) {
-          toast({ 
-            title: "Processing PDFs...", 
-            description: `Starting to process ${pdfFiles.length} file(s)...` 
-          });
-          
-          try {
-            await processPDFsForAgent(data.id, pdfFiles);
-          } catch (pdfError) {
-            toast({
-              title: "PDF Processing Failed",
-              description: pdfError instanceof Error ? pdfError.message : "Unknown error processing PDFs",
-              variant: "destructive"
-            });
-            // Don't throw error - allow agent to be created anyway
-          }
-        }
-
         toast({ 
           title: "Success", 
-          description: pdfFiles.length > 0 
-            ? "Agent created and documents processed successfully!" 
-            : "Agent created successfully!" 
+          description: "Agent created successfully!" 
         });
         onSuccess(data);
+        onOpenChange(false);
       }
-      
-      // Close modal after everything is complete
-      onOpenChange(false);
       
       // Reset form
       setName("");
       setDescription("");
       setSystemPrompt("");
-      setPdfFiles([]);
+      setShowKnowledgeUpload(false);
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
       toast({ title: "Error", description: error.message || `Failed to ${editingAgent ? 'update' : 'create'} agent`, variant: "destructive" });
@@ -311,52 +196,44 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </p>
           </div>
 
-          {/* Knowledge Base PDF Upload */}
-          <div>
-            <Label htmlFor="pdf-upload">Knowledge Base (PDF files)</Label>
-            <div className="border-2 border-dashed rounded-lg p-6 text-center">
-              <Input 
-                id="pdf-upload"
-                type="file"
-                accept=".pdf"
-                multiple
-                onChange={handleFileChange}
-                disabled={loading}
-                className="hidden"
-              />
-              <label 
-                htmlFor="pdf-upload" 
-                className="cursor-pointer flex flex-col items-center gap-2"
-              >
-                <Upload className="h-8 w-8 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  Click to upload PDF documents
-                </p>
-              </label>
-              
-              {pdfFiles.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  {pdfFiles.map((file, index) => (
-                    <div 
-                      key={index} 
-                      className="flex items-center justify-between bg-muted p-2 rounded text-sm"
-                    >
-                      <span className="truncate">📄 {file.name}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFile(index)}
-                        disabled={loading}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+          {/* Knowledge Base Upload - Only shown after agent is created */}
+          {editingAgent && (
+            <div>
+              <Label>Knowledge Base (PDF files)</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Upload PDF documents to enhance the agent's knowledge
+              </p>
+              {!showKnowledgeUpload ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowKnowledgeUpload(true)}
+                  className="w-full"
+                >
+                  Add Knowledge Base Documents
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <PDFKnowledgeUpload
+                    agentId={editingAgent.id}
+                    onUploadComplete={() => {
+                      setShowKnowledgeUpload(false);
+                      toast({ title: "Success", description: "Knowledge base updated" });
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowKnowledgeUpload(false)}
+                    className="w-full"
+                  >
+                    Cancel
+                  </Button>
                 </div>
               )}
             </div>
-          </div>
+          )}
 
           {/* Submit */}
           <div className="flex gap-2 justify-between">
@@ -388,9 +265,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {pdfFiles.length > 0 
-                      ? `${editingAgent ? 'Updating' : 'Creating'} agent and processing documents...` 
-                      : `${editingAgent ? 'Updating' : 'Creating'}...`}
+                    {editingAgent ? 'Updating...' : 'Creating...'}
                   </>
                 ) : (
                   editingAgent ? "Update Agent" : "Create Agent"
