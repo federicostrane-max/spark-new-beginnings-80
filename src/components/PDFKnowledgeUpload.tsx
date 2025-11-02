@@ -83,8 +83,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
           
           console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Send chunks in batches to avoid timeout for large files
-          const BATCH_SIZE = 20; // Reduced batch size to avoid timeouts
+          // Step 3: Send chunks in batches (parallel processing on edge function)
+          const BATCH_SIZE = 50; // Batch size increased thanks to parallel processing
           const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
           let processedChunks = 0;
           

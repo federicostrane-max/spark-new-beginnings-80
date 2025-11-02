@@ -45,10 +45,8 @@ serve(async (req) => {
     let successCount = 0;
     let errorCount = 0;
 
-    // Process each chunk
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      
+    // Process chunks in parallel for better performance
+    const chunkPromises = chunks.map(async (chunk: string, i: number) => {
       console.log(`Processing chunk ${i + 1}/${chunks.length} (length: ${chunk.length})`);
 
       try {
@@ -61,14 +59,12 @@ serve(async (req) => {
 
         if (embeddingError) {
           console.error(`Embedding error for chunk ${i + 1}:`, embeddingError);
-          errorCount++;
-          continue;
+          return { success: false, index: i + 1 };
         }
 
         if (!embeddingData?.embedding) {
           console.error(`No embedding returned for chunk ${i + 1}`);
-          errorCount++;
-          continue;
+          return { success: false, index: i + 1 };
         }
 
         console.log(`Embedding generated successfully for chunk ${i + 1}`);
@@ -88,18 +84,29 @@ serve(async (req) => {
 
         if (insertError) {
           console.error(`Database insert error for chunk ${i + 1}:`, insertError);
-          errorCount++;
-          continue;
+          return { success: false, index: i + 1 };
         }
 
         console.log(`Chunk ${i + 1} inserted successfully`);
-        successCount++;
+        return { success: true, index: i + 1 };
 
       } catch (chunkError) {
         console.error(`Error processing chunk ${i + 1}:`, chunkError);
+        return { success: false, index: i + 1 };
+      }
+    });
+
+    // Wait for all chunks to be processed
+    const results = await Promise.all(chunkPromises);
+    
+    // Count successes and failures
+    results.forEach(result => {
+      if (result.success) {
+        successCount++;
+      } else {
         errorCount++;
       }
-    }
+    });
 
     console.log(`Processing complete: ${successCount} successful, ${errorCount} failed`);
 
