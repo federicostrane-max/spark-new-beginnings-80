@@ -69,25 +69,19 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
       
       try {
-        // Validate PDF file
-        const validation = validatePDFFile(file);
-        if (!validation.valid) {
-          throw new Error(validation.error);
+        // Validate file size and type
+        if (file.size > 10 * 1024 * 1024) {
+          throw new Error(`${file.name} is too large (max 10MB)`);
+        }
+
+        if (!file.type.includes('pdf')) {
+          throw new Error(`${file.name} is not a PDF file`);
         }
 
         toast({ 
-          title: `Processing ${file.name}...`, 
-          description: `Extracting text from PDF (${i + 1}/${files.length})` 
+          title: `Uploading ${file.name}...`, 
+          description: `File ${i + 1}/${files.length}` 
         });
-
-        // Extract text from PDF
-        console.log(`Extracting text from ${file.name}...`);
-        const fileContent = await extractTextFromPDF(file);
-        console.log(`Extracted ${fileContent.length} characters from ${file.name}`);
-
-        if (!fileContent || fileContent.trim().length === 0) {
-          throw new Error('No text content found in PDF');
-        }
 
         // Upload to Supabase Storage
         const fileName = `${agentId}/${Date.now()}_${file.name}`;
@@ -98,7 +92,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (uploadError) {
           console.error('Storage upload error:', uploadError);
-          throw uploadError;
+          throw new Error(`Failed to upload: ${uploadError.message}`);
         }
 
         // Get public URL
@@ -107,52 +101,31 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           .getPublicUrl(fileName);
         console.log(`File uploaded successfully: ${publicUrl}`);
 
-        // Chunk text
-        const chunks = chunkText(fileContent, 1000, 200);
-        console.log(`Created ${chunks.length} chunks from ${file.name}`);
-
         toast({ 
           title: `Processing ${file.name}...`, 
-          description: `Creating ${chunks.length} knowledge chunks...` 
+          description: `Extracting text and generating embeddings...` 
         });
 
-        // Generate embeddings and insert
-        for (let j = 0; j < chunks.length; j++) {
-          const chunk = chunks[j];
-          console.log(`Processing chunk ${j + 1}/${chunks.length} for ${file.name}`);
-          
-          const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke('generate-embedding', {
-            body: { text: chunk }
-          });
-
-          if (embeddingError) {
-            console.error('Embedding generation error:', embeddingError);
-            throw embeddingError;
+        // Call edge function to process the PDF
+        console.log(`Calling process-agent-knowledge for ${file.name}`);
+        const { data, error } = await supabase.functions.invoke('process-agent-knowledge', {
+          body: {
+            agentId,
+            fileUrl: publicUrl,
+            fileName: file.name,
+            category: 'uploaded'
           }
+        });
 
-          if (!embeddingData?.embedding) {
-            throw new Error('No embedding returned from function');
-          }
-
-          const { error: insertError } = await supabase.from('agent_knowledge').insert({
-            agent_id: agentId,
-            document_name: file.name,
-            content: chunk,
-            category: 'uploaded',
-            summary: null,
-            embedding: embeddingData.embedding
-          });
-
-          if (insertError) {
-            console.error('Knowledge insert error:', insertError);
-            throw insertError;
-          }
+        if (error) {
+          console.error('Processing error:', error);
+          throw new Error(`Failed to process: ${error.message}`);
         }
 
-        console.log(`Successfully processed ${file.name}`);
+        console.log(`Successfully processed ${file.name}: ${data.chunks} chunks stored`);
         toast({ 
           title: "Success", 
-          description: `${file.name} processed successfully!` 
+          description: `${file.name} processed (${data.chunks} chunks)` 
         });
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error);
