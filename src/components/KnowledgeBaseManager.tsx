@@ -105,7 +105,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome Documento</TableHead>
-                  <TableHead>Categoria</TableHead>
                   <TableHead>Creato</TableHead>
                   <TableHead className="text-right">Azioni</TableHead>
                 </TableRow>
@@ -119,7 +118,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                         {doc.document_name}
                       </div>
                     </TableCell>
-                    <TableCell>{doc.category}</TableCell>
                     <TableCell>
                       {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true })}
                     </TableCell>
