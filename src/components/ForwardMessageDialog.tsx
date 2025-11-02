@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { Search, Check, Loader2 } from "lucide-react";
+import { Search, Loader2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 
 interface Agent {
@@ -48,14 +49,16 @@ export const ForwardMessageDialog = ({
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set());
+  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     if (open) {
       loadData();
+      setSelectedConversations(new Set());
+      setSelectedAgents(new Set());
     }
   }, [open]);
 
@@ -111,11 +114,33 @@ export const ForwardMessageDialog = ({
     }
   };
 
+  const toggleConversation = (convId: string) => {
+    const newSet = new Set(selectedConversations);
+    if (newSet.has(convId)) {
+      newSet.delete(convId);
+    } else {
+      newSet.add(convId);
+    }
+    setSelectedConversations(newSet);
+  };
+
+  const toggleAgent = (agentId: string) => {
+    const newSet = new Set(selectedAgents);
+    if (newSet.has(agentId)) {
+      newSet.delete(agentId);
+    } else {
+      newSet.add(agentId);
+    }
+    setSelectedAgents(newSet);
+  };
+
   const handleForward = async () => {
-    if (!selectedConversation && !selectedAgent) {
+    const totalSelected = selectedConversations.size + selectedAgents.size;
+    
+    if (totalSelected === 0) {
       toast({ 
         title: "Attenzione", 
-        description: "Seleziona una destinazione", 
+        description: "Seleziona almeno una destinazione", 
         variant: "destructive" 
       });
       return;
@@ -124,20 +149,33 @@ export const ForwardMessageDialog = ({
     try {
       setForwarding(true);
 
-      let targetConversationId = selectedConversation;
+      const { data: session } = await supabase.auth.getSession();
+      if (!session.session) throw new Error("No session");
 
-      // Se è selezionato un agente ma non una conversazione, crea una nuova conversazione
-      if (selectedAgent && !selectedConversation) {
+      // Inoltra a tutte le conversazioni selezionate
+      for (const convId of selectedConversations) {
+        const messagesToInsert = messages.map((msg) => ({
+          conversation_id: convId,
+          role: msg.role,
+          content: msg.content,
+        }));
+
+        const { error: insertError } = await supabase
+          .from("agent_messages")
+          .insert(messagesToInsert);
+
+        if (insertError) throw insertError;
+      }
+
+      // Inoltra a tutti gli agenti selezionati (crea nuove conversazioni)
+      for (const agentId of selectedAgents) {
         const firstMessageContent = messages[0].content;
         const title = `Forwarded: ${firstMessageContent.slice(0, 40)}...`;
-        
-        const { data: session } = await supabase.auth.getSession();
-        if (!session.session) throw new Error("No session");
 
         const { data: newConv, error: convError } = await supabase
           .from("agent_conversations")
           .insert({
-            agent_id: selectedAgent,
+            agent_id: agentId,
             user_id: session.session.user.id,
             title,
           })
@@ -145,27 +183,23 @@ export const ForwardMessageDialog = ({
           .single();
 
         if (convError) throw convError;
-        targetConversationId = newConv.id;
+
+        const messagesToInsert = messages.map((msg) => ({
+          conversation_id: newConv.id,
+          role: msg.role,
+          content: msg.content,
+        }));
+
+        const { error: insertError } = await supabase
+          .from("agent_messages")
+          .insert(messagesToInsert);
+
+        if (insertError) throw insertError;
       }
-
-      if (!targetConversationId) throw new Error("No target conversation");
-
-      // Inoltra i messaggi
-      const messagesToInsert = messages.map((msg) => ({
-        conversation_id: targetConversationId,
-        role: msg.role,
-        content: msg.content,
-      }));
-
-      const { error: insertError } = await supabase
-        .from("agent_messages")
-        .insert(messagesToInsert);
-
-      if (insertError) throw insertError;
 
       toast({ 
         title: "Successo", 
-        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"}` 
+        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${totalSelected} destinazione${totalSelected > 1 ? "i" : ""}` 
       });
       
       onForwardComplete();
@@ -201,7 +235,7 @@ export const ForwardMessageDialog = ({
         <DialogHeader>
           <DialogTitle>Inoltra {messages.length} messaggio{messages.length > 1 ? "i" : ""}</DialogTitle>
           <DialogDescription>
-            Seleziona una conversazione o un agente
+            Seleziona una o più destinazioni
           </DialogDescription>
         </DialogHeader>
 
@@ -229,18 +263,20 @@ export const ForwardMessageDialog = ({
                     <h3 className="text-sm font-semibold mb-2 px-2">Conversazioni recenti</h3>
                     <div className="space-y-1">
                       {filteredConversations.map((conv) => (
-                        <button
+                        <div
                           key={conv.id}
-                          onClick={() => {
-                            setSelectedConversation(conv.id);
-                            setSelectedAgent(null);
-                          }}
+                          onClick={() => toggleConversation(conv.id)}
                           className={cn(
-                            "w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors",
+                            "w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
                             "hover:bg-accent",
-                            selectedConversation === conv.id && "bg-accent"
+                            selectedConversations.has(conv.id) && "bg-accent"
                           )}
                         >
+                          <Checkbox
+                            checked={selectedConversations.has(conv.id)}
+                            onCheckedChange={() => toggleConversation(conv.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                           <div className="text-2xl flex-shrink-0">
                             {conv.agent?.avatar || "🤖"}
                           </div>
@@ -252,10 +288,7 @@ export const ForwardMessageDialog = ({
                               {conv.agent?.name}
                             </div>
                           </div>
-                          {selectedConversation === conv.id && (
-                            <Check className="h-5 w-5 text-primary flex-shrink-0" />
-                          )}
-                        </button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -269,18 +302,20 @@ export const ForwardMessageDialog = ({
                     </h3>
                     <div className="space-y-1">
                       {filteredAgents.map((agent) => (
-                        <button
+                        <div
                           key={agent.id}
-                          onClick={() => {
-                            setSelectedAgent(agent.id);
-                            setSelectedConversation(null);
-                          }}
+                          onClick={() => toggleAgent(agent.id)}
                           className={cn(
-                            "w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors",
+                            "w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
                             "hover:bg-accent",
-                            selectedAgent === agent.id && "bg-accent"
+                            selectedAgents.has(agent.id) && "bg-accent"
                           )}
                         >
+                          <Checkbox
+                            checked={selectedAgents.has(agent.id)}
+                            onCheckedChange={() => toggleAgent(agent.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
                           <div className="text-2xl flex-shrink-0">
                             {agent.avatar || "🤖"}
                           </div>
@@ -292,10 +327,7 @@ export const ForwardMessageDialog = ({
                               Nuova conversazione
                             </div>
                           </div>
-                          {selectedAgent === agent.id && (
-                            <Check className="h-5 w-5 text-primary flex-shrink-0" />
-                          )}
-                        </button>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -322,7 +354,7 @@ export const ForwardMessageDialog = ({
             <Button
               onClick={handleForward}
               className="flex-1"
-              disabled={(!selectedConversation && !selectedAgent) || forwarding}
+              disabled={(selectedConversations.size === 0 && selectedAgents.size === 0) || forwarding}
             >
               {forwarding ? (
                 <>
