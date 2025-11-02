@@ -32,11 +32,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   const loadDocuments = async () => {
     try {
       setLoading(true);
+      
+      // Get distinct document names instead of all chunks
       const { data, error } = await supabase
         .from('agent_knowledge')
         .select('id, document_name, category, summary, created_at')
         .eq('agent_id', agentId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(10000); // High limit to get all chunks
 
       if (error) throw error;
 
