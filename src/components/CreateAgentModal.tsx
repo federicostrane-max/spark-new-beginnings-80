@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Upload, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { chunkText } from "@/lib/textChunking";
+import { extractTextFromPDF, validatePDFFile } from "@/lib/pdfExtraction";
 
 interface Agent {
   id: string;
@@ -60,36 +61,79 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent }
   };
 
   const processPDFsForAgent = async (agentId: string, files: File[]) => {
-    for (const file of files) {
+    console.log(`Starting to process ${files.length} PDF file(s) for agent ${agentId}`);
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`);
+      
       try {
+        // Validate PDF file
+        const validation = validatePDFFile(file);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+
+        toast({ 
+          title: `Processing ${file.name}...`, 
+          description: `Extracting text from PDF (${i + 1}/${files.length})` 
+        });
+
+        // Extract text from PDF
+        console.log(`Extracting text from ${file.name}...`);
+        const fileContent = await extractTextFromPDF(file);
+        console.log(`Extracted ${fileContent.length} characters from ${file.name}`);
+
+        if (!fileContent || fileContent.trim().length === 0) {
+          throw new Error('No text content found in PDF');
+        }
+
         // Upload to Supabase Storage
         const fileName = `${agentId}/${Date.now()}_${file.name}`;
+        console.log(`Uploading to storage: ${fileName}`);
         const { error: uploadError } = await supabase.storage
           .from('knowledge-pdfs')
           .upload(fileName, file);
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          console.error('Storage upload error:', uploadError);
+          throw uploadError;
+        }
 
         // Get public URL
         const { data: { publicUrl } } = supabase.storage
           .from('knowledge-pdfs')
           .getPublicUrl(fileName);
-
-        // Read file as text (for PDF we'd normally use a library, but for demo we'll use FileReader)
-        const fileContent = await file.text();
+        console.log(`File uploaded successfully: ${publicUrl}`);
 
         // Chunk text
         const chunks = chunkText(fileContent, 1000, 200);
+        console.log(`Created ${chunks.length} chunks from ${file.name}`);
+
+        toast({ 
+          title: `Processing ${file.name}...`, 
+          description: `Creating ${chunks.length} knowledge chunks...` 
+        });
 
         // Generate embeddings and insert
-        for (const chunk of chunks) {
+        for (let j = 0; j < chunks.length; j++) {
+          const chunk = chunks[j];
+          console.log(`Processing chunk ${j + 1}/${chunks.length} for ${file.name}`);
+          
           const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke('generate-embedding', {
             body: { text: chunk }
           });
 
-          if (embeddingError) throw embeddingError;
+          if (embeddingError) {
+            console.error('Embedding generation error:', embeddingError);
+            throw embeddingError;
+          }
 
-          await supabase.from('agent_knowledge').insert({
+          if (!embeddingData?.embedding) {
+            throw new Error('No embedding returned from function');
+          }
+
+          const { error: insertError } = await supabase.from('agent_knowledge').insert({
             agent_id: agentId,
             document_name: file.name,
             content: chunk,
@@ -97,16 +141,29 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent }
             summary: null,
             embedding: embeddingData.embedding
           });
+
+          if (insertError) {
+            console.error('Knowledge insert error:', insertError);
+            throw insertError;
+          }
         }
+
+        console.log(`Successfully processed ${file.name}`);
+        toast({ 
+          title: "Success", 
+          description: `${file.name} processed successfully!` 
+        });
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error);
         toast({ 
-          title: "Warning", 
-          description: `Failed to process ${file.name}. Agent created but knowledge base incomplete.`,
+          title: "Error", 
+          description: `Failed to process ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
           variant: "destructive" 
         });
       }
     }
+    
+    console.log('Finished processing all PDF files');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
