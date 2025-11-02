@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 
 type TTSStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
@@ -47,11 +47,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         };
         audio.onerror = () => {
           setStatus('error');
-          toast({
-            title: "Errore Riproduzione",
-            description: "Impossibile riprodurre l'audio",
-            variant: "destructive",
-          });
+          toast.error("Impossibile riprodurre l'audio");
         };
 
         setAudioElement(audio);
@@ -60,11 +56,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error('TTS error:', error);
       setStatus('error');
-      toast({
-        title: "Errore TTS",
-        description: "Impossibile generare l'audio",
-        variant: "destructive",
-      });
+      toast.error("Impossibile generare l'audio");
     }
   }, [audioElement]);
 
