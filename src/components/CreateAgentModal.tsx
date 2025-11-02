@@ -22,9 +22,10 @@ interface CreateAgentModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (agent: Agent) => void;
+  editingAgent?: Agent | null;
 }
 
-export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentModalProps) => {
+export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent }: CreateAgentModalProps) => {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -32,15 +33,20 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Reset form when dialog closes
+  // Load agent data when editing
   useEffect(() => {
-    if (!open) {
+    if (open && editingAgent) {
+      setName(editingAgent.name);
+      setDescription(editingAgent.description);
+      setSystemPrompt(editingAgent.system_prompt);
+      setPdfFiles([]);
+    } else if (!open) {
       setName("");
       setDescription("");
       setSystemPrompt("");
       setPdfFiles([]);
     }
-  }, [open]);
+  }, [open, editingAgent]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -119,56 +125,83 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
 
     setLoading(true);
     try {
-      // Auto-generate slug
-      let autoSlug = name.toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
+      if (editingAgent) {
+        // Update existing agent
+        const { data, error } = await supabase
+          .from("agents")
+          .update({
+            name,
+            description,
+            system_prompt: systemPrompt,
+          })
+          .eq("id", editingAgent.id)
+          .select()
+          .single();
 
-      // Check slug uniqueness
-      const { data: existing } = await supabase
-        .from("agents")
-        .select("id")
-        .eq("slug", autoSlug)
-        .maybeSingle();
+        if (error) throw error;
+
+        // Process PDF files if present
+        if (pdfFiles.length > 0) {
+          toast({ title: "Processing documents...", description: "Agent updated, uploading knowledge base..." });
+          await processPDFsForAgent(data.id, pdfFiles);
+        }
+
+        toast({ title: "Success", description: "Agent updated successfully!" });
+        onSuccess(data);
+      } else {
+        // Create new agent
+        // Auto-generate slug
+        let autoSlug = name.toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)/g, '');
+
+        // Check slug uniqueness
+        const { data: existing } = await supabase
+          .from("agents")
+          .select("id")
+          .eq("slug", autoSlug)
+          .maybeSingle();
+        
+        if (existing) {
+          // Append timestamp to make it unique
+          autoSlug = `${autoSlug}-${Date.now()}`;
+        }
+
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not authenticated");
+
+        // Create agent
+        const { data, error } = await supabase
+          .from("agents")
+          .insert({
+            name,
+            slug: autoSlug,
+            description,
+            system_prompt: systemPrompt,
+            avatar: null,
+            active: true,
+            user_id: user.id
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Process PDF files if present
+        if (pdfFiles.length > 0) {
+          toast({ title: "Processing documents...", description: "Agent created, uploading knowledge base..." });
+          await processPDFsForAgent(data.id, pdfFiles);
+        }
+
+        toast({ title: "Success", description: "Agent created successfully!" });
+        onSuccess(data);
+      }
       
-      if (existing) {
-        // Append timestamp to make it unique
-        autoSlug = `${autoSlug}-${Date.now()}`;
-      }
-
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-
-      // Create agent
-      const { data, error } = await supabase
-        .from("agents")
-        .insert({
-          name,
-          slug: autoSlug,
-          description,
-          system_prompt: systemPrompt,
-          avatar: null,
-          active: true,
-          user_id: user.id
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      // Process PDF files if present
-      if (pdfFiles.length > 0) {
-        toast({ title: "Processing documents...", description: "Agent created, uploading knowledge base..." });
-        await processPDFsForAgent(data.id, pdfFiles);
-      }
-
-      toast({ title: "Success", description: "Agent created successfully!" });
-      onSuccess(data);
       onOpenChange(false);
     } catch (error: any) {
-      console.error("Error creating agent:", error);
-      toast({ title: "Error", description: error.message || "Failed to create agent", variant: "destructive" });
+      console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
+      toast({ title: "Error", description: error.message || `Failed to ${editingAgent ? 'update' : 'create'} agent`, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -178,7 +211,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create New Agent</DialogTitle>
+          <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -287,10 +320,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess }: CreateAgentM
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {pdfFiles.length > 0 ? "Creating agent and processing documents..." : "Creating..."}
+                  {pdfFiles.length > 0 
+                    ? `${editingAgent ? 'Updating' : 'Creating'} agent and processing documents...` 
+                    : `${editingAgent ? 'Updating' : 'Creating'}...`}
                 </>
               ) : (
-                "Create Agent"
+                editingAgent ? "Update Agent" : "Create Agent"
               )}
             </Button>
           </div>

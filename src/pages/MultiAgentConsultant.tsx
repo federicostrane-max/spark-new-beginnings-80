@@ -20,6 +20,7 @@ interface Agent {
   slug: string;
   description: string;
   avatar: string | null;
+  system_prompt?: string;
 }
 
 interface Message {
@@ -44,6 +45,7 @@ export default function MultiAgentConsultant() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -312,6 +314,10 @@ export default function MultiAgentConsultant() {
             currentAgentId={currentAgent?.id || null}
             onSelectAgent={handleSelectAgent}
             onCreateAgent={() => setShowCreateModal(true)}
+            onEditAgent={(agent) => {
+              setEditingAgent(agent);
+              setShowCreateModal(true);
+            }}
           />
         </div>
       )}
@@ -339,6 +345,11 @@ export default function MultiAgentConsultant() {
               currentAgentId={currentAgent?.id || null}
               onSelectAgent={handleSelectAgent}
               onCreateAgent={() => {
+                setShowCreateModal(true);
+                setDrawerOpen(false);
+              }}
+              onEditAgent={(agent) => {
+                setEditingAgent(agent);
                 setShowCreateModal(true);
                 setDrawerOpen(false);
               }}
@@ -504,6 +515,42 @@ export default function MultiAgentConsultant() {
           </div>
         )}
       </div>
+
+      {/* Create/Edit Agent Modal */}
+      <CreateAgentModal 
+        open={showCreateModal} 
+        onOpenChange={(open) => {
+          setShowCreateModal(open);
+          if (!open) setEditingAgent(null);
+        }}
+        onSuccess={(agent) => {
+          if (editingAgent) {
+            // Agent updated, refresh current agent if it's the one being edited
+            if (currentAgent?.id === agent.id) {
+              setCurrentAgent({ ...agent });
+            }
+          } else {
+            // New agent created, select it
+            handleSelectAgent({ ...agent });
+          }
+          setEditingAgent(null);
+        }}
+        editingAgent={editingAgent ? {
+          ...editingAgent,
+          system_prompt: editingAgent.system_prompt || ""
+        } : null}
+      />
+      
+      {/* Forward Message Dialog */}
+      <ForwardMessageDialog
+        open={showForwardDialog}
+        onOpenChange={setShowForwardDialog}
+        messages={Array.from(selectedMessages)
+          .map(id => messages.find(m => m.id === id))
+          .filter((m): m is Message => m !== undefined)}
+        currentAgentId={currentAgent?.id || ""}
+        onForwardComplete={handleForwardComplete}
+      />
     </div>
   );
 }

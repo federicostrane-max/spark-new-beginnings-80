@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, LogOut, MoreVertical, BookOpen, Trash2 } from "lucide-react";
+import { Plus, LogOut, MoreVertical, BookOpen, Trash2, Edit } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -38,12 +38,14 @@ interface AgentsSidebarProps {
   currentAgentId: string | null;
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
+  onEditAgent: (agent: Agent) => void;
 }
 
 export const AgentsSidebar = ({ 
   currentAgentId, 
   onSelectAgent,
-  onCreateAgent
+  onCreateAgent,
+  onEditAgent
 }: AgentsSidebarProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -173,6 +175,10 @@ export const AgentsSidebar = ({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => onEditAgent(agent)}>
+                      <Edit className="mr-2 h-4 w-4" />
+                      Edit Agent
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setSelectedAgentForKB(agent)}>
                       <BookOpen className="mr-2 h-4 w-4" />
                       Manage Knowledge Base
