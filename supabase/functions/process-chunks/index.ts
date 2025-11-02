@@ -35,91 +35,119 @@ serve(async (req) => {
       throw new Error('agentId and fileName are required');
     }
 
-    console.log(`Processing ${chunks.length} chunks for agent ${agentId}`);
+    console.log(`Starting background processing of ${chunks.length} chunks for agent ${agentId}`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    let successCount = 0;
-    let errorCount = 0;
+    // Define background task to process chunks in small batches
+    const processChunksInBackground = async () => {
+      const BATCH_SIZE = 15; // Process 15 chunks at a time
+      let successCount = 0;
+      let errorCount = 0;
 
-    // Process chunks in parallel for better performance
-    const chunkPromises = chunks.map(async (chunk: string, i: number) => {
-      console.log(`Processing chunk ${i + 1}/${chunks.length} (length: ${chunk.length})`);
+      console.log(`Background task started: Processing ${chunks.length} chunks in batches of ${BATCH_SIZE}`);
 
-      try {
-        // Generate embedding for this chunk
-        console.log(`Generating embedding for chunk ${i + 1}...`);
-        const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke(
-          'generate-embedding',
-          { body: { text: chunk } }
-        );
+      // Process in batches sequentially
+      for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
+        const batchEnd = Math.min(batchStart + BATCH_SIZE, chunks.length);
+        const batch = chunks.slice(batchStart, batchEnd);
+        const batchNum = Math.floor(batchStart / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
 
-        if (embeddingError) {
-          console.error(`Embedding error for chunk ${i + 1}:`, embeddingError);
-          return { success: false, index: i + 1 };
+        console.log(`\n=== Processing batch ${batchNum}/${totalBatches} (chunks ${batchStart + 1}-${batchEnd}) ===`);
+
+        // Process chunks in this batch in parallel
+        const batchPromises = batch.map(async (chunk: string, i: number) => {
+          const globalIndex = batchStart + i;
+          
+          try {
+            // Generate embedding
+            const { data: embeddingData, error: embeddingError } = await supabase.functions.invoke(
+              'generate-embedding',
+              { body: { text: chunk } }
+            );
+
+            if (embeddingError || !embeddingData?.embedding) {
+              console.error(`Embedding failed for chunk ${globalIndex + 1}:`, embeddingError);
+              return { success: false };
+            }
+
+            // Insert chunk into database
+            const { error: insertError } = await supabase
+              .from('agent_knowledge')
+              .insert({
+                agent_id: agentId,
+                document_name: fileName,
+                content: chunk,
+                category: category || 'General',
+                summary: summary || null,
+                embedding: embeddingData.embedding
+              });
+
+            if (insertError) {
+              console.error(`Insert failed for chunk ${globalIndex + 1}:`, insertError);
+              return { success: false };
+            }
+
+            console.log(`✓ Chunk ${globalIndex + 1} processed successfully`);
+            return { success: true };
+
+          } catch (chunkError) {
+            console.error(`Error processing chunk ${globalIndex + 1}:`, chunkError);
+            return { success: false };
+          }
+        });
+
+        // Wait for this batch to complete
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Count results for this batch
+        batchResults.forEach(result => {
+          if (result.success) {
+            successCount++;
+          } else {
+            errorCount++;
+          }
+        });
+
+        console.log(`Batch ${batchNum} complete: ${batchResults.filter(r => r.success).length}/${batch.length} successful`);
+        console.log(`Overall progress: ${successCount + errorCount}/${chunks.length} chunks processed (${successCount} success, ${errorCount} errors)`);
+
+        // Small delay between batches to avoid overwhelming the system
+        if (batchEnd < chunks.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
-
-        if (!embeddingData?.embedding) {
-          console.error(`No embedding returned for chunk ${i + 1}`);
-          return { success: false, index: i + 1 };
-        }
-
-        console.log(`Embedding generated successfully for chunk ${i + 1}`);
-
-        // Insert chunk into database
-        console.log(`Inserting chunk ${i + 1} into database...`);
-        const { error: insertError } = await supabase
-          .from('agent_knowledge')
-          .insert({
-            agent_id: agentId,
-            document_name: fileName,
-            content: chunk,
-            category: category || 'General',
-            summary: summary || null,
-            embedding: embeddingData.embedding
-          });
-
-        if (insertError) {
-          console.error(`Database insert error for chunk ${i + 1}:`, insertError);
-          return { success: false, index: i + 1 };
-        }
-
-        console.log(`Chunk ${i + 1} inserted successfully`);
-        return { success: true, index: i + 1 };
-
-      } catch (chunkError) {
-        console.error(`Error processing chunk ${i + 1}:`, chunkError);
-        return { success: false, index: i + 1 };
       }
-    });
 
-    // Wait for all chunks to be processed
-    const results = await Promise.all(chunkPromises);
-    
-    // Count successes and failures
-    results.forEach(result => {
-      if (result.success) {
-        successCount++;
-      } else {
-        errorCount++;
-      }
-    });
+      console.log(`\n=== BACKGROUND PROCESSING COMPLETE ===`);
+      console.log(`File: ${fileName}`);
+      console.log(`Total chunks: ${chunks.length}`);
+      console.log(`Successful: ${successCount}`);
+      console.log(`Failed: ${errorCount}`);
+      console.log(`Success rate: ${((successCount / chunks.length) * 100).toFixed(1)}%`);
+    };
 
-    console.log(`Processing complete: ${successCount} successful, ${errorCount} failed`);
-
-    if (successCount === 0) {
-      throw new Error('Failed to process any chunks');
+    // Start background processing (non-blocking)
+    // @ts-ignore - EdgeRuntime is available in Deno deploy
+    if (typeof EdgeRuntime !== 'undefined') {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(processChunksInBackground());
+    } else {
+      // Fallback for local testing - just await it
+      await processChunksInBackground();
     }
 
+    // Return immediate response to client
     return new Response(
       JSON.stringify({
         success: true,
-        chunks: successCount,
-        errors: errorCount,
-        total: chunks.length
+        message: 'Processing started in background',
+        totalChunks: chunks.length,
+        fileName: fileName,
+        estimatedTime: `${Math.ceil(chunks.length / 15)} batches (~${Math.ceil(chunks.length / 15 * 3)} seconds)`
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

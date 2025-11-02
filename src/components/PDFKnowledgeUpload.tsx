@@ -111,7 +111,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             throw new Error('Risposta imprevista dal server');
           }
           
-          console.log(`✓ ${file.name} processed successfully - ${chunks.length} chunks created`);
+          console.log(`✓ ${file.name} processing started - ${chunks.length} chunks being processed in background`);
+          console.log(`Estimated time: ${data.estimatedTime || 'calculating...'}`);
           successCount++;
           // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
