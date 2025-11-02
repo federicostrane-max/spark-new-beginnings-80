@@ -176,8 +176,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             <div className="mt-3 space-y-2">
               <p className="text-sm font-medium">File selezionati ({selectedFiles.length}):</p>
               {selectedFiles.map((file, index) => (
-                <div key={index} className="flex items-center justify-between bg-muted p-2 rounded">
-                  <span className="text-sm truncate flex-1">{file.name}</span>
+                <div key={index} className="flex items-center justify-between gap-2 bg-muted p-2 rounded min-w-0">
+                  <span className="text-sm break-all flex-1 min-w-0">{file.name}</span>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -200,7 +200,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             <span className="text-sm font-medium">Caricamento in corso...</span>
           </div>
           {currentFile && (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground break-all">
               Elaborando: {currentFile}
             </p>
           )}
