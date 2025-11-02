@@ -116,7 +116,7 @@ export const ForwardMessageDialog = ({
         const { data: conversationId, error: rpcError } = await supabase.rpc(
           'get_or_create_conversation',
           { 
-            p_user_id: session.session.user.id.toString(),
+            p_user_id: session.session.user.id,
             p_agent_id: agentId 
           }
         );
