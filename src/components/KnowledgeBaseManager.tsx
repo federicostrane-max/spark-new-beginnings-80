@@ -40,15 +40,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
-      // Group by document name to avoid showing duplicate chunks
+      // Group by exact document name to show unique documents
       const uniqueDocs = new Map<string, KnowledgeDocument>();
       data?.forEach(doc => {
-        const baseName = doc.document_name.split(' (chunk')[0];
-        if (!uniqueDocs.has(baseName)) {
-          uniqueDocs.set(baseName, {
-            ...doc,
-            document_name: baseName
-          });
+        if (!uniqueDocs.has(doc.document_name)) {
+          uniqueDocs.set(doc.document_name, doc);
         }
       });
 

@@ -95,9 +95,12 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             
             console.log(`Processing batch ${batchIndex + 1}/${totalBatches} for ${file.name} (${batchChunks.length} chunks)`);
             
-            const progressBase = (fileIndex / totalFiles) * 100 + 30;
-            const batchProgress = (batchIndex / totalBatches) * 60;
-            setProgress(progressBase + batchProgress);
+            // Calculate progress correctly: each file gets equal portion of 100%
+            const fileProgressStart = (fileIndex / totalFiles) * 100;
+            const fileProgressRange = (1 / totalFiles) * 100;
+            const batchProgressWithinFile = (batchIndex / totalBatches) * fileProgressRange;
+            const totalProgress = Math.min(99, fileProgressStart + batchProgressWithinFile);
+            setProgress(totalProgress);
             
             let retries = 0;
             const MAX_RETRIES = 2;
