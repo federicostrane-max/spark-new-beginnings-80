@@ -51,12 +51,12 @@ export const ChatMessage = ({
     <div 
       className={cn(
         "mb-4 flex w-full group relative",
-        isUser ? "justify-end" : "justify-start"
+        selectionMode ? "justify-start" : (isUser ? "justify-end" : "justify-start")
       )}
       onClick={selectionMode ? onToggleSelection : undefined}
     >
       {selectionMode && (
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
           <div
             className={cn(
               "h-6 w-6 rounded-full border-2 flex items-center justify-center transition-all",
@@ -71,12 +71,11 @@ export const ChatMessage = ({
       )}
       <div
         className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm transition-all",
-          selectionMode ? "max-w-[70%]" : "max-w-[85%]",
+          "rounded-2xl px-4 py-3 shadow-sm transition-all overflow-hidden",
+          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[85%]",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
-          selectionMode && "ml-10",
           isSelected && "ring-2 ring-primary"
         )}
       >
