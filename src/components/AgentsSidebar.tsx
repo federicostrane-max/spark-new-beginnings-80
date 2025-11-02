@@ -144,36 +144,34 @@ export const AgentsSidebar = ({
               <div
                 key={agent.id}
                 className={cn(
-                  "group relative w-full rounded-lg transition-colors overflow-visible",
+                  "group relative w-full rounded-lg transition-colors",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                 )}
               >
-                <button
-                  onClick={() => onSelectAgent(agent)}
-                  className="w-full text-left p-3 pr-12"
-                >
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center w-full p-3">
+                  <button
+                    onClick={() => onSelectAgent(agent)}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  >
                     <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{agent.name}</p>
                       <p className="text-xs opacity-70 truncate">{agent.description}</p>
                     </div>
-                  </div>
-                </button>
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 z-10"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
@@ -193,6 +191,7 @@ export const AgentsSidebar = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+            </div>
             ))
           )}
         </div>
