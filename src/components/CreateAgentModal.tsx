@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
+import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 
 interface Agent {
   id: string;
@@ -223,6 +224,16 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               Define the agent's personality, expertise, and behavior
             </p>
           </div>
+
+          {/* Knowledge Base Manager - Durante l'editing */}
+          {editingAgent && (
+            <div className="border rounded-lg p-4">
+              <KnowledgeBaseManager 
+                agentId={editingAgent.id}
+                agentName={editingAgent.name}
+              />
+            </div>
+          )}
 
           {/* Knowledge Base Upload - Solo per nuovi agenti */}
           {!editingAgent && !createdAgentId && (
