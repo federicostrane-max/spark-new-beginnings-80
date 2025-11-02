@@ -166,9 +166,9 @@ export const AgentsSidebar = ({
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon"
-                      className="h-9 w-9 flex-shrink-0 opacity-100"
+                      className="h-9 w-9 flex-shrink-0 border-2 border-foreground/20 bg-background hover:bg-accent hover:text-accent-foreground"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreVertical className="h-5 w-5" />
