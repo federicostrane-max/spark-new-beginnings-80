@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
-import { ConversationList } from "@/components/ConversationList";
+
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -79,24 +79,30 @@ export default function MultiAgentConsultant() {
     setCurrentAgent(agent);
     setMessages([]);
     setDrawerOpen(false);
-    setCurrentConversation(null);
     
-    // Try to load the most recent conversation for this agent
-    try {
-      const { data, error } = await supabase
-        .from("agent_conversations")
-        .select("*")
-        .eq("agent_id", agent.id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (!error && data) {
-        await loadConversation(data.id);
+    if (!session?.user?.id) return;
+    
+    // Get or create the unique conversation for this agent
+    const { data: conversationId, error } = await supabase.rpc(
+      'get_or_create_conversation',
+      { 
+        p_user_id: session.user.id,
+        p_agent_id: agent.id 
       }
-    } catch (err) {
-      // No existing conversation, that's fine
-      console.log("No existing conversation for agent:", agent.slug);
+    );
+    
+    if (error) {
+      console.error("Error getting conversation:", error);
+      toast({ 
+        title: "Error", 
+        description: "Failed to load conversation", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
+    if (conversationId) {
+      await loadConversation(conversationId);
     }
   };
 
@@ -134,39 +140,14 @@ export default function MultiAgentConsultant() {
     }
   };
 
-  const createConversation = async (firstMessage: string): Promise<string> => {
-    if (!currentAgent || !session?.user) throw new Error("No agent or user");
-
-    const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? "..." : "");
-
-    const { data, error } = await supabase
-      .from("agent_conversations")
-      .insert({
-        agent_id: currentAgent.id,
-        user_id: session.user.id,
-        title,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-    setCurrentConversation(data);
-    return data.id;
-  };
-
   const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>) => {
     if (!currentAgent || !session?.access_token) return;
 
-    let conversationId = currentConversation?.id;
+    const conversationId = currentConversation?.id;
 
     if (!conversationId) {
-      try {
-        conversationId = await createConversation(text);
-      } catch (error: any) {
-        console.error("Error creating conversation:", error);
-        toast({ title: "Error", description: "Failed to create conversation", variant: "destructive" });
-        return;
-      }
+      toast({ title: "Error", description: "No active conversation", variant: "destructive" });
+      return;
     }
 
     const userMessage: Message = {
@@ -322,20 +303,6 @@ export default function MultiAgentConsultant() {
         </div>
       )}
 
-      {/* Desktop Conversations Sidebar */}
-      {!isMobile && currentAgent && (
-        <div className="w-[240px] flex-shrink-0 border-r bg-sidebar/50">
-          <div className="p-3 border-b">
-            <h3 className="font-semibold text-sm text-sidebar-foreground">Conversations</h3>
-          </div>
-          <ConversationList
-            agentId={currentAgent.id}
-            currentConversationId={currentConversation?.id || null}
-            onSelectConversation={(conv) => loadConversation(conv.id)}
-            onNewConversation={handleNewChat}
-          />
-        </div>
-      )}
 
       {/* Mobile Drawer */}
       {isMobile && (
@@ -354,25 +321,6 @@ export default function MultiAgentConsultant() {
                 setDrawerOpen(false);
               }}
             />
-            {currentAgent && (
-              <div className="border-t">
-                <div className="p-3 border-b">
-                  <h3 className="font-semibold text-sm">Conversations</h3>
-                </div>
-                <ConversationList
-                  agentId={currentAgent.id}
-                  currentConversationId={currentConversation?.id || null}
-                  onSelectConversation={(conv) => {
-                    loadConversation(conv.id);
-                    setDrawerOpen(false);
-                  }}
-                  onNewConversation={() => {
-                    handleNewChat();
-                    setDrawerOpen(false);
-                  }}
-                />
-              </div>
-            )}
           </SheetContent>
         </Sheet>
       )}

@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Loader2, ChevronDown, ChevronRight } from "lucide-react";
-import { ConversationList } from "@/components/ConversationList";
+
 
 interface Agent {
   id: string;
@@ -103,15 +103,6 @@ export const AgentChatList = ({ currentAgentId, currentConversationId, onSelectA
                     </div>
                   </div>
                 </button>
-                
-                {isExpanded && (
-                  <ConversationList
-                    agentId={agent.id}
-                    currentConversationId={currentConversationId}
-                    onSelectConversation={(conv: Conversation) => onSelectAgent(agent, conv.id)}
-                    onNewConversation={() => onSelectAgent(agent, null)}
-                  />
-                )}
               </div>
             );
           })}

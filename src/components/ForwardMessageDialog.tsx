@@ -45,11 +45,9 @@ export const ForwardMessageDialog = ({
   currentAgentId,
   onForwardComplete,
 }: ForwardMessageDialogProps) => {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set());
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);
   const { toast } = useToast();
@@ -57,7 +55,6 @@ export const ForwardMessageDialog = ({
   useEffect(() => {
     if (open) {
       loadData();
-      setSelectedConversations(new Set());
       setSelectedAgents(new Set());
     }
   }, [open]);
@@ -75,53 +72,16 @@ export const ForwardMessageDialog = ({
 
       if (agentsError) throw agentsError;
       setAgents(agentsData || []);
-
-      // Load recent conversations
-      const { data: convsData, error: convsError } = await supabase
-        .from("agent_conversations")
-        .select(`
-          *,
-          agents (
-            id,
-            name,
-            slug,
-            description,
-            avatar
-          )
-        `)
-        .order("updated_at", { ascending: false })
-        .limit(20);
-
-      if (convsError) throw convsError;
-      
-      const formattedConvs = (convsData || []).map((conv: any) => ({
-        id: conv.id,
-        agent_id: conv.agent_id,
-        title: conv.title,
-        agent: conv.agents,
-      }));
-      
-      setConversations(formattedConvs);
     } catch (error) {
-      console.error("Error loading data:", error);
+      console.error("Error loading agents:", error);
       toast({ 
         title: "Errore", 
-        description: "Impossibile caricare le conversazioni", 
+        description: "Impossibile caricare gli agenti", 
         variant: "destructive" 
       });
     } finally {
       setLoading(false);
     }
-  };
-
-  const toggleConversation = (convId: string) => {
-    const newSet = new Set(selectedConversations);
-    if (newSet.has(convId)) {
-      newSet.delete(convId);
-    } else {
-      newSet.add(convId);
-    }
-    setSelectedConversations(newSet);
   };
 
   const toggleAgent = (agentId: string) => {
@@ -135,12 +95,10 @@ export const ForwardMessageDialog = ({
   };
 
   const handleForward = async () => {
-    const totalSelected = selectedConversations.size + selectedAgents.size;
-    
-    if (totalSelected === 0) {
+    if (selectedAgents.size === 0) {
       toast({ 
         title: "Attenzione", 
-        description: "Seleziona almeno una destinazione", 
+        description: "Seleziona almeno un agente", 
         variant: "destructive" 
       });
       return;
@@ -152,40 +110,22 @@ export const ForwardMessageDialog = ({
       const { data: session } = await supabase.auth.getSession();
       if (!session.session) throw new Error("No session");
 
-      // Inoltra a tutte le conversazioni selezionate
-      for (const convId of selectedConversations) {
-        const messagesToInsert = messages.map((msg) => ({
-          conversation_id: convId,
-          role: msg.role,
-          content: msg.content,
-        }));
-
-        const { error: insertError } = await supabase
-          .from("agent_messages")
-          .insert(messagesToInsert);
-
-        if (insertError) throw insertError;
-      }
-
-      // Inoltra a tutti gli agenti selezionati (crea nuove conversazioni)
+      // Inoltra a tutti gli agenti selezionati (ottieni o crea la conversazione unica)
       for (const agentId of selectedAgents) {
-        const firstMessageContent = messages[0].content;
-        const title = `Forwarded: ${firstMessageContent.slice(0, 40)}...`;
+        // Ottieni o crea la conversazione unica per questo agente
+        const { data: conversationId, error: rpcError } = await supabase.rpc(
+          'get_or_create_conversation',
+          { 
+            p_user_id: session.session.user.id,
+            p_agent_id: agentId 
+          }
+        );
 
-        const { data: newConv, error: convError } = await supabase
-          .from("agent_conversations")
-          .insert({
-            agent_id: agentId,
-            user_id: session.session.user.id,
-            title,
-          })
-          .select()
-          .single();
+        if (rpcError) throw rpcError;
 
-        if (convError) throw convError;
-
+        // Inserisci i messaggi inoltrati
         const messagesToInsert = messages.map((msg) => ({
-          conversation_id: newConv.id,
+          conversation_id: conversationId,
           role: msg.role,
           content: msg.content,
         }));
@@ -195,11 +135,17 @@ export const ForwardMessageDialog = ({
           .insert(messagesToInsert);
 
         if (insertError) throw insertError;
+
+        // Aggiorna timestamp conversazione
+        await supabase
+          .from("agent_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId);
       }
 
       toast({ 
         title: "Successo", 
-        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${totalSelected} destinazione${totalSelected > 1 ? "i" : ""}` 
+        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}` 
       });
       
       onForwardComplete();
@@ -216,17 +162,11 @@ export const ForwardMessageDialog = ({
     }
   };
 
-  const filteredConversations = conversations.filter(
-    (conv) =>
-      conv.agent_id !== currentAgentId &&
-      (conv.title.toLowerCase().includes(search.toLowerCase()) ||
-        conv.agent?.name.toLowerCase().includes(search.toLowerCase()))
-  );
-
   const filteredAgents = agents.filter(
     (agent) =>
       agent.id !== currentAgentId &&
-      agent.name.toLowerCase().includes(search.toLowerCase())
+      (agent.name.toLowerCase().includes(search.toLowerCase()) ||
+        agent.description.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -257,49 +197,10 @@ export const ForwardMessageDialog = ({
           ) : (
             <ScrollArea className="h-[400px]">
               <div className="space-y-4">
-                {/* Recent Conversations */}
-                {filteredConversations.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-semibold mb-2 px-2">Conversazioni recenti</h3>
-                    <div className="space-y-1">
-                      {filteredConversations.map((conv) => (
-                        <div
-                          key={conv.id}
-                          onClick={() => toggleConversation(conv.id)}
-                          className={cn(
-                            "w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                            "hover:bg-accent",
-                            selectedConversations.has(conv.id) && "bg-accent"
-                          )}
-                        >
-                          <Checkbox
-                            checked={selectedConversations.has(conv.id)}
-                            onCheckedChange={() => toggleConversation(conv.id)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <div className="text-2xl flex-shrink-0">
-                            {conv.agent?.avatar || "🤖"}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">
-                              {conv.title}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">
-                              {conv.agent?.name}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* All Agents */}
-                {filteredAgents.length > 0 && (
+                {filteredAgents.length > 0 ? (
                   <div>
-                    <h3 className="text-sm font-semibold mb-2 px-2">
-                      {filteredConversations.length > 0 ? "Altri agenti" : "Agenti"}
-                    </h3>
+                    <h3 className="text-sm font-semibold mb-2 px-2">Seleziona agenti</h3>
                     <div className="space-y-1">
                       {filteredAgents.map((agent) => (
                         <div
@@ -324,18 +225,16 @@ export const ForwardMessageDialog = ({
                               {agent.name}
                             </div>
                             <div className="text-xs text-muted-foreground truncate">
-                              Nuova conversazione
+                              {agent.description}
                             </div>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
-                )}
-
-                {filteredConversations.length === 0 && filteredAgents.length === 0 && (
+                ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    Nessun risultato
+                    Nessun agente trovato
                   </div>
                 )}
               </div>
@@ -354,7 +253,7 @@ export const ForwardMessageDialog = ({
             <Button
               onClick={handleForward}
               className="flex-1"
-              disabled={(selectedConversations.size === 0 && selectedAgents.size === 0) || forwarding}
+              disabled={selectedAgents.size === 0 || forwarding}
             >
               {forwarding ? (
                 <>
@@ -362,7 +261,7 @@ export const ForwardMessageDialog = ({
                   Inoltro...
                 </>
               ) : (
-                "Inoltra"
+                `Inoltra a ${selectedAgents.size} agente${selectedAgents.size === 1 ? "" : "i"}`
               )}
             </Button>
           </div>
