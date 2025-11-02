@@ -191,6 +191,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               placeholder="e.g. Marketing Guru"
               required
               disabled={loading}
+              autoFocus={false}
             />
           </div>
 
