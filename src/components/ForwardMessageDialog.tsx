@@ -150,99 +150,34 @@ export const ForwardMessageDialog = ({
           .update({ updated_at: new Date().toISOString() })
           .eq("id", conversationId);
 
-        // IMPORTANTE: Genera automaticamente la risposta dell'agente ricevente
-        // Prendi l'ultimo messaggio inoltrato come prompt per l'agente
+        // IMPORTANTE: Chiama l'edge function per generare la risposta in background
+        // Non aspettiamo la risposta per non bloccare l'UI
         const lastMessage = messages[messages.length - 1];
         
-        // Crea un messaggio placeholder per la risposta
-        const assistantPlaceholderId = crypto.randomUUID();
-        await supabase
-          .from("agent_messages")
-          .insert({
-            id: assistantPlaceholderId,
-            conversation_id: conversationId,
-            role: "assistant",
-            content: "",
-          });
-
-        // Chiama l'edge function per ottenere la risposta
-        try {
-          const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${session.session.access_token}`,
-              },
-              body: JSON.stringify({
-                message: lastMessage.content,
-                conversationId,
-                agentSlug: agent.slug,
-              }),
-            }
-          );
-
-          if (!response.ok) {
-            console.error("Error getting agent response:", await response.text());
-            // Rimuovi il placeholder se c'è un errore
-            await supabase
-              .from("agent_messages")
-              .delete()
-              .eq("id", assistantPlaceholderId);
-          } else {
-            // Stream la risposta (la gestiamo in background)
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
-            let accumulatedText = "";
-
-            if (reader) {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split("\n");
-
-                for (const line of lines) {
-                  if (!line.trim() || line.startsWith(":")) continue;
-                  if (!line.startsWith("data: ")) continue;
-
-                  const data = line.slice(6);
-                  if (data === "[DONE]") continue;
-
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.type === "content" && parsed.text) {
-                      accumulatedText += parsed.text;
-                      // Aggiorna il messaggio nel database
-                      await supabase
-                        .from("agent_messages")
-                        .update({ content: accumulatedText })
-                        .eq("id", assistantPlaceholderId);
-                    }
-                  } catch (e) {
-                    console.error("Error parsing SSE:", e);
-                  }
-                }
-              }
-            }
+        fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.session.access_token}`,
+            },
+            body: JSON.stringify({
+              message: lastMessage.content,
+              conversationId,
+              agentSlug: agent.slug,
+            }),
           }
-        } catch (error) {
-          console.error("Error calling agent-chat:", error);
-          // Rimuovi il placeholder se c'è un errore
-          await supabase
-            .from("agent_messages")
-            .delete()
-            .eq("id", assistantPlaceholderId);
-        }
+        ).catch(error => {
+          console.error("Error calling agent-chat in background:", error);
+        });
       }
 
       console.log(`${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}`);
       
       toast({
         title: "Messaggi inoltrati",
-        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} con successo. Gli agenti stanno rispondendo...`,
+        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"}. Gli agenti stanno elaborando la risposta...`,
       });
       
       onForwardComplete();
