@@ -447,7 +447,7 @@ export default function MultiAgentConsultant() {
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="max-w-4xl mx-auto px-4 md:px-6 py-6">
+                <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 overflow-wrap-anywhere break-words">
                   {messages.length === 0 ? (
                     <div className="flex h-full items-center justify-center p-6 md:p-8 text-center">
                       <div>
