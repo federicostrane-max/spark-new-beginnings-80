@@ -47,7 +47,6 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         };
         audio.onerror = () => {
           setStatus('error');
-          toast.error("Impossibile riprodurre l'audio");
         };
 
         setAudioElement(audio);
@@ -56,7 +55,6 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error('TTS error:', error);
       setStatus('error');
-      toast.error("Impossibile generare l'audio");
     }
   }, [audioElement]);
 

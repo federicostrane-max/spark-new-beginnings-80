@@ -51,7 +51,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       }
     } catch (error: any) {
       console.error('Error loading documents:', error);
-      toast.error("Errore nel caricamento dei documenti");
     } finally {
       setLoading(false);
     }
@@ -66,11 +65,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
-      toast.success("Documento eliminato");
       loadDocuments();
     } catch (error: any) {
       console.error('Error deleting document:', error);
-      toast.error("Errore durante l'eliminazione");
     }
   };
 

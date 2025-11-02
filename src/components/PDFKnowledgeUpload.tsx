@@ -26,11 +26,11 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
     
     for (const file of files) {
       if (file.type !== "application/pdf") {
-        toast.error(`${file.name} non è un PDF`);
+        console.warn(`${file.name} non è un PDF`);
         continue;
       }
       if (file.size > 50 * 1024 * 1024) {
-        toast.error(`${file.name} supera i 50MB`);
+        console.warn(`${file.name} supera i 50MB`);
         continue;
       }
       validFiles.push(file);
@@ -45,7 +45,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
-      toast.error("Seleziona almeno un file PDF");
+      console.warn("Nessun file selezionato");
       return;
     }
 
@@ -145,12 +145,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         }
       }
 
-      if (successCount > 0) {
-        toast.success(`✓ ${successCount} PDF caricati con successo!`);
-      }
       if (errorCount > 0) {
         console.error('Upload errors:', errors);
-        toast.error(`✗ ${errorCount} PDF hanno generato errori. Controlla la console per i dettagli.`);
       }
       
       // Reset form
@@ -165,7 +161,6 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
 
     } catch (error: any) {
       console.error('=== ERROR IN PDF UPLOAD ===', error);
-      toast.error(error.message || "Errore durante il caricamento");
     } finally {
       setUploading(false);
       setCurrentFile("");
