@@ -33,25 +33,13 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
     try {
       setLoading(true);
       
-      // Get all chunks without limit, then group client-side
-      const { data: allData, error } = await supabase
-        .from('agent_knowledge')
-        .select('id, document_name, category, summary, created_at')
-        .eq('agent_id', agentId)
-        .order('created_at', { ascending: false })
-        .limit(50000); // Very high limit to ensure we get all documents
+      // Use RPC to get distinct documents efficiently
+      const { data, error } = await supabase
+        .rpc('get_distinct_documents', { p_agent_id: agentId });
 
       if (error) throw error;
 
-      // Group by exact document name to show unique documents
-      const uniqueDocs = new Map<string, KnowledgeDocument>();
-      allData?.forEach(doc => {
-        if (!uniqueDocs.has(doc.document_name)) {
-          uniqueDocs.set(doc.document_name, doc);
-        }
-      });
-
-      setDocuments(Array.from(uniqueDocs.values()));
+      setDocuments(data || []);
     } catch (error: any) {
       console.error('Error loading documents:', error);
       toast.error("Errore nel caricamento dei documenti");
