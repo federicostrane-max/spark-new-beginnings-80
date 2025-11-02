@@ -85,20 +85,21 @@ export const ChatMessage = ({
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
-          <div className={cn("prose prose-sm max-w-none dark:prose-invert break-words", !isExpanded && isLong && "line-clamp-3")}>
-            <ReactMarkdown 
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
-                strong: ({children}) => <strong className="font-bold">{children}</strong>,
-                em: ({children}) => <em className="italic">{children}</em>,
-                ul: ({children}) => <ul className="my-2 list-disc list-inside">{children}</ul>,
-                ol: ({children}) => <ol className="my-2 list-decimal list-inside">{children}</ol>,
-                li: ({children}) => <li className="break-words">{children}</li>,
-              }}
-            >
-              {content}
-            </ReactMarkdown>
+          <div className={cn(!isExpanded && isLong && "line-clamp-3")}>
+            {(() => {
+              console.log('[ChatMessage] Rendering assistant message:', {
+                id,
+                contentLength: content.length,
+                contentPreview: content.substring(0, 200),
+                hasMarkdown: content.includes('**') || content.includes('*') || content.includes('#')
+              });
+              return null;
+            })()}
+            <div className="prose prose-sm max-w-none dark:prose-invert text-sm md:text-base">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content}
+              </ReactMarkdown>
+            </div>
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         )}
