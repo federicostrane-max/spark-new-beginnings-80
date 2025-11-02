@@ -144,35 +144,37 @@ export const AgentsSidebar = ({
               <div
                 key={agent.id}
                 className={cn(
-                  "group relative w-full rounded-lg transition-colors",
+                  "flex items-center gap-2 w-full rounded-lg p-3 transition-colors",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                 )}
               >
-                <div className="flex items-center w-full p-3">
-                  <button
-                    onClick={() => onSelectAgent(agent)}
-                    className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                  >
-                    <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{agent.name}</p>
-                      <p className="text-xs opacity-70 truncate">{agent.description}</p>
-                    </div>
-                  </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 flex-shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="z-50 bg-popover">
+                {/* Agent Info - clickable */}
+                <button
+                  onClick={() => onSelectAgent(agent)}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                >
+                  <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{agent.name}</p>
+                    <p className="text-xs opacity-70 truncate">{agent.description}</p>
+                  </div>
+                </button>
+
+                {/* Three dots menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 flex-shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="z-50">
                     <DropdownMenuItem onClick={() => onEditAgent(agent)}>
                       <Edit className="mr-2 h-4 w-4" />
                       Edit Agent
@@ -191,7 +193,6 @@ export const AgentsSidebar = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-            </div>
             ))
           )}
         </div>
