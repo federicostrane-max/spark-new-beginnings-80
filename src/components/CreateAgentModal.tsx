@@ -246,17 +246,28 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        // Process PDF files if present
+        // Process PDF files BEFORE closing modal
         if (pdfFiles.length > 0) {
-          toast({ title: "Processing documents...", description: "Agent created, uploading knowledge base..." });
           await processPDFsForAgent(data.id, pdfFiles);
         }
 
-        toast({ title: "Success", description: "Agent created successfully!" });
+        toast({ 
+          title: "Success", 
+          description: pdfFiles.length > 0 
+            ? "Agent created and documents processed successfully!" 
+            : "Agent created successfully!" 
+        });
         onSuccess(data);
       }
       
+      // Close modal after everything is complete
       onOpenChange(false);
+      
+      // Reset form
+      setName("");
+      setDescription("");
+      setSystemPrompt("");
+      setPdfFiles([]);
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
       toast({ title: "Error", description: error.message || `Failed to ${editingAgent ? 'update' : 'create'} agent`, variant: "destructive" });
