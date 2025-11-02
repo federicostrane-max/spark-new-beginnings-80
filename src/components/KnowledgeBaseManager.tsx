@@ -31,6 +31,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   }, [agentId]);
 
   const loadDocuments = async () => {
+    console.log('📄 LOAD DOCUMENTS START');
     try {
       setLoading(true);
       
@@ -43,20 +44,24 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
+      console.log('📄 LOAD DOCUMENTS SUCCESS, found:', data?.length || 0, 'documents');
       setDocuments(data || []);
       
       // Switch to list tab after documents are loaded if there are any
       if (data && data.length > 0) {
+        console.log('📄 Switching to list tab');
         setActiveTab("list");
       }
     } catch (error: any) {
-      console.error('Error loading documents:', error);
+      console.error('❌ Error loading documents:', error);
     } finally {
       setLoading(false);
+      console.log('📄 LOAD DOCUMENTS END');
     }
   };
 
   const handleDeleteDocument = async (documentName: string) => {
+    console.log('🗑️ DELETE START:', documentName);
     try {
       const { error } = await supabase
         .from('agent_knowledge')
@@ -65,9 +70,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
+      console.log('✅ DELETE SUCCESS, calling loadDocuments...');
       loadDocuments();
+      console.log('✅ loadDocuments called');
     } catch (error: any) {
-      console.error('Error deleting document:', error);
+      console.error('❌ Error deleting document:', error);
     }
   };
 

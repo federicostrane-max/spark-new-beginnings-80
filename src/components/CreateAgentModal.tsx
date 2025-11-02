@@ -57,11 +57,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     const pdfFiles = files.filter(file => file.type === 'application/pdf');
     
     if (pdfFiles.length !== files.length) {
-      toast({ 
-        title: "Solo file PDF", 
-        description: "Puoi caricare solo file PDF", 
-        variant: "destructive" 
-      });
+      console.warn("Solo file PDF sono supportati");
     }
     
     setSelectedFiles(prev => [...prev, ...pdfFiles]);
@@ -76,12 +72,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     
     // Validation
     if (!name || name.length < 3) {
-      toast({ title: "Name too short", description: "Agent name must be at least 3 characters", variant: "destructive" });
+      console.warn("Agent name must be at least 3 characters");
       return;
     }
 
     if (!systemPrompt) {
-      toast({ title: "System prompt required", variant: "destructive" });
+      console.warn("System prompt required");
       return;
     }
 

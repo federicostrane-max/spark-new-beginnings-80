@@ -66,7 +66,6 @@ export const AgentsSidebar = ({
       setAgents(data || []);
     } catch (error: any) {
       console.error("Error loading agents:", error);
-      toast({ title: "Error", description: "Failed to load agents", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -88,12 +87,10 @@ export const AgentsSidebar = ({
 
       if (error) throw error;
 
-      toast({ title: "Success", description: `${agentToDelete.name} deleted successfully` });
       setAgentToDelete(null);
       loadAgents();
     } catch (error: any) {
       console.error("Error deleting agent:", error);
-      toast({ title: "Error", description: "Failed to delete agent", variant: "destructive" });
     }
   };
 

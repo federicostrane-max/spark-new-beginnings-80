@@ -55,7 +55,6 @@ export const ChatSidebar = ({
       setConversations(data || []);
     } catch (error: any) {
       console.error("Error loading conversations:", error);
-      toast({ title: "Error", description: "Failed to load conversations", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -77,11 +76,8 @@ export const ChatSidebar = ({
       if (conversationId === currentConversationId) {
         onNewChat();
       }
-      
-      toast({ title: "Success", description: "Conversation deleted" });
     } catch (error: any) {
       console.error("Error deleting conversation:", error);
-      toast({ title: "Error", description: "Failed to delete conversation", variant: "destructive" });
     }
   };
 
