@@ -115,30 +115,35 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Nome Documento</TableHead>
-                  <TableHead>Creato</TableHead>
-                  <TableHead className="text-right">Azioni</TableHead>
+                  <TableHead className="w-full max-w-0">Nome Documento</TableHead>
+                  <TableHead className="w-32">Creato</TableHead>
+                  <TableHead className="w-20 text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {documents.map((doc) => (
                   <TableRow key={doc.id}>
-                    <TableCell className="font-medium max-w-[300px]">
-                      <div className="flex items-center gap-2">
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2 min-w-0">
                         <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <span className="truncate" title={doc.document_name}>
+                        <span className="truncate break-all" title={doc.document_name}>
                           {doc.document_name}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap">
                       {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true })}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button 
                         variant="ghost" 
                         size="sm"
-                        onClick={() => handleDeleteDocument(doc.document_name)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.document_name);
+                        }}
+                        type="button"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
