@@ -108,7 +108,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             setProgress(totalProgress);
             
             let retries = 0;
-            const MAX_RETRIES = 2;
+            const MAX_RETRIES = 5;
             let batchSuccess = false;
             
             while (!batchSuccess && retries <= MAX_RETRIES) {
@@ -142,8 +142,8 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
                   throw new Error(`Batch ${batchIndex + 1} fallito dopo ${MAX_RETRIES} tentativi: ${batchError.message}`);
                 }
                 
-                // Wait before retry
-                await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+                // Wait longer before retry (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 2000 * retries));
               }
             }
           }
