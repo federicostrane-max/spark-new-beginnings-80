@@ -185,7 +185,7 @@ export const ForwardMessageDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background overflow-hidden">
         <DialogHeader>
           <DialogTitle>Inoltra {messages.length} messaggio{messages.length > 1 ? "i" : ""}</DialogTitle>
           <DialogDescription>
@@ -209,13 +209,13 @@ export const ForwardMessageDialog = ({
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <ScrollArea className="h-[400px]">
-              <div className="space-y-4">
+            <ScrollArea className="max-h-[50vh] min-h-[200px]">
+              <div className="space-y-4 pr-4">
                 {/* All Agents */}
                 {filteredAgents.length > 0 ? (
                   <div>
-                    <h3 className="text-sm font-semibold mb-2 px-2">Seleziona agenti</h3>
-                    <div className="space-y-1">
+                    <h3 className="text-sm font-semibold mb-3 px-2 text-foreground">Seleziona agenti</h3>
+                    <div className="space-y-2">
                       {filteredAgents.map((agent) => (
                         <div
                           key={agent.id}
