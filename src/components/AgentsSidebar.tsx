@@ -144,7 +144,7 @@ export const AgentsSidebar = ({
               <div
                 key={agent.id}
                 className={cn(
-                  "group relative w-full rounded-lg transition-colors",
+                  "group relative w-full rounded-lg transition-colors overflow-visible",
                   agent.id === currentAgentId
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
@@ -152,7 +152,7 @@ export const AgentsSidebar = ({
               >
                 <button
                   onClick={() => onSelectAgent(agent)}
-                  className="w-full text-left p-3"
+                  className="w-full text-left p-3 pr-12"
                 >
                   <div className="flex items-center gap-3">
                     <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
@@ -168,7 +168,7 @@ export const AgentsSidebar = ({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="absolute right-2 top-2 h-8 w-8 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 z-10"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreVertical className="h-4 w-4" />
