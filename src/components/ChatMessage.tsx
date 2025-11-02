@@ -80,26 +80,15 @@ export const ChatMessage = ({
         )}
       >
         {isUser ? (
-          <div className={cn("text-sm md:text-base whitespace-pre-wrap break-words", !isExpanded && isLong && "line-clamp-3")}>
+          <div className={cn("whitespace-pre-wrap break-words", !isExpanded && isLong && "line-clamp-3")}>
             {content}
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
-          <div className={cn(!isExpanded && isLong && "line-clamp-3")}>
-            {(() => {
-              console.log('[ChatMessage] Rendering assistant message:', {
-                id,
-                contentLength: content.length,
-                contentPreview: content.substring(0, 200),
-                hasMarkdown: content.includes('**') || content.includes('*') || content.includes('#')
-              });
-              return null;
-            })()}
-            <div className="prose prose-sm max-w-none dark:prose-invert text-sm md:text-base">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {content}
-              </ReactMarkdown>
-            </div>
+          <div className={cn("break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2", !isExpanded && isLong && "line-clamp-3")}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {content}
+            </ReactMarkdown>
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         )}
