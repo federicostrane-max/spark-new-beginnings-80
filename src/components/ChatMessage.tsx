@@ -72,7 +72,7 @@ export const ChatMessage = ({
       <div
         className={cn(
           "rounded-2xl px-4 py-3 shadow-sm transition-all overflow-hidden",
-          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[85%]",
+          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[75%]",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
