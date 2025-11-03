@@ -169,32 +169,19 @@ Deno.serve(async (req) => {
     console.log(`📊 Messages: ${messages?.length || 0} → ${cleanedMessages.length} after cleanup`);
 
     // Truncate conversation history to prevent context overflow
-    // Strategy: Keep more messages but with stricter char limit to prevent Claude confusion
-    const MAX_MESSAGES = 15;
-    const MAX_TOTAL_CHARS = 20000; // Reduced from 50k to prevent Claude from getting confused
-    const MAX_SINGLE_MESSAGE_CHARS = 8000; // New: cap individual messages
+    // Keep enough messages to allow forwarding long agent responses
+    const MAX_MESSAGES = 20;
+    const MAX_TOTAL_CHARS = 100000; // Allow long forwarded messages
     
     let truncatedMessages = cleanedMessages;
     
-    // First, truncate individual messages that are too long
-    truncatedMessages = truncatedMessages.map(m => {
-      if (m.content && m.content.length > MAX_SINGLE_MESSAGE_CHARS) {
-        console.log(`✂️ Truncating ${m.role} message from ${m.content.length} to ${MAX_SINGLE_MESSAGE_CHARS} chars`);
-        return {
-          ...m,
-          content: m.content.slice(0, MAX_SINGLE_MESSAGE_CHARS) + '\n\n[Message truncated for length...]'
-        };
-      }
-      return m;
-    });
-    
-    // Then, limit by message count (keep most recent)
+    // Limit by message count (keep most recent)
     if (truncatedMessages.length > MAX_MESSAGES) {
       truncatedMessages = truncatedMessages.slice(-MAX_MESSAGES);
       console.log(`✂️ Truncated to last ${MAX_MESSAGES} messages`);
     }
     
-    // Finally, check total character count
+    // Check total character count
     let totalChars = truncatedMessages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
     
     if (totalChars > MAX_TOTAL_CHARS) {
