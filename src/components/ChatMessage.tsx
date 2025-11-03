@@ -85,7 +85,7 @@ export const ChatMessage = ({
   const shouldBeCollapsed = hasLocalOverride 
     ? isCollapsed 
     : (forceExpanded === true ? false : (forceExpanded === false ? true : isCollapsed));
-  const previewLength = 150;
+  const previewLength = 500;
 
   return (
     <div 
@@ -154,9 +154,19 @@ export const ChatMessage = ({
                   setHasLocalOverride(true);
                   setIsCollapsed(!isCollapsed);
                 }}
-                className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
+                className={cn("h-8 px-2 gap-1", isUser && "hover:bg-primary-foreground/10")}
               >
-                {shouldBeCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                {shouldBeCollapsed ? (
+                  <>
+                    <ChevronDown className="h-3 w-3" />
+                    <span className="text-xs">Mostra tutto</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    <span className="text-xs">Mostra meno</span>
+                  </>
+                )}
               </Button>
             )}
             <Button
