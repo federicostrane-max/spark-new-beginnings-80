@@ -172,6 +172,14 @@ Deno.serve(async (req) => {
         };
 
         try {
+          // Cleanup any previous empty assistant messages in this conversation
+          await supabase
+            .from('agent_messages')
+            .delete()
+            .eq('conversation_id', conversation.id)
+            .eq('role', 'assistant')
+            .or('content.is.null,content.eq.');
+
           // Create placeholder message in DB
           const { data: placeholderMsg, error: placeholderError } = await supabase
             .from('agent_messages')
@@ -196,7 +204,13 @@ Deno.serve(async (req) => {
           let lastUpdateTime = Date.now();
           
           const anthropicMessages = messages
-            .filter(m => m.content && m.content.trim() !== '')
+            .filter(m => {
+              // Exclude messages with empty or null content
+              if (!m.content || typeof m.content !== 'string') return false;
+              // Exclude messages with only whitespace
+              if (m.content.trim() === '') return false;
+              return true;
+            })
             .map(m => ({
               role: m.role,
               content: m.content
