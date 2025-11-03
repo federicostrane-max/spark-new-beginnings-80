@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Mic, Square } from "lucide-react";
+import { Mic, Square, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
@@ -80,13 +80,17 @@ export const VoiceInput = ({ onTranscription, disabled }: VoiceInputProps) => {
     <Button
       type="button"
       size="icon"
-      variant={isRecording ? "destructive" : "outline"}
+      variant={isRecording ? "destructive" : isProcessing ? "secondary" : "outline"}
       onClick={isRecording ? stopRecording : startRecording}
       disabled={disabled || isProcessing}
-      className="h-[50px] w-[50px] md:h-[60px] md:w-[60px]"
+      className={`h-[50px] w-[50px] md:h-[60px] md:w-[60px] ${
+        isProcessing ? 'cursor-wait' : ''
+      }`}
     >
       {isRecording ? (
         <Square className="h-4 w-4 md:h-5 md:w-5 animate-pulse" />
+      ) : isProcessing ? (
+        <Loader2 className="h-4 w-4 md:h-5 md:w-5 animate-spin" />
       ) : (
         <Mic className="h-4 w-4 md:h-5 md:w-5" />
       )}
