@@ -95,10 +95,18 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // Stop current playback if any
+    // Stop current playback if any with proper cleanup
     if (audioElement) {
+      // Remove all event handlers first
+      audioElement.onplay = null;
+      audioElement.onpause = null;
+      audioElement.onended = null;
+      audioElement.onerror = null;
+      audioElement.oncanplaythrough = null;
+      
       audioElement.pause();
       audioElement.src = '';
+      setAudioElement(null);
     }
 
     setStatus('loading');
@@ -118,23 +126,36 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
 
       // Create audio element IMMEDIATELY with cached blob
       const audio = new Audio();
-      audio.preload = 'auto'; // Force immediate preload
+      audio.preload = 'auto';
       
       // Set up event handlers BEFORE setting src
       audio.oncanplaythrough = () => {
-        // Audio is ready to play without interruption
         console.log('Audio ready to play');
       };
       
-      audio.onplay = () => setStatus('playing');
-      audio.onpause = () => setStatus('paused');
+      audio.onplay = () => {
+        console.log('Audio playing');
+        setStatus('playing');
+      };
+      
+      audio.onpause = () => {
+        console.log('Audio paused');
+        // Only update status if we're still playing this message
+        setStatus(prev => prev === 'playing' ? 'paused' : prev);
+      };
+      
       audio.onended = () => {
+        console.log('Audio ended');
         setStatus('idle');
         setCurrentMessageId(null);
+        setAudioElement(null);
       };
-      audio.onerror = () => {
+      
+      audio.onerror = (e) => {
+        console.error('Audio error:', e);
         setStatus('error');
         setCurrentMessageId(null);
+        setAudioElement(null);
         toast.error('Errore nella riproduzione audio');
         // Remove from cache if playback fails
         setAudioCache(prev => {
@@ -145,7 +166,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         });
       };
 
-      // Set src and play
+      // Set src and save audio element
       audio.src = blobUrl;
       setAudioElement(audio);
       
@@ -155,6 +176,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
       console.error('TTS error:', error);
       setStatus('error');
       setCurrentMessageId(null);
+      setAudioElement(null);
       toast.error('Errore nella riproduzione audio');
     }
   }, [audioElement, status, audioCache, fetchAudioBlob]);
@@ -168,11 +190,23 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
 
   const stop = useCallback(() => {
     if (audioElement) {
+      // Remove event handlers FIRST to prevent async updates
+      audioElement.onplay = null;
+      audioElement.onpause = null;
+      audioElement.onended = null;
+      audioElement.onerror = null;
+      audioElement.oncanplaythrough = null;
+      
+      // Then stop playback
       audioElement.pause();
       audioElement.currentTime = 0;
+      audioElement.src = ''; // Release the blob URL reference
     }
+    
+    // Finally update state
     setStatus('idle');
     setCurrentMessageId(null);
+    setAudioElement(null);
   }, [audioElement]);
 
   return (
