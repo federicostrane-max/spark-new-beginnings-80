@@ -145,16 +145,18 @@ export const ChatMessage = ({
         {!isStreaming && content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
             {content.length > previewLength && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setHasLocalOverride(true);
-                  setIsCollapsed(prev => !prev);
-                }}
-                className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
-              >
+            <Button
+              variant="ghost"
+              size="sm"
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setHasLocalOverride(true);
+                setIsCollapsed(prev => !prev);
+              }}
+              className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
+            >
                 {shouldBeCollapsed ? (
                   <>
                     <ChevronDown className="h-3 w-3" />
@@ -171,6 +173,8 @@ export const ChatMessage = ({
             <Button
               variant="ghost"
               size="sm"
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 handleCopy();
@@ -183,6 +187,8 @@ export const ChatMessage = ({
             <Button
               variant="ghost"
               size="sm"
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 handleTTS();
