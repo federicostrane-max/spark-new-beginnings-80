@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Copy, Check, Play, Pause, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,14 @@ export const ChatMessage = ({
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [hasLocalOverride, setHasLocalOverride] = useState(false);
   const { currentMessageId, status, playMessage, pause } = useTTS();
+
+  useEffect(() => {
+    if (forceExpanded !== undefined) {
+      setHasLocalOverride(false);
+    }
+  }, [forceExpanded]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -47,7 +54,9 @@ export const ChatMessage = ({
 
   const isUser = role === "user";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
-  const shouldBeCollapsed = forceExpanded === true ? false : (forceExpanded === false ? true : isCollapsed);
+  const shouldBeCollapsed = hasLocalOverride 
+    ? isCollapsed 
+    : (forceExpanded === true ? false : (forceExpanded === false ? true : isCollapsed));
   const previewLength = 150;
 
   return (
@@ -106,7 +115,10 @@ export const ChatMessage = ({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setIsCollapsed(!isCollapsed)}
+                onClick={() => {
+                  setHasLocalOverride(true);
+                  setIsCollapsed(!isCollapsed);
+                }}
                 className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
               >
                 {shouldBeCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}

@@ -410,20 +410,11 @@ export default function MultiAgentConsultant() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => setAllMessagesExpanded(false)}
+                              onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
                               className="gap-2"
-                              title="Riduci tutti"
+                              title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
                             >
-                              <ChevronsDown className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setAllMessagesExpanded(true)}
-                              className="gap-2"
-                              title="Espandi tutti"
-                            >
-                              <ChevronsUp className="h-4 w-4" />
+                              {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
                             </Button>
                             <Button
                               variant="ghost"
