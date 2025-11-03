@@ -495,17 +495,19 @@ ${agent.system_prompt}`;
         } catch (error) {
           console.error('Stream error:', error);
           
-          // Delete the placeholder message if stream failed
+          // Update placeholder with error message instead of deleting
           try {
             if (placeholderMsg?.id) {
               await supabase
                 .from('agent_messages')
-                .delete()
+                .update({
+                  content: '❌ Si è verificato un errore di connessione durante la generazione della risposta. Per favore riprova.'
+                })
                 .eq('id', placeholderMsg.id);
-              console.log('Deleted placeholder message after stream failure');
+              console.log('Updated placeholder message with error after stream failure');
             }
-          } catch (deleteError) {
-            console.error('Error deleting placeholder:', deleteError);
+          } catch (updateError) {
+            console.error('Error updating placeholder with error:', updateError);
           }
           
           // Only send error if stream is not closed yet
