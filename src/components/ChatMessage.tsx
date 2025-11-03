@@ -37,8 +37,9 @@ export const ChatMessage = ({
   const [isLongPressing, setIsLongPressing] = useState(false);
 
   useEffect(() => {
-    if (forceExpanded !== undefined) {
-      setHasLocalOverride(false);
+    // Reset local override only when global state changes and was previously undefined
+    if (forceExpanded !== undefined && !hasLocalOverride) {
+      setIsCollapsed(!forceExpanded);
     }
   }, [forceExpanded]);
 
@@ -84,7 +85,7 @@ export const ChatMessage = ({
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   const shouldBeCollapsed = hasLocalOverride 
     ? isCollapsed 
-    : (forceExpanded === true ? false : (forceExpanded === false ? true : isCollapsed));
+    : (forceExpanded === undefined ? isCollapsed : !forceExpanded);
   const previewLength = 500;
 
   return (
@@ -114,7 +115,7 @@ export const ChatMessage = ({
       )}
       <div
         className={cn(
-          "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all select-none",
+          "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
           "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
           isUser && !selectionMode && "ml-auto",
           selectionMode && "ml-8",
@@ -126,14 +127,14 @@ export const ChatMessage = ({
         )}
       >
         {isUser ? (
-          <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
+          <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere select-none">
             {shouldBeCollapsed && content.length > previewLength
               ? content.substring(0, previewLength) + "..."
               : content}
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
-          <div className="break-words overflow-wrap-anywhere [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
+          <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {shouldBeCollapsed && content.length > previewLength
                 ? content.substring(0, previewLength) + "..."
@@ -154,7 +155,7 @@ export const ChatMessage = ({
                   setHasLocalOverride(true);
                   setIsCollapsed(!isCollapsed);
                 }}
-                className={cn("h-8 px-2 gap-1", isUser && "hover:bg-primary-foreground/10")}
+                className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
               >
                 {shouldBeCollapsed ? (
                   <>
