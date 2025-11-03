@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
               'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
-              model: 'claude-sonnet-4-5',
+              model: 'claude-sonnet-4-20250514',
               max_tokens: 4096,
               system: agent.system_prompt,
               messages: anthropicMessages,
@@ -218,7 +218,9 @@ Deno.serve(async (req) => {
           });
 
           if (!response.ok) {
-            throw new Error(`Anthropic API error: ${response.status}`);
+            const errorBody = await response.text();
+            console.error('Anthropic API error details:', response.status, errorBody);
+            throw new Error(`Anthropic API error: ${response.status} - ${errorBody}`);
           }
 
           const reader = response.body?.getReader();
@@ -291,7 +293,7 @@ Deno.serve(async (req) => {
                     'anthropic-version': '2023-06-01'
                   },
                   body: JSON.stringify({
-                    model: 'claude-sonnet-4-5',
+                    model: 'claude-sonnet-4-20250514',
                     max_tokens: 2048,
                     system: consultedAgent.system_prompt,
                     messages: [{ role: 'user', content: question }]
@@ -347,7 +349,7 @@ Deno.serve(async (req) => {
                 'anthropic-version': '2023-06-01'
               },
               body: JSON.stringify({
-                model: 'claude-sonnet-4-5',
+                model: 'claude-sonnet-4-20250514',
                 max_tokens: 4096,
                 system: agent.system_prompt,
                 messages: followUpMessages,
@@ -356,7 +358,9 @@ Deno.serve(async (req) => {
             });
 
             if (!followUpResponse.ok) {
-              throw new Error(`Anthropic API error: ${followUpResponse.status}`);
+              const errorBody = await followUpResponse.text();
+              console.error('Anthropic API error details (follow-up):', followUpResponse.status, errorBody);
+              throw new Error(`Anthropic API error: ${followUpResponse.status} - ${errorBody}`);
             }
 
             const followUpReader = followUpResponse.body?.getReader();
