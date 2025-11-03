@@ -9,7 +9,7 @@ import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -293,6 +293,40 @@ export default function MultiAgentConsultant() {
     setSelectedMessages(new Set());
   };
 
+  const handleDeleteMessages = async () => {
+    if (selectedMessages.size === 0) return;
+    
+    try {
+      const messageIds = Array.from(selectedMessages);
+      
+      const { error } = await supabase
+        .from("agent_messages")
+        .delete()
+        .in("id", messageIds);
+      
+      if (error) throw error;
+      
+      // Rimuovi i messaggi dall'UI
+      setMessages(prev => prev.filter(m => !selectedMessages.has(m.id)));
+      
+      // Reset selection
+      setSelectedMessages(new Set());
+      setSelectionMode(false);
+      
+      toast({
+        title: "Messaggi eliminati",
+        description: `${messageIds.length} messaggio${messageIds.length > 1 ? 'i' : ''} eliminat${messageIds.length > 1 ? 'i' : 'o'} con successo`,
+      });
+    } catch (error: any) {
+      console.error("Error deleting messages:", error);
+      toast({
+        title: "Errore",
+        description: "Impossibile eliminare i messaggi",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleForward = () => {
     if (selectedMessages.size === 0) {
       toast({ 
@@ -384,48 +418,35 @@ export default function MultiAgentConsultant() {
                       <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
                         <Menu className="h-5 w-5" />
                       </Button>
-                    )}
+                     )}
                      <div className="flex items-center gap-3 flex-1 min-w-0 mr-2">
-                       <div className="text-3xl flex-shrink-0">{currentAgent.avatar || "🤖"}</div>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         onClick={() => {
+                           setEditingAgent(currentAgent);
+                           setShowCreateModal(true);
+                         }}
+                         title="Modifica agente"
+                       >
+                         <Edit className="h-4 w-4" />
+                       </Button>
                        <div className="min-w-0 flex-1">
                          <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
                          <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
                        </div>
                      </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <Button
-                         variant="outline"
-                         size="sm"
-                         onClick={() => {
-                           setEditingAgent(currentAgent);
-                           setShowCreateModal(true);
-                         }}
-                         className="gap-2"
-                       >
-                         <Edit className="h-4 w-4" />
-                         <span className="hidden md:inline">Modifica</span>
-                       </Button>
                         {messages.length > 0 && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
-                              className="gap-2"
-                              title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
-                            >
-                              {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleStartSelection}
-                              className="gap-2"
-                            >
-                              <Forward className="h-4 w-4" />
-                              <span className="hidden md:inline">Inoltra</span>
-                            </Button>
-                          </>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
+                            className="gap-2"
+                            title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
+                          >
+                            {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
+                          </Button>
                         )}
                      </div>
                   </>
@@ -439,14 +460,25 @@ export default function MultiAgentConsultant() {
                         {selectedMessages.size} selezionat{selectedMessages.size === 1 ? "o" : "i"}
                       </span>
                     </div>
-                    <Button
-                      onClick={handleForward}
-                      disabled={selectedMessages.size === 0}
-                      className="gap-2"
-                    >
-                      <Forward className="h-4 w-4" />
-                      Inoltra
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteMessages}
+                        disabled={selectedMessages.size === 0}
+                        className="gap-2"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span className="hidden md:inline">Elimina</span>
+                      </Button>
+                      <Button
+                        onClick={handleForward}
+                        disabled={selectedMessages.size === 0}
+                        className="gap-2"
+                      >
+                        <Forward className="h-4 w-4" />
+                        <span className="hidden md:inline">Inoltra</span>
+                      </Button>
+                    </div>
                   </>
                 )}
               </div>
