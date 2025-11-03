@@ -117,12 +117,16 @@ export const ForwardMessageDialog = ({
 
       if (insertError) throw insertError;
 
+      // Get the agent slug for the edge function
+      const selectedAgentData = agents.find(a => a.id === selectedAgent);
+      if (!selectedAgentData) throw new Error('Selected agent not found');
+
       // Trigger agent response via edge function
       const { error: chatError } = await supabase.functions.invoke('agent-chat', {
         body: {
           conversationId: conversationId,
           message: message.content,
-          agentId: selectedAgent
+          agentSlug: selectedAgentData.slug
         }
       });
 
