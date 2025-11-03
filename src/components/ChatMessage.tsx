@@ -47,7 +47,7 @@ export const ChatMessage = ({
 
   const isUser = role === "user";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
-  const shouldBeCollapsed = forceExpanded === false || (forceExpanded === undefined && isCollapsed);
+  const shouldBeCollapsed = forceExpanded === true ? false : (forceExpanded === false ? true : isCollapsed);
   const previewLength = 150;
 
   return (
