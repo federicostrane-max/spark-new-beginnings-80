@@ -79,6 +79,7 @@ export default function MultiAgentConsultant() {
   const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
+    setAllMessagesExpanded(true); // Reset to expanded when changing agent
     setDrawerOpen(false);
     
     if (!session?.user?.id) return;
