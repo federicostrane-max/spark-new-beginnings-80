@@ -171,30 +171,11 @@ Deno.serve(async (req) => {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         };
 
-        try {
-          // Cleanup any previous incomplete assistant messages in this conversation
-          // This includes NULL, empty strings, and messages shorter than 10 characters
-          const { data: incompleteMsgs } = await supabase
-            .from('agent_messages')
-            .select('id, content')
-            .eq('conversation_id', conversation.id)
-            .eq('role', 'assistant');
-          
-          if (incompleteMsgs) {
-            const idsToDelete = incompleteMsgs
-              .filter(m => !m.content || m.content.trim() === '' || m.content.length < 10)
-              .map(m => m.id);
-            
-            if (idsToDelete.length > 0) {
-              await supabase
-                .from('agent_messages')
-                .delete()
-                .in('id', idsToDelete);
-            }
-          }
+        let placeholderMsg: any = null; // Declare outside try block for catch access
 
-          // Create placeholder message in DB
-          const { data: placeholderMsg, error: placeholderError } = await supabase
+        try {
+          // Create placeholder message in DB FIRST
+          const { data: placeholder, error: placeholderError } = await supabase
             .from('agent_messages')
             .insert({
               conversation_id: conversation.id,
@@ -205,6 +186,30 @@ Deno.serve(async (req) => {
             .single();
 
           if (placeholderError) throw placeholderError;
+          placeholderMsg = placeholder;
+
+          // Cleanup any previous incomplete assistant messages (excluding the current placeholder)
+          // This includes NULL, empty strings, and messages shorter than 10 characters
+          const { data: incompleteMsgs } = await supabase
+            .from('agent_messages')
+            .select('id, content')
+            .eq('conversation_id', conversation.id)
+            .eq('role', 'assistant')
+            .neq('id', placeholderMsg.id);
+          
+          if (incompleteMsgs) {
+            const idsToDelete = incompleteMsgs
+              .filter(m => !m.content || m.content.trim() === '' || m.content.length < 10)
+              .map(m => m.id);
+            
+            if (idsToDelete.length > 0) {
+              console.log(`Cleaning up ${idsToDelete.length} incomplete assistant messages`);
+              await supabase
+                .from('agent_messages')
+                .delete()
+                .in('id', idsToDelete);
+            }
+          }
 
           // Send message_start event with message ID
           sendSSE(JSON.stringify({ 
@@ -455,6 +460,18 @@ Deno.serve(async (req) => {
           controller.close();
         } catch (error) {
           console.error('Stream error:', error);
+          
+          // Delete the placeholder message if stream failed
+          try {
+            await supabase
+              .from('agent_messages')
+              .delete()
+              .eq('id', placeholderMsg.id);
+            console.log('Deleted placeholder message after stream failure');
+          } catch (deleteError) {
+            console.error('Error deleting placeholder:', deleteError);
+          }
+          
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
           controller.close();
