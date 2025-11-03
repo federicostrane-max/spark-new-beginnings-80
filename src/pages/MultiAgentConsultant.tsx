@@ -264,7 +264,8 @@ export default function MultiAgentConsultant() {
                 setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
               }
             } else if (parsed.type === "error") {
-              throw new Error(parsed.error);
+              const errorMsg = parsed.error || parsed.message || "Unknown error";
+              throw new Error(errorMsg);
             }
           } catch (e) {
             console.error("Error parsing SSE:", e);

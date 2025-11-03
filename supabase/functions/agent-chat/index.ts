@@ -148,6 +148,26 @@ Deno.serve(async (req) => {
 
     if (msgError) throw msgError;
 
+    // Clean up duplicate consecutive user messages and ensure no empty content
+    const cleanedMessages = messages?.filter((m, index, arr) => {
+      // Skip if content is empty or whitespace
+      if (!m.content || m.content.trim() === '') return false;
+      
+      // For user messages, check if next message is a duplicate
+      if (m.role === 'user' && index < arr.length - 1) {
+        const nextMsg = arr[index + 1];
+        // Skip this message if next is also user with identical content
+        if (nextMsg.role === 'user' && nextMsg.content === m.content) {
+          console.log('🧹 Skipping duplicate user message:', m.content.slice(0, 50));
+          return false;
+        }
+      }
+      
+      return true;
+    }) || [];
+
+    console.log(`📊 Messages: ${messages?.length || 0} → ${cleanedMessages.length} after cleanup`);
+
     // Get other agents for tool calling
     const { data: otherAgents } = await supabase
       .from('agents')
@@ -239,7 +259,8 @@ Deno.serve(async (req) => {
           let toolCalls: ToolUseBlock[] = [];
           let lastUpdateTime = Date.now();
           
-          const anthropicMessages = messages
+          // Use cleanedMessages instead of messages
+          const anthropicMessages = cleanedMessages
             .filter(m => {
               // Exclude the placeholder we just created
               if (m.id === placeholderMsg.id) return false;
