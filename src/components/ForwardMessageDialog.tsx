@@ -34,22 +34,22 @@ interface Conversation {
 interface ForwardMessageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  messages: Array<{ id: string; role: "user" | "assistant"; content: string }>;
+  message: { id: string; role: "user" | "assistant"; content: string } | null;
   currentAgentId: string;
-  onForwardComplete: () => void;
+  onForwardComplete: (conversationId: string, agentId: string) => void;
 }
 
 export const ForwardMessageDialog = ({
   open,
   onOpenChange,
-  messages,
+  message,
   currentAgentId,
   onForwardComplete,
 }: ForwardMessageDialogProps) => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [forwarding, setForwarding] = useState(false);
   const { toast } = useToast();
   const isMobile = useIsMobile();
@@ -57,7 +57,7 @@ export const ForwardMessageDialog = ({
   useEffect(() => {
     if (open) {
       loadData();
-      setSelectedAgents(new Set());
+      setSelectedAgent(null);
     }
   }, [open]);
 
@@ -81,117 +81,64 @@ export const ForwardMessageDialog = ({
     }
   };
 
-  const toggleAgent = (agentId: string) => {
-    const newSet = new Set(selectedAgents);
-    if (newSet.has(agentId)) {
-      newSet.delete(agentId);
-    } else {
-      newSet.add(agentId);
-    }
-    setSelectedAgents(newSet);
+  const selectAgent = (agentId: string) => {
+    setSelectedAgent(agentId);
   };
 
   const handleForward = async () => {
-    if (selectedAgents.size === 0) {
-      console.warn("Seleziona almeno un agente");
-      return;
-    }
-
+    if (!selectedAgent || !message) return;
+    
+    setForwarding(true);
+    
     try {
-      setForwarding(true);
-
       const { data: session } = await supabase.auth.getSession();
       if (!session.session) throw new Error("No session");
 
-      // Inoltra a tutti gli agenti selezionati
-      for (const agentId of selectedAgents) {
-        const agent = agents.find(a => a.id === agentId);
-        if (!agent) continue;
-
-        console.log('[ForwardMessage] Getting/creating conversation for:', {
-          userId: session.session.user.id,
-          agentId
-        });
-
-        // Ottieni o crea la conversazione unica per questo agente
-        const { data: conversationId, error: rpcError } = await supabase.rpc(
-          'get_or_create_conversation',
-          { 
-            p_user_id: session.session.user.id,
-            p_agent_id: agentId 
-          }
-        );
-
-        console.log('[ForwardMessage] RPC result:', { conversationId, rpcError });
-
-        if (rpcError) {
-          console.error('[ForwardMessage] RPC error details:', rpcError);
-          throw rpcError;
+      // Get or create conversation with the selected agent
+      const { data: conversationId, error: rpcError } = await supabase.rpc(
+        'get_or_create_conversation',
+        { 
+          p_user_id: session.session.user.id,
+          p_agent_id: selectedAgent 
         }
+      );
 
-        if (!conversationId) {
-          throw new Error('No conversation ID returned from RPC');
-        }
+      if (rpcError) throw rpcError;
+      if (!conversationId) throw new Error('No conversation ID returned');
 
-        // Inserisci i messaggi inoltrati
-        const messagesToInsert = messages.map((msg) => ({
+      // Insert the forwarded message as a user message
+      const { error: insertError } = await supabase
+        .from("agent_messages")
+        .insert({
           conversation_id: conversationId,
-          role: msg.role,
-          content: msg.content,
-        }));
-
-        const { error: insertError } = await supabase
-          .from("agent_messages")
-          .insert(messagesToInsert);
-
-        if (insertError) throw insertError;
-
-        // Aggiorna timestamp conversazione
-        await supabase
-          .from("agent_conversations")
-          .update({ updated_at: new Date().toISOString() })
-          .eq("id", conversationId);
-
-        // IMPORTANTE: Chiama l'edge function per generare la risposta in background
-        // Non aspettiamo la risposta per non bloccare l'UI
-        const lastMessage = messages[messages.length - 1];
-        
-        fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session.session.access_token}`,
-            },
-            body: JSON.stringify({
-              message: lastMessage.content,
-              conversationId,
-              agentSlug: agent.slug,
-            }),
-          }
-        ).catch(error => {
-          console.error("Error calling agent-chat in background:", error);
+          role: 'user',
+          content: message.content
         });
-      }
 
-      console.log(`${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}`);
-      
+      if (insertError) throw insertError;
+
+      // Update conversation timestamp
+      await supabase
+        .from("agent_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+
       if (!isMobile) {
         toast({
-          title: "Messaggi inoltrati",
-          description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"}. Gli agenti stanno elaborando la risposta...`,
+          title: "Messaggio inoltrato",
+          description: "L'agente sta elaborando la risposta...",
         });
       }
-      
-      onForwardComplete();
+
       onOpenChange(false);
+      onForwardComplete(conversationId, selectedAgent);
+      
     } catch (error: any) {
-      console.error("Error forwarding messages:", error);
+      console.error("Error forwarding message:", error);
       if (!isMobile) {
         toast({
           title: "Errore",
-          description: "Si è verificato un errore durante l'inoltro dei messaggi",
+          description: "Errore durante l'inoltro del messaggio",
           variant: "destructive",
         });
       }
@@ -211,9 +158,9 @@ export const ForwardMessageDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>Inoltra {messages.length} messaggio{messages.length > 1 ? "i" : ""}</DialogTitle>
+          <DialogTitle>Inoltra messaggio</DialogTitle>
           <DialogDescription>
-            Seleziona una o più destinazioni
+            Seleziona l'agente destinatario
           </DialogDescription>
         </DialogHeader>
 
@@ -243,18 +190,13 @@ export const ForwardMessageDialog = ({
                       {filteredAgents.map((agent) => (
                         <div
                           key={agent.id}
-                          onClick={() => toggleAgent(agent.id)}
+                          onClick={() => selectAgent(agent.id)}
                           className={cn(
                             "w-full flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                            "hover:bg-accent",
-                            selectedAgents.has(agent.id) && "bg-accent"
+                            "hover:bg-accent border-2",
+                            selectedAgent === agent.id ? "border-primary bg-accent" : "border-transparent"
                           )}
                         >
-                          <Checkbox
-                            checked={selectedAgents.has(agent.id)}
-                            onCheckedChange={() => toggleAgent(agent.id)}
-                            onClick={(e) => e.stopPropagation()}
-                          />
                           <div className="text-2xl flex-shrink-0">
                             {agent.avatar || "🤖"}
                           </div>
@@ -291,7 +233,7 @@ export const ForwardMessageDialog = ({
             <Button
               onClick={handleForward}
               className="flex-1"
-              disabled={selectedAgents.size === 0 || forwarding}
+              disabled={!selectedAgent || forwarding}
             >
               {forwarding ? (
                 <>
@@ -299,7 +241,7 @@ export const ForwardMessageDialog = ({
                   Inoltro...
                 </>
               ) : (
-                `Inoltra a ${selectedAgents.size} agente${selectedAgents.size === 1 ? "" : "i"}`
+                "Inoltra"
               )}
             </Button>
           </div>

@@ -59,7 +59,7 @@ export default function MultiAgentConsultant() {
   const [showForwardDialog, setShowForwardDialog] = useState(false);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
   const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean | undefined>(undefined);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -283,65 +283,46 @@ export default function MultiAgentConsultant() {
     setCurrentConversation(null);
     setMessages([]);
     setSelectionMode(false);
-    setSelectedMessages(new Set());
+    setSelectedMessage(null);
   };
 
-  const toggleMessageSelection = (messageId: string) => {
-    const newSelection = new Set(selectedMessages);
-    if (newSelection.has(messageId)) {
-      newSelection.delete(messageId);
-    } else {
-      newSelection.add(messageId);
-    }
-    setSelectedMessages(newSelection);
-  };
-
-  const handleStartSelection = (messageId?: string) => {
+  const handleStartSelection = (messageId: string) => {
     setSelectionMode(true);
-    if (messageId) {
-      setSelectedMessages(new Set([messageId]));
-    } else {
-      setSelectedMessages(new Set());
-    }
+    setSelectedMessage(messageId);
   };
 
   const handleCancelSelection = () => {
     setSelectionMode(false);
-    setSelectedMessages(new Set());
+    setSelectedMessage(null);
   };
 
   const handleDeleteMessages = async () => {
-    if (selectedMessages.size === 0) return;
+    if (!selectedMessage) return;
     
     try {
-      const messageIds = Array.from(selectedMessages);
-      
       const { error } = await supabase
         .from("agent_messages")
         .delete()
-        .in("id", messageIds);
+        .eq("id", selectedMessage);
       
       if (error) throw error;
       
-      // Rimuovi i messaggi dall'UI
-      setMessages(prev => prev.filter(m => !selectedMessages.has(m.id)));
-      
-      // Reset selection
-      setSelectedMessages(new Set());
+      setMessages(prev => prev.filter(m => m.id !== selectedMessage));
       setSelectionMode(false);
+      setSelectedMessage(null);
       
       if (!isMobile) {
         toast({
-          title: "Messaggi eliminati",
-          description: `${messageIds.length} messaggio${messageIds.length > 1 ? 'i' : ''} eliminat${messageIds.length > 1 ? 'i' : 'o'} con successo`,
+          title: "Messaggio eliminato",
+          description: "Il messaggio è stato eliminato con successo",
         });
       }
     } catch (error: any) {
-      console.error("Error deleting messages:", error);
+      console.error("Error deleting message:", error);
       if (!isMobile) {
         toast({
           title: "Errore",
-          description: "Impossibile eliminare i messaggi",
+          description: "Impossibile eliminare il messaggio",
           variant: "destructive",
         });
       }
@@ -349,22 +330,25 @@ export default function MultiAgentConsultant() {
   };
 
   const handleForward = () => {
-    if (selectedMessages.size === 0) {
-      if (!isMobile) {
-        toast({ 
-          title: "Attenzione", 
-          description: "Seleziona almeno un messaggio", 
-          variant: "destructive" 
-        });
-      }
-      return;
-    }
     setShowForwardDialog(true);
   };
 
-  const handleForwardComplete = () => {
+  const handleForwardComplete = async (conversationId: string, agentId: string) => {
     setSelectionMode(false);
-    setSelectedMessages(new Set());
+    setSelectedMessage(null);
+    setShowForwardDialog(false);
+    
+    // Load the agent
+    const { data: agentData } = await supabase
+      .from("agents")
+      .select("*")
+      .eq("id", agentId)
+      .single();
+    
+    if (agentData) {
+      setCurrentAgent(agentData);
+      await loadConversation(conversationId);
+    }
   };
 
   const handleDeleteAllMessages = async () => {
@@ -452,13 +436,13 @@ export default function MultiAgentConsultant() {
       />
 
       {/* Forward Message Dialog */}
-      <ForwardMessageDialog
-        open={showForwardDialog}
-        onOpenChange={setShowForwardDialog}
-        messages={messages.filter(m => selectedMessages.has(m.id))}
-        currentAgentId={currentAgent?.id || ""}
-        onForwardComplete={handleForwardComplete}
-      />
+            <ForwardMessageDialog
+              open={showForwardDialog}
+              onOpenChange={setShowForwardDialog}
+              message={messages.find(m => m.id === selectedMessage) || null}
+              currentAgentId={currentAgent?.id || ""}
+              onForwardComplete={handleForwardComplete}
+            />
 
 
       {/* Main Chat Area */}
@@ -523,14 +507,13 @@ export default function MultiAgentConsultant() {
                     </Button>
                     <div className="flex items-center gap-2 flex-1">
                       <span className="font-semibold">
-                        {selectedMessages.size} selezionat{selectedMessages.size === 1 ? "o" : "i"}
+                        Messaggio selezionato
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
                         variant="destructive"
                         onClick={handleDeleteMessages}
-                        disabled={selectedMessages.size === 0}
                         className="gap-2"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -538,7 +521,6 @@ export default function MultiAgentConsultant() {
                       </Button>
                       <Button
                         onClick={handleForward}
-                        disabled={selectedMessages.size === 0}
                         className="gap-2"
                       >
                         <Forward className="h-4 w-4" />
@@ -577,8 +559,8 @@ export default function MultiAgentConsultant() {
                         content={msg.content}
                         isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}
                         selectionMode={selectionMode}
-                        isSelected={selectedMessages.has(msg.id)}
-                        onToggleSelection={() => toggleMessageSelection(msg.id)}
+                        isSelected={selectedMessage === msg.id}
+                        onToggleSelection={() => {}}
                         onLongPress={() => handleStartSelection(msg.id)}
                         forceExpanded={allMessagesExpanded}
                       />
@@ -648,9 +630,7 @@ export default function MultiAgentConsultant() {
       <ForwardMessageDialog
         open={showForwardDialog}
         onOpenChange={setShowForwardDialog}
-        messages={Array.from(selectedMessages)
-          .map(id => messages.find(m => m.id === id))
-          .filter((m): m is Message => m !== undefined)}
+        message={messages.find(m => m.id === selectedMessage) || null}
         currentAgentId={currentAgent?.id || ""}
         onForwardComplete={handleForwardComplete}
       />
