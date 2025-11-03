@@ -345,9 +345,99 @@ export default function MultiAgentConsultant() {
       .eq("id", agentId)
       .single();
     
-    if (agentData) {
-      setCurrentAgent(agentData);
-      await loadConversation(conversationId);
+    if (!agentData) return;
+    
+    setCurrentAgent(agentData);
+    await loadConversation(conversationId);
+    
+    // Get the last user message (the forwarded one)
+    const { data: lastMessage } = await supabase
+      .from("agent_messages")
+      .select("content")
+      .eq("conversation_id", conversationId)
+      .eq("role", "user")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (!lastMessage || !session?.access_token) return;
+    
+    // Create placeholder for assistant response
+    const assistantId = crypto.randomUUID();
+    setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+    setIsStreaming(true);
+    
+    // Start SSE stream for automatic agent response
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            message: lastMessage.content,
+            conversationId,
+            agentSlug: agentData.slug,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to get response");
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+
+      if (!reader) throw new Error("No reader");
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(":")) continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+              accumulatedText += parsed.delta.text;
+              
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: accumulatedText } : m
+                )
+              );
+            }
+          } catch (e) {
+            console.error("Parse error:", e);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error("Error during forward response:", error);
+      if (!isMobile) {
+        toast({
+          title: "Errore",
+          description: "Errore durante la risposta dell'agente",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      setIsStreaming(false);
     }
   };
 
