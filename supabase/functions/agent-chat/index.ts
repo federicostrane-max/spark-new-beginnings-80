@@ -328,15 +328,18 @@ Deno.serve(async (req) => {
             }
 
             // Continue conversation with tool results
+            // Costruisci il messaggio assistant solo se ha contenuto
+            const assistantContent = [
+              ...(fullResponse ? [{ type: 'text', text: fullResponse }] : []),
+              ...toolCalls
+            ];
+
             const followUpMessages = [
               ...anthropicMessages,
-              {
+              ...(assistantContent.length > 0 ? [{
                 role: 'assistant',
-                content: [
-                  ...(fullResponse ? [{ type: 'text', text: fullResponse }] : []),
-                  ...toolCalls
-                ]
-              },
+                content: assistantContent
+              }] : []),
               {
                 role: 'user',
                 content: toolResults
