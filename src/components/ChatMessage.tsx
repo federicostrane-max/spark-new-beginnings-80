@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Copy, Check, Play, Pause, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ interface ChatMessageProps {
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
+  onLongPress?: () => void;
   forceExpanded?: boolean;
 }
 
@@ -25,12 +26,15 @@ export const ChatMessage = ({
   isSelected = false,
   selectionMode = false,
   onToggleSelection,
+  onLongPress,
   forceExpanded
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [hasLocalOverride, setHasLocalOverride] = useState(false);
   const { currentMessageId, status, playMessage, pause } = useTTS();
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const [isLongPressing, setIsLongPressing] = useState(false);
 
   useEffect(() => {
     if (forceExpanded !== undefined) {
@@ -52,6 +56,30 @@ export const ChatMessage = ({
     }
   };
 
+  const handleLongPressStart = () => {
+    if (selectionMode) return;
+    
+    setIsLongPressing(true);
+    longPressTimer.current = setTimeout(() => {
+      if (onLongPress) {
+        onLongPress();
+        // Vibrazione per feedback tattile (se disponibile)
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
+      }
+      setIsLongPressing(false);
+    }, 500);
+  };
+
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    setIsLongPressing(false);
+  };
+
   const isUser = role === "user";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   const shouldBeCollapsed = hasLocalOverride 
@@ -63,6 +91,12 @@ export const ChatMessage = ({
     <div 
       className="mb-4 group relative"
       onClick={selectionMode ? onToggleSelection : undefined}
+      onMouseDown={!selectionMode ? handleLongPressStart : undefined}
+      onMouseUp={handleLongPressEnd}
+      onMouseLeave={handleLongPressEnd}
+      onTouchStart={!selectionMode ? handleLongPressStart : undefined}
+      onTouchEnd={handleLongPressEnd}
+      onTouchCancel={handleLongPressEnd}
     >
       {selectionMode && (
         <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
@@ -87,7 +121,8 @@ export const ChatMessage = ({
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
-          isSelected && "ring-2 ring-primary"
+          isSelected && "ring-2 ring-primary",
+          isLongPressing && "scale-95 opacity-80"
         )}
       >
         {isUser ? (

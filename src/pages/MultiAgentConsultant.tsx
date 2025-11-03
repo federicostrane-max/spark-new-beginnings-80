@@ -283,9 +283,13 @@ export default function MultiAgentConsultant() {
     setSelectedMessages(newSelection);
   };
 
-  const handleStartSelection = () => {
+  const handleStartSelection = (messageId?: string) => {
     setSelectionMode(true);
-    setSelectedMessages(new Set());
+    if (messageId) {
+      setSelectedMessages(new Set([messageId]));
+    } else {
+      setSelectedMessages(new Set());
+    }
   };
 
   const handleCancelSelection = () => {
@@ -513,6 +517,7 @@ export default function MultiAgentConsultant() {
                         selectionMode={selectionMode}
                         isSelected={selectedMessages.has(msg.id)}
                         onToggleSelection={() => toggleMessageSelection(msg.id)}
+                        onLongPress={() => handleStartSelection(msg.id)}
                         forceExpanded={allMessagesExpanded}
                       />
                     ))
