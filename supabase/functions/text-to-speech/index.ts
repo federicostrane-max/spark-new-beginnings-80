@@ -18,6 +18,15 @@ serve(async (req) => {
       throw new Error('No text provided');
     }
 
+    // OpenAI TTS has a 4096 character limit
+    const MAX_TTS_LENGTH = 4000; // Leave some buffer
+    let processedText = text;
+    
+    if (text.length > MAX_TTS_LENGTH) {
+      console.log(`Text too long (${text.length} chars), truncating to ${MAX_TTS_LENGTH}`);
+      processedText = text.substring(0, MAX_TTS_LENGTH) + '...';
+    }
+
     const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
     if (!openAIApiKey) {
       throw new Error('OPENAI_API_KEY not configured');
@@ -27,7 +36,7 @@ serve(async (req) => {
     // Default to 'alloy' if not specified
     const voiceName = voice || 'alloy';
     
-    console.log('Generating speech with OpenAI voice:', voiceName);
+    console.log('Generating speech with OpenAI voice:', voiceName, `(${processedText.length} chars)`);
 
     const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
@@ -37,7 +46,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'tts-1',
-        input: text,
+        input: processedText,
         voice: voiceName,
         response_format: 'mp3',
       }),
