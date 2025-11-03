@@ -231,9 +231,32 @@ Deno.serve(async (req) => {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
+        let streamClosed = false;
         
         const sendSSE = (data: string) => {
-          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          if (streamClosed) {
+            console.warn('⚠️ Attempted to send SSE on closed stream, ignoring');
+            return;
+          }
+          try {
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          } catch (error) {
+            console.error('Error enqueueing SSE data:', error);
+            streamClosed = true;
+          }
+        };
+        
+        const closeStream = () => {
+          if (streamClosed) {
+            console.warn('⚠️ Stream already closed, ignoring duplicate close');
+            return;
+          }
+          streamClosed = true;
+          try {
+            controller.close();
+          } catch (error) {
+            console.error('Error closing stream:', error);
+          }
         };
 
         let placeholderMsg: any = null; // Declare outside try block for catch access
@@ -513,7 +536,7 @@ ${agent.system_prompt}`;
               }
               
               sendSSE(JSON.stringify({ type: 'done' }));
-              controller.close();
+              closeStream();
               return;
             }
 
@@ -655,7 +678,7 @@ ${agent.system_prompt}`;
             conversationId: conversation.id 
           }));
           
-          controller.close();
+          closeStream();
         } catch (error) {
           console.error('Stream error:', error);
           
@@ -672,7 +695,7 @@ ${agent.system_prompt}`;
           
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
           sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
-          controller.close();
+          closeStream();
         }
       }
     });
