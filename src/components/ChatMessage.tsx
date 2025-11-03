@@ -62,7 +62,7 @@ export const ChatMessage = ({
   return (
     <div 
       className={cn(
-        "mb-4 flex w-full group relative",
+        "mb-4 flex group relative",
         selectionMode ? "justify-start" : (isUser ? "justify-end" : "justify-start")
       )}
       onClick={selectionMode ? onToggleSelection : undefined}
