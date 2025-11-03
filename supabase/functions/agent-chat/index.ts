@@ -684,17 +684,22 @@ ${agent.system_prompt}`;
           
           // Delete the placeholder message if stream failed
           try {
-            await supabase
-              .from('agent_messages')
-              .delete()
-              .eq('id', placeholderMsg.id);
-            console.log('Deleted placeholder message after stream failure');
+            if (placeholderMsg?.id) {
+              await supabase
+                .from('agent_messages')
+                .delete()
+                .eq('id', placeholderMsg.id);
+              console.log('Deleted placeholder message after stream failure');
+            }
           } catch (deleteError) {
             console.error('Error deleting placeholder:', deleteError);
           }
           
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
+          // Only send error if stream is not closed yet
+          if (!streamClosed) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
+          }
           closeStream();
         }
       }
