@@ -42,7 +42,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ text, voice: 'alloy' }),
+        body: JSON.stringify({ text, voice: '9BWtsMINqrJLrRacOk9x' }), // Aria voice
       }
     );
 
