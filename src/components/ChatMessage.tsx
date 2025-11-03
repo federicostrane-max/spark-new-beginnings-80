@@ -14,6 +14,7 @@ interface ChatMessageProps {
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
+  globalExpanded?: boolean;
 }
 
 export const ChatMessage = ({ 
@@ -23,11 +24,15 @@ export const ChatMessage = ({
   isStreaming, 
   isSelected = false,
   selectionMode = false,
-  onToggleSelection 
+  onToggleSelection,
+  globalExpanded = true
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [localExpanded, setLocalExpanded] = useState(true);
   const { currentMessageId, status, playMessage, pause } = useTTS();
+
+  // Use globalExpanded as the source of truth, but allow local override
+  const isExpanded = globalExpanded && localExpanded;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -118,7 +123,7 @@ export const ChatMessage = ({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setIsExpanded(!isExpanded)}
+                onClick={() => setLocalExpanded(!localExpanded)}
                 className="h-8 px-2"
               >
                 {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
