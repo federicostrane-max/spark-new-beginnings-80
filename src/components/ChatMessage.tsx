@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Play, Pause, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Play, Pause } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import ReactMarkdown from 'react-markdown';
@@ -14,7 +14,6 @@ interface ChatMessageProps {
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
-  globalExpanded?: boolean;
 }
 
 export const ChatMessage = ({ 
@@ -24,15 +23,10 @@ export const ChatMessage = ({
   isStreaming, 
   isSelected = false,
   selectionMode = false,
-  onToggleSelection,
-  globalExpanded = true
+  onToggleSelection
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
-  const [localExpanded, setLocalExpanded] = useState(true);
   const { currentMessageId, status, playMessage, pause } = useTTS();
-
-  // Use globalExpanded as the source of truth, but allow local override
-  const isExpanded = globalExpanded && localExpanded;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -49,7 +43,6 @@ export const ChatMessage = ({
   };
 
   const isUser = role === "user";
-  const isLong = content.length > 500;
   const isTTSPlaying = currentMessageId === id && status === 'playing';
 
   return (
@@ -77,13 +70,12 @@ export const ChatMessage = ({
       <div
         className={cn(
           "rounded-2xl px-4 py-3 shadow-sm transition-all",
-          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[85%] md:max-w-[75%]",
+          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[95%] md:max-w-[75%]",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
           isSelected && "ring-2 ring-primary"
         )}
-        style={{ wordBreak: 'break-word', overflowWrap: 'break-word', minWidth: 0 }}
       >
         {isUser ? (
           <div className="whitespace-pre-wrap">
@@ -118,17 +110,6 @@ export const ChatMessage = ({
             >
               {isTTSPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
             </Button>
-
-            {isLong && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setLocalExpanded(!localExpanded)}
-                className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
-              >
-                {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              </Button>
-            )}
           </div>
         )}
       </div>
