@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
               'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
+              model: 'claude-sonnet-4-5',
               max_tokens: 4096,
               system: agent.system_prompt,
               messages: anthropicMessages,
@@ -358,11 +358,13 @@ Deno.serve(async (req) => {
 
           // Handle tool calls (agent consultations)
           if (toolCalls.length > 0) {
+            console.log(`🔧 Tool calls detected: ${toolCalls.length}`);
             sendSSE(JSON.stringify({ type: 'thinking', content: 'Consulting with other experts...' }));
 
             const toolResults = [];
             for (const toolCall of toolCalls) {
               const { question, consulted_agent_slug } = toolCall.input;
+              console.log(`  - Consulting ${consulted_agent_slug} with question: ${question.slice(0, 100)}`);
               
               const { data: consultedAgent } = await supabase
                 .from('agents')
@@ -379,17 +381,26 @@ Deno.serve(async (req) => {
                     'anthropic-version': '2023-06-01'
                   },
                   body: JSON.stringify({
-                    model: 'claude-sonnet-4-20250514',
+                    model: 'claude-sonnet-4-5',
                     max_tokens: 2048,
                     system: consultedAgent.system_prompt,
                     messages: [{ role: 'user', content: question }]
                   })
                 });
 
+                if (!consultResponse.ok) {
+                  console.error(`❌ Failed to consult ${consulted_agent_slug}: ${consultResponse.status}`);
+                  const errorText = await consultResponse.text();
+                  console.error('Error details:', errorText);
+                  continue; // Skip this tool result
+                }
+
                 const consultData = await consultResponse.json();
                 const answer = consultData.content?.[0]?.type === 'text' 
                   ? consultData.content[0].text 
                   : '';
+                
+                console.log(`✅ Answer from ${consultedAgent.name}: ${answer ? answer.slice(0, 150) + '...' : 'EMPTY'}`);
 
                 await supabase
                   .from('inter_agent_messages')
@@ -417,9 +428,24 @@ Deno.serve(async (req) => {
             }
 
             // Validate tool results before proceeding
+            console.log(`📊 Tool results: ${toolResults.length} of ${toolCalls.length} consultations succeeded`);
+            
             if (toolResults.length === 0) {
-              console.warn('⚠️ No valid tool results collected, skipping follow-up');
-              sendSSE(JSON.stringify({ type: 'error', message: 'No valid consultation results' }));
+              console.warn('⚠️ No valid tool results collected, responding without consultations');
+              
+              // If agent has a partial response, save it and complete
+              if (fullResponse && fullResponse.trim()) {
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+                
+                sendSSE(JSON.stringify({ type: 'content', text: '\n\n[Note: Unable to consult other agents]' }));
+              } else {
+                // Otherwise, send error
+                sendSSE(JSON.stringify({ type: 'error', message: 'Unable to complete agent consultations' }));
+              }
+              
               sendSSE(JSON.stringify({ type: 'done' }));
               controller.close();
               return;
