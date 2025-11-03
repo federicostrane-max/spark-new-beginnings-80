@@ -195,10 +195,12 @@ Deno.serve(async (req) => {
           let toolCalls: ToolUseBlock[] = [];
           let lastUpdateTime = Date.now();
           
-          const anthropicMessages = messages.map(m => ({
-            role: m.role,
-            content: m.content
-          }));
+          const anthropicMessages = messages
+            .filter(m => m.content && m.content.trim() !== '')
+            .map(m => ({
+              role: m.role,
+              content: m.content
+            }));
 
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
