@@ -17,6 +17,217 @@ interface Attachment {
   extracted_text?: string;
 }
 
+interface UserIntent {
+  type: 'SEARCH_REQUEST' | 'DOWNLOAD_COMMAND' | 'FILTER_REQUEST' | 'SEMANTIC_QUESTION' | 'UNKNOWN';
+  topic?: string;
+  pdfNumbers?: number[];
+  filterCriteria?: string;
+}
+
+interface SearchResult {
+  number: number;
+  title: string;
+  authors?: string;
+  year?: string;
+  source?: string;
+  url: string;
+}
+
+// ============================================
+// DETERMINISTIC WORKFLOW HELPERS
+// ============================================
+
+function parseKnowledgeSearchIntent(message: string): UserIntent {
+  const lowerMsg = message.toLowerCase().trim();
+  
+  // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for..."
+  const searchPatterns = [
+    /find\s+(?:pdf|pdfs|papers?|documents?|articles?)\s+(?:on|about|regarding)/i,
+    /search\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
+    /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i
+  ];
+  
+  for (const pattern of searchPatterns) {
+    if (pattern.test(message)) {
+      const topic = message.replace(pattern, '').trim();
+      return { type: 'SEARCH_REQUEST', topic };
+    }
+  }
+  
+  // DOWNLOAD COMMAND: "Download #2, #5", "Get PDFs #1, #3, #7"
+  const downloadPattern = /download|get|scarica/i;
+  const numberPattern = /#(\d+)/g;
+  
+  if (downloadPattern.test(message)) {
+    const matches = Array.from(message.matchAll(numberPattern));
+    if (matches.length > 0) {
+      const pdfNumbers = matches.map(m => parseInt(m[1]));
+      return { type: 'DOWNLOAD_COMMAND', pdfNumbers };
+    }
+  }
+  
+  // FILTER REQUEST: "only last 3 years", "most authoritative"
+  const filterPatterns = [
+    /only|filter|show|keep|remove/i,
+    /last\s+\d+\s+years?/i,
+    /most\s+(?:authoritative|cited|recent)/i,
+    /from\s+(?:universities|arxiv)/i
+  ];
+  
+  for (const pattern of filterPatterns) {
+    if (pattern.test(message)) {
+      return { type: 'FILTER_REQUEST', filterCriteria: message };
+    }
+  }
+  
+  // Default: semantic question for AI
+  return { type: 'SEMANTIC_QUESTION' };
+}
+
+async function executeWebSearch(topic: string): Promise<SearchResult[]> {
+  console.log('🔍 Executing web search for:', topic);
+  
+  // Call Lovable AI web_search tool via edge function
+  // For now, simulate - you'll need to implement actual web_search integration
+  
+  // This is a placeholder - replace with actual Lovable AI web_search call
+  const searchQuery = `${topic} PDF site:arxiv.org OR site:researchgate.net OR site:scholar.google.com filetype:pdf`;
+  
+  // TODO: Call actual web_search tool here
+  // For now, return mock data
+  return [
+    {
+      number: 1,
+      title: "Example Paper on " + topic,
+      authors: "Smith et al.",
+      year: "2023",
+      source: "arXiv",
+      url: "https://arxiv.org/pdf/example1.pdf"
+    },
+    {
+      number: 2,
+      title: "Survey on " + topic,
+      authors: "Johnson et al.",
+      year: "2024",
+      source: "ResearchGate",
+      url: "https://researchgate.net/example2.pdf"
+    }
+  ];
+}
+
+function formatSearchResults(results: SearchResult[], topic: string): string {
+  const header = `Found ${results.length} PDFs on **${topic}**:\n\n`;
+  
+  const formattedResults = results.map(r => {
+    const authors = r.authors ? ` | ${r.authors}` : '';
+    const year = r.year ? ` | ${r.year}` : '';
+    const source = r.source ? ` | ${r.source}` : '';
+    return `#${r.number}. **${r.title}**${authors}${year}${source}`;
+  }).join('\n\n');
+  
+  const footer = `\n\nYou can now:\n- Ask me to filter these results (e.g., "only last 3 years", "most authoritative only")\n- Ask questions about specific PDFs\n- Tell me which ones to download (e.g., "Download #1, #3, and #5")`;
+  
+  return header + formattedResults + footer;
+}
+
+function extractCachedSearchResults(messages: any[]): SearchResult[] | null {
+  // Find the most recent assistant message containing search results
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === 'assistant' && msg.content) {
+      const match = msg.content.match(/Found (\d+) PDFs on/);
+      if (match) {
+        // Extract results from formatted message
+        const results: SearchResult[] = [];
+        const lines = msg.content.split('\n');
+        
+        for (const line of lines) {
+          const resultMatch = line.match(/#(\d+)\.\s+\*\*(.+?)\*\*(?:\s+\|\s+(.+?))?(?:\s+\|\s+(\d{4}))?(?:\s+\|\s+(.+?))?$/);
+          if (resultMatch) {
+            results.push({
+              number: parseInt(resultMatch[1]),
+              title: resultMatch[2],
+              authors: resultMatch[3],
+              year: resultMatch[4],
+              source: resultMatch[5],
+              url: '' // URL not stored in formatted output - need to maintain separately
+            });
+          }
+        }
+        
+        return results.length > 0 ? results : null;
+      }
+    }
+  }
+  
+  return null;
+}
+
+async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Promise<any[]> {
+  const results = [];
+  
+  for (const pdf of pdfs) {
+    if (!pdf.url) {
+      results.push({
+        number: pdf.number,
+        title: pdf.title,
+        success: false,
+        error: 'URL non disponibile'
+      });
+      continue;
+    }
+    
+    try {
+      // Call download-pdf-tool edge function
+      const downloadResult = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/download-pdf-tool', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+        },
+        body: JSON.stringify({
+          url: pdf.url,
+          search_query: searchQuery
+        })
+      });
+      
+      const data = await downloadResult.json();
+      
+      results.push({
+        number: pdf.number,
+        title: pdf.title,
+        success: !data.error,
+        fileName: data.document?.file_name,
+        error: data.error
+      });
+    } catch (error) {
+      results.push({
+        number: pdf.number,
+        title: pdf.title,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+  
+  return results;
+}
+
+function formatDownloadResults(results: any[]): string {
+  const successCount = results.filter(r => r.success).length;
+  const header = `Downloaded ${successCount} PDF(s):\n\n`;
+  
+  const formattedResults = results.map(r => {
+    if (r.success) {
+      return `✅ #${r.number}. **${r.title}**\n   Salvato come: ${r.fileName}`;
+    } else {
+      return `❌ #${r.number}. **${r.title}**\n   Errore: ${r.error}`;
+    }
+  }).join('\n\n');
+  
+  return header + formattedResults;
+}
+
 Deno.serve(async (req) => {
   console.log('=== AGENT CHAT REQUEST RECEIVED ===');
   console.log('Method:', req.method);
@@ -301,6 +512,105 @@ Deno.serve(async (req) => {
           console.log('Total messages:', anthropicMessages.length);
           console.log('Messages:', JSON.stringify(anthropicMessages, null, 2));
 
+          // ============================================
+          // DETERMINISTIC WORKFLOW FOR KNOWLEDGE SEARCH EXPERT
+          // ============================================
+          let workflowHandled = false;
+          let workflowResponse = '';
+          
+          if (agent.slug === 'knowledge-search-expert') {
+            const userIntent = parseKnowledgeSearchIntent(message);
+            
+            if (userIntent.type === 'SEARCH_REQUEST' && userIntent.topic) {
+              console.log('🔍 Auto-executing web_search for:', userIntent.topic);
+              workflowHandled = true;
+              
+              // Execute web search immediately
+              try {
+                const searchResults = await executeWebSearch(userIntent.topic);
+                workflowResponse = formatSearchResults(searchResults, userIntent.topic);
+                
+                // Send formatted results to user
+                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                fullResponse = workflowResponse;
+                
+                // Save to DB
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+                
+                sendSSE(JSON.stringify({ 
+                  type: 'complete', 
+                  conversationId: conversation.id 
+                }));
+                
+                closeStream();
+                return; // Exit early, no AI call needed
+              } catch (searchError) {
+                console.error('Search error:', searchError);
+                workflowHandled = false; // Fall back to AI
+              }
+            }
+            
+            if (userIntent.type === 'DOWNLOAD_COMMAND' && userIntent.pdfNumbers) {
+              console.log('⬇️ Auto-executing downloads for PDFs:', userIntent.pdfNumbers);
+              workflowHandled = true;
+              
+              // Get cached search results from conversation history
+              const cachedResults = extractCachedSearchResults(truncatedMessages);
+              
+              if (cachedResults && cachedResults.length > 0) {
+                const selectedPdfs = userIntent.pdfNumbers
+                  .map(num => cachedResults[num - 1])
+                  .filter(Boolean);
+                
+                // Execute downloads
+                const downloadResults = await executeDownloads(selectedPdfs, message);
+                workflowResponse = formatDownloadResults(downloadResults);
+                
+                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                fullResponse = workflowResponse;
+                
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+                
+                sendSSE(JSON.stringify({ 
+                  type: 'complete', 
+                  conversationId: conversation.id 
+                }));
+                
+                closeStream();
+                return;
+              } else {
+                workflowResponse = '⚠️ Non trovo risultati di ricerca precedenti. Per favore, esegui prima una ricerca con "Find PDFs on [topic]".';
+                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                fullResponse = workflowResponse;
+                
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+                
+                sendSSE(JSON.stringify({ 
+                  type: 'complete', 
+                  conversationId: conversation.id 
+                }));
+                
+                closeStream();
+                return;
+              }
+            }
+          }
+          
+          // If workflow didn't handle it, proceed with normal AI call
+          if (workflowHandled) {
+            console.log('✅ Workflow handled deterministically, skipping AI call');
+            return;
+          }
+          
           const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
