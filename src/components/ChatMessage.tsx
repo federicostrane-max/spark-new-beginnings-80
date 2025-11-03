@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Play, Pause } from "lucide-react";
+import { Copy, Check, Play, Pause, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import ReactMarkdown from 'react-markdown';
@@ -14,6 +14,7 @@ interface ChatMessageProps {
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
+  forceExpanded?: boolean;
 }
 
 export const ChatMessage = ({ 
@@ -23,9 +24,11 @@ export const ChatMessage = ({
   isStreaming, 
   isSelected = false,
   selectionMode = false,
-  onToggleSelection
+  onToggleSelection,
+  forceExpanded
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { currentMessageId, status, playMessage, pause } = useTTS();
 
   const handleCopy = async () => {
@@ -44,6 +47,8 @@ export const ChatMessage = ({
 
   const isUser = role === "user";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
+  const shouldBeCollapsed = forceExpanded === false || (forceExpanded === undefined && isCollapsed);
+  const previewLength = 150;
 
   return (
     <div 
@@ -79,13 +84,17 @@ export const ChatMessage = ({
       >
         {isUser ? (
           <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
-            {content}
+            {shouldBeCollapsed && content.length > previewLength
+              ? content.substring(0, previewLength) + "..."
+              : content}
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
           <div className="break-words [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-all [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {content}
+              {shouldBeCollapsed && content.length > previewLength
+                ? content.substring(0, previewLength) + "..."
+                : content}
             </ReactMarkdown>
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
@@ -93,6 +102,16 @@ export const ChatMessage = ({
 
         {!isStreaming && content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
+            {content.length > previewLength && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
+              >
+                {shouldBeCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

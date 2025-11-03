@@ -9,7 +9,7 @@ import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Menu, Forward, X, Edit } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,7 @@ export default function MultiAgentConsultant() {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const { toast } = useToast();
@@ -404,17 +405,37 @@ export default function MultiAgentConsultant() {
                          <Edit className="h-4 w-4" />
                          <span className="hidden md:inline">Modifica</span>
                        </Button>
-                       {messages.length > 0 && (
-                         <Button
-                           variant="ghost"
-                           size="sm"
-                           onClick={handleStartSelection}
-                           className="gap-2"
-                         >
-                           <Forward className="h-4 w-4" />
-                           <span className="hidden md:inline">Inoltra</span>
-                         </Button>
-                       )}
+                        {messages.length > 0 && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setAllMessagesExpanded(false)}
+                              className="gap-2"
+                              title="Riduci tutti"
+                            >
+                              <ChevronsDown className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setAllMessagesExpanded(true)}
+                              className="gap-2"
+                              title="Espandi tutti"
+                            >
+                              <ChevronsUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleStartSelection}
+                              className="gap-2"
+                            >
+                              <Forward className="h-4 w-4" />
+                              <span className="hidden md:inline">Inoltra</span>
+                            </Button>
+                          </>
+                        )}
                      </div>
                   </>
                 ) : (
@@ -469,6 +490,7 @@ export default function MultiAgentConsultant() {
                         selectionMode={selectionMode}
                         isSelected={selectedMessages.has(msg.id)}
                         onToggleSelection={() => toggleMessageSelection(msg.id)}
+                        forceExpanded={allMessagesExpanded}
                       />
                     ))
                   )}
