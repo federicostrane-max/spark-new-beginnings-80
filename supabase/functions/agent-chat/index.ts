@@ -168,6 +168,31 @@ Deno.serve(async (req) => {
 
     console.log(`📊 Messages: ${messages?.length || 0} → ${cleanedMessages.length} after cleanup`);
 
+    // Truncate conversation history to prevent context overflow
+    // Keep max 10 messages or 50,000 total characters (whichever is smaller)
+    const MAX_MESSAGES = 10;
+    const MAX_TOTAL_CHARS = 50000;
+    
+    let truncatedMessages = cleanedMessages;
+    
+    // First, limit by message count (keep most recent)
+    if (truncatedMessages.length > MAX_MESSAGES) {
+      truncatedMessages = truncatedMessages.slice(-MAX_MESSAGES);
+      console.log(`✂️ Truncated to last ${MAX_MESSAGES} messages`);
+    }
+    
+    // Then, check total character count
+    let totalChars = truncatedMessages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+    
+    if (totalChars > MAX_TOTAL_CHARS) {
+      // Remove oldest messages until under limit
+      while (totalChars > MAX_TOTAL_CHARS && truncatedMessages.length > 2) {
+        const removed = truncatedMessages.shift();
+        totalChars -= (removed?.content?.length || 0);
+      }
+      console.log(`✂️ Truncated to ${totalChars} chars across ${truncatedMessages.length} messages`);
+    }
+
     // Get other agents for tool calling
     const { data: otherAgents } = await supabase
       .from('agents')
@@ -259,8 +284,8 @@ Deno.serve(async (req) => {
           let toolCalls: ToolUseBlock[] = [];
           let lastUpdateTime = Date.now();
           
-          // Use cleanedMessages instead of messages
-          const anthropicMessages = cleanedMessages
+          // Use truncatedMessages instead of cleanedMessages
+          const anthropicMessages = truncatedMessages
             .filter(m => {
               // Exclude the placeholder we just created
               if (m.id === placeholderMsg.id) return false;
