@@ -193,9 +193,16 @@ export const ChatMessage = ({
                 e.stopPropagation();
                 handleTTS();
               }}
+              disabled={status === 'loading'}
               className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
             >
-              {isTTSPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+              {status === 'loading' && currentMessageId === id ? (
+                <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : isTTSPlaying ? (
+                <Pause className="h-3 w-3" />
+              ) : (
+                <Play className="h-3 w-3" />
+              )}
             </Button>
           </div>
         )}

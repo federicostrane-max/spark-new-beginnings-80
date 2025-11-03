@@ -20,6 +20,12 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
 
   const playMessage = useCallback(async (messageId: string, text: string) => {
+    // Prevent multiple simultaneous requests
+    if (status === 'loading') {
+      console.log('Already loading, ignoring request');
+      return;
+    }
+
     // Stop current playback if any
     if (audioElement) {
       audioElement.pause();
@@ -47,6 +53,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         };
         audio.onerror = () => {
           setStatus('error');
+          setCurrentMessageId(null);
         };
 
         setAudioElement(audio);
@@ -55,8 +62,9 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
     } catch (error) {
       console.error('TTS error:', error);
       setStatus('error');
+      setCurrentMessageId(null);
     }
-  }, [audioElement]);
+  }, [audioElement, status]);
 
   const pause = useCallback(() => {
     if (audioElement) {
