@@ -358,7 +358,19 @@ Deno.serve(async (req) => {
                 role: 'user',
                 content: toolResults
               }
-            ];
+            ].filter(m => {
+              // Double-check: exclude any messages with empty content
+              if (m.role === 'user' || m.role === 'assistant') {
+                if (typeof m.content === 'string') {
+                  return m.content && m.content.trim() !== '';
+                }
+                // Per content array (tool calls), controlla che non sia vuoto
+                if (Array.isArray(m.content)) {
+                  return m.content.length > 0;
+                }
+              }
+              return true;
+            });
 
             const followUpResponse = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
