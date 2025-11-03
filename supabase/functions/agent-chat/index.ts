@@ -272,6 +272,7 @@ Deno.serve(async (req) => {
           if (toolCalls.length > 0) {
             sendSSE(JSON.stringify({ type: 'thinking', content: 'Consulting with other experts...' }));
 
+            const toolResults = [];
             for (const toolCall of toolCalls) {
               const { question, consulted_agent_slug } = toolCall.input;
               
@@ -312,8 +313,92 @@ Deno.serve(async (req) => {
                     answer
                   });
 
-                fullResponse += `\n\n[Consulted ${consultedAgent.name}]\n${answer}`;
                 sendSSE(JSON.stringify({ type: 'consultation', agent: consultedAgent.name, answer }));
+                
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolCall.id,
+                  content: answer
+                });
+              }
+            }
+
+            // Continue conversation with tool results
+            const followUpMessages = [
+              ...anthropicMessages,
+              {
+                role: 'assistant',
+                content: [
+                  ...(fullResponse ? [{ type: 'text', text: fullResponse }] : []),
+                  ...toolCalls
+                ]
+              },
+              {
+                role: 'user',
+                content: toolResults
+              }
+            ];
+
+            const followUpResponse = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-5',
+                max_tokens: 4096,
+                system: agent.system_prompt,
+                messages: followUpMessages,
+                stream: true
+              })
+            });
+
+            if (!followUpResponse.ok) {
+              throw new Error(`Anthropic API error: ${followUpResponse.status}`);
+            }
+
+            const followUpReader = followUpResponse.body?.getReader();
+            if (!followUpReader) throw new Error('No response body');
+
+            let followUpBuffer = '';
+            
+            while (true) {
+              const { done, value } = await followUpReader.read();
+              if (done) break;
+
+              followUpBuffer += decoder.decode(value, { stream: true });
+              const lines = followUpBuffer.split('\n');
+              followUpBuffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (!line.trim() || line.startsWith(':')) continue;
+                if (!line.startsWith('data: ')) continue;
+
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  
+                  if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                    const text = parsed.delta.text;
+                    fullResponse += text;
+                    sendSSE(JSON.stringify({ type: 'content', text }));
+
+                    const now = Date.now();
+                    if (now - lastUpdateTime > 500) {
+                      await supabase
+                        .from('agent_messages')
+                        .update({ content: fullResponse })
+                        .eq('id', placeholderMsg.id);
+                      lastUpdateTime = now;
+                    }
+                  }
+                } catch (e) {
+                  console.error('Parse error:', e);
+                }
               }
             }
           }
