@@ -149,7 +149,8 @@ export const ChatMessage = ({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setHasLocalOverride(true);
                   setIsCollapsed(!isCollapsed);
                 }}
@@ -161,7 +162,10 @@ export const ChatMessage = ({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleCopy}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCopy();
+              }}
               className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
             >
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -170,7 +174,10 @@ export const ChatMessage = ({
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleTTS}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTTS();
+              }}
               className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
             >
               {isTTSPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
