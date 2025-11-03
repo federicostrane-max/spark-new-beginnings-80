@@ -10,16 +10,6 @@ interface Message {
   content: string;
 }
 
-interface ToolUseBlock {
-  type: 'tool_use';
-  id: string;
-  name: string;
-  input: {
-    question: string;
-    consulted_agent_slug: string;
-  };
-}
-
 interface Attachment {
   url: string;
   name: string;
@@ -195,33 +185,6 @@ Deno.serve(async (req) => {
     
     console.log(`📊 Final context: ${truncatedMessages.length} messages, ${totalChars} total chars`);
 
-    // Get other agents for tool calling
-    const { data: otherAgents } = await supabase
-      .from('agents')
-      .select('slug, name, description')
-      .eq('active', true)
-      .neq('id', agent.id);
-
-    const tools = otherAgents?.map(a => ({
-      name: `consult_${a.slug.replace(/-/g, '_')}`,
-      description: `Consult with ${a.name}: ${a.description}`,
-      input_schema: {
-        type: "object",
-        properties: {
-          question: {
-            type: "string",
-            description: "The specific question to ask this expert agent"
-          },
-          consulted_agent_slug: {
-            type: "string",
-            const: a.slug,
-            description: "The slug of the agent being consulted"
-          }
-        },
-        required: ["question", "consulted_agent_slug"]
-      }
-    })) || [];
-
     const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
     if (!ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY not configured');
@@ -306,7 +269,6 @@ Deno.serve(async (req) => {
           }));
 
           let fullResponse = '';
-          let toolCalls: ToolUseBlock[] = [];
           let lastUpdateTime = Date.now();
           
           // Use truncatedMessages instead of cleanedMessages
@@ -361,7 +323,6 @@ ${agent.system_prompt}`;
               temperature: 0.7,
               system: enhancedSystemPrompt,
               messages: anthropicMessages,
-              tools: tools.length > 0 ? tools : undefined,
               stream: true
             })
           });
@@ -421,8 +382,6 @@ ${agent.system_prompt}`;
                         .eq('id', placeholderMsg.id);
                       lastUpdateTime = now;
                     }
-                  } else if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
-                    toolCalls.push(parsed.content_block);
                   }
                 } catch (e) {
                   console.error('Parse error:', e);
@@ -441,230 +400,6 @@ ${agent.system_prompt}`;
                 .eq('id', placeholderMsg.id);
             }
             throw error;
-          }
-
-          console.log(`🎯 Total tokens received: ${fullResponse.length} chars, ${toolCalls.length} tool calls`);
-
-          // Handle tool calls (agent consultations)
-          if (toolCalls.length > 0) {
-            console.log(`🔧 Tool calls detected: ${toolCalls.length}`);
-            sendSSE(JSON.stringify({ type: 'thinking', content: 'Consulting with other experts...' }));
-
-            const toolResults = [];
-            for (const toolCall of toolCalls) {
-              const { question, consulted_agent_slug } = toolCall.input;
-              console.log(`  - Consulting ${consulted_agent_slug} with question: ${question.slice(0, 100)}`);
-              
-              const { data: consultedAgent } = await supabase
-                .from('agents')
-                .select('*')
-                .eq('slug', consulted_agent_slug)
-                .single();
-
-              if (consultedAgent) {
-                const consultResponse = await fetch('https://api.anthropic.com/v1/messages', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': ANTHROPIC_API_KEY,
-                    'anthropic-version': '2023-06-01'
-                  },
-                  body: JSON.stringify({
-                    model: 'claude-sonnet-4-5',
-                    max_tokens: 8192,
-                    system: consultedAgent.system_prompt,
-                    messages: [{ role: 'user', content: question }]
-                  })
-                });
-
-                if (!consultResponse.ok) {
-                  console.error(`❌ Failed to consult ${consulted_agent_slug}: ${consultResponse.status}`);
-                  const errorText = await consultResponse.text();
-                  console.error('Error details:', errorText);
-                  continue; // Skip this tool result
-                }
-
-                const consultData = await consultResponse.json();
-                const answer = consultData.content?.[0]?.type === 'text' 
-                  ? consultData.content[0].text 
-                  : '';
-                
-                console.log(`✅ Answer from ${consultedAgent.name}: ${answer ? answer.slice(0, 150) + '...' : 'EMPTY'}`);
-
-                await supabase
-                  .from('inter_agent_messages')
-                  .insert({
-                    requesting_agent_id: agent.id,
-                    consulted_agent_id: consultedAgent.id,
-                    context_conversation_id: conversation.id,
-                    question,
-                    answer
-                  });
-
-                sendSSE(JSON.stringify({ type: 'consultation', agent: consultedAgent.name, answer }));
-                
-                // Validate answer before adding to toolResults
-                if (answer && answer.trim()) {
-                  toolResults.push({
-                    type: 'tool_result',
-                    tool_use_id: toolCall.id,
-                    content: answer
-                  });
-                } else {
-                  console.warn(`Empty answer from agent ${consultedAgent.name}, skipping tool result`);
-                }
-              }
-            }
-
-            // Validate tool results before proceeding
-            console.log(`📊 Tool results: ${toolResults.length} of ${toolCalls.length} consultations succeeded`);
-            
-            if (toolResults.length === 0) {
-              console.warn('⚠️ No valid tool results collected, responding without consultations');
-              
-              // If agent has a partial response, save it and complete
-              if (fullResponse && fullResponse.trim()) {
-                await supabase
-                  .from('agent_messages')
-                  .update({ content: fullResponse })
-                  .eq('id', placeholderMsg.id);
-                
-                sendSSE(JSON.stringify({ type: 'content', text: '\n\n[Note: Unable to consult other agents]' }));
-              } else {
-                // Otherwise, send error
-                sendSSE(JSON.stringify({ type: 'error', message: 'Unable to complete agent consultations' }));
-              }
-              
-              sendSSE(JSON.stringify({ type: 'done' }));
-              closeStream();
-              return;
-            }
-
-            // Continue conversation with tool results
-            // Costruisci il messaggio assistant solo se ha contenuto
-            const assistantContent = [
-              ...(fullResponse ? [{ type: 'text', text: fullResponse }] : []),
-              ...toolCalls
-            ];
-
-            const followUpMessages = [
-              ...anthropicMessages,
-              ...(assistantContent.length > 0 ? [{
-                role: 'assistant',
-                content: assistantContent
-              }] : []),
-              {
-                role: 'user',
-                content: toolResults
-              }
-            ];
-
-            console.log('🔄 Follow-up to Anthropic with tool results:');
-            console.log('assistantContent:', JSON.stringify(assistantContent, null, 2));
-            console.log('toolResults:', JSON.stringify(toolResults, null, 2));
-            console.log('followUpMessages length:', followUpMessages.length);
-
-            const enhancedSystemPromptFollowUp = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
-- Multiple detailed examples with concrete scenarios
-- In-depth explanations of each point with complete context
-- All relevant background information and nuances
-- Complete breakdowns of complex topics with step-by-step analysis
-- Extended elaborations with practical examples and real-world applications
-- Comprehensive coverage of all aspects of the topic
-
-Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
-
-${agent.system_prompt}`;
-
-            const followUpResponse = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 64000,
-                temperature: 0.7,
-                system: enhancedSystemPromptFollowUp,
-                messages: followUpMessages,
-                stream: true
-              })
-            });
-
-            if (!followUpResponse.ok) {
-              const errorBody = await followUpResponse.text();
-              console.error('Anthropic API error details (follow-up):', followUpResponse.status, errorBody);
-              throw new Error(`Anthropic API error: ${followUpResponse.status} - ${errorBody}`);
-            }
-
-            const followUpReader = followUpResponse.body?.getReader();
-            if (!followUpReader) throw new Error('No response body');
-
-            let followUpBuffer = '';
-            
-            console.log('🔄 Starting follow-up stream from Anthropic...');
-
-            try {
-              while (true) {
-                const { done, value } = await followUpReader.read();
-                if (done) {
-                  console.log(`✅ Follow-up stream ended. Total response length: ${fullResponse.length} chars`);
-                  // Save before breaking
-                  await supabase
-                    .from('agent_messages')
-                    .update({ content: fullResponse })
-                    .eq('id', placeholderMsg.id);
-                  break;
-                }
-
-                followUpBuffer += decoder.decode(value, { stream: true });
-                const lines = followUpBuffer.split('\n');
-                followUpBuffer = lines.pop() || '';
-
-                for (const line of lines) {
-                  if (!line.trim() || line.startsWith(':')) continue;
-                  if (!line.startsWith('data: ')) continue;
-
-                  const data = line.slice(6);
-                  if (data === '[DONE]') continue;
-
-                  try {
-                    const parsed = JSON.parse(data);
-                    
-                    if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                      const text = parsed.delta.text;
-                      fullResponse += text;
-                      sendSSE(JSON.stringify({ type: 'content', text }));
-
-                      const now = Date.now();
-                      if (now - lastUpdateTime > 500) {
-                        await supabase
-                          .from('agent_messages')
-                          .update({ content: fullResponse })
-                          .eq('id', placeholderMsg.id);
-                        lastUpdateTime = now;
-                      }
-                    }
-                  } catch (e) {
-                    console.error('Parse error:', e);
-                  }
-                }
-              }
-              console.log(`📝 Follow-up stream completed successfully. Final length: ${fullResponse.length} chars`);
-            } catch (error) {
-              console.error('❌ Follow-up streaming interrupted:', error);
-              console.error('📊 Partial follow-up response length:', fullResponse.length);
-              // Save whatever we have so far
-              if (fullResponse) {
-                await supabase
-                  .from('agent_messages')
-                  .update({ content: fullResponse })
-                  .eq('id', placeholderMsg.id);
-              }
-              throw error;
-            }
           }
 
           // Final update to DB
