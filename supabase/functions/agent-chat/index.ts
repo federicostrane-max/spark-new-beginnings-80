@@ -382,12 +382,26 @@ Deno.serve(async (req) => {
 
                 sendSSE(JSON.stringify({ type: 'consultation', agent: consultedAgent.name, answer }));
                 
-                toolResults.push({
-                  type: 'tool_result',
-                  tool_use_id: toolCall.id,
-                  content: answer
-                });
+                // Validate answer before adding to toolResults
+                if (answer && answer.trim()) {
+                  toolResults.push({
+                    type: 'tool_result',
+                    tool_use_id: toolCall.id,
+                    content: answer
+                  });
+                } else {
+                  console.warn(`Empty answer from agent ${consultedAgent.name}, skipping tool result`);
+                }
               }
+            }
+
+            // Validate tool results before proceeding
+            if (toolResults.length === 0) {
+              console.warn('⚠️ No valid tool results collected, skipping follow-up');
+              sendSSE(JSON.stringify({ type: 'error', message: 'No valid consultation results' }));
+              sendSSE(JSON.stringify({ type: 'done' }));
+              controller.close();
+              return;
             }
 
             // Continue conversation with tool results
@@ -408,6 +422,11 @@ Deno.serve(async (req) => {
                 content: toolResults
               }
             ];
+
+            console.log('🔄 Follow-up to Anthropic with tool results:');
+            console.log('assistantContent:', JSON.stringify(assistantContent, null, 2));
+            console.log('toolResults:', JSON.stringify(toolResults, null, 2));
+            console.log('followUpMessages length:', followUpMessages.length);
 
             const followUpResponse = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
