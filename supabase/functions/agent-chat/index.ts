@@ -38,6 +38,7 @@ interface SearchResult {
 // ============================================
 
 function parseKnowledgeSearchIntent(message: string): UserIntent {
+  console.log('🧠 [INTENT PARSER] Analyzing message:', message.slice(0, 100));
   const lowerMsg = message.toLowerCase().trim();
   
   // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for..."
@@ -50,6 +51,7 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   for (const pattern of searchPatterns) {
     if (pattern.test(message)) {
       const topic = message.replace(pattern, '').trim();
+      console.log('✅ [INTENT PARSER] Detected SEARCH_REQUEST for topic:', topic);
       return { type: 'SEARCH_REQUEST', topic };
     }
   }
@@ -62,6 +64,7 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
     const matches = Array.from(message.matchAll(numberPattern));
     if (matches.length > 0) {
       const pdfNumbers = matches.map(m => parseInt(m[1]));
+      console.log('✅ [INTENT PARSER] Detected DOWNLOAD_COMMAND for PDFs:', pdfNumbers);
       return { type: 'DOWNLOAD_COMMAND', pdfNumbers };
     }
   }
@@ -76,16 +79,18 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   
   for (const pattern of filterPatterns) {
     if (pattern.test(message)) {
+      console.log('✅ [INTENT PARSER] Detected FILTER_REQUEST:', message.slice(0, 100));
       return { type: 'FILTER_REQUEST', filterCriteria: message };
     }
   }
   
   // Default: semantic question for AI
+  console.log('✅ [INTENT PARSER] Detected SEMANTIC_QUESTION (default)');
   return { type: 'SEMANTIC_QUESTION' };
 }
 
 async function executeWebSearch(topic: string): Promise<SearchResult[]> {
-  console.log('🔍 Executing web search for:', topic);
+  console.log('🔍 [WEB SEARCH] Starting search for topic:', topic);
   
   // Call Lovable AI web_search tool via edge function
   // For now, simulate - you'll need to implement actual web_search integration
@@ -95,7 +100,7 @@ async function executeWebSearch(topic: string): Promise<SearchResult[]> {
   
   // TODO: Call actual web_search tool here
   // For now, return mock data
-  return [
+  const mockResults = [
     {
       number: 1,
       title: "Example Paper on " + topic,
@@ -113,9 +118,15 @@ async function executeWebSearch(topic: string): Promise<SearchResult[]> {
       url: "https://researchgate.net/example2.pdf"
     }
   ];
+  
+  console.log(`✅ [WEB SEARCH] Found ${mockResults.length} results (MOCK DATA)`);
+  console.log('[WEB SEARCH] Results:', JSON.stringify(mockResults, null, 2));
+  
+  return mockResults;
 }
 
 function formatSearchResults(results: SearchResult[], topic: string): string {
+  console.log(`📝 [FORMATTER] Formatting ${results.length} results for topic:`, topic);
   const header = `Found ${results.length} PDFs on **${topic}**:\n\n`;
   
   const formattedResults = results.map(r => {
@@ -131,12 +142,14 @@ function formatSearchResults(results: SearchResult[], topic: string): string {
 }
 
 function extractCachedSearchResults(messages: any[]): SearchResult[] | null {
+  console.log(`🔍 [CACHE] Searching for cached results in ${messages.length} messages`);
   // Find the most recent assistant message containing search results
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === 'assistant' && msg.content) {
       const match = msg.content.match(/Found (\d+) PDFs on/);
       if (match) {
+        console.log(`✅ [CACHE] Found search results in message ${i}:`, match[0]);
         // Extract results from formatted message
         const results: SearchResult[] = [];
         const lines = msg.content.split('\n');
@@ -155,19 +168,30 @@ function extractCachedSearchResults(messages: any[]): SearchResult[] | null {
           }
         }
         
-        return results.length > 0 ? results : null;
+        if (results.length > 0) {
+          console.log(`✅ [CACHE] Extracted ${results.length} cached results`);
+          return results;
+        } else {
+          console.log('⚠️ [CACHE] No valid results extracted from message');
+          return null;
+        }
       }
     }
   }
   
+  console.log('❌ [CACHE] No cached search results found in conversation history');
   return null;
 }
 
 async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Promise<any[]> {
+  console.log(`⬇️ [DOWNLOAD] Starting download of ${pdfs.length} PDFs`);
   const results = [];
   
   for (const pdf of pdfs) {
+    console.log(`⬇️ [DOWNLOAD] Processing PDF #${pdf.number}:`, pdf.title);
+    
     if (!pdf.url) {
+      console.log(`❌ [DOWNLOAD] PDF #${pdf.number} has no URL`);
       results.push({
         number: pdf.number,
         title: pdf.title,
@@ -192,6 +216,7 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Prom
       });
       
       const data = await downloadResult.json();
+      console.log(`✅ [DOWNLOAD] PDF #${pdf.number} response:`, data.error ? 'ERROR' : 'SUCCESS');
       
       results.push({
         number: pdf.number,
@@ -201,6 +226,7 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Prom
         error: data.error
       });
     } catch (error) {
+      console.error(`❌ [DOWNLOAD] PDF #${pdf.number} exception:`, error);
       results.push({
         number: pdf.number,
         title: pdf.title,
@@ -210,11 +236,13 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Prom
     }
   }
   
+  console.log(`✅ [DOWNLOAD] Completed. Success: ${results.filter(r => r.success).length}/${results.length}`);
   return results;
 }
 
 function formatDownloadResults(results: any[]): string {
   const successCount = results.filter(r => r.success).length;
+  console.log(`📝 [FORMATTER] Formatting download results: ${successCount}/${results.length} successful`);
   const header = `Downloaded ${successCount} PDF(s):\n\n`;
   
   const formattedResults = results.map(r => {
@@ -519,10 +547,12 @@ Deno.serve(async (req) => {
           let workflowResponse = '';
           
           if (agent.slug === 'knowledge-search-expert') {
+            console.log('🤖 [WORKFLOW] Knowledge Search Expert detected, checking intent...');
             const userIntent = parseKnowledgeSearchIntent(message);
+            console.log('🤖 [WORKFLOW] Intent result:', userIntent);
             
             if (userIntent.type === 'SEARCH_REQUEST' && userIntent.topic) {
-              console.log('🔍 Auto-executing web_search for:', userIntent.topic);
+              console.log('🔍 [WORKFLOW] Handling SEARCH_REQUEST automatically');
               workflowHandled = true;
               
               // Execute web search immediately
@@ -554,7 +584,7 @@ Deno.serve(async (req) => {
             }
             
             if (userIntent.type === 'DOWNLOAD_COMMAND' && userIntent.pdfNumbers) {
-              console.log('⬇️ Auto-executing downloads for PDFs:', userIntent.pdfNumbers);
+              console.log('⬇️ [WORKFLOW] Handling DOWNLOAD_COMMAND automatically for:', userIntent.pdfNumbers);
               workflowHandled = true;
               
               // Get cached search results from conversation history
@@ -607,8 +637,10 @@ Deno.serve(async (req) => {
           
           // If workflow didn't handle it, proceed with normal AI call
           if (workflowHandled) {
-            console.log('✅ Workflow handled deterministically, skipping AI call');
+            console.log('✅ [WORKFLOW] Request handled deterministically, AI call skipped');
             return;
+          } else {
+            console.log('🤖 [WORKFLOW] Workflow not handled, proceeding with AI call for semantic processing');
           }
           
           const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
