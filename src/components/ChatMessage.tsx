@@ -61,10 +61,7 @@ export const ChatMessage = ({
 
   return (
     <div 
-      className={cn(
-        "mb-4 flex group relative",
-        selectionMode ? "justify-start" : (isUser ? "justify-end" : "justify-start")
-      )}
+      className="mb-4 group relative"
       onClick={selectionMode ? onToggleSelection : undefined}
     >
       {selectionMode && (
@@ -83,8 +80,10 @@ export const ChatMessage = ({
       )}
       <div
         className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm transition-all",
-          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[85%] md:max-w-[75%]",
+          "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
+          "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
+          isUser && !selectionMode && "ml-auto",
+          selectionMode && "ml-8",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
