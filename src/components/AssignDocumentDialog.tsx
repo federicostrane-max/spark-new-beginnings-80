@@ -130,6 +130,16 @@ export const AssignDocumentDialog = ({
           .in("agent_id", toRemove);
 
         if (deleteError) throw deleteError;
+
+        // Delete chunks from removed agents
+        for (const agentId of toRemove) {
+          await supabase
+            .from("agent_knowledge")
+            .delete()
+            .eq("pool_document_id", document.id)
+            .eq("agent_id", agentId)
+            .eq("source_type", "pool");
+        }
       }
 
       // Add newly assigned agents
@@ -146,6 +156,28 @@ export const AssignDocumentDialog = ({
           );
 
         if (insertError) throw insertError;
+
+        // Sync document to each newly assigned agent
+        for (const agentId of toAdd) {
+          console.log(`[AssignDialog] Syncing document ${document.id} to agent ${agentId}`);
+          
+          const { data: syncData, error: syncError } = await supabase.functions.invoke(
+            "sync-pool-document",
+            {
+              body: {
+                documentId: document.id,
+                agentId: agentId,
+              },
+            }
+          );
+
+          if (syncError) {
+            console.error(`[AssignDialog] Sync failed for agent ${agentId}:`, syncError);
+            toast.error(`Errore nella sincronizzazione per un agente`);
+          } else {
+            console.log(`[AssignDialog] Sync successful:`, syncData);
+          }
+        }
       }
 
       toast.success("Assegnazione completata");
