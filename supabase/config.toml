@@ -30,3 +30,6 @@ verify_jwt = false
 
 [functions.process-document]
 verify_jwt = false
+
+[functions.sync-pool-document]
+verify_jwt = false
