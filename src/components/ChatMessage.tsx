@@ -69,7 +69,7 @@ export const ChatMessage = ({
         }
       }
       setIsLongPressing(false);
-    }, 500);
+    }, 800);
   };
 
   const handleLongPressEnd = () => {
