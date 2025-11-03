@@ -55,6 +55,20 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
     return URL.createObjectURL(blob);
   }, []);
 
+  // Pre-create Audio element for instant playback
+  const preloadAudioElement = useCallback((messageId: string) => {
+    const blobUrl = audioCache[messageId];
+    if (!blobUrl) return;
+    
+    // Create a hidden audio element ready to play
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.src = blobUrl;
+    
+    // This forces the browser to buffer the audio
+    audio.load();
+  }, [audioCache]);
+
   // Pre-generate audio in background (cache only, no playback)
   const preGenerateAudio = useCallback(async (messageId: string, text: string) => {
     // Don't pre-generate if already cached or empty
@@ -65,11 +79,14 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
       const blobUrl = await fetchAudioBlob(text);
       setAudioCache(prev => ({ ...prev, [messageId]: blobUrl }));
       console.log('Audio pre-generated successfully');
+      
+      // Pre-load audio element for instant playback
+      preloadAudioElement(messageId);
     } catch (error) {
       console.error('Error pre-generating audio:', error);
       // Silent fail for background pre-generation
     }
-  }, [audioCache, fetchAudioBlob]);
+  }, [audioCache, fetchAudioBlob, preloadAudioElement]);
 
   const playMessage = useCallback(async (messageId: string, text: string) => {
     // Prevent multiple simultaneous requests
@@ -99,7 +116,15 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         console.log('Playing cached audio');
       }
 
-      const audio = new Audio(blobUrl);
+      // Create audio element IMMEDIATELY with cached blob
+      const audio = new Audio();
+      audio.preload = 'auto'; // Force immediate preload
+      
+      // Set up event handlers BEFORE setting src
+      audio.oncanplaythrough = () => {
+        // Audio is ready to play without interruption
+        console.log('Audio ready to play');
+      };
       
       audio.onplay = () => setStatus('playing');
       audio.onpause = () => setStatus('paused');
@@ -110,6 +135,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
       audio.onerror = () => {
         setStatus('error');
         setCurrentMessageId(null);
+        toast.error('Errore nella riproduzione audio');
         // Remove from cache if playback fails
         setAudioCache(prev => {
           const newCache = { ...prev };
@@ -119,7 +145,11 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
         });
       };
 
+      // Set src and play
+      audio.src = blobUrl;
       setAudioElement(audio);
+      
+      // Try to play immediately
       await audio.play();
     } catch (error) {
       console.error('TTS error:', error);

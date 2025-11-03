@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Play, Pause, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import ReactMarkdown from 'react-markdown';
@@ -32,7 +32,7 @@ export const ChatMessage = ({
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [hasLocalOverride, setHasLocalOverride] = useState(false);
-  const { currentMessageId, status, playMessage, pause } = useTTS();
+  const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
 
@@ -50,9 +50,16 @@ export const ChatMessage = ({
   };
 
   const handleTTS = () => {
+    if (status === 'loading' && currentMessageId === id) {
+      // During loading: prevent clicks
+      return;
+    }
+    
     if (currentMessageId === id && status === 'playing') {
-      pause();
+      // During playback: STOP completely (not pause)
+      stop();
     } else {
+      // Otherwise: play
       playMessage(id, content);
     }
   };
@@ -193,13 +200,24 @@ export const ChatMessage = ({
                 e.stopPropagation();
                 handleTTS();
               }}
-              disabled={status === 'loading'}
-              className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
+              disabled={status === 'loading' && currentMessageId === id}
+              className={cn(
+                "h-8 px-2 transition-all",
+                isUser && "hover:bg-primary-foreground/10",
+                status === 'loading' && currentMessageId === id && "opacity-50 cursor-not-allowed"
+              )}
+              title={
+                status === 'loading' && currentMessageId === id
+                  ? "Caricamento audio..."
+                  : isTTSPlaying
+                  ? "Ferma audio"
+                  : "Riproduci con voce"
+              }
             >
               {status === 'loading' && currentMessageId === id ? (
-                <div className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
               ) : isTTSPlaying ? (
-                <Pause className="h-3 w-3" />
+                <Square className="h-3 w-3 fill-current" />
               ) : (
                 <Play className="h-3 w-3" />
               )}
