@@ -470,29 +470,28 @@ export default function MultiAgentConsultant() {
               <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
                 {!selectionMode ? (
                   <>
-                    {isMobile && (
+                     {isMobile && (
                       <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
                         <Menu className="h-5 w-5" />
                       </Button>
                      )}
                      <div className="flex items-center gap-3 flex-1 min-w-0 mr-2">
-                       <Button
-                         variant="ghost"
-                         size="icon"
-                         onClick={() => {
-                           setEditingAgent(currentAgent);
-                           setShowCreateModal(true);
-                         }}
-                         title="Modifica agente"
-                       >
-                         <Edit className="h-4 w-4" />
-                       </Button>
                        <div className="min-w-0 flex-1">
-                         <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
-                         <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
+                         <h1 className="font-semibold truncate">{currentAgent.name}</h1>
                        </div>
                       </div>
                        <div className="flex items-center gap-2 flex-shrink-0">
+                         <Button
+                           variant="ghost"
+                           size="icon"
+                           onClick={() => {
+                             setEditingAgent(currentAgent);
+                             setShowCreateModal(true);
+                           }}
+                           title="Modifica agente"
+                         >
+                           <Edit className="h-4 w-4" />
+                         </Button>
                          {messages.length > 0 && (
                            <>
                              <Button
