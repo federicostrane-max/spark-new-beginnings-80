@@ -46,32 +46,42 @@ export const VoiceInput = ({ onTranscription, disabled }: VoiceInputProps) => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setIsProcessing(true);
     }
   };
 
   const transcribeAudio = async (audioBlob: Blob) => {
-    setIsProcessing(true);
     try {
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       
       reader.onloadend = async () => {
-        const base64Audio = (reader.result as string).split(',')[1];
+        try {
+          const base64Audio = (reader.result as string).split(',')[1];
 
-        const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-          body: { audio: base64Audio }
-        });
+          const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+            body: { audio: base64Audio }
+          });
 
-        if (error) throw error;
+          if (error) throw error;
 
-        if (data?.text) {
-          onTranscription(data.text);
-          console.log("Trascrizione completata");
+          if (data?.text) {
+            onTranscription(data.text);
+            console.log("Trascrizione completata");
+          }
+        } catch (error) {
+          console.error('Transcription error:', error);
+        } finally {
+          setIsProcessing(false);
         }
+      };
+      
+      reader.onerror = () => {
+        console.error('FileReader error');
+        setIsProcessing(false);
       };
     } catch (error) {
       console.error('Transcription error:', error);
-    } finally {
       setIsProcessing(false);
     }
   };
