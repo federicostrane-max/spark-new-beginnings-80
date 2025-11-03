@@ -348,17 +348,6 @@ Deno.serve(async (req) => {
               ...toolCalls
             ];
 
-            // Save assistant message with tool_use blocks to database
-            if (assistantContent.length > 0) {
-              await supabase
-                .from('agent_messages')
-                .insert({
-                  conversation_id: conversationId,
-                  role: 'assistant',
-                  content: JSON.stringify(assistantContent)
-                });
-            }
-
             const followUpMessages = [
               ...anthropicMessages,
               ...(assistantContent.length > 0 ? [{
