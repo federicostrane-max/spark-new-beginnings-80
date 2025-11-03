@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useTTS } from "@/contexts/TTSContext";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
@@ -46,6 +47,7 @@ interface Conversation {
 
 export default function MultiAgentConsultant() {
   const { session } = useAuth();
+  const { preGenerateAudio } = useTTS();
   const isMobile = useIsMobile();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
@@ -84,6 +86,17 @@ export default function MultiAgentConsultant() {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, isUserAtBottom, isStreaming]);
+
+  // Pre-generate audio for assistant messages when streaming stops
+  useEffect(() => {
+    if (!isStreaming && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && lastMessage.content.trim()) {
+        // Pre-generate audio in background
+        preGenerateAudio(lastMessage.id, lastMessage.content);
+      }
+    }
+  }, [isStreaming, messages, preGenerateAudio]);
 
   const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);

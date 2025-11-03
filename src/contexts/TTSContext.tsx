@@ -1,8 +1,12 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 type TTSStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
+
+interface AudioCache {
+  [key: string]: string; // messageId -> blob URL
+}
 
 interface TTSContextType {
   currentMessageId: string | null;
@@ -10,6 +14,7 @@ interface TTSContextType {
   playMessage: (messageId: string, text: string) => Promise<void>;
   pause: () => void;
   stop: () => void;
+  preGenerateAudio: (messageId: string, text: string) => Promise<void>;
 }
 
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
@@ -18,6 +23,53 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
   const [currentMessageId, setCurrentMessageId] = useState<string | null>(null);
   const [status, setStatus] = useState<TTSStatus>('idle');
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [audioCache, setAudioCache] = useState<AudioCache>({});
+
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(audioCache).forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [audioCache]);
+
+  // Shared function to fetch and cache audio
+  const fetchAudioBlob = useCallback(async (text: string): Promise<string> => {
+    const response = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/text-to-speech`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({ text, voice: 'alloy' }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to generate audio');
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  }, []);
+
+  // Pre-generate audio in background (cache only, no playback)
+  const preGenerateAudio = useCallback(async (messageId: string, text: string) => {
+    // Don't pre-generate if already cached or empty
+    if (audioCache[messageId] || !text.trim()) return;
+
+    try {
+      console.log('Pre-generating audio for message:', messageId);
+      const blobUrl = await fetchAudioBlob(text);
+      setAudioCache(prev => ({ ...prev, [messageId]: blobUrl }));
+      console.log('Audio pre-generated successfully');
+    } catch (error) {
+      console.error('Error pre-generating audio:', error);
+      // Silent fail for background pre-generation
+    }
+  }, [audioCache, fetchAudioBlob]);
 
   const playMessage = useCallback(async (messageId: string, text: string) => {
     // Prevent multiple simultaneous requests
@@ -36,35 +88,46 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
     setCurrentMessageId(messageId);
 
     try {
-      const { data, error } = await supabase.functions.invoke('text-to-speech', {
-        body: { text, voice: 'alloy' }
-      });
+      let blobUrl = audioCache[messageId];
 
-      if (error) throw error;
-
-      if (data?.audioContent) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
-        
-        audio.onplay = () => setStatus('playing');
-        audio.onpause = () => setStatus('paused');
-        audio.onended = () => {
-          setStatus('idle');
-          setCurrentMessageId(null);
-        };
-        audio.onerror = () => {
-          setStatus('error');
-          setCurrentMessageId(null);
-        };
-
-        setAudioElement(audio);
-        await audio.play();
+      // If not cached, fetch it now
+      if (!blobUrl) {
+        console.log('Audio not cached, fetching...');
+        blobUrl = await fetchAudioBlob(text);
+        setAudioCache(prev => ({ ...prev, [messageId]: blobUrl }));
+      } else {
+        console.log('Playing cached audio');
       }
+
+      const audio = new Audio(blobUrl);
+      
+      audio.onplay = () => setStatus('playing');
+      audio.onpause = () => setStatus('paused');
+      audio.onended = () => {
+        setStatus('idle');
+        setCurrentMessageId(null);
+      };
+      audio.onerror = () => {
+        setStatus('error');
+        setCurrentMessageId(null);
+        // Remove from cache if playback fails
+        setAudioCache(prev => {
+          const newCache = { ...prev };
+          delete newCache[messageId];
+          URL.revokeObjectURL(blobUrl);
+          return newCache;
+        });
+      };
+
+      setAudioElement(audio);
+      await audio.play();
     } catch (error) {
       console.error('TTS error:', error);
       setStatus('error');
       setCurrentMessageId(null);
+      toast.error('Errore nella riproduzione audio');
     }
-  }, [audioElement, status]);
+  }, [audioElement, status, audioCache, fetchAudioBlob]);
 
   const pause = useCallback(() => {
     if (audioElement) {
@@ -83,7 +146,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
   }, [audioElement]);
 
   return (
-    <TTSContext.Provider value={{ currentMessageId, status, playMessage, pause, stop }}>
+    <TTSContext.Provider value={{ currentMessageId, status, playMessage, pause, stop, preGenerateAudio }}>
       {children}
     </TTSContext.Provider>
   );

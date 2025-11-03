@@ -32,7 +32,7 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'tts-1',
+        model: 'tts-1-hd',
         input: text,
         voice: voice,
         response_format: 'mp3',
@@ -45,23 +45,16 @@ serve(async (req) => {
       throw new Error(`OpenAI TTS error: ${error}`);
     }
 
-    // Convert audio to base64 in chunks to avoid stack overflow
-    const arrayBuffer = await response.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    const base64Audio = btoa(binary);
+    console.log('Speech generated successfully, streaming response');
 
-    console.log('Speech generated successfully');
-
-    return new Response(
-      JSON.stringify({ audioContent: base64Audio }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    // Stream the audio directly instead of converting to base64
+    return new Response(response.body, {
+      headers: { 
+        ...corsHeaders, 
+        'Content-Type': 'audio/mpeg',
+        'Content-Disposition': 'inline'
+      }
+    });
 
   } catch (error) {
     console.error('Error in text-to-speech:', error);
