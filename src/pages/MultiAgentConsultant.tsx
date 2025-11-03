@@ -13,6 +13,16 @@ import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2 } fro
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Agent {
   id: string;
@@ -51,6 +61,7 @@ export default function MultiAgentConsultant() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean | undefined>(undefined);
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const { toast } = useToast();
@@ -356,6 +367,39 @@ export default function MultiAgentConsultant() {
     setSelectedMessages(new Set());
   };
 
+  const handleDeleteAllMessages = async () => {
+    if (!currentConversation?.id) return;
+    
+    try {
+      const { error } = await supabase
+        .from("agent_messages")
+        .delete()
+        .eq("conversation_id", currentConversation.id);
+      
+      if (error) throw error;
+      
+      setMessages([]);
+      setShowDeleteAllDialog(false);
+      
+      if (!isMobile) {
+        toast({
+          title: "Messaggi eliminati",
+          description: "Tutti i messaggi della chat sono stati eliminati",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error deleting all messages:", error);
+      if (!isMobile) {
+        toast({
+          title: "Errore",
+          description: "Impossibile eliminare i messaggi",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Desktop Sidebar - Always show AgentsSidebar */}
@@ -447,20 +491,31 @@ export default function MultiAgentConsultant() {
                          <h1 className="font-semibold truncate">{currentConversation?.title || "New Chat"}</h1>
                          <p className="text-sm text-muted-foreground truncate">{currentAgent.name}</p>
                        </div>
-                     </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {messages.length > 0 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
-                            className="gap-2"
-                            title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
-                          >
-                            {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
-                          </Button>
-                        )}
-                     </div>
+                      </div>
+                       <div className="flex items-center gap-2 flex-shrink-0">
+                         {messages.length > 0 && (
+                           <>
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
+                               className="gap-2"
+                               title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
+                             >
+                               {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
+                             </Button>
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               onClick={() => setShowDeleteAllDialog(true)}
+                               className="gap-2 text-destructive hover:text-destructive"
+                               title="Cancella tutti i messaggi"
+                             >
+                               <Trash2 className="h-4 w-4" />
+                             </Button>
+                           </>
+                         )}
+                      </div>
                   </>
                 ) : (
                   <>
@@ -600,6 +655,28 @@ export default function MultiAgentConsultant() {
         currentAgentId={currentAgent?.id || ""}
         onForwardComplete={handleForwardComplete}
       />
+
+      {/* Delete All Messages Confirmation */}
+      <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancellare tutti i messaggi?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Questa azione eliminerà tutti i {messages.length} messaggi della chat corrente. 
+              Questa operazione non può essere annullata.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAllMessages}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Elimina tutti
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
