@@ -286,6 +286,18 @@ Deno.serve(async (req) => {
           console.log('Total messages:', anthropicMessages.length);
           console.log('Messages:', JSON.stringify(anthropicMessages, null, 2));
 
+          const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
+- Multiple detailed examples with concrete scenarios
+- In-depth explanations of each point with complete context
+- All relevant background information and nuances
+- Complete breakdowns of complex topics with step-by-step analysis
+- Extended elaborations with practical examples and real-world applications
+- Comprehensive coverage of all aspects of the topic
+
+Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
+
+${agent.system_prompt}`;
+
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -296,7 +308,8 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               model: 'claude-sonnet-4-5',
               max_tokens: 16384,
-              system: agent.system_prompt,
+              temperature: 0.7,
+              system: enhancedSystemPrompt,
               messages: anthropicMessages,
               tools: tools.length > 0 ? tools : undefined,
               stream: true
@@ -501,6 +514,18 @@ Deno.serve(async (req) => {
             console.log('toolResults:', JSON.stringify(toolResults, null, 2));
             console.log('followUpMessages length:', followUpMessages.length);
 
+            const enhancedSystemPromptFollowUp = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
+- Multiple detailed examples with concrete scenarios
+- In-depth explanations of each point with complete context
+- All relevant background information and nuances
+- Complete breakdowns of complex topics with step-by-step analysis
+- Extended elaborations with practical examples and real-world applications
+- Comprehensive coverage of all aspects of the topic
+
+Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
+
+${agent.system_prompt}`;
+
             const followUpResponse = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
               headers: {
@@ -511,7 +536,8 @@ Deno.serve(async (req) => {
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
                 max_tokens: 16384,
-                system: agent.system_prompt,
+                temperature: 0.7,
+                system: enhancedSystemPromptFollowUp,
                 messages: followUpMessages,
                 stream: true
               })
