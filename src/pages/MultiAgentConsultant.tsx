@@ -252,7 +252,7 @@ export default function MultiAgentConsultant() {
                   lastMessageId = parsed.messageId;
                 } else if (parsed.type === "complete") {
                   if (parsed.conversationId && !currentConversation) {
-                    setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
+                    setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: (text || accumulatedText || "Chat").slice(0, 50) });
                   }
                 }
               } catch (e) {
@@ -291,7 +291,7 @@ export default function MultiAgentConsultant() {
               );
             } else if (parsed.type === "complete") {
               if (parsed.conversationId && !currentConversation) {
-                setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
+                setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: (text || accumulatedText || "Chat").slice(0, 50) });
               }
             } else if (parsed.type === "error") {
               const errorMsg = parsed.error || parsed.message || "Unknown error";
