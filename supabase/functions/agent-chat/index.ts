@@ -172,13 +172,26 @@ Deno.serve(async (req) => {
         };
 
         try {
-          // Cleanup any previous empty assistant messages in this conversation
-          await supabase
+          // Cleanup any previous incomplete assistant messages in this conversation
+          // This includes NULL, empty strings, and messages shorter than 10 characters
+          const { data: incompleteMsgs } = await supabase
             .from('agent_messages')
-            .delete()
+            .select('id, content')
             .eq('conversation_id', conversation.id)
-            .eq('role', 'assistant')
-            .or('content.is.null,content.eq.');
+            .eq('role', 'assistant');
+          
+          if (incompleteMsgs) {
+            const idsToDelete = incompleteMsgs
+              .filter(m => !m.content || m.content.trim() === '' || m.content.length < 10)
+              .map(m => m.id);
+            
+            if (idsToDelete.length > 0) {
+              await supabase
+                .from('agent_messages')
+                .delete()
+                .in('id', idsToDelete);
+            }
+          }
 
           // Create placeholder message in DB
           const { data: placeholderMsg, error: placeholderError } = await supabase
