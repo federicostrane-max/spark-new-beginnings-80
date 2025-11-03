@@ -266,27 +266,6 @@ export default function MultiAgentConsultant() {
               }
             }
           }
-          
-          // Reload message from database to ensure we have the complete content
-          if (lastMessageId && conversationId) {
-            try {
-              const { data: dbMessage } = await supabase
-                .from('agent_messages')
-                .select('content')
-                .eq('id', lastMessageId)
-                .single();
-              
-              if (dbMessage?.content) {
-                setMessages((prev) => 
-                  prev.map((m) =>
-                    m.id === assistantId ? { ...m, content: dbMessage.content } : m
-                  )
-                );
-              }
-            } catch (e) {
-              console.error("Error reloading message from DB:", e);
-            }
-          }
           break;
         }
 
