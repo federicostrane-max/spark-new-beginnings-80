@@ -117,6 +117,20 @@ export const ForwardMessageDialog = ({
 
       if (insertError) throw insertError;
 
+      // Trigger agent response via edge function
+      const { error: chatError } = await supabase.functions.invoke('agent-chat', {
+        body: {
+          conversationId: conversationId,
+          message: message.content,
+          agentId: selectedAgent
+        }
+      });
+
+      if (chatError) {
+        console.error('Error invoking agent-chat:', chatError);
+        throw chatError;
+      }
+
       // Update conversation timestamp
       await supabase
         .from("agent_conversations")
