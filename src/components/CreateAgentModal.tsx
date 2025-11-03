@@ -6,7 +6,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 
@@ -28,7 +27,6 @@ interface CreateAgentModalProps {
 }
 
 export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, onDelete }: CreateAgentModalProps) => {
-  const { toast } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");

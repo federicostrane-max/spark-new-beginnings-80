@@ -13,7 +13,6 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Search, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useToast } from "@/hooks/use-toast";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Agent {
@@ -51,7 +50,6 @@ export const ForwardMessageDialog = ({
   const [search, setSearch] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [forwarding, setForwarding] = useState(false);
-  const { toast } = useToast();
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -106,26 +104,12 @@ export const ForwardMessageDialog = ({
       if (rpcError) throw rpcError;
       if (!conversationId) throw new Error('No conversation ID returned');
 
-      if (!isMobile) {
-        toast({
-          title: "Messaggio inoltrato",
-          description: "L'agente sta elaborando la risposta...",
-        });
-      }
-
       onOpenChange(false);
       // Pass the message content to be sent via handleSendMessage
       onForwardComplete(conversationId, selectedAgent, message.content);
       
     } catch (error: any) {
       console.error("Error forwarding message:", error);
-      if (!isMobile) {
-        toast({
-          title: "Errore",
-          description: "Errore durante l'inoltro del messaggio",
-          variant: "destructive",
-        });
-      }
     } finally {
       setForwarding(false);
     }

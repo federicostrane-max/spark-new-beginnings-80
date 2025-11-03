@@ -8,7 +8,6 @@ import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useToast } from "@/hooks/use-toast";
 import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -64,7 +63,6 @@ export default function MultiAgentConsultant() {
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
-  const { toast } = useToast();
 
   // Intelligent auto-scroll
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -105,13 +103,6 @@ export default function MultiAgentConsultant() {
     
     if (error) {
       console.error("Error getting conversation:", error);
-      if (!isMobile) {
-        toast({ 
-          title: "Error", 
-          description: "Failed to load conversation", 
-          variant: "destructive" 
-        });
-      }
       return;
     }
     
@@ -350,22 +341,8 @@ export default function MultiAgentConsultant() {
       setMessages(prev => prev.filter(m => m.id !== selectedMessage));
       setSelectionMode(false);
       setSelectedMessage(null);
-      
-      if (!isMobile) {
-        toast({
-          title: "Messaggio eliminato",
-          description: "Il messaggio è stato eliminato con successo",
-        });
-      }
     } catch (error: any) {
       console.error("Error deleting message:", error);
-      if (!isMobile) {
-        toast({
-          title: "Errore",
-          description: "Impossibile eliminare il messaggio",
-          variant: "destructive",
-        });
-      }
     }
   };
 
@@ -415,22 +392,8 @@ export default function MultiAgentConsultant() {
       
       setMessages([]);
       setShowDeleteAllDialog(false);
-      
-      if (!isMobile) {
-        toast({
-          title: "Messaggi eliminati",
-          description: "Tutti i messaggi della chat sono stati eliminati",
-        });
-      }
     } catch (error: any) {
       console.error("Error deleting all messages:", error);
-      if (!isMobile) {
-        toast({
-          title: "Errore",
-          description: "Impossibile eliminare i messaggi",
-          variant: "destructive",
-        });
-      }
     }
   };
 

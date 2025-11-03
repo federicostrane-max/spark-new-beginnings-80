@@ -7,7 +7,6 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Plus, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { useToast } from "@/hooks/use-toast";
 
 interface Conversation {
   id: string;
@@ -30,7 +29,6 @@ export const ChatSidebar = ({
   onNewChat 
 }: ChatSidebarProps) => {
   const { user } = useAuth();
-  const { toast } = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 

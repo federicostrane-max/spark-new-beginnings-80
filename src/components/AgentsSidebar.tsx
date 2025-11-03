@@ -6,7 +6,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Plus, LogOut, BookOpen, Trash2, Edit } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -43,7 +42,6 @@ export const AgentsSidebar = ({
   onEditAgent
 }: AgentsSidebarProps) => {
   const { user } = useAuth();
-  const { toast } = useToast();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
