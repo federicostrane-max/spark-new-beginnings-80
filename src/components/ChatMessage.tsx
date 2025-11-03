@@ -37,11 +37,10 @@ export const ChatMessage = ({
   const [isLongPressing, setIsLongPressing] = useState(false);
 
   useEffect(() => {
-    // Reset local override only when global state changes and was previously undefined
     if (forceExpanded !== undefined && !hasLocalOverride) {
       setIsCollapsed(!forceExpanded);
     }
-  }, [forceExpanded]);
+  }, [forceExpanded, hasLocalOverride]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -83,9 +82,7 @@ export const ChatMessage = ({
 
   const isUser = role === "user";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
-  const shouldBeCollapsed = hasLocalOverride 
-    ? isCollapsed 
-    : (forceExpanded === undefined ? isCollapsed : !forceExpanded);
+  const shouldBeCollapsed = isCollapsed;
   const previewLength = 500;
 
   return (
@@ -153,7 +150,7 @@ export const ChatMessage = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   setHasLocalOverride(true);
-                  setIsCollapsed(!isCollapsed);
+                  setIsCollapsed(prev => !prev);
                 }}
                 className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
               >
