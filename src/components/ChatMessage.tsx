@@ -128,7 +128,8 @@ export const ChatMessage = ({
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
           isSelected && "ring-2 ring-primary",
-          isLongPressing && "scale-95 opacity-80"
+          isLongPressing && "scale-95 opacity-80",
+          isStreaming && !isUser && "ring-2 ring-primary/30 animate-pulse"
         )}
       >
         {isUser ? (
@@ -136,7 +137,6 @@ export const ChatMessage = ({
             {shouldBeCollapsed && content.length > previewLength
               ? content.substring(0, previewLength) + "..."
               : content}
-            {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
@@ -145,25 +145,45 @@ export const ChatMessage = ({
                 ? content.substring(0, previewLength) + "..."
                 : content}
             </ReactMarkdown>
-            {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         )}
 
-        {!isStreaming && content && (
+        {/* Indicatore di streaming sempre visibile */}
+        {isStreaming && (
+          <div className="flex items-center gap-2 mt-2">
+            <span className="inline-block w-2 h-4 bg-foreground animate-pulse" />
+            <span className="text-xs text-muted-foreground animate-pulse">
+              Sto scrivendo...
+            </span>
+          </div>
+        )}
+
+        {/* Badge per streaming in modalità collapsed */}
+        {isStreaming && shouldBeCollapsed && content.length > previewLength && (
+          <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-primary/10 rounded-md">
+            <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+            <span className="text-xs font-medium text-primary">
+              Continua a scrivere... (clicca Mostra tutto per vedere)
+            </span>
+          </div>
+        )}
+
+        {content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
+            {/* Bottone Espandi/Collassa - visibile anche durante streaming */}
             {content.length > previewLength && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                setHasLocalOverride(true);
-                setIsCollapsed(prev => !prev);
-              }}
-              className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
-            >
+              <Button
+                variant="ghost"
+                size="sm"
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHasLocalOverride(true);
+                  setIsCollapsed(prev => !prev);
+                }}
+                className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
+              >
                 {shouldBeCollapsed ? (
                   <>
                     <ChevronDown className="h-3 w-3" />
@@ -177,51 +197,57 @@ export const ChatMessage = ({
                 )}
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleCopy();
-              }}
-              className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
-            >
-              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="sm"
-              onMouseDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTTS();
-              }}
-              disabled={status === 'loading' && currentMessageId === id}
-              className={cn(
-                "h-8 px-2 transition-all",
-                isUser && "hover:bg-primary-foreground/10",
-                status === 'loading' && currentMessageId === id && "opacity-50 cursor-not-allowed"
-              )}
-              title={
-                status === 'loading' && currentMessageId === id
-                  ? "Caricamento audio..."
-                  : isTTSPlaying
-                  ? "Ferma audio"
-                  : "Riproduci con voce"
-              }
-            >
-              {status === 'loading' && currentMessageId === id ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              ) : isTTSPlaying ? (
-                <Square className="h-3 w-3 fill-current" />
-              ) : (
-                <Play className="h-3 w-3" />
-              )}
-            </Button>
+
+            {/* Bottoni Copy e TTS - solo quando NON è in streaming */}
+            {!isStreaming && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCopy();
+                  }}
+                  className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
+                >
+                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTTS();
+                  }}
+                  disabled={status === 'loading' && currentMessageId === id}
+                  className={cn(
+                    "h-8 px-2 transition-all",
+                    isUser && "hover:bg-primary-foreground/10",
+                    status === 'loading' && currentMessageId === id && "opacity-50 cursor-not-allowed"
+                  )}
+                  title={
+                    status === 'loading' && currentMessageId === id
+                      ? "Caricamento audio..."
+                      : isTTSPlaying
+                      ? "Ferma audio"
+                      : "Riproduci con voce"
+                  }
+                >
+                  {status === 'loading' && currentMessageId === id ? (
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  ) : isTTSPlaying ? (
+                    <Square className="h-3 w-3 fill-current" />
+                  ) : (
+                    <Play className="h-3 w-3" />
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>
