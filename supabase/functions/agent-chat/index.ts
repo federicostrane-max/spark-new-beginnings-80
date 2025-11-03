@@ -270,6 +270,9 @@ Deno.serve(async (req) => {
 
           let fullResponse = '';
           let lastUpdateTime = Date.now();
+          let toolUseId: string | null = null;
+          let toolUseName: string | null = null;
+          let toolUseInputJson = '';
           
           // Use truncatedMessages instead of cleanedMessages
           const anthropicMessages = truncatedMessages
@@ -310,6 +313,28 @@ Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address 
 
 ${agent.system_prompt}`;
 
+          // Define tools for Knowledge Search Expert agent
+          const tools = agent.slug === 'knowledge-search-expert' ? [
+            {
+              name: 'download_pdf',
+              description: 'Downloads a PDF document from a URL and adds it to the document pool. Use this when you find relevant PDF documents that should be saved for later use.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  url: {
+                    type: 'string',
+                    description: 'The direct URL of the PDF file to download'
+                  },
+                  search_query: {
+                    type: 'string',
+                    description: 'The search query or context that led to finding this document'
+                  }
+                },
+                required: ['url']
+              }
+            }
+          ] : undefined;
+
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
@@ -323,6 +348,7 @@ ${agent.system_prompt}`;
               temperature: 0.7,
               system: enhancedSystemPrompt,
               messages: anthropicMessages,
+              tools: tools,
               stream: true
             })
           });
@@ -368,6 +394,58 @@ ${agent.system_prompt}`;
                 try {
                   const parsed = JSON.parse(data);
                   
+                  // Handle tool use start
+                  if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+                    toolUseId = parsed.content_block.id;
+                    toolUseName = parsed.content_block.name;
+                    toolUseInputJson = '';
+                    console.log('🔧 Tool use started:', toolUseName);
+                  }
+                  
+                  // Accumulate tool input JSON
+                  if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
+                    toolUseInputJson += parsed.delta.partial_json;
+                    console.log('🔧 Tool input accumulated, length:', toolUseInputJson.length);
+                  }
+                  
+                  // Execute tool when block stops
+                  if (parsed.type === 'content_block_stop' && toolUseId && toolUseName) {
+                    try {
+                      const toolInput = toolUseInputJson ? JSON.parse(toolUseInputJson) : {};
+                      console.log('🔧 Executing tool:', toolUseName, 'with input:', toolInput);
+                      
+                      if (toolUseName === 'download_pdf') {
+                        const toolResult = await supabase.functions.invoke('download-pdf-tool', {
+                          body: toolInput
+                        });
+                        
+                        if (toolResult.error) {
+                          console.error('Tool execution error:', toolResult.error);
+                          fullResponse += `\n\n[Errore nel download del PDF: ${toolResult.error.message}]`;
+                        } else {
+                          const result = toolResult.data;
+                          console.log('✅ Tool executed successfully:', result);
+                          fullResponse += `\n\n✅ PDF "${result.document.file_name}" scaricato con successo! Il documento è stato aggiunto al pool e sarà validato automaticamente.`;
+                        }
+                        
+                        sendSSE(JSON.stringify({ 
+                          type: 'content', 
+                          text: fullResponse.slice(Math.max(0, fullResponse.lastIndexOf('\n\n')))
+                        }));
+                      }
+                    } catch (toolError) {
+                      console.error('Error executing tool:', toolError);
+                      const errorMsg = toolError instanceof Error ? toolError.message : 'Unknown error';
+                      fullResponse += `\n\n[Errore nell'esecuzione del tool: ${errorMsg}]`;
+                    }
+                    
+                    // Reset tool state
+                    toolUseId = null;
+                    toolUseName = null;
+                    toolUseInputJson = '';
+                  }
+                  
+                  // Handle regular text content
                   if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                     const text = parsed.delta.text;
                     fullResponse += text;

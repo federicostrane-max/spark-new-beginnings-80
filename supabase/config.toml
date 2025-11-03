@@ -33,3 +33,6 @@ verify_jwt = false
 
 [functions.sync-pool-document]
 verify_jwt = false
+
+[functions.download-pdf-tool]
+verify_jwt = false
