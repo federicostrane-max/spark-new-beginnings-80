@@ -18,43 +18,40 @@ serve(async (req) => {
       throw new Error('No text provided');
     }
 
-    const elevenLabsApiKey = Deno.env.get('ELEVEN_LABS_API_KEY');
-    if (!elevenLabsApiKey) {
-      throw new Error('ELEVEN_LABS_API_KEY not configured');
+    const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openAIApiKey) {
+      throw new Error('OPENAI_API_KEY not configured');
     }
 
-    // Default to Aria voice if not specified
-    const voiceId = voice || '9BWtsMINqrJLrRacOk9x';
+    // OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
+    // Default to 'alloy' if not specified
+    const voiceName = voice || 'alloy';
     
-    console.log('Generating speech with ElevenLabs voice:', voiceId);
+    console.log('Generating speech with OpenAI voice:', voiceName);
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: {
-        'xi-api-key': elevenLabsApiKey,
+        'Authorization': `Bearer ${openAIApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        text: text,
-        model_id: 'eleven_turbo_v2_5',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.0,
-          use_speaker_boost: true
-        }
+        model: 'tts-1',
+        input: text,
+        voice: voiceName,
+        response_format: 'mp3',
       }),
     });
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('ElevenLabs TTS error:', error);
-      throw new Error(`ElevenLabs TTS error: ${error}`);
+      console.error('OpenAI TTS error:', error);
+      throw new Error(`OpenAI TTS error: ${error}`);
     }
 
     console.log('Speech generated successfully, streaming response');
 
-    // Stream the audio directly instead of converting to base64
+    // Stream the audio directly
     return new Response(response.body, {
       headers: { 
         ...corsHeaders, 
