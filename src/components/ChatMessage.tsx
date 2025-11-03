@@ -37,10 +37,11 @@ export const ChatMessage = ({
   const [isLongPressing, setIsLongPressing] = useState(false);
 
   useEffect(() => {
-    if (forceExpanded !== undefined && !hasLocalOverride) {
+    if (forceExpanded !== undefined) {
+      setHasLocalOverride(false);
       setIsCollapsed(!forceExpanded);
     }
-  }, [forceExpanded, hasLocalOverride]);
+  }, [forceExpanded]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
