@@ -230,6 +230,7 @@ export default function MultiAgentConsultant() {
       const decoder = new TextDecoder();
       let accumulatedText = "";
       let buffer = "";
+      let lastMessageId = "";
 
       if (!reader) throw new Error("No reader");
 
@@ -253,10 +254,37 @@ export default function MultiAgentConsultant() {
                       m.id === assistantId ? { ...m, content: accumulatedText } : m
                     )
                   );
+                } else if (parsed.type === "message_start") {
+                  lastMessageId = parsed.messageId;
+                } else if (parsed.type === "complete") {
+                  if (parsed.conversationId && !currentConversation) {
+                    setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
+                  }
                 }
               } catch (e) {
                 // Ignore parse errors in final flush
               }
+            }
+          }
+          
+          // Reload message from database to ensure we have the complete content
+          if (lastMessageId && conversationId) {
+            try {
+              const { data: dbMessage } = await supabase
+                .from('agent_messages')
+                .select('content')
+                .eq('id', lastMessageId)
+                .single();
+              
+              if (dbMessage?.content) {
+                setMessages((prev) => 
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: dbMessage.content } : m
+                  )
+                );
+              }
+            } catch (e) {
+              console.error("Error reloading message from DB:", e);
             }
           }
           break;
@@ -280,6 +308,7 @@ export default function MultiAgentConsultant() {
 
             if (parsed.type === "message_start") {
               console.log("Message started:", parsed.messageId);
+              lastMessageId = parsed.messageId;
             } else if (parsed.type === "content" && parsed.text) {
               accumulatedText += parsed.text;
               setMessages((prev) => 
