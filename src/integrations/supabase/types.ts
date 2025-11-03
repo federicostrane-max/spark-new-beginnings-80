@@ -75,6 +75,51 @@ export type Database = {
           },
         ]
       }
+      agent_document_links: {
+        Row: {
+          agent_id: string
+          assigned_by: string | null
+          assignment_type: string
+          confidence_score: number | null
+          created_at: string | null
+          document_id: string
+          id: string
+        }
+        Insert: {
+          agent_id: string
+          assigned_by?: string | null
+          assignment_type: string
+          confidence_score?: number | null
+          created_at?: string | null
+          document_id: string
+          id?: string
+        }
+        Update: {
+          agent_id?: string
+          assigned_by?: string | null
+          assignment_type?: string
+          confidence_score?: number | null
+          created_at?: string | null
+          document_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_document_links_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_document_links_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_knowledge: {
         Row: {
           agent_id: string | null
@@ -84,6 +129,8 @@ export type Database = {
           document_name: string
           embedding: string | null
           id: string
+          pool_document_id: string | null
+          source_type: string | null
           summary: string | null
         }
         Insert: {
@@ -94,6 +141,8 @@ export type Database = {
           document_name: string
           embedding?: string | null
           id?: string
+          pool_document_id?: string | null
+          source_type?: string | null
           summary?: string | null
         }
         Update: {
@@ -104,6 +153,8 @@ export type Database = {
           document_name?: string
           embedding?: string | null
           id?: string
+          pool_document_id?: string | null
+          source_type?: string | null
           summary?: string | null
         }
         Relationships: [
@@ -112,6 +163,13 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_knowledge_pool_document_id_fkey"
+            columns: ["pool_document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
             referencedColumns: ["id"]
           },
         ]
@@ -222,6 +280,59 @@ export type Database = {
         }
         Relationships: []
       }
+      document_processing_cache: {
+        Row: {
+          created_at: string | null
+          document_id: string
+          error_message: string | null
+          id: string
+          processed_chunks: number | null
+          processing_completed_at: string | null
+          processing_started_at: string | null
+          retry_count: number | null
+          total_chunks: number | null
+          updated_at: string | null
+          validation_completed_at: string | null
+          validation_started_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          document_id: string
+          error_message?: string | null
+          id?: string
+          processed_chunks?: number | null
+          processing_completed_at?: string | null
+          processing_started_at?: string | null
+          retry_count?: number | null
+          total_chunks?: number | null
+          updated_at?: string | null
+          validation_completed_at?: string | null
+          validation_started_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          document_id?: string
+          error_message?: string | null
+          id?: string
+          processed_chunks?: number | null
+          processing_completed_at?: string | null
+          processing_started_at?: string | null
+          retry_count?: number | null
+          total_chunks?: number | null
+          updated_at?: string | null
+          validation_completed_at?: string | null
+          validation_started_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_processing_cache_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inter_agent_messages: {
         Row: {
           answer: string
@@ -273,6 +384,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      knowledge_documents: {
+        Row: {
+          ai_summary: string | null
+          complexity_level: string | null
+          created_at: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes: number | null
+          id: string
+          keywords: string[] | null
+          processed_at: string | null
+          processing_status: string
+          search_query: string | null
+          source_url: string | null
+          text_length: number | null
+          topics: string[] | null
+          updated_at: string | null
+          validation_date: string | null
+          validation_reason: string | null
+          validation_status: string
+        }
+        Insert: {
+          ai_summary?: string | null
+          complexity_level?: string | null
+          created_at?: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes?: number | null
+          id?: string
+          keywords?: string[] | null
+          processed_at?: string | null
+          processing_status?: string
+          search_query?: string | null
+          source_url?: string | null
+          text_length?: number | null
+          topics?: string[] | null
+          updated_at?: string | null
+          validation_date?: string | null
+          validation_reason?: string | null
+          validation_status?: string
+        }
+        Update: {
+          ai_summary?: string | null
+          complexity_level?: string | null
+          created_at?: string | null
+          file_name?: string
+          file_path?: string
+          file_size_bytes?: number | null
+          id?: string
+          keywords?: string[] | null
+          processed_at?: string | null
+          processing_status?: string
+          search_query?: string | null
+          source_url?: string | null
+          text_length?: number | null
+          topics?: string[] | null
+          updated_at?: string | null
+          validation_date?: string | null
+          validation_reason?: string | null
+          validation_status?: string
+        }
+        Relationships: []
       }
       pdf_exports: {
         Row: {
