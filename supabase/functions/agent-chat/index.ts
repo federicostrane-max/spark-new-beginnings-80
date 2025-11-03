@@ -137,11 +137,13 @@ Deno.serve(async (req) => {
 
     if (userMsgError) throw userMsgError;
 
-    // Get conversation history
+    // Get conversation history - EXCLUDE empty/incomplete messages at DB level
     const { data: messages, error: msgError } = await supabase
       .from('agent_messages')
       .select('id, role, content')
       .eq('conversation_id', conversation.id)
+      .not('content', 'is', null)
+      .neq('content', '')
       .order('created_at', { ascending: true });
 
     if (msgError) throw msgError;
@@ -251,6 +253,17 @@ Deno.serve(async (req) => {
               role: m.role,
               content: m.content
             }));
+
+          // Verify no empty messages remain before sending to Anthropic
+          const hasEmptyMessages = anthropicMessages.some(m => !m.content || m.content.trim() === '');
+          if (hasEmptyMessages) {
+            console.error('Found empty messages after filtering!', anthropicMessages);
+            throw new Error('Cannot send empty messages to Anthropic');
+          }
+
+          console.log('📤 Sending to Anthropic:');
+          console.log('Total messages:', anthropicMessages.length);
+          console.log('Messages:', JSON.stringify(anthropicMessages, null, 2));
 
           const response = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
