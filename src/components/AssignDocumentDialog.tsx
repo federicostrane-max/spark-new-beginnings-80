@@ -159,7 +159,8 @@ export const AssignDocumentDialog = ({
 
         // Sync document to each newly assigned agent
         for (const agentId of toAdd) {
-          console.log(`[AssignDialog] Syncing document ${document.id} to agent ${agentId}`);
+          const agentName = agents.find(a => a.id === agentId)?.name || 'Agente';
+          toast.loading(`Sincronizzazione per ${agentName}...`);
           
           const { data: syncData, error: syncError } = await supabase.functions.invoke(
             "sync-pool-document",
@@ -173,9 +174,14 @@ export const AssignDocumentDialog = ({
 
           if (syncError) {
             console.error(`[AssignDialog] Sync failed for agent ${agentId}:`, syncError);
-            toast.error(`Errore nella sincronizzazione per un agente`);
+            toast.error(`Errore nella sincronizzazione per ${agentName}`);
           } else {
             console.log(`[AssignDialog] Sync successful:`, syncData);
+            if (syncData?.chunksCount) {
+              toast.success(`${syncData.chunksCount} chunk aggiunti per ${agentName}`);
+            } else {
+              toast.info(`Documento già sincronizzato per ${agentName}`);
+            }
           }
         }
       }
