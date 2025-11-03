@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
     // Get conversation history
     const { data: messages, error: msgError } = await supabase
       .from('agent_messages')
-      .select('role, content')
+      .select('id, role, content')
       .eq('conversation_id', conversation.id)
       .order('created_at', { ascending: true });
 
@@ -205,6 +205,8 @@ Deno.serve(async (req) => {
           
           const anthropicMessages = messages
             .filter(m => {
+              // Exclude the placeholder we just created
+              if (m.id === placeholderMsg.id) return false;
               // Exclude messages with empty or null content
               if (!m.content || typeof m.content !== 'string') return false;
               // Exclude messages with only whitespace
