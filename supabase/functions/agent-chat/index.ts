@@ -28,13 +28,23 @@ interface Attachment {
 }
 
 Deno.serve(async (req) => {
+  console.log('=== AGENT CHAT REQUEST RECEIVED ===');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Headers:', {
+    authorization: req.headers.get('Authorization') ? 'Present' : 'Missing',
+    contentType: req.headers.get('Content-Type')
+  });
+  
   if (req.method === 'OPTIONS') {
+    console.log('Handling CORS preflight');
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
+      console.error('Missing authorization header');
       throw new Error('Missing authorization header');
     }
 
@@ -48,10 +58,16 @@ Deno.serve(async (req) => {
     );
 
     if (userError || !user) {
+      console.error('Authentication failed:', userError);
       throw new Error('Unauthorized');
     }
 
-    const { conversationId, message, agentSlug, attachments } = await req.json();
+    console.log('User authenticated:', user.id);
+
+    const requestBody = await req.json();
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
+    
+    const { conversationId, message, agentSlug, attachments } = requestBody;
 
     console.log('Processing chat for agent:', agentSlug);
 
