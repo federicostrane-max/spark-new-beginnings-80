@@ -36,7 +36,7 @@ interface ForwardMessageDialogProps {
   onOpenChange: (open: boolean) => void;
   message: { id: string; role: "user" | "assistant"; content: string } | null;
   currentAgentId: string;
-  onForwardComplete: (conversationId: string, agentId: string) => void;
+  onForwardComplete: (conversationId: string, agentId: string, messageContent: string) => void;
 }
 
 export const ForwardMessageDialog = ({
@@ -106,23 +106,6 @@ export const ForwardMessageDialog = ({
       if (rpcError) throw rpcError;
       if (!conversationId) throw new Error('No conversation ID returned');
 
-      // Insert the forwarded message as a user message
-      const { error: insertError } = await supabase
-        .from("agent_messages")
-        .insert({
-          conversation_id: conversationId,
-          role: 'user',
-          content: message.content
-        });
-
-      if (insertError) throw insertError;
-
-      // Update conversation timestamp
-      await supabase
-        .from("agent_conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", conversationId);
-
       if (!isMobile) {
         toast({
           title: "Messaggio inoltrato",
@@ -131,7 +114,8 @@ export const ForwardMessageDialog = ({
       }
 
       onOpenChange(false);
-      onForwardComplete(conversationId, selectedAgent);
+      // Pass the message content to be sent via handleSendMessage
+      onForwardComplete(conversationId, selectedAgent, message.content);
       
     } catch (error: any) {
       console.error("Error forwarding message:", error);
