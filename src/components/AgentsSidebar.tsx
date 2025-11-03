@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, LogOut, BookOpen, Trash2, Edit } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -42,6 +43,7 @@ export const AgentsSidebar = ({
   onEditAgent
 }: AgentsSidebarProps) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
@@ -153,7 +155,15 @@ export const AgentsSidebar = ({
       </ScrollArea>
 
       {/* Logout Button */}
-      <div className="p-3 border-t border-sidebar-border">
+      <div className="p-3 border-t border-sidebar-border space-y-2">
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
+          onClick={() => navigate("/documents")}
+        >
+          <Database className="h-4 w-4" />
+          Pool Documenti
+        </Button>
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"

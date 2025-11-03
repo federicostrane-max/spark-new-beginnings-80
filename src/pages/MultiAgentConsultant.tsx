@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTTS } from "@/contexts/TTSContext";
@@ -9,7 +10,7 @@ import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2 } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Database } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ export default function MultiAgentConsultant() {
   const { session } = useAuth();
   const { preGenerateAudio } = useTTS();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -515,20 +517,28 @@ export default function MultiAgentConsultant() {
                        <div className="min-w-0 flex-1">
                          <h1 className="font-semibold truncate">{currentAgent.name}</h1>
                        </div>
-                      </div>
-                       <div className="flex items-center gap-2 flex-shrink-0">
-                         <Button
-                           variant="ghost"
-                           size="icon"
-                           onClick={() => {
-                             setEditingAgent(currentAgent);
-                             setShowCreateModal(true);
-                           }}
-                           title="Modifica agente"
-                         >
-                           <Edit className="h-4 w-4" />
-                         </Button>
-                         {messages.length > 0 && (
+                       </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => navigate("/documents")}
+                            title="Pool Documenti"
+                          >
+                            <Database className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setEditingAgent(currentAgent);
+                              setShowCreateModal(true);
+                            }}
+                            title="Modifica agente"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          {messages.length > 0 && (
                            <>
                              <Button
                                variant="ghost"
