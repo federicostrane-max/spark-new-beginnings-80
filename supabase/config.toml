@@ -2,6 +2,7 @@ project_id = "vjeafbnkycxfzpxwkifw"
 
 [functions.agent-chat]
 verify_jwt = false
+timeout = 300
 
 [functions.agent-chat-demo]
 verify_jwt = false

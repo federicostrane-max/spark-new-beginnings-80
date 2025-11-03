@@ -315,45 +315,57 @@ Deno.serve(async (req) => {
           const decoder = new TextDecoder();
           let buffer = '';
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
 
-            for (const line of lines) {
-              if (!line.trim() || line.startsWith(':')) continue;
-              if (!line.startsWith('data: ')) continue;
+              for (const line of lines) {
+                if (!line.trim() || line.startsWith(':')) continue;
+                if (!line.startsWith('data: ')) continue;
 
-              const data = line.slice(6);
-              if (data === '[DONE]') continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
 
-              try {
-                const parsed = JSON.parse(data);
-                
-                if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                  const text = parsed.delta.text;
-                  fullResponse += text;
-                  sendSSE(JSON.stringify({ type: 'content', text }));
+                try {
+                  const parsed = JSON.parse(data);
+                  
+                  if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                    const text = parsed.delta.text;
+                    fullResponse += text;
+                    sendSSE(JSON.stringify({ type: 'content', text }));
 
-                  // Periodic DB update (every 500ms)
-                  const now = Date.now();
-                  if (now - lastUpdateTime > 500) {
-                    await supabase
-                      .from('agent_messages')
-                      .update({ content: fullResponse })
-                      .eq('id', placeholderMsg.id);
-                    lastUpdateTime = now;
+                    // Periodic DB update (every 500ms)
+                    const now = Date.now();
+                    if (now - lastUpdateTime > 500) {
+                      await supabase
+                        .from('agent_messages')
+                        .update({ content: fullResponse })
+                        .eq('id', placeholderMsg.id);
+                      lastUpdateTime = now;
+                    }
+                  } else if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+                    toolCalls.push(parsed.content_block);
                   }
-                } else if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
-                  toolCalls.push(parsed.content_block);
+                } catch (e) {
+                  console.error('Parse error:', e);
                 }
-              } catch (e) {
-                console.error('Parse error:', e);
               }
             }
+          } catch (error) {
+            console.error('Streaming interrupted:', error);
+            // Save whatever we have so far
+            if (fullResponse) {
+              await supabase
+                .from('agent_messages')
+                .update({ content: fullResponse })
+                .eq('id', placeholderMsg.id);
+            }
+            throw error;
           }
 
           // Handle tool calls (agent consultations)
@@ -484,7 +496,7 @@ Deno.serve(async (req) => {
               },
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 4096,
+                max_tokens: 16384,
                 system: agent.system_prompt,
                 messages: followUpMessages,
                 stream: true
@@ -502,42 +514,54 @@ Deno.serve(async (req) => {
 
             let followUpBuffer = '';
             
-            while (true) {
-              const { done, value } = await followUpReader.read();
-              if (done) break;
+            try {
+              while (true) {
+                const { done, value } = await followUpReader.read();
+                if (done) break;
 
-              followUpBuffer += decoder.decode(value, { stream: true });
-              const lines = followUpBuffer.split('\n');
-              followUpBuffer = lines.pop() || '';
+                followUpBuffer += decoder.decode(value, { stream: true });
+                const lines = followUpBuffer.split('\n');
+                followUpBuffer = lines.pop() || '';
 
-              for (const line of lines) {
-                if (!line.trim() || line.startsWith(':')) continue;
-                if (!line.startsWith('data: ')) continue;
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  if (!line.startsWith('data: ')) continue;
 
-                const data = line.slice(6);
-                if (data === '[DONE]') continue;
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
 
-                try {
-                  const parsed = JSON.parse(data);
-                  
-                  if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                    const text = parsed.delta.text;
-                    fullResponse += text;
-                    sendSSE(JSON.stringify({ type: 'content', text }));
+                  try {
+                    const parsed = JSON.parse(data);
+                    
+                    if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                      const text = parsed.delta.text;
+                      fullResponse += text;
+                      sendSSE(JSON.stringify({ type: 'content', text }));
 
-                    const now = Date.now();
-                    if (now - lastUpdateTime > 500) {
-                      await supabase
-                        .from('agent_messages')
-                        .update({ content: fullResponse })
-                        .eq('id', placeholderMsg.id);
-                      lastUpdateTime = now;
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 500) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
                     }
+                  } catch (e) {
+                    console.error('Parse error:', e);
                   }
-                } catch (e) {
-                  console.error('Parse error:', e);
                 }
               }
+            } catch (error) {
+              console.error('Follow-up streaming interrupted:', error);
+              // Save whatever we have so far
+              if (fullResponse) {
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+              }
+              throw error;
             }
           }
 
