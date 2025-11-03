@@ -94,11 +94,13 @@ export default function MultiAgentConsultant() {
     
     if (error) {
       console.error("Error getting conversation:", error);
-      toast({ 
-        title: "Error", 
-        description: "Failed to load conversation", 
-        variant: "destructive" 
-      });
+      if (!isMobile) {
+        toast({ 
+          title: "Error", 
+          description: "Failed to load conversation", 
+          variant: "destructive" 
+        });
+      }
       return;
     }
     
@@ -317,27 +319,33 @@ export default function MultiAgentConsultant() {
       setSelectedMessages(new Set());
       setSelectionMode(false);
       
-      toast({
-        title: "Messaggi eliminati",
-        description: `${messageIds.length} messaggio${messageIds.length > 1 ? 'i' : ''} eliminat${messageIds.length > 1 ? 'i' : 'o'} con successo`,
-      });
+      if (!isMobile) {
+        toast({
+          title: "Messaggi eliminati",
+          description: `${messageIds.length} messaggio${messageIds.length > 1 ? 'i' : ''} eliminat${messageIds.length > 1 ? 'i' : 'o'} con successo`,
+        });
+      }
     } catch (error: any) {
       console.error("Error deleting messages:", error);
-      toast({
-        title: "Errore",
-        description: "Impossibile eliminare i messaggi",
-        variant: "destructive",
-      });
+      if (!isMobile) {
+        toast({
+          title: "Errore",
+          description: "Impossibile eliminare i messaggi",
+          variant: "destructive",
+        });
+      }
     }
   };
 
   const handleForward = () => {
     if (selectedMessages.size === 0) {
-      toast({ 
-        title: "Attenzione", 
-        description: "Seleziona almeno un messaggio", 
-        variant: "destructive" 
-      });
+      if (!isMobile) {
+        toast({ 
+          title: "Attenzione", 
+          description: "Seleziona almeno un messaggio", 
+          variant: "destructive" 
+        });
+      }
       return;
     }
     setShowForwardDialog(true);

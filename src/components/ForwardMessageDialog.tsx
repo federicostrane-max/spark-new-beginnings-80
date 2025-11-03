@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { Search, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface Agent {
   id: string;
@@ -51,6 +52,7 @@ export const ForwardMessageDialog = ({
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [forwarding, setForwarding] = useState(false);
   const { toast } = useToast();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (open) {
@@ -175,20 +177,24 @@ export const ForwardMessageDialog = ({
 
       console.log(`${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"} a ${selectedAgents.size} agente${selectedAgents.size > 1 ? "i" : ""}`);
       
-      toast({
-        title: "Messaggi inoltrati",
-        description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"}. Gli agenti stanno elaborando la risposta...`,
-      });
+      if (!isMobile) {
+        toast({
+          title: "Messaggi inoltrati",
+          description: `${messages.length} messaggio${messages.length > 1 ? "i" : ""} inoltrat${messages.length > 1 ? "i" : "o"}. Gli agenti stanno elaborando la risposta...`,
+        });
+      }
       
       onForwardComplete();
       onOpenChange(false);
     } catch (error: any) {
       console.error("Error forwarding messages:", error);
-      toast({
-        title: "Errore",
-        description: "Si è verificato un errore durante l'inoltro dei messaggi",
-        variant: "destructive",
-      });
+      if (!isMobile) {
+        toast({
+          title: "Errore",
+          description: "Si è verificato un errore durante l'inoltro dei messaggi",
+          variant: "destructive",
+        });
+      }
     } finally {
       setForwarding(false);
     }
