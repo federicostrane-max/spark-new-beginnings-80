@@ -228,15 +228,44 @@ export default function MultiAgentConsultant() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = "";
+      let buffer = "";
 
       if (!reader) throw new Error("No reader");
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Process any remaining buffer
+          if (buffer.trim()) {
+            const remainingLines = buffer.split("\n");
+            for (const line of remainingLines) {
+              if (!line.trim() || line.startsWith(":")) continue;
+              if (!line.startsWith("data: ")) continue;
+              const data = line.slice(6);
+              if (data === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.type === "content" && parsed.text) {
+                  accumulatedText += parsed.text;
+                  setMessages((prev) => 
+                    prev.map((m) =>
+                      m.id === assistantId ? { ...m, content: accumulatedText } : m
+                    )
+                  );
+                }
+              } catch (e) {
+                // Ignore parse errors in final flush
+              }
+            }
+          }
+          break;
+        }
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        
+        // Keep the last incomplete line in the buffer
+        buffer = lines.pop() || "";
 
         for (const line of lines) {
           if (!line.trim() || line.startsWith(":")) continue;
@@ -249,7 +278,6 @@ export default function MultiAgentConsultant() {
             const parsed = JSON.parse(data);
 
             if (parsed.type === "message_start") {
-              // Backend created placeholder, we already have one in UI
               console.log("Message started:", parsed.messageId);
             } else if (parsed.type === "content" && parsed.text) {
               accumulatedText += parsed.text;
@@ -259,7 +287,6 @@ export default function MultiAgentConsultant() {
                 )
               );
             } else if (parsed.type === "complete") {
-              // Stream complete
               if (parsed.conversationId && !currentConversation) {
                 setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: text.slice(0, 50) });
               }
