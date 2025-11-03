@@ -315,10 +315,20 @@ Deno.serve(async (req) => {
           const decoder = new TextDecoder();
           let buffer = '';
 
+          console.log('🔄 Starting stream from Anthropic...');
+
           try {
             while (true) {
               const { done, value } = await reader.read();
-              if (done) break;
+              if (done) {
+                console.log(`✅ Stream ended. Total response length: ${fullResponse.length} chars`);
+                // Save before breaking
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+                break;
+              }
 
               buffer += decoder.decode(value, { stream: true });
               const lines = buffer.split('\n');
@@ -356,8 +366,10 @@ Deno.serve(async (req) => {
                 }
               }
             }
+            console.log(`📝 Stream completed successfully. Final length: ${fullResponse.length} chars`);
           } catch (error) {
-            console.error('Streaming interrupted:', error);
+            console.error('❌ Streaming interrupted:', error);
+            console.error('📊 Partial response length:', fullResponse.length);
             // Save whatever we have so far
             if (fullResponse) {
               await supabase
@@ -367,6 +379,8 @@ Deno.serve(async (req) => {
             }
             throw error;
           }
+
+          console.log(`🎯 Total tokens received: ${fullResponse.length} chars, ${toolCalls.length} tool calls`);
 
           // Handle tool calls (agent consultations)
           if (toolCalls.length > 0) {
@@ -514,10 +528,20 @@ Deno.serve(async (req) => {
 
             let followUpBuffer = '';
             
+            console.log('🔄 Starting follow-up stream from Anthropic...');
+
             try {
               while (true) {
                 const { done, value } = await followUpReader.read();
-                if (done) break;
+                if (done) {
+                  console.log(`✅ Follow-up stream ended. Total response length: ${fullResponse.length} chars`);
+                  // Save before breaking
+                  await supabase
+                    .from('agent_messages')
+                    .update({ content: fullResponse })
+                    .eq('id', placeholderMsg.id);
+                  break;
+                }
 
                 followUpBuffer += decoder.decode(value, { stream: true });
                 const lines = followUpBuffer.split('\n');
@@ -552,8 +576,10 @@ Deno.serve(async (req) => {
                   }
                 }
               }
+              console.log(`📝 Follow-up stream completed successfully. Final length: ${fullResponse.length} chars`);
             } catch (error) {
-              console.error('Follow-up streaming interrupted:', error);
+              console.error('❌ Follow-up streaming interrupted:', error);
+              console.error('📊 Partial follow-up response length:', fullResponse.length);
               // Save whatever we have so far
               if (fullResponse) {
                 await supabase
