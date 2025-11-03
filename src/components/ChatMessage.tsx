@@ -99,13 +99,13 @@ export const ChatMessage = ({
           </div>
         )}
 
-        {!isUser && !isStreaming && content && (
-          <div className="mt-3 pt-2 border-t border-border/50 flex gap-2 flex-wrap">
+        {!isStreaming && content && (
+          <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
             <Button
               variant="ghost"
               size="sm"
               onClick={handleCopy}
-              className="h-8 px-2"
+              className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
             >
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
             </Button>
@@ -114,7 +114,7 @@ export const ChatMessage = ({
               variant="ghost"
               size="sm"
               onClick={handleTTS}
-              className="h-8 px-2"
+              className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
             >
               {isTTSPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
             </Button>
@@ -124,7 +124,7 @@ export const ChatMessage = ({
                 variant="ghost"
                 size="sm"
                 onClick={() => setLocalExpanded(!localExpanded)}
-                className="h-8 px-2"
+                className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
               >
                 {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </Button>
