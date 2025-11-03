@@ -307,7 +307,7 @@ ${agent.system_prompt}`;
             },
             body: JSON.stringify({
               model: 'claude-sonnet-4-5',
-              max_tokens: 200000,
+              max_tokens: 64000,
               temperature: 0.7,
               system: enhancedSystemPrompt,
               messages: anthropicMessages,
@@ -535,7 +535,7 @@ ${agent.system_prompt}`;
               },
               body: JSON.stringify({
                 model: 'claude-sonnet-4-20250514',
-                max_tokens: 200000,
+                max_tokens: 64000,
                 temperature: 0.7,
                 system: enhancedSystemPromptFollowUp,
                 messages: followUpMessages,
