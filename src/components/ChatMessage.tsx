@@ -69,8 +69,8 @@ export const ChatMessage = ({
       )}
       <div
         className={cn(
-          "rounded-2xl px-4 py-3 shadow-sm transition-all",
-          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[95%] md:max-w-[75%]",
+          "rounded-2xl px-4 py-3 shadow-sm transition-all w-full",
+          selectionMode ? "max-w-[calc(100%-3rem)] ml-8" : "max-w-[85%] md:max-w-[75%]",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
@@ -78,12 +78,12 @@ export const ChatMessage = ({
         )}
       >
         {isUser ? (
-          <div className="whitespace-pre-wrap">
+          <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">
             {content}
             {isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-foreground animate-pulse" />}
           </div>
         ) : (
-          <div className="[&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-all [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
+          <div className="break-words [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-all [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {content}
             </ReactMarkdown>
