@@ -295,7 +295,7 @@ Deno.serve(async (req) => {
             },
             body: JSON.stringify({
               model: 'claude-sonnet-4-5',
-              max_tokens: 4096,
+              max_tokens: 16384,
               system: agent.system_prompt,
               messages: anthropicMessages,
               tools: tools.length > 0 ? tools : undefined,
@@ -382,7 +382,7 @@ Deno.serve(async (req) => {
                   },
                   body: JSON.stringify({
                     model: 'claude-sonnet-4-5',
-                    max_tokens: 2048,
+                    max_tokens: 8192,
                     system: consultedAgent.system_prompt,
                     messages: [{ role: 'user', content: question }]
                   })
