@@ -98,6 +98,31 @@ export default function MultiAgentConsultant() {
     }
   }, [isStreaming, messages, preGenerateAudio]);
 
+  // Reload messages when returning to the app
+  useEffect(() => {
+    const reloadMessages = () => {
+      if (currentConversation?.id && !isStreaming) {
+        loadConversation(currentConversation.id);
+      }
+    };
+
+    // Reload when window regains focus (user returns to app)
+    window.addEventListener('focus', reloadMessages);
+    
+    // Also reload on visibility change (mobile)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && currentConversation?.id && !isStreaming) {
+        loadConversation(currentConversation.id);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', reloadMessages);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentConversation?.id, isStreaming]);
+
   const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
