@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { TTSProvider } from "@/contexts/TTSContext";
 import { useAuth } from "@/hooks/useAuth";
 import MultiAgentConsultant from "./pages/MultiAgentConsultant";
+import DocumentPool from "./pages/DocumentPool";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -37,6 +38,14 @@ const App = () => {
                 element={
                   <ProtectedRoute>
                     <MultiAgentConsultant />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/documents"
+                element={
+                  <ProtectedRoute>
+                    <DocumentPool />
                   </ProtectedRoute>
                 }
               />
