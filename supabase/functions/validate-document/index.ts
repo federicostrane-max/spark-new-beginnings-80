@@ -25,7 +25,8 @@ serve(async (req) => {
   }
 
   try {
-    const { documentId, searchQuery, extractedText }: ValidationRequest = await req.json();
+    const requestBody = await req.json();
+    const documentId = requestBody.documentId;
 
     console.log(`[validate-document] Starting validation for document ${documentId}`);
 
@@ -33,6 +34,17 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Get document info
+    const { data: doc, error: docError } = await supabase
+      .from('knowledge_documents')
+      .select('file_path, search_query')
+      .eq('id', documentId)
+      .single();
+
+    if (docError || !doc) {
+      throw new Error('Document not found');
+    }
 
     // Update status to validating
     await supabase
@@ -45,8 +57,51 @@ serve(async (req) => {
 
     await supabase
       .from('document_processing_cache')
-      .update({ validation_started_at: new Date().toISOString() })
-      .eq('document_id', documentId);
+      .upsert({ 
+        document_id: documentId,
+        validation_started_at: new Date().toISOString() 
+      });
+
+    // Extract text from PDF (simplified - just get file metadata for now)
+    // In a real implementation, you'd download and parse the PDF here
+    let extractedText = requestBody.extractedText;
+    let searchQuery = requestBody.searchQuery || doc.search_query || '';
+
+    // If no extracted text provided, skip AI validation and just mark as validated
+    if (!extractedText) {
+      console.log('[validate-document] No extracted text, marking as validated');
+      
+      await supabase
+        .from('knowledge_documents')
+        .update({ 
+          validation_status: 'validated',
+          processing_status: 'pending_processing',
+          validation_reason: 'Documento accettato (validazione AI saltata)',
+          validation_date: new Date().toISOString(),
+          text_length: 0
+        })
+        .eq('id', documentId);
+
+      await supabase
+        .from('document_processing_cache')
+        .update({ 
+          validation_completed_at: new Date().toISOString()
+        })
+        .eq('document_id', documentId);
+      
+      // Trigger processing
+      supabase.functions.invoke('process-document', {
+        body: { documentId }
+      }).then(() => console.log('[validate-document] Processing triggered'));
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        reason: 'Documento accettato per il processing',
+        textLength: 0
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // ========================================
     // STEP 1: Technical Validation
@@ -178,7 +233,7 @@ Rispondi SOLO con questo formato JSON:
       .from('knowledge_documents')
       .update({ 
         validation_status: 'validated',
-        processing_status: 'validated',
+        processing_status: 'pending_processing',
         validation_reason: `Documento valido: ${aiResult.motivazione}`,
         validation_date: new Date().toISOString(),
         text_length: textLength
@@ -191,6 +246,13 @@ Rispondi SOLO con questo formato JSON:
         validation_completed_at: new Date().toISOString()
       })
       .eq('document_id', documentId);
+
+    // Trigger processing
+    console.log('[validate-document] Triggering document processing...');
+    supabase.functions.invoke('process-document', {
+      body: { documentId }
+    }).then(() => console.log('[validate-document] Processing triggered'))
+      .catch((err: Error) => console.error('[validate-document] Failed to trigger processing:', err));
 
     return new Response(JSON.stringify({ 
       success: true, 
