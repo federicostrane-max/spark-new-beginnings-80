@@ -60,6 +60,7 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
 
   const pause = useCallback(() => {
     if (audioElement) {
+      setStatus('paused');
       audioElement.pause();
     }
   }, [audioElement]);
