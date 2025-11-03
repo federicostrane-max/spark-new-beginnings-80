@@ -178,10 +178,10 @@ export default function MultiAgentConsultant() {
     }
   };
 
-  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>) => {
+  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forceConversationId?: string) => {
     if (!currentAgent || !session?.access_token) return;
 
-    const conversationId = currentConversation?.id;
+    const conversationId = forceConversationId || currentConversation?.id;
 
     if (!conversationId) {
       console.error("No active conversation");
@@ -395,8 +395,8 @@ export default function MultiAgentConsultant() {
     // Small delay to ensure UI has updated
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    // Send the forwarded message using the standard flow
-    await handleSendMessage(messageContent);
+    // Send the forwarded message using the standard flow, passing conversationId explicitly
+    await handleSendMessage(messageContent, undefined, conversationId);
   };
 
   const handleDeleteAllMessages = async () => {
