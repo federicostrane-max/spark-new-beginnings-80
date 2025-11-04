@@ -61,12 +61,14 @@ const Presentation = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const [theme, setTheme] = useState<Theme>('aurora');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isGeneratingAudioRef = useRef(false);
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -154,14 +156,24 @@ const Presentation = () => {
   const playSlideAudio = async (slide: PresentationSlide, onComplete?: () => void) => {
     if (!isAudioEnabled && !isAutoPlaying) return;
 
+    // Prevent multiple simultaneous requests
+    if (isGeneratingAudioRef.current) {
+      console.log('⚠️ Audio generation already in progress, skipping...');
+      return;
+    }
+
+    isGeneratingAudioRef.current = true;
+
     // Stop any currently playing audio
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
+      setIsPlayingAudio(false);
     }
 
     try {
-      setIsPlayingAudio(true);
+      setIsLoadingAudio(true);
+      console.log('⏳ Loading audio...');
 
       // Combine title and content for narration
       const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
@@ -225,11 +237,16 @@ const Presentation = () => {
       };
 
       console.log('▶️ Starting audio playback...');
+      
+      setIsLoadingAudio(false);
+      setIsPlayingAudio(true);
+      
       await audio.play();
       console.log('🎶 Audio playing!');
       
     } catch (error) {
       console.error('❌ Error in TTS:', error);
+      setIsLoadingAudio(false);
       setIsPlayingAudio(false);
       toast.error('Errore generazione audio');
       
@@ -237,6 +254,8 @@ const Presentation = () => {
       if (isAutoPlaying && onComplete) {
         setTimeout(onComplete, 2000);
       }
+    } finally {
+      isGeneratingAudioRef.current = false;
     }
   };
 
@@ -325,6 +344,8 @@ const Presentation = () => {
   };
 
   const toggleAudio = () => {
+    if (isLoadingAudio) return; // Prevent toggling while loading
+    
     setIsAudioEnabled(!isAudioEnabled);
     if (audioRef.current && !isAudioEnabled) {
       audioRef.current.pause();
@@ -492,14 +513,23 @@ const Presentation = () => {
             onClick={toggleAudio}
             variant="outline"
             size="sm"
-            disabled={isAutoPlaying}
+            disabled={isAutoPlaying || isLoadingAudio}
             className={cn(
               "bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm",
-              isPlayingAudio && "animate-pulse"
+              isPlayingAudio && "animate-pulse",
+              isLoadingAudio && "opacity-70 cursor-wait"
             )}
-            title={isAudioEnabled ? "Disattiva audio" : "Attiva audio"}
+            title={
+              isLoadingAudio 
+                ? "Caricamento audio..." 
+                : isAudioEnabled 
+                  ? "Disattiva audio" 
+                  : "Attiva audio"
+            }
           >
-            {isAudioEnabled ? (
+            {isLoadingAudio ? (
+              <Loader2 className="h-3 w-3 md:h-4 md:w-4 animate-spin" />
+            ) : isAudioEnabled ? (
               <Volume2 className="h-3 w-3 md:h-4 md:w-4" />
             ) : (
               <VolumeX className="h-3 w-3 md:h-4 md:w-4" />
