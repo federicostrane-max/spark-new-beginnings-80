@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
+import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -140,7 +141,7 @@ export default function DocumentPool() {
         </div>
 
         {!checkingMigration && needsMigration && (
-          <Alert className="bg-blue-500/10 border-blue-500">
+          <Alert className="bg-blue-500/10 border-blue-500 mb-6">
             <AlertCircle className="h-4 w-4 text-blue-500" />
             <AlertTitle className="text-blue-500">Migrazione Disponibile</AlertTitle>
             <AlertDescription>
@@ -150,6 +151,10 @@ export default function DocumentPool() {
             </AlertDescription>
           </Alert>
         )}
+
+        <div className="mb-6">
+          <DocumentPoolUpload onUploadComplete={checkMigrationStatus} />
+        </div>
 
         <DocumentPoolTable />
       </div>

@@ -48,3 +48,6 @@ verify_jwt = false
 
 [functions.upload-pdf-to-pool]
 verify_jwt = false
+
+[functions.upload-pdf-to-shared-pool]
+verify_jwt = true
