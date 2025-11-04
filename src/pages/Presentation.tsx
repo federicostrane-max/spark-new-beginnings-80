@@ -166,8 +166,8 @@ const Presentation = () => {
     animationTimersRef.current = [];
   };
 
-  // Schedule progressive reveal: show content as audio reads it
-  const scheduleProgressiveReveal = (contentItemsCount: number, delayBeforeStart: number = 1100) => {
+  // Schedule progressive reveal: show content as audio reads it based on actual audio duration
+  const scheduleProgressiveReveal = (contentItemsCount: number, audioDuration: number) => {
     clearAnimationTimers();
     setVisibleContentItems([]);
     setAnimationInProgress(true);
@@ -177,23 +177,23 @@ const Presentation = () => {
       return;
     }
 
-    // For title slides, show everything immediately
+    // For title slides or single items, show immediately
     if (contentItemsCount === 1) {
-      const timer = setTimeout(() => {
-        setVisibleContentItems([0]);
-        setAnimationInProgress(false);
-      }, delayBeforeStart);
-      animationTimersRef.current.push(timer);
+      setVisibleContentItems([0]);
+      setAnimationInProgress(false);
       return;
     }
 
-    // Show items progressively, starting after the initial delay
-    // Each item appears just before the audio reads it
-    const timePerItem = 2000; // 2 seconds per item
+    // Calculate time per item based on actual audio duration
+    // Distribute items evenly across the audio duration
+    const timePerItem = (audioDuration * 1000) / contentItemsCount;
+    
+    console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s (${timePerItem}ms per item)`);
     
     for (let i = 0; i < contentItemsCount; i++) {
-      const delay = delayBeforeStart + (i * timePerItem);
+      const delay = i * timePerItem;
       const timer = setTimeout(() => {
+        console.log(`✨ Showing content item ${i + 1}/${contentItemsCount}`);
         setVisibleContentItems(prev => [...prev, i]);
         if (i === contentItemsCount - 1) {
           setAnimationInProgress(false);
@@ -315,15 +315,18 @@ const Presentation = () => {
       audio.src = audioUrl;
       audioRef.current = audio;
 
-      // Schedule content to appear progressively
-      const contentCount = slide.content.length;
-      scheduleProgressiveReveal(contentCount, 0); // Start immediately, first item shows after 1.1s
+      // Wait for audio metadata to get duration
+      audio.onloadedmetadata = () => {
+        const audioDuration = audio.duration;
+        const contentCount = slide.content.length;
+        console.log(`🎵 Audio duration: ${audioDuration}s for ${contentCount} content items`);
+        
+        // Schedule content to appear progressively based on actual audio duration
+        scheduleProgressiveReveal(contentCount, audioDuration);
+      };
       
       audio.oncanplaythrough = async () => {
         try {
-          // Wait 1 second to let user see ALL content before audio starts
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
           console.log('▶️ Starting audio playback...');
           setIsLoadingAudio(false);
           setIsPlayingAudio(true);
