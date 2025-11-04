@@ -11,11 +11,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import mermaid from "mermaid";
 
 interface PresentationSlide {
   title: string;
   content: string[];
-  type: 'title' | 'content' | 'bullets' | 'conclusion';
+  type: 'title' | 'content' | 'bullets' | 'conclusion' | 'table' | 'diagram' | 'tree';
+  tableData?: {
+    headers: string[];
+    rows: string[][];
+  };
+  diagramCode?: string;
 }
 
 type Theme = 'aurora' | 'midnight' | 'ocean' | 'sunset' | 'forest' | 'minimal';
@@ -83,6 +89,24 @@ const Presentation = () => {
   const agentId = searchParams.get("agentId");
 
   useEffect(() => {
+    // Initialize Mermaid
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#a855f7',
+        primaryTextColor: '#fff',
+        primaryBorderColor: '#c084fc',
+        lineColor: '#e879f9',
+        secondaryColor: '#ec4899',
+        tertiaryColor: '#8b5cf6',
+      },
+      flowchart: {
+        curve: 'basis',
+        padding: 20,
+      },
+    });
+
     if (!messageId) {
       toast.error("No message ID provided");
       navigate("/");
@@ -166,14 +190,30 @@ const Presentation = () => {
     animationTimersRef.current = [];
   };
 
+  // Render Mermaid diagrams
+  const renderMermaidDiagram = async (code: string, elementId: string) => {
+    try {
+      const { svg } = await mermaid.render(elementId, code);
+      return svg;
+    } catch (error) {
+      console.error('Mermaid render error:', error);
+      return null;
+    }
+  };
+
   // Calculate progressive reveal timing based on audio duration
-  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number) => {
+  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number, slideType: string) => {
     clearAnimationTimers();
     setVisibleContentItems([]);
     setAnimationInProgress(true);
 
-    if (contentItemsCount === 0) {
-      setAnimationInProgress(false);
+    if (contentItemsCount === 0 || slideType === 'diagram' || slideType === 'tree' || slideType === 'table') {
+      // For visual slides, show everything at once after a brief delay
+      const timer = setTimeout(() => {
+        setVisibleContentItems([0]);
+        setAnimationInProgress(false);
+      }, 500);
+      animationTimersRef.current.push(timer);
       return;
     }
 
@@ -314,8 +354,8 @@ const Presentation = () => {
 
       audio.onloadedmetadata = () => {
         const duration = audio.duration;
-        const contentCount = slide.content.length;
-        scheduleProgressiveReveal(duration, contentCount);
+        const contentCount = slide.type === 'table' ? slide.tableData?.rows.length || 0 : slide.content.length;
+        scheduleProgressiveReveal(duration, contentCount, slide.type);
       };
 
       audio.onended = () => {
@@ -415,6 +455,25 @@ const Presentation = () => {
     setIsPlayingAudio(false);
     setAnimationInProgress(false);
   };
+
+  // Render Mermaid diagrams when slide changes
+  useEffect(() => {
+    const renderDiagrams = async () => {
+      if (slides.length > 0 && (slides[currentSlide]?.type === 'diagram' || slides[currentSlide]?.type === 'tree')) {
+        const slide = slides[currentSlide];
+        if (slide.diagramCode) {
+          const svg = await renderMermaidDiagram(slide.diagramCode, `mermaid-${currentSlide}`);
+          if (svg) {
+            const element = document.getElementById(`mermaid-${currentSlide}`);
+            if (element) {
+              element.innerHTML = svg;
+            }
+          }
+        }
+      }
+    };
+    renderDiagrams();
+  }, [currentSlide, slides]);
 
   // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
@@ -809,6 +868,71 @@ const Presentation = () => {
                     {item}
                   </p>
                 ))}
+              </div>
+            ) : slide?.type === 'table' && slide.tableData ? (
+              <div className={cn(
+                "overflow-x-auto transition-all duration-700",
+                visibleContentItems.includes(0) ? "opacity-100 scale-100" : "opacity-0 scale-95"
+              )}>
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      {slide.tableData.headers.map((header, idx) => (
+                        <th
+                          key={idx}
+                          className={cn(
+                            "px-3 md:px-6 py-2 md:py-4 text-xs md:text-lg font-semibold",
+                            "border-b-2 border-white/30",
+                            currentTheme.accent,
+                            "text-white"
+                          )}
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slide.tableData.rows.map((row, rowIdx) => (
+                      <tr
+                        key={rowIdx}
+                        className={cn(
+                          "transition-all duration-500 hover:bg-white/10",
+                          visibleContentItems.includes(0) && `animate-in fade-in slide-in-from-bottom-2`,
+                          visibleContentItems.includes(0) ? "" : "opacity-0"
+                        )}
+                        style={{ animationDelay: `${rowIdx * 100}ms` }}
+                      >
+                        {row.map((cell, cellIdx) => (
+                          <td
+                            key={cellIdx}
+                            className={cn(
+                              "px-3 md:px-6 py-2 md:py-3 text-xs md:text-base",
+                              "border-b border-white/10 text-center"
+                            )}
+                          >
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (slide?.type === 'diagram' || slide?.type === 'tree') && slide.diagramCode ? (
+              <div
+                className={cn(
+                  "transition-all duration-700",
+                  visibleContentItems.includes(0) ? "opacity-100 scale-100" : "opacity-0 scale-90"
+                )}
+              >
+                <div 
+                  id={`mermaid-${currentSlide}`}
+                  className="mermaid-diagram flex items-center justify-center p-4 md:p-8"
+                  dangerouslySetInnerHTML={{
+                    __html: slide.diagramCode
+                  }}
+                />
               </div>
             ) : (
               <div className="grid gap-2 md:gap-6">

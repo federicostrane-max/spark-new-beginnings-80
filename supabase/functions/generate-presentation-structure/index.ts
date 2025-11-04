@@ -8,7 +8,12 @@ const corsHeaders = {
 interface PresentationSlide {
   title: string;
   content: string[];
-  type: 'title' | 'content' | 'bullets' | 'conclusion';
+  type: 'title' | 'content' | 'bullets' | 'conclusion' | 'table' | 'diagram' | 'tree';
+  tableData?: {
+    headers: string[];
+    rows: string[][];
+  };
+  diagramCode?: string;
 }
 
 serve(async (req) => {
@@ -60,6 +65,27 @@ Return a JSON array of slides with this exact structure:
     "type": "bullets"
   },
   {
+    "title": "Process Flow",
+    "content": ["Step 1", "Step 2", "Step 3"],
+    "type": "diagram",
+    "diagramCode": "graph LR\n  A[Start] --> B[Process]\n  B --> C[End]"
+  },
+  {
+    "title": "Data Comparison",
+    "content": [],
+    "type": "table",
+    "tableData": {
+      "headers": ["Category", "Value 1", "Value 2"],
+      "rows": [["Item A", "10", "20"], ["Item B", "15", "25"]]
+    }
+  },
+  {
+    "title": "Hierarchical Structure",
+    "content": ["Root concept with sub-elements"],
+    "type": "tree",
+    "diagramCode": "graph TD\n  A[Root] --> B[Branch 1]\n  A --> C[Branch 2]"
+  },
+  {
     "title": "Conclusion",
     "content": ["Summary point"],
     "type": "conclusion"
@@ -69,11 +95,18 @@ Return a JSON array of slides with this exact structure:
 Rules:
 - Create 3-7 slides maximum
 - Each slide should have a clear title
-- Use "bullets" type for most slides with 2-5 points each
-- Use "title" type only for the first slide
-- Use "conclusion" type for the last slide
+- Choose the most appropriate type for each concept:
+  * "bullets" for lists and key points (2-5 items)
+  * "table" for data comparisons, statistics, or structured information
+  * "diagram" for processes, workflows, or sequential steps (use Mermaid syntax)
+  * "tree" for hierarchies, organizational structures, or relationships (use Mermaid syntax)
+  * "title" only for the first slide
+  * "conclusion" for the last slide
+- For diagrams and trees, use valid Mermaid syntax (graph LR, graph TD, flowchart)
+- For tables, ensure headers and rows are properly structured
 - Keep content concise and impactful
-- Extract only the most important concepts`
+- Extract only the most important concepts
+- Prioritize visual representations when data is structured or relational`
           },
           {
             role: 'user',
