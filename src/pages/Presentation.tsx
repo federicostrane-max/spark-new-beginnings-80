@@ -177,38 +177,55 @@ const Presentation = () => {
       return;
     }
 
-    // For title slides or single items, show immediately
+    // For single items, show immediately
     if (contentItemsCount === 1) {
       setVisibleContentItems([0]);
       setAnimationInProgress(false);
       return;
     }
 
-    // Show first item immediately when audio starts
-    setVisibleContentItems([0]);
+    const currentSlideData = slides[currentSlide];
     
-    // Calculate time per item based on actual audio duration
-    // Remaining items are distributed across the audio duration
-    const timePerItem = (audioDuration * 1000) / contentItemsCount;
+    // Calculate text length for each content item to distribute time proportionally
+    const contentLengths = currentSlideData.content.map(item => item.length);
+    const totalLength = contentLengths.reduce((sum, len) => sum + len, 0);
     
-    console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s (${timePerItem}ms per item)`);
+    // Small initial delay for audio to start speaking
+    const initialDelay = 400;
     
-    // Schedule remaining items to appear after the previous one has been read
+    // Show first item after initial delay
+    const timer0 = setTimeout(() => {
+      console.log(`✨ Showing content item 1/${contentItemsCount}`);
+      setVisibleContentItems([0]);
+    }, initialDelay);
+    animationTimersRef.current.push(timer0);
+    
+    // Calculate when each subsequent item should appear
+    // Items appear slightly BEFORE the audio reads them (anticipation)
+    const anticipationOffset = 500; // Show text 500ms before it's read
+    const availableTime = (audioDuration * 1000) - initialDelay - anticipationOffset;
+    
+    console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s (proportional to text length)`);
+    
     for (let i = 1; i < contentItemsCount; i++) {
-      const delay = i * timePerItem;
+      // Calculate cumulative proportion of text up to this point
+      const cumulativeLength = contentLengths.slice(0, i).reduce((sum, len) => sum + len, 0);
+      const proportion = cumulativeLength / totalLength;
+      
+      // Item should appear based on proportion of text read so far, with anticipation
+      const itemDelay = initialDelay + (availableTime * proportion);
+      
+      console.log(`  Item ${i + 1}: ${Math.round(itemDelay)}ms (${Math.round(proportion * 100)}% of text)`);
+      
       const timer = setTimeout(() => {
         console.log(`✨ Showing content item ${i + 1}/${contentItemsCount}`);
         setVisibleContentItems(prev => [...prev, i]);
         if (i === contentItemsCount - 1) {
           setAnimationInProgress(false);
         }
-      }, delay);
+      }, itemDelay);
+      
       animationTimersRef.current.push(timer);
-    }
-    
-    // If only one item, mark as complete
-    if (contentItemsCount === 1) {
-      setAnimationInProgress(false);
     }
   };
 
