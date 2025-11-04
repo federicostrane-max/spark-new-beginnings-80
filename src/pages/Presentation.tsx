@@ -223,7 +223,8 @@ const Presentation = () => {
     try {
       console.log(`🔄 Prefetching audio for slide ${slideIndex + 1}...`);
       
-      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+      // Add a brief pause at the start to prevent cut-off audio
+      const textToSpeak = `... ${slide.title}. ${slide.content.join('. ')}`;
       const { data: { session } } = await supabase.auth.getSession();
       
       const response = await fetch(
@@ -236,7 +237,7 @@ const Presentation = () => {
           },
           body: JSON.stringify({ 
             text: textToSpeak, 
-            voice: 'nova' 
+            voice: 'alloy' // Changed from 'nova' for better quality
           })
         }
       );
@@ -283,7 +284,8 @@ const Presentation = () => {
         setIsLoadingAudio(true);
         console.log(`⏳ Loading audio for slide ${slideIndex + 1}...`);
 
-        const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+        // Add a brief pause at the start to prevent cut-off audio
+        const textToSpeak = `... ${slide.title}. ${slide.content.join('. ')}`;
         const { data: { session } } = await supabase.auth.getSession();
         
         const response = await fetch(
@@ -296,7 +298,7 @@ const Presentation = () => {
             },
             body: JSON.stringify({ 
               text: textToSpeak, 
-              voice: 'nova' 
+              voice: 'alloy' // Changed from 'nova' for better quality
             })
           }
         );
@@ -320,6 +322,29 @@ const Presentation = () => {
       audio.src = audioUrl;
       audioRef.current = audio;
 
+      // Add a small delay before playing to ensure audio is fully loaded
+      audio.oncanplaythrough = async () => {
+        try {
+          console.log('▶️ Starting audio playback...');
+          setIsLoadingAudio(false);
+          setIsPlayingAudio(true);
+          
+          // Small delay to prevent cut-off
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await audio.play();
+          console.log('🎶 Audio playing!');
+          
+          // Prefetch next slide audio while playing
+          if (slideIndex + 1 < slides.length) {
+            prefetchAudio(slideIndex + 1);
+          }
+        } catch (playError) {
+          console.error('❌ Audio play error:', playError);
+          setIsPlayingAudio(false);
+          toast.error('Errore riproduzione audio');
+        }
+      };
+
       audio.onloadedmetadata = () => {
         const duration = audio.duration;
         const contentCount = slide.content.length;
@@ -341,25 +366,13 @@ const Presentation = () => {
       audio.onerror = (e) => {
         console.error('❌ Audio playback error:', e);
         setIsPlayingAudio(false);
+        setIsLoadingAudio(false);
         toast.error('Errore riproduzione audio');
         
         if (isAutoPlaying && onComplete) {
           setTimeout(onComplete, 1000);
         }
       };
-
-      console.log('▶️ Starting audio playback...');
-      
-      setIsLoadingAudio(false);
-      setIsPlayingAudio(true);
-      
-      await audio.play();
-      console.log('🎶 Audio playing!');
-      
-      // Prefetch next slide audio while playing
-      if (slideIndex + 1 < slides.length) {
-        prefetchAudio(slideIndex + 1);
-      }
       
     } catch (error) {
       console.error('❌ Error in TTS:', error);
