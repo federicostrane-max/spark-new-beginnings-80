@@ -65,9 +65,11 @@ const Presentation = () => {
   const [theme, setTheme] = useState<Theme>('aurora');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
+  const [showControls, setShowControls] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isGeneratingAudioRef = useRef(false);
 
   const messageId = searchParams.get("messageId");
@@ -372,12 +374,53 @@ const Presentation = () => {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isFs = !!document.fullscreenElement;
+      setIsFullscreen(isFs);
+      if (!isFs) {
+        setShowControls(true); // Always show controls when exiting fullscreen
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // Handle controls auto-hide in fullscreen
+  const resetControlsTimer = () => {
+    if (!isFullscreen) return;
+    
+    setShowControls(true);
+    
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+    }
+    
+    controlsTimerRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 3000); // Hide after 3 seconds of inactivity
+  };
+
+  // Show controls on interaction
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const handleInteraction = () => {
+      resetControlsTimer();
+    };
+
+    window.addEventListener('click', handleInteraction);
+    window.addEventListener('touchstart', handleInteraction);
+    window.addEventListener('mousemove', handleInteraction);
+
+    return () => {
+      window.removeEventListener('click', handleInteraction);
+      window.removeEventListener('touchstart', handleInteraction);
+      window.removeEventListener('mousemove', handleInteraction);
+      if (controlsTimerRef.current) {
+        clearTimeout(controlsTimerRef.current);
+      }
+    };
+  }, [isFullscreen]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -452,16 +495,36 @@ const Presentation = () => {
       )}
     >
       {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-50 p-3 md:p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent">
-        <Button
-          onClick={() => navigate("/")}
-          variant="outline"
-          size="sm"
-          className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
-        >
-          <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
-          Indietro
-        </Button>
+      <div className={cn(
+        "absolute top-0 left-0 right-0 z-50 p-3 md:p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent transition-all duration-300",
+        isFullscreen && !showControls && "opacity-0 pointer-events-none"
+      )}>
+        {!isFullscreen && (
+          <Button
+            onClick={() => navigate("/")}
+            variant="outline"
+            size="sm"
+            className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
+          >
+            <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+            Indietro
+          </Button>
+        )}
+        
+        {isFullscreen && (
+          <Button
+            onClick={async () => {
+              await document.exitFullscreen();
+              setIsFullscreen(false);
+            }}
+            variant="outline"
+            size="sm"
+            className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
+          >
+            <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+            Esci
+          </Button>
+        )}
 
         <div className="flex items-center gap-2">
           {/* Auto-play button */}
@@ -639,7 +702,10 @@ const Presentation = () => {
       </div>
 
       {/* Navigation Controls */}
-      <div className="absolute bottom-6 md:bottom-10 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4">
+      <div className={cn(
+        "absolute bottom-6 md:bottom-10 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4 transition-all duration-300",
+        isFullscreen && !showControls && "opacity-0 pointer-events-none"
+      )}>
         <Button
           onClick={prevSlide}
           disabled={currentSlide === 0 || isAutoPlaying}
