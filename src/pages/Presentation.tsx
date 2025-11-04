@@ -155,8 +155,15 @@ const Presentation = () => {
     };
   }, [slides]);
 
-  const nextSlide = () => revealRef.current?.next();
-  const prevSlide = () => revealRef.current?.prev();
+  const nextSlide = () => {
+    console.log('nextSlide called, current:', currentSlideIndex);
+    revealRef.current?.next();
+  };
+  
+  const prevSlide = () => {
+    console.log('prevSlide called, current:', currentSlideIndex);
+    revealRef.current?.prev();
+  };
 
   const getSlideBackground = (type: string) => {
     switch (type) {
@@ -201,7 +208,13 @@ const Presentation = () => {
 
       {/* Instructions Overlay */}
       {showInstructions && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+        <div 
+          className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fade-in cursor-pointer"
+          onClick={() => {
+            console.log('Instructions dismissed');
+            setShowInstructions(false);
+          }}
+        >
           <div className="bg-primary/90 backdrop-blur-sm text-primary-foreground px-6 py-3 rounded-full shadow-lg flex items-center gap-3">
             <Info className="h-5 w-5" />
             <span className="text-sm font-medium">
@@ -211,8 +224,8 @@ const Presentation = () => {
         </div>
       )}
 
-      {/* Main Reveal.js Container */}
-      <div className="reveal" ref={deckRef} onClick={() => setShowInstructions(false)}>
+      {/* Main Reveal.js Container - NO onClick to avoid blocking */}
+      <div className="reveal" ref={deckRef}>
         <div className="slides">
           {slides.map((slide, index) => (
             <section
@@ -240,13 +253,17 @@ const Presentation = () => {
         </div>
       </div>
 
-      {/* Custom Mobile Navigation Buttons */}
-      <div className="absolute bottom-8 left-0 right-0 z-50 flex items-center justify-center gap-4 md:hidden">
+      {/* Custom Mobile Navigation Buttons - Always Visible */}
+      <div className="absolute bottom-8 left-0 right-0 z-50 flex items-center justify-center gap-4">
         <Button
-          onClick={prevSlide}
+          onClick={(e) => {
+            e.stopPropagation();
+            console.log('Prev button clicked');
+            prevSlide();
+          }}
           disabled={currentSlideIndex === 0}
           size="lg"
-          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg"
+          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg disabled:opacity-50"
         >
           <ChevronLeft className="h-6 w-6" />
         </Button>
@@ -256,10 +273,14 @@ const Presentation = () => {
         </div>
         
         <Button
-          onClick={nextSlide}
+          onClick={(e) => {
+            e.stopPropagation();
+            console.log('Next button clicked');
+            nextSlide();
+          }}
           disabled={currentSlideIndex === slides.length - 1}
           size="lg"
-          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg"
+          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg disabled:opacity-50"
         >
           <ChevronRight className="h-6 w-6" />
         </Button>
