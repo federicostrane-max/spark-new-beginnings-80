@@ -290,14 +290,14 @@ const Presentation = () => {
       audio.src = audioUrl;
       audioRef.current = audio;
 
-      // Show all content FIRST, then wait 1 second before playing audio
+      // Show all content FIRST
       showAllContentBeforeAudio();
       
-      // Wait 1 second to let user see the content before audio starts
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
       audio.oncanplaythrough = async () => {
         try {
+          // Wait 1 second to let user see the content before audio starts
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
           console.log('▶️ Starting audio playback...');
           setIsLoadingAudio(false);
           setIsPlayingAudio(true);
@@ -313,6 +313,7 @@ const Presentation = () => {
           }
         } catch (playError) {
           console.error('❌ Audio play error:', playError);
+          setIsLoadingAudio(false);
           setIsPlayingAudio(false);
           toast.error('Errore riproduzione audio');
         }
