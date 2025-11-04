@@ -902,12 +902,15 @@ ${agent.system_prompt}`;
             while (true) {
               const { done, value } = await reader.read();
               if (done) {
-                console.log(`✅ Stream ended. Total response length: ${fullResponse.length} chars`);
+                console.log(`✅ Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
                 clearInterval(keepAliveInterval);
                 // Save before breaking
                 await supabase
                   .from('agent_messages')
-                  .update({ content: fullResponse })
+                  .update({ 
+                    content: fullResponse,
+                    llm_provider: llmProvider 
+                  })
                   .eq('id', placeholderMsg.id);
                 break;
               }
@@ -921,10 +924,38 @@ ${agent.system_prompt}`;
                 if (!line.startsWith('data: ')) continue;
 
                 const data = line.slice(6);
-                if (data === '[DONE]') continue;
+                if (data === '[DONE]') {
+                  console.log(`🏁 [${llmProvider.toUpperCase()}] Received [DONE] signal`);
+                  continue;
+                }
 
                 try {
                   const parsed = JSON.parse(data);
+                  
+                  // Handle DeepSeek streaming format
+                  if (llmProvider === 'deepseek') {
+                    console.log('🔵 [DEEPSEEK] Parsed chunk:', JSON.stringify(parsed).substring(0, 200));
+                    
+                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
+                      console.log('🔵 [DEEPSEEK] Content chunk length:', newText.length);
+                      fullResponse += newText;
+                      sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 5000) {
+                        console.log('🔵 [DEEPSEEK] Saving intermediate response, length:', fullResponse.length);
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    } else {
+                      console.log('🔵 [DEEPSEEK] No content in delta:', JSON.stringify(parsed.choices?.[0]?.delta || 'no delta'));
+                    }
+                    continue; // Skip OpenAI/Anthropic-specific handling
+                  }
                   
                   // Handle OpenAI streaming format
                   if (llmProvider === 'openai') {
