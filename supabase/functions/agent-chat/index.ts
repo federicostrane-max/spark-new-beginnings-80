@@ -22,6 +22,7 @@ interface UserIntent {
   topic?: string;
   pdfNumbers?: number[];
   filterCriteria?: string;
+  count?: number; // Number of results requested
 }
 
 interface SearchResult {
@@ -41,18 +42,24 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   console.log('🧠 [INTENT PARSER] Analyzing message:', message.slice(0, 100));
   const lowerMsg = message.toLowerCase().trim();
   
+  // Extract requested count (e.g., "find 20 PDFs", "5 documents", "get 50 papers")
+  const countMatch = message.match(/\b(\d+)\s+(?:pdf|pdfs|document|documents|result|results|file|files|paper|papers)/i);
+  const requestedCount = countMatch ? Math.min(parseInt(countMatch[1]), 100) : 10; // Default 10, max 100
+  console.log('📊 [INTENT PARSER] Requested count:', requestedCount);
+  
   // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for..."
   const searchPatterns = [
     /find\s+(?:pdf|pdfs|papers?|documents?|articles?)\s+(?:on|about|regarding)/i,
     /search\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
-    /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i
+    /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
+    /\d+\s+(?:pdf|pdfs|papers?|documents?)\s+(?:on|about|regarding)/i // "20 PDFs on..."
   ];
   
   for (const pattern of searchPatterns) {
     if (pattern.test(message)) {
-      const topic = message.replace(pattern, '').trim();
+      const topic = message.replace(pattern, '').replace(/\b\d+\b/g, '').trim(); // Remove pattern and standalone numbers
       console.log('✅ [INTENT PARSER] Detected SEARCH_REQUEST for topic:', topic);
-      return { type: 'SEARCH_REQUEST', topic };
+      return { type: 'SEARCH_REQUEST', topic, count: requestedCount };
     }
   }
   
@@ -89,8 +96,9 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   return { type: 'SEMANTIC_QUESTION' };
 }
 
-async function executeWebSearch(topic: string): Promise<SearchResult[]> {
+async function executeWebSearch(topic: string, count: number = 10): Promise<SearchResult[]> {
   console.log('🔍 [WEB SEARCH] Starting Google Custom Search for topic:', topic);
+  console.log('📊 [WEB SEARCH] Requested count:', count);
   
   try {
     const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
@@ -101,84 +109,93 @@ async function executeWebSearch(topic: string): Promise<SearchResult[]> {
       throw new Error('Google Custom Search not configured');
     }
     
-    // Construct search query optimized for academic PDFs
+    // Google API max is 10 per request, so we need pagination
+    const resultsPerPage = 10;
+    const totalRequests = Math.ceil(count / resultsPerPage);
+    console.log(`📡 Will make ${totalRequests} API call(s) to fetch ${count} results`);
+    
+    const allResults: SearchResult[] = [];
     const searchQuery = `${topic} filetype:pdf`;
-    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=10`;
     
-    console.log('📡 Calling Google Custom Search API...');
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Google API Error:', response.status, errorText);
-      throw new Error(`Google Custom Search failed: ${response.status}`);
+    for (let page = 0; page < totalRequests; page++) {
+      const startIndex = page * resultsPerPage + 1; // Google uses 1-based indexing
+      const numResults = Math.min(resultsPerPage, count - allResults.length);
+      
+      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=${numResults}&start=${startIndex}`;
+      
+      console.log(`📡 Page ${page + 1}/${totalRequests}: start=${startIndex}, num=${numResults}`);
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Google API Error:', response.status, errorText);
+        
+        // If we got some results already, return what we have
+        if (allResults.length > 0) {
+          console.log(`⚠️ Error on page ${page + 1}, returning ${allResults.length} results collected so far`);
+          break;
+        }
+        throw new Error(`Google Custom Search failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.items || data.items.length === 0) {
+        console.log(`⚠️ No more results found on page ${page + 1}`);
+        break;
+      }
+      
+      // Transform Google results to SearchResult format
+      const pageResults: SearchResult[] = data.items.map((item: any, index: number) => {
+        const yearMatch = item.snippet?.match(/\b(19|20)\d{2}\b/);
+        const year = yearMatch ? yearMatch[0] : undefined;
+        
+        const authorsMatch = item.snippet?.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
+        const authors = authorsMatch ? authorsMatch[0] : undefined;
+        
+        return {
+          number: allResults.length + index + 1, // Global numbering
+          title: item.title.replace(' [PDF]', '').trim(),
+          authors,
+          year,
+          source: new URL(item.link).hostname,
+          url: item.link
+        };
+      });
+      
+      allResults.push(...pageResults);
+      console.log(`✅ Page ${page + 1} complete: ${pageResults.length} results (total: ${allResults.length})`);
+      
+      // If we have enough results, stop
+      if (allResults.length >= count) {
+        break;
+      }
+      
+      // Rate limiting: wait 500ms between requests to avoid hitting Google API limits
+      if (page < totalRequests - 1) {
+        console.log('⏱️ Rate limiting: waiting 500ms before next request...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
     
-    const data = await response.json();
-    
-    if (!data.items || data.items.length === 0) {
-      console.log('⚠️ No results found for:', topic);
-      return [];
-    }
-    
-    // Transform Google results to SearchResult format
-    const results: SearchResult[] = data.items.map((item: any, index: number) => {
-      // Extract metadata from snippet/title
-      const yearMatch = item.snippet?.match(/\b(19|20)\d{2}\b/);
-      const year = yearMatch ? yearMatch[0] : undefined;
-      
-      // Try to extract authors from snippet (heuristic)
-      const authorsMatch = item.snippet?.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
-      const authors = authorsMatch ? authorsMatch[0] : undefined;
-      
-      return {
-        number: index + 1,
-        title: item.title.replace(' [PDF]', '').trim(),
-        authors,
-        year,
-        source: new URL(item.link).hostname,
-        url: item.link
-      };
-    });
-    
-    console.log(`✅ [WEB SEARCH] Found ${results.length} PDFs`);
-    return results;
+    console.log(`✅ [WEB SEARCH] Completed: ${allResults.length} PDFs found (requested: ${count})`);
+    return allResults;
     
   } catch (error) {
     console.error('❌ [WEB SEARCH] Error:', error);
     throw error;
   }
-  
-  // TODO: Call actual web_search tool here
-  // For now, return mock data
-  const mockResults = [
-    {
-      number: 1,
-      title: "Example Paper on " + topic,
-      authors: "Smith et al.",
-      year: "2023",
-      source: "arXiv",
-      url: "https://arxiv.org/pdf/example1.pdf"
-    },
-    {
-      number: 2,
-      title: "Survey on " + topic,
-      authors: "Johnson et al.",
-      year: "2024",
-      source: "ResearchGate",
-      url: "https://researchgate.net/example2.pdf"
-    }
-  ];
-  
-  console.log(`✅ [WEB SEARCH] Found ${mockResults.length} results (MOCK DATA)`);
-  console.log('[WEB SEARCH] Results:', JSON.stringify(mockResults, null, 2));
-  
-  return mockResults;
 }
 
-function formatSearchResults(results: SearchResult[], topic: string): string {
+function formatSearchResults(results: SearchResult[], topic: string, requestedCount?: number): string {
   console.log(`📝 [FORMATTER] Formatting ${results.length} results for topic:`, topic);
-  const header = `Found ${results.length} PDFs on **${topic}**:\n\n`;
+  
+  let header = `Found ${results.length} PDFs on **${topic}**`;
+  if (requestedCount && requestedCount !== results.length) {
+    header += ` (requested: ${requestedCount})`;
+  }
+  header += ':\n\n';
   
   const formattedResults = results.map(r => {
     const authors = r.authors ? ` | ${r.authors}` : '';
@@ -604,12 +621,13 @@ Deno.serve(async (req) => {
             
             if (userIntent.type === 'SEARCH_REQUEST' && userIntent.topic) {
               console.log('🔍 [WORKFLOW] Handling SEARCH_REQUEST automatically');
+              console.log('📊 [WORKFLOW] Requested count:', userIntent.count);
               workflowHandled = true;
               
-              // Execute web search immediately
+              // Execute web search immediately with requested count
               try {
-                const searchResults = await executeWebSearch(userIntent.topic);
-                workflowResponse = formatSearchResults(searchResults, userIntent.topic);
+                const searchResults = await executeWebSearch(userIntent.topic, userIntent.count || 10);
+                workflowResponse = formatSearchResults(searchResults, userIntent.topic, userIntent.count);
                 
                 // Send formatted results to user
                 sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
