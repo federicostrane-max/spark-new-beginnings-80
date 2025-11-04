@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import "reveal.js/dist/reveal.css";
-import "reveal.js/dist/theme/black.css";
+import { cn } from "@/lib/utils";
 
 interface PresentationSlide {
   title: string;
@@ -18,10 +17,7 @@ const Presentation = () => {
   const navigate = useNavigate();
   const [slides, setSlides] = useState<PresentationSlide[]>([]);
   const [loading, setLoading] = useState(true);
-  const deckRef = useRef<HTMLDivElement>(null);
-  const revealRef = useRef<any>(null);
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
-  const [showInstructions, setShowInstructions] = useState(true);
+  const [currentSlide, setCurrentSlide] = useState(0);
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -104,94 +100,55 @@ const Presentation = () => {
     }
   };
 
-  useEffect(() => {
-    if (slides.length === 0 || !deckRef.current || revealRef.current) {
-      return;
-    }
-
-    // Wait for DOM to be fully ready
-    const initializeReveal = async () => {
-      try {
-        console.log('Starting Reveal.js initialization...');
-        
-        // Dynamic import for Reveal.js
-        const { default: Reveal } = await import('reveal.js');
-        
-        // Ensure DOM is ready
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        if (!deckRef.current) {
-          console.error('Deck ref lost during initialization');
-          return;
-        }
-
-        console.log('Creating Reveal instance with', slides.length, 'slides');
-        
-        const deck = new Reveal(deckRef.current, {
-          embedded: false,
-          hash: true,
-          transition: 'slide',
-          backgroundTransition: 'fade',
-          controls: true,
-          controlsLayout: 'bottom-right',
-          controlsBackArrows: 'visible',
-          progress: true,
-          center: true,
-          touch: true,
-          loop: false,
-          keyboard: true,
-          overview: true,
-          slideNumber: 'c/t',
-          width: '100%',
-          height: '100%',
-          margin: 0.1,
-          minScale: 0.2,
-          maxScale: 2.0,
-        });
-
-        await deck.initialize();
-        
-        console.log('Reveal.js initialized successfully');
-        revealRef.current = deck;
-        
-        deck.on('slidechanged', (event: any) => {
-          const newIndex = event.indexh;
-          console.log('Slide changed to:', newIndex);
-          setCurrentSlideIndex(newIndex);
-        });
-        
-        // Hide instructions after 5 seconds
-        setTimeout(() => setShowInstructions(false), 5000);
-        
-      } catch (error) {
-        console.error('Error initializing Reveal.js:', error);
-        toast.error('Failed to initialize presentation');
-      }
-    };
-
-    initializeReveal();
-
-    return () => {
-      if (revealRef.current) {
-        try {
-          revealRef.current.destroy();
-        } catch (e) {
-          console.error('Error destroying Reveal:', e);
-        }
-        revealRef.current = null;
-      }
-    };
-  }, [slides]);
-
   const nextSlide = () => {
-    console.log('nextSlide called, current:', currentSlideIndex);
-    revealRef.current?.next();
+    if (currentSlide < slides.length - 1) {
+      setCurrentSlide(currentSlide + 1);
+    }
   };
-  
+
   const prevSlide = () => {
-    console.log('prevSlide called, current:', currentSlideIndex);
-    revealRef.current?.prev();
+    if (currentSlide > 0) {
+      setCurrentSlide(currentSlide - 1);
+    }
   };
+
+  // Keyboard navigation
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') nextSlide();
+      if (e.key === 'ArrowLeft') prevSlide();
+    };
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [currentSlide, slides.length]);
+
+  // Touch swipe navigation
+  useEffect(() => {
+    let touchStartX = 0;
+    let touchEndX = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartX = e.changedTouches[0].screenX;
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      touchEndX = e.changedTouches[0].screenX;
+      handleSwipe();
+    };
+
+    const handleSwipe = () => {
+      if (touchStartX - touchEndX > 50) nextSlide(); // Swipe left
+      if (touchEndX - touchStartX > 50) prevSlide(); // Swipe right
+    };
+
+    window.addEventListener('touchstart', handleTouchStart);
+    window.addEventListener('touchend', handleTouchEnd);
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [currentSlide, slides.length]);
+
 
   const getSlideBackground = (type: string) => {
     switch (type) {
@@ -215,103 +172,97 @@ const Presentation = () => {
     );
   }
 
+  const slide = slides[currentSlide];
+
   return (
-    <div className="relative h-screen w-screen bg-black overflow-hidden">
-      {/* Header with Back Button */}
-      <div className="absolute top-0 left-0 right-0 z-50 p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent">
+    <div className="relative h-screen w-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+      {/* Header */}
+      <div className="absolute top-0 left-0 right-0 z-50 p-3 md:p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent">
         <Button
           onClick={() => navigate("/")}
           variant="outline"
           size="sm"
-          className="bg-background/90 backdrop-blur-sm hover:bg-background"
+          className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Chat
+          <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
+          Indietro
         </Button>
         
-        <div className="text-white/80 text-sm font-medium">
-          Slide {currentSlideIndex + 1} / {slides.length}
+        <div className="text-white/80 text-xs md:text-sm font-medium">
+          {currentSlide + 1} / {slides.length}
         </div>
       </div>
 
-      {/* Instructions Overlay */}
-      {showInstructions && (
+      {/* Slide Content */}
+      <div className="absolute inset-0 flex items-center justify-center p-4 md:p-8">
         <div 
-          className="absolute top-20 left-1/2 -translate-x-1/2 z-50 animate-fade-in cursor-pointer"
-          onClick={() => {
-            console.log('Instructions dismissed');
-            setShowInstructions(false);
-          }}
+          className={cn(
+            "w-full h-full flex flex-col items-center justify-center text-white text-center transition-all duration-500",
+            "animate-in fade-in slide-in-from-bottom-4"
+          )}
+          key={currentSlide}
         >
-          <div className="bg-primary/90 backdrop-blur-sm text-primary-foreground px-6 py-3 rounded-full shadow-lg flex items-center gap-3">
-            <Info className="h-5 w-5" />
-            <span className="text-sm font-medium">
-              Swipe or use arrows to navigate • Tap to dismiss
-            </span>
-          </div>
-        </div>
-      )}
+          {/* Title */}
+          <h1 className={cn(
+            "font-bold mb-4 md:mb-8 px-2 md:px-4 leading-tight",
+            slide?.type === 'title' ? "text-3xl md:text-6xl" : "text-2xl md:text-4xl"
+          )}>
+            {slide?.title}
+          </h1>
 
-      {/* Main Reveal.js Container - NO onClick to avoid blocking */}
-      <div className="reveal" ref={deckRef}>
-        <div className="slides">
-          {slides.map((slide, index) => (
-            <section
-              key={index}
-              data-background={getSlideBackground(slide.type)}
-              data-transition="slide"
-            >
-              <h2 className="text-4xl md:text-5xl font-bold mb-8 px-4">{slide.title}</h2>
-              {slide.type === 'title' ? (
-                <p className="text-2xl md:text-3xl opacity-90 px-4">{slide.content[0]}</p>
-              ) : (
-                <ul className="text-left space-y-4 max-w-3xl mx-auto px-6">
-                  {slide.content.map((item, itemIndex) => (
-                    <li
-                      key={itemIndex}
-                      className="text-lg md:text-xl leading-relaxed"
-                    >
-                      • {item}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ))}
+          {/* Content */}
+          {slide?.type === 'title' ? (
+            <p className="text-lg md:text-2xl opacity-90 px-4 md:px-8 max-w-3xl">
+              {slide.content[0]}
+            </p>
+          ) : (
+            <ul className="space-y-3 md:space-y-4 max-w-2xl text-left px-4 md:px-8">
+              {slide?.content.map((item, idx) => (
+                <li
+                  key={idx}
+                  className="text-sm md:text-lg leading-relaxed flex items-start gap-2 md:gap-3 animate-in fade-in slide-in-from-left"
+                  style={{ animationDelay: `${idx * 100}ms` }}
+                >
+                  <span className="text-primary text-lg md:text-xl flex-shrink-0">•</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
-      {/* Custom Mobile Navigation Buttons - Always Visible */}
-      <div className="absolute bottom-8 left-0 right-0 z-50 flex items-center justify-center gap-4">
+      {/* Navigation Controls */}
+      <div className="absolute bottom-4 md:bottom-8 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4">
         <Button
-          onClick={(e) => {
-            e.stopPropagation();
-            console.log('Prev button clicked');
-            prevSlide();
-          }}
-          disabled={currentSlideIndex === 0}
+          onClick={prevSlide}
+          disabled={currentSlide === 0}
           size="lg"
-          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg disabled:opacity-50"
+          className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-primary hover:bg-primary/90 shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <ChevronLeft className="h-6 w-6" />
+          <ChevronLeft className="h-5 w-5 md:h-6 md:w-6" />
         </Button>
         
-        <div className="bg-background/90 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-medium">
-          {currentSlideIndex + 1} / {slides.length}
+        <div className="bg-background/90 backdrop-blur-sm px-3 py-1.5 md:px-4 md:py-2 rounded-full text-xs md:text-sm font-medium">
+          {currentSlide + 1} / {slides.length}
         </div>
         
         <Button
-          onClick={(e) => {
-            e.stopPropagation();
-            console.log('Next button clicked');
-            nextSlide();
-          }}
-          disabled={currentSlideIndex === slides.length - 1}
+          onClick={nextSlide}
+          disabled={currentSlide === slides.length - 1}
           size="lg"
-          className="h-14 w-14 rounded-full bg-primary/90 hover:bg-primary shadow-lg disabled:opacity-50"
+          className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-primary hover:bg-primary/90 shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <ChevronRight className="h-6 w-6" />
+          <ChevronRight className="h-5 w-5 md:h-6 md:w-6" />
         </Button>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+        <div 
+          className="h-full bg-primary transition-all duration-300"
+          style={{ width: `${((currentSlide + 1) / slides.length) * 100}%` }}
+        />
       </div>
     </div>
   );
