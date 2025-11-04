@@ -121,8 +121,10 @@ export const AssignDocumentDialog = ({
         (id) => !selectedAgents.has(id)
       );
 
-      // Remove unassigned agents
+      // Remove unassigned agents (only delete links, not chunks - they're shared)
       if (toRemove.length > 0) {
+        console.log(`[AssignDialog] Removing ${toRemove.length} agent assignments`);
+        
         const { error: deleteError } = await supabase
           .from("agent_document_links")
           .delete()
@@ -130,20 +132,15 @@ export const AssignDocumentDialog = ({
           .in("agent_id", toRemove);
 
         if (deleteError) throw deleteError;
-
-        // Delete chunks from removed agents
-        for (const agentId of toRemove) {
-          await supabase
-            .from("agent_knowledge")
-            .delete()
-            .eq("pool_document_id", document.id)
-            .eq("agent_id", agentId)
-            .eq("source_type", "pool");
-        }
+        
+        console.log(`[AssignDialog] ✓ Removed agent_document_links for ${toRemove.length} agents`);
+        console.log(`[AssignDialog] NOTE: Chunks remain in agent_knowledge (shared pool)`);
       }
 
-      // Add newly assigned agents
+      // Add newly assigned agents (link-based, no chunk copying)
       if (toAdd.length > 0) {
+        console.log(`[AssignDialog] Adding ${toAdd.length} new agent assignments`);
+        
         const { error: insertError } = await supabase
           .from("agent_document_links")
           .insert(
@@ -157,33 +154,10 @@ export const AssignDocumentDialog = ({
 
         if (insertError) throw insertError;
 
-        // Sync document to each newly assigned agent
-        for (const agentId of toAdd) {
-          const agentName = agents.find(a => a.id === agentId)?.name || 'Agente';
-          toast.loading(`Sincronizzazione per ${agentName}...`);
-          
-          const { data: syncData, error: syncError } = await supabase.functions.invoke(
-            "sync-pool-document",
-            {
-              body: {
-                documentId: document.id,
-                agentId: agentId,
-              },
-            }
-          );
-
-          if (syncError) {
-            console.error(`[AssignDialog] Sync failed for agent ${agentId}:`, syncError);
-            toast.error(`Errore nella sincronizzazione per ${agentName}`);
-          } else {
-            console.log(`[AssignDialog] Sync successful:`, syncData);
-            if (syncData?.chunksCount) {
-              toast.success(`${syncData.chunksCount} chunk aggiunti per ${agentName}`);
-            } else {
-              toast.info(`Documento già sincronizzato per ${agentName}`);
-            }
-          }
-        }
+        console.log(`[AssignDialog] ✓ Created agent_document_links for ${toAdd.length} agents`);
+        console.log(`[AssignDialog] NOTE: Chunks are shared via match_documents function (no duplication)`);
+        
+        toast.success(`Documento assegnato a ${toAdd.length} nuovi agenti`);
       }
 
       toast.success("Assegnazione completata");

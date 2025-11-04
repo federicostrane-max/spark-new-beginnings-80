@@ -1,11 +1,101 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function DocumentPool() {
   const navigate = useNavigate();
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  const [checkingMigration, setCheckingMigration] = useState(true);
+
+  useEffect(() => {
+    checkMigrationStatus();
+  }, []);
+
+  const checkMigrationStatus = async () => {
+    try {
+      setCheckingMigration(true);
+      
+      // Check if there are any documents with source_type='direct_upload'
+      const { count, error } = await supabase
+        .from('agent_knowledge')
+        .select('document_name', { count: 'exact', head: true })
+        .eq('source_type', 'direct_upload');
+
+      if (error) throw error;
+
+      setNeedsMigration((count || 0) > 0);
+      
+      if ((count || 0) > 0) {
+        console.log(`[Migration Check] Found ${count} chunks to migrate`);
+      }
+    } catch (error: any) {
+      console.error('[Migration Check Error]', error);
+    } finally {
+      setCheckingMigration(false);
+    }
+  };
+
+  const handleMigration = async () => {
+    try {
+      setMigrating(true);
+      setShowMigrationDialog(false);
+      
+      toast.loading('Migrazione in corso...', { id: 'migration' });
+      
+      const { data, error } = await supabase.functions.invoke('migrate-agent-pdfs-to-pool');
+
+      if (error) throw error;
+
+      if (!data.success) {
+        throw new Error(data.error || 'Migration failed');
+      }
+
+      const stats = data.stats;
+      
+      console.log('[Migration Complete]', stats);
+      
+      toast.success(
+        `Migrazione completata! ${stats.documentsCreated} documenti creati, ${stats.linksCreated} link creati, ${stats.chunksUpdated} chunks aggiornati`,
+        { id: 'migration', duration: 5000 }
+      );
+
+      if (stats.errors.length > 0) {
+        toast.error(
+          `Attenzione: ${stats.errors.length} errori durante la migrazione. Controlla i log.`,
+          { duration: 5000 }
+        );
+      }
+
+      // Refresh migration status
+      await checkMigrationStatus();
+      
+      // Trigger table refresh
+      window.location.reload();
+      
+    } catch (error: any) {
+      console.error('[Migration Error]', error);
+      toast.error(`Errore durante la migrazione: ${error.message}`, { id: 'migration' });
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -20,16 +110,72 @@ export default function DocumentPool() {
             Torna alla Chat
           </Button>
           
-          <div>
+          <div className="flex-1">
             <h1 className="text-3xl font-bold">Pool Documenti Condivisi</h1>
             <p className="text-muted-foreground mt-2">
               Gestisci i documenti validati e assegnali ai tuoi agenti
             </p>
           </div>
+
+          {!checkingMigration && needsMigration && (
+            <Button
+              onClick={() => setShowMigrationDialog(true)}
+              disabled={migrating}
+              variant="default"
+              size="lg"
+            >
+              {migrating ? (
+                <>
+                  <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
+                  Migrazione in corso...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-5 w-5" />
+                  Migra PDF degli Agenti al Pool
+                </>
+              )}
+            </Button>
+          )}
         </div>
+
+        {!checkingMigration && needsMigration && (
+          <Alert className="bg-blue-500/10 border-blue-500">
+            <AlertCircle className="h-4 w-4 text-blue-500" />
+            <AlertTitle className="text-blue-500">Migrazione Disponibile</AlertTitle>
+            <AlertDescription>
+              Sono stati trovati documenti PDF caricati direttamente negli agenti. 
+              Clicca su "Migra PDF degli Agenti al Pool" per spostarli nel pool condiviso 
+              e renderli disponibili per tutti gli agenti.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <DocumentPoolTable />
       </div>
+
+      {/* Migration Confirmation Dialog */}
+      <AlertDialog open={showMigrationDialog} onOpenChange={setShowMigrationDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conferma Migrazione</AlertDialogTitle>
+            <AlertDialogDescription>
+              Questa operazione migrerà tutti i PDF caricati negli agenti al pool condiviso.
+              <br /><br />
+              Tutti i documenti rimarranno automaticamente assegnati agli agenti originali,
+              ma saranno anche disponibili per l'assegnazione ad altri agenti.
+              <br /><br />
+              Questa operazione è sicura e reversibile. Vuoi procedere?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMigration}>
+              Procedi con la Migrazione
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

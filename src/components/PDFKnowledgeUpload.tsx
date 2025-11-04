@@ -82,56 +82,33 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             throw new Error('PDF vuoto o non leggibile');
           }
 
-          // Step 2: Chunk text in browser
+          // Step 2: Upload directly (chunking happens in backend)
           setProgress((fileIndex / totalFiles) * 100 + 20);
-          const chunks = chunkText(text, 1000, 200);
-          
-          console.log(`Created ${chunks.length} chunks for ${file.name}`);
 
-          // Step 3: Send chunks in batches to avoid "payload too large" errors
-          // Each batch is processed in background by the edge function
-          const CLIENT_BATCH_SIZE = 100; // Send max 100 chunks per request
-          const totalBatches = Math.ceil(chunks.length / CLIENT_BATCH_SIZE);
+          // Step 3: Upload to pool (all processing happens in edge function)
+          setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          console.log(`Will send ${chunks.length} chunks in ${totalBatches} batches of max ${CLIENT_BATCH_SIZE} chunks each`);
+          console.log(`Uploading "${file.name}" to pool...`);
           
-          for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-            const batchStart = batchIndex * CLIENT_BATCH_SIZE;
-            const batchEnd = Math.min(batchStart + CLIENT_BATCH_SIZE, chunks.length);
-            const batchChunks = chunks.slice(batchStart, batchEnd);
-            
-            console.log(`Sending batch ${batchIndex + 1}/${totalBatches} (${batchChunks.length} chunks) for ${file.name}...`);
-            
-            // Update progress
-            const batchProgress = ((fileIndex + (batchIndex / totalBatches)) / totalFiles) * 100;
-            setProgress(Math.min(99, batchProgress));
-            
-            const { data, error } = await supabase.functions.invoke('process-chunks', {
-              body: {
-                chunks: batchChunks,
-                agentId: agentId,
-                fileName: file.name,
-                category: "General"
-              }
-            });
+          const { data, error } = await supabase.functions.invoke('upload-pdf-to-pool', {
+            body: {
+              text: text,
+              fileName: file.name,
+              agentId: agentId,
+              fileSize: file.size
+            }
+          });
 
-            if (error) {
-              throw new Error(`Batch ${batchIndex + 1} failed: ${error.message}`);
-            }
-            
-            if (!data?.success) {
-              throw new Error(`Batch ${batchIndex + 1}: Risposta imprevista dal server`);
-            }
-            
-            console.log(`✓ Batch ${batchIndex + 1}/${totalBatches} sent successfully - ${batchChunks.length} chunks processing in background`);
-            
-            // Small delay between client batches
-            if (batchIndex < totalBatches - 1) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
+          if (error) {
+            throw new Error(`Upload failed: ${error.message}`);
           }
           
-          console.log(`✓ ${file.name} - all ${chunks.length} chunks sent successfully (${totalBatches} batches)`);
+          if (!data?.success) {
+            throw new Error(`Upload failed: ${data?.error || 'Unknown error'}`);
+          }
+          
+          console.log(`✓ ${file.name} uploaded to pool - ${data.chunksProcessed} chunks created, document ID: ${data.documentId}`);
+          
           successCount++;
           // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
