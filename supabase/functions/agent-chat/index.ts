@@ -852,7 +852,7 @@ ${agent.system_prompt}`;
             if (llmProvider === 'deepseek') {
               // DeepSeek with direct streaming
               console.log('🚀 ROUTING TO DEEPSEEK');
-              console.log(`   Model: deepseek-reasoner`);
+              console.log(`   Model: deepseek-chat`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
               if (!DEEPSEEK_API_KEY) {
@@ -871,7 +871,7 @@ ${agent.system_prompt}`;
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  model: 'deepseek-reasoner',
+                  model: 'deepseek-chat',
                   messages: deepseekMessages,
                   temperature: 0.7,
                   max_tokens: 4000,

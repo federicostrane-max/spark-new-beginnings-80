@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'deepseek-reasoner', // DeepSeek-R1 for best reasoning
+        model: 'deepseek-chat',
         messages: deepseekMessages,
         temperature: 0.7,
         max_tokens: 4000,
