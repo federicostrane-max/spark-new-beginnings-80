@@ -283,22 +283,25 @@ const Presentation = () => {
   const playSlideAudio = async (slide: PresentationSlide, slideIndex: number, onComplete?: () => void) => {
     if (!isAudioEnabled && !isAutoPlaying) return;
 
-    // Prevent multiple audio playbacks at the same time
+    // CRITICAL: Prevent multiple audio playbacks at the same time
     if (isGeneratingAudioRef.current || isPlayingAudio || isLoadingAudio) {
       console.log('⚠️ Audio already playing or loading, skipping...');
       return;
     }
 
+    // Set generating flag immediately to block other calls
     isGeneratingAudioRef.current = true;
-
-    // Stop any currently playing audio
+    
+    // Stop and cleanup any currently playing audio completely
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.currentTime = 0;
       audioRef.current.src = '';
       audioRef.current = null;
-      setIsPlayingAudio(false);
-      setIsLoadingAudio(false);
     }
+    
+    setIsPlayingAudio(false);
+    setIsLoadingAudio(false);
 
     try {
       let audioUrl = audioCacheRef.current.get(slideIndex);
@@ -450,9 +453,10 @@ const Presentation = () => {
     console.log('⏹️ Stopping auto-play...');
     setIsAutoPlaying(false);
     
-    // Stop audio completely
+    // Stop and cleanup audio completely
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.currentTime = 0;
       audioRef.current.src = '';
       audioRef.current = null;
     }
@@ -464,7 +468,7 @@ const Presentation = () => {
     }
     clearAnimationTimers();
     
-    // Reset states
+    // Reset all states
     setIsPlayingAudio(false);
     setIsLoadingAudio(false);
     isGeneratingAudioRef.current = false;
@@ -485,14 +489,15 @@ const Presentation = () => {
     };
   }, [currentSlide, slides, isAudioEnabled]);
 
-  // Cleanup cache on unmount
+  // Cleanup cache on unmount and STOP ALL AUDIO
   useEffect(() => {
     return () => {
-      console.log('🧹 Cleaning up presentation...');
+      console.log('🧹 Cleaning up presentation and stopping all audio...');
       
-      // Stop and cleanup audio
+      // CRITICAL: Stop and cleanup audio completely when component unmounts
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.currentTime = 0;
         audioRef.current.src = '';
         audioRef.current = null;
       }
@@ -501,13 +506,19 @@ const Presentation = () => {
       clearAnimationTimers();
       if (autoPlayTimerRef.current) {
         clearTimeout(autoPlayTimerRef.current);
+        autoPlayTimerRef.current = null;
+      }
+      if (controlsTimerRef.current) {
+        clearTimeout(controlsTimerRef.current);
+        controlsTimerRef.current = null;
       }
       
       // Clean up all cached audio URLs
       audioCacheRef.current.forEach(url => URL.revokeObjectURL(url));
       audioCacheRef.current.clear();
+      prefetchingRef.current.clear();
       
-      // Reset states
+      // Reset all states
       setIsPlayingAudio(false);
       setIsLoadingAudio(false);
       setIsAutoPlaying(false);
