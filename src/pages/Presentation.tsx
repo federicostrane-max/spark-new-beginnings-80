@@ -167,7 +167,7 @@ const Presentation = () => {
   };
 
   // Schedule progressive reveal: show content as audio reads it based on actual audio duration
-  const scheduleProgressiveReveal = (contentItemsCount: number, audioDuration: number) => {
+  const scheduleProgressiveReveal = (slide: PresentationSlide, contentItemsCount: number, audioDuration: number) => {
     clearAnimationTimers();
     setVisibleContentItems([]);
     setAnimationInProgress(true);
@@ -184,14 +184,14 @@ const Presentation = () => {
       return;
     }
 
-    const currentSlideData = slides[currentSlide];
-    
     // Calculate text length for each content item to distribute time proportionally
-    const contentLengths = currentSlideData.content.map(item => item.length);
+    const contentLengths = slide.content.map(item => item.length);
     const totalLength = contentLengths.reduce((sum, len) => sum + len, 0);
     
+    console.log(`📊 Content lengths:`, contentLengths, `Total: ${totalLength}`);
+    
     // Small initial delay for audio to start speaking
-    const initialDelay = 400;
+    const initialDelay = 500;
     
     // Show first item after initial delay
     const timer0 = setTimeout(() => {
@@ -200,22 +200,29 @@ const Presentation = () => {
     }, initialDelay);
     animationTimersRef.current.push(timer0);
     
-    // Calculate when each subsequent item should appear
-    // Items appear slightly BEFORE the audio reads them (anticipation)
-    const anticipationOffset = 500; // Show text 500ms before it's read
-    const availableTime = (audioDuration * 1000) - initialDelay - anticipationOffset;
+    // Calculate timing for each item based on cumulative text length
+    // Each item appears slightly BEFORE the audio finishes reading the previous content
+    const anticipationOffset = 800; // Show text 800ms before it's about to be read
+    const totalAvailableTime = (audioDuration * 1000) - initialDelay;
     
-    console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s (proportional to text length)`);
+    console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s`);
+    console.log(`   Initial delay: ${initialDelay}ms, Available time: ${totalAvailableTime}ms`);
     
     for (let i = 1; i < contentItemsCount; i++) {
-      // Calculate cumulative proportion of text up to this point
-      const cumulativeLength = contentLengths.slice(0, i).reduce((sum, len) => sum + len, 0);
-      const proportion = cumulativeLength / totalLength;
+      // Calculate the cumulative proportion of text that should be read BEFORE this item appears
+      // For item i, we want to show it after items 0 to i-1 have been read
+      const textBeforeThisItem = contentLengths.slice(0, i).reduce((sum, len) => sum + len, 0);
+      const proportion = textBeforeThisItem / totalLength;
       
-      // Item should appear based on proportion of text read so far, with anticipation
-      const itemDelay = initialDelay + (availableTime * proportion);
+      // Calculate when this item should appear
+      const timeBasedOnProportion = totalAvailableTime * proportion;
+      const itemDelay = initialDelay + timeBasedOnProportion - anticipationOffset;
       
-      console.log(`  Item ${i + 1}: ${Math.round(itemDelay)}ms (${Math.round(proportion * 100)}% of text)`);
+      // Ensure minimum spacing between items (at least 1 second)
+      const minDelay = initialDelay + (i * 1000);
+      const finalDelay = Math.max(itemDelay, minDelay);
+      
+      console.log(`  Item ${i + 1}: ${Math.round(finalDelay)}ms (proportion: ${Math.round(proportion * 100)}%, text: ${textBeforeThisItem}/${totalLength})`);
       
       const timer = setTimeout(() => {
         console.log(`✨ Showing content item ${i + 1}/${contentItemsCount}`);
@@ -223,7 +230,7 @@ const Presentation = () => {
         if (i === contentItemsCount - 1) {
           setAnimationInProgress(false);
         }
-      }, itemDelay);
+      }, finalDelay);
       
       animationTimersRef.current.push(timer);
     }
@@ -348,7 +355,7 @@ const Presentation = () => {
         console.log(`🎵 Audio duration: ${audioDuration}s for ${contentCount} content items`);
         
         // Schedule content to appear progressively based on actual audio duration
-        scheduleProgressiveReveal(contentCount, audioDuration);
+        scheduleProgressiveReveal(slide, contentCount, audioDuration);
       };
       
       audio.oncanplaythrough = async () => {
