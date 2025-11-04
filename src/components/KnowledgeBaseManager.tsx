@@ -10,10 +10,11 @@ import { formatDistanceToNow } from "date-fns";
 
 interface KnowledgeDocument {
   id: string;
-  document_name: string;
-  category: string;
-  summary: string;
+  file_name: string;
+  ai_summary: string | null;
   created_at: string;
+  assignment_type: string;
+  link_id: string;
 }
 
 interface KnowledgeBaseManagerProps {
@@ -32,24 +33,47 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   }, [agentId]);
 
   const loadDocuments = async () => {
-    console.log('📄 LOAD DOCUMENTS START');
+    console.log('📄 LOAD ASSIGNED DOCUMENTS START - Agent:', agentId);
     try {
       setLoading(true);
       
-      // Use RPC to get distinct documents efficiently
+      // Query documents assigned to this agent via agent_document_links
       const { data, error } = await supabase
-        .rpc('get_distinct_documents', { p_agent_id: agentId }) as { 
-          data: KnowledgeDocument[] | null, 
-          error: any 
-        };
+        .from('agent_document_links')
+        .select(`
+          id,
+          assignment_type,
+          created_at,
+          document_id,
+          knowledge_documents (
+            id,
+            file_name,
+            ai_summary,
+            created_at
+          )
+        `)
+        .eq('agent_id', agentId)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      console.log('📄 LOAD DOCUMENTS SUCCESS, found:', data?.length || 0, 'documents');
-      setDocuments(data || []);
+      // Transform data to flat structure
+      const transformedData: KnowledgeDocument[] = (data || [])
+        .filter(link => link.knowledge_documents)
+        .map(link => ({
+          id: (link.knowledge_documents as any).id,
+          file_name: (link.knowledge_documents as any).file_name,
+          ai_summary: (link.knowledge_documents as any).ai_summary,
+          created_at: (link.knowledge_documents as any).created_at,
+          assignment_type: link.assignment_type,
+          link_id: link.id,
+        }));
+
+      console.log('📄 LOAD ASSIGNED DOCUMENTS SUCCESS, found:', transformedData.length, 'documents');
+      setDocuments(transformedData);
       
       // Switch to list tab ONLY on initial load if there are documents
-      if (isInitialLoad && data && data.length > 0) {
+      if (isInitialLoad && transformedData.length > 0) {
         console.log('📄 Initial load: Switching to list tab');
         setActiveTab("list");
         setIsInitialLoad(false);
@@ -57,28 +81,30 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
         setIsInitialLoad(false);
       }
     } catch (error: any) {
-      console.error('❌ Error loading documents:', error);
+      console.error('❌ Error loading assigned documents:', error);
     } finally {
       setLoading(false);
-      console.log('📄 LOAD DOCUMENTS END');
+      console.log('📄 LOAD ASSIGNED DOCUMENTS END');
     }
   };
 
-  const handleDeleteDocument = async (documentName: string) => {
-    console.log('🗑️ DELETE START:', documentName);
+  const handleUnassignDocument = async (linkId: string, fileName: string) => {
+    console.log('🔗 UNASSIGN DOCUMENT START - Link ID:', linkId);
     try {
+      // Delete the link from agent_document_links
       const { error } = await supabase
-        .from('agent_knowledge')
+        .from('agent_document_links')
         .delete()
-        .match({ agent_id: agentId, document_name: documentName });
+        .eq('id', linkId);
 
       if (error) throw error;
 
-      console.log('✅ DELETE SUCCESS, calling loadDocuments...');
+      console.log('✅ UNASSIGN SUCCESS - Document unassigned:', fileName);
+      toast.success(`Documento "${fileName}" rimosso dalla knowledge base`);
       loadDocuments();
-      console.log('✅ loadDocuments called');
     } catch (error: any) {
-      console.error('❌ Error deleting document:', error);
+      console.error('❌ Error unassigning document:', error);
+      toast.error('Errore nella rimozione del documento');
     }
   };
 
@@ -123,12 +149,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                 </TableHeader>
                 <TableBody>
                   {documents.map((doc) => (
-                    <TableRow key={doc.id}>
+                    <TableRow key={doc.link_id}>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2 min-w-0 max-w-full">
                           <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                          <span className="truncate" title={doc.document_name}>
-                            {doc.document_name}
+                          <span className="truncate" title={doc.file_name}>
+                            {doc.file_name}
                           </span>
                         </div>
                       </TableCell>
@@ -142,7 +168,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            handleDeleteDocument(doc.document_name);
+                            handleUnassignDocument(doc.link_id, doc.file_name);
                           }}
                           type="button"
                         >
