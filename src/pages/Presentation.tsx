@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX, Maximize, Palette } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX, Maximize, Palette, Play, Pause } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -63,8 +63,10 @@ const Presentation = () => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [theme, setTheme] = useState<Theme>('aurora');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -147,15 +149,10 @@ const Presentation = () => {
     }
   };
 
-  const nextSlide = () => {
-    if (currentSlide < slides.length - 1) {
-      setCurrentSlide(currentSlide + 1);
-    }
-  };
 
   // Generate speech for current slide
-  const playSlideAudio = async (slide: PresentationSlide) => {
-    if (!isAudioEnabled) return;
+  const playSlideAudio = async (slide: PresentationSlide, onComplete?: () => void) => {
+    if (!isAudioEnabled && !isAutoPlaying) return;
 
     // Stop any currently playing audio
     if (audioRef.current) {
@@ -168,52 +165,173 @@ const Presentation = () => {
 
       // Combine title and content for narration
       const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+      
+      console.log('Requesting TTS for:', textToSpeak.substring(0, 100) + '...');
 
       const { data, error } = await supabase.functions.invoke('text-to-speech', {
         body: { text: textToSpeak, voice: 'nova' }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('TTS error:', error);
+        throw error;
+      }
+
+      console.log('TTS response received, type:', typeof data);
 
       // Create audio element and play
       const audio = new Audio();
-      const blob = new Blob([data], { type: 'audio/mpeg' });
-      audio.src = URL.createObjectURL(blob);
+      
+      // Handle the response - it should be a blob/arraybuffer
+      let audioBlob: Blob;
+      
+      if (data instanceof Blob) {
+        audioBlob = data;
+      } else if (data instanceof ArrayBuffer) {
+        audioBlob = new Blob([data], { type: 'audio/mpeg' });
+      } else if (data instanceof ReadableStream) {
+        // Convert stream to blob
+        const reader = data.getReader();
+        const chunks: Uint8Array[] = [];
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+        }
+        
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        
+        for (const chunk of chunks) {
+          combined.set(chunk, offset);
+          offset += chunk.length;
+        }
+        
+        audioBlob = new Blob([combined], { type: 'audio/mpeg' });
+      } else {
+        console.error('Unexpected data type:', data);
+        throw new Error('Formato audio non valido');
+      }
+
+      console.log('Audio blob created, size:', audioBlob.size);
+      
+      const audioUrl = URL.createObjectURL(audioBlob);
+      audio.src = audioUrl;
       audioRef.current = audio;
 
       audio.onended = () => {
+        console.log('Audio playback ended');
         setIsPlayingAudio(false);
-        URL.revokeObjectURL(audio.src);
+        URL.revokeObjectURL(audioUrl);
+        if (onComplete) {
+          onComplete();
+        }
       };
 
-      audio.onerror = () => {
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
         setIsPlayingAudio(false);
-        URL.revokeObjectURL(audio.src);
+        URL.revokeObjectURL(audioUrl);
+        toast.error('Errore riproduzione audio');
       };
 
+      console.log('Starting audio playback...');
       await audio.play();
+      console.log('Audio playing successfully');
+      
     } catch (error) {
       console.error('Error playing slide audio:', error);
       setIsPlayingAudio(false);
+      toast.error('Errore nella generazione audio');
+      
+      // If auto-playing, continue to next slide even if audio fails
+      if (isAutoPlaying && onComplete) {
+        setTimeout(onComplete, 2000);
+      }
     }
   };
 
-  // Auto-play audio when slide changes
+  // Auto-play functionality
+  const startAutoPlay = async () => {
+    setIsAutoPlaying(true);
+    setCurrentSlide(0);
+    
+    const playNext = async (index: number) => {
+      if (index >= slides.length) {
+        setIsAutoPlaying(false);
+        toast.success('Presentazione completata!');
+        return;
+      }
+
+      await playSlideAudio(slides[index], () => {
+        if (index < slides.length - 1) {
+          setCurrentSlide(index + 1);
+          // Small delay before next slide
+          autoPlayTimerRef.current = setTimeout(() => {
+            playNext(index + 1);
+          }, 500);
+        } else {
+          setIsAutoPlaying(false);
+          toast.success('Presentazione completata!');
+        }
+      });
+    };
+
+    await playNext(0);
+  };
+
+  const stopAutoPlay = () => {
+    setIsAutoPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (autoPlayTimerRef.current) {
+      clearTimeout(autoPlayTimerRef.current);
+      autoPlayTimerRef.current = null;
+    }
+    setIsPlayingAudio(false);
+  };
+
+  // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
-    if (slides.length > 0 && isAudioEnabled) {
+    if (slides.length > 0 && isAudioEnabled && !isAutoPlaying) {
       playSlideAudio(slides[currentSlide]);
     }
 
     return () => {
       // Cleanup audio when slide changes or component unmounts
-      if (audioRef.current) {
+      if (audioRef.current && !isAutoPlaying) {
         audioRef.current.pause();
         audioRef.current = null;
       }
     };
   }, [currentSlide, slides, isAudioEnabled]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (autoPlayTimerRef.current) {
+        clearTimeout(autoPlayTimerRef.current);
+      }
+    };
+  }, []);
+
+  const nextSlide = () => {
+    if (isAutoPlaying) return;
+    if (currentSlide < slides.length - 1) {
+      setCurrentSlide(currentSlide + 1);
+    }
+  };
+
   const prevSlide = () => {
+    if (isAutoPlaying) return;
     if (currentSlide > 0) {
       setCurrentSlide(currentSlide - 1);
     }
@@ -338,6 +456,30 @@ const Presentation = () => {
         </Button>
 
         <div className="flex items-center gap-2">
+          {/* Auto-play button */}
+          <Button
+            onClick={isAutoPlaying ? stopAutoPlay : startAutoPlay}
+            variant="outline"
+            size="sm"
+            className={cn(
+              "bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm",
+              isAutoPlaying && "bg-primary text-primary-foreground"
+            )}
+            title={isAutoPlaying ? "Ferma presentazione automatica" : "Avvia presentazione automatica"}
+          >
+            {isAutoPlaying ? (
+              <>
+                <Pause className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                <span className="hidden sm:inline">Stop</span>
+              </>
+            ) : (
+              <>
+                <Play className="h-3 w-3 md:h-4 md:w-4 mr-1" />
+                <span className="hidden sm:inline">Auto</span>
+              </>
+            )}
+          </Button>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -363,6 +505,7 @@ const Presentation = () => {
             onClick={toggleAudio}
             variant="outline"
             size="sm"
+            disabled={isAutoPlaying}
             className={cn(
               "bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm",
               isPlayingAudio && "animate-pulse"
@@ -481,7 +624,7 @@ const Presentation = () => {
       <div className="absolute bottom-6 md:bottom-10 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4">
         <Button
           onClick={prevSlide}
-          disabled={currentSlide === 0}
+          disabled={currentSlide === 0 || isAutoPlaying}
           size="lg"
           className={cn(
             "h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl",
@@ -502,7 +645,7 @@ const Presentation = () => {
         
         <Button
           onClick={nextSlide}
-          disabled={currentSlide === slides.length - 1}
+          disabled={currentSlide === slides.length - 1 || isAutoPlaying}
           size="lg"
           className={cn(
             "h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl",
