@@ -207,7 +207,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
             Questi documenti sono condivisi nel pool e assegnati a {agentName}
           </p>
         </div>
-        <Button onClick={() => setShowAssignDialog(true)} size="sm">
+        <Button onClick={() => setShowAssignDialog(true)} size="sm" type="button">
           <Plus className="h-4 w-4 mr-2" />
           Assegna Documento
         </Button>
@@ -223,7 +223,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
           <p className="text-muted-foreground mb-4">
             Nessun documento assegnato a questo agente
           </p>
-          <Button onClick={() => setShowAssignDialog(true)} variant="outline">
+          <Button onClick={() => setShowAssignDialog(true)} variant="outline" type="button">
             <Plus className="h-4 w-4 mr-2" />
             Assegna il primo documento
           </Button>
@@ -346,12 +346,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                 variant="outline"
                 onClick={() => setShowAssignDialog(false)}
                 disabled={assigning}
+                type="button"
               >
                 Annulla
               </Button>
               <Button
                 onClick={handleAssignDocuments}
                 disabled={selectedDocuments.size === 0 || assigning}
+                type="button"
               >
                 {assigning && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Assegna Documenti
