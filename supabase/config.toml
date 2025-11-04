@@ -39,3 +39,6 @@ verify_jwt = false
 
 [functions.generate-presentation-structure]
 verify_jwt = false
+
+[functions.deepseek-chat]
+verify_jwt = false

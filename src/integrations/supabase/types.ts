@@ -251,6 +251,7 @@ export type Database = {
           created_at: string | null
           description: string
           id: string
+          llm_provider: string | null
           name: string
           slug: string
           system_prompt: string
@@ -262,6 +263,7 @@ export type Database = {
           created_at?: string | null
           description: string
           id?: string
+          llm_provider?: string | null
           name: string
           slug: string
           system_prompt: string
@@ -273,6 +275,7 @@ export type Database = {
           created_at?: string | null
           description?: string
           id?: string
+          llm_provider?: string | null
           name?: string
           slug?: string
           system_prompt?: string

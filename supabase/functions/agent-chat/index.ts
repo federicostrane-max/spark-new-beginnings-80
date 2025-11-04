@@ -492,9 +492,30 @@ Deno.serve(async (req) => {
     
     console.log(`📊 Final context: ${truncatedMessages.length} messages, ${totalChars} total chars`);
 
-    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-    if (!ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY not configured');
+    // Determine which LLM provider to use
+    const llmProvider = agent.llm_provider || 'anthropic';
+    console.log('🤖 Using LLM Provider:', llmProvider);
+
+    // Get and validate API keys based on provider
+    let ANTHROPIC_API_KEY: string | undefined;
+    let DEEPSEEK_API_KEY: string | undefined;
+    let OPENAI_API_KEY: string | undefined;
+
+    if (llmProvider === 'anthropic') {
+      ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+      if (!ANTHROPIC_API_KEY) {
+        throw new Error('ANTHROPIC_API_KEY not configured');
+      }
+    } else if (llmProvider === 'deepseek') {
+      DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+      if (!DEEPSEEK_API_KEY) {
+        throw new Error('DEEPSEEK_API_KEY not configured');
+      }
+    } else if (llmProvider === 'openai') {
+      OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+      if (!OPENAI_API_KEY) {
+        throw new Error('OPENAI_API_KEY not configured');
+      }
     }
 
     // Start streaming response
@@ -752,31 +773,97 @@ ${agent.system_prompt}`;
           
           let response: Response;
           try {
-            response = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': ANTHROPIC_API_KEY,
-                'anthropic-version': '2023-06-01'
-              },
-              body: JSON.stringify({
-                model: 'claude-sonnet-4-5',
-                max_tokens: 64000,
-                temperature: 0.7,
-                system: enhancedSystemPrompt,
-                messages: anthropicMessages,
-                tools: tools,
-                stream: true
-              }),
-              signal: controller.signal
-            });
+            // Route to appropriate LLM provider
+            if (llmProvider === 'deepseek') {
+              // Call DeepSeek via edge function
+              console.log('🚀 Routing to DeepSeek...');
+              const deepseekResponse = await supabase.functions.invoke('deepseek-chat', {
+                body: {
+                  messages: anthropicMessages,
+                  systemPrompt: enhancedSystemPrompt
+                }
+              });
+
+              if (deepseekResponse.error) {
+                throw new Error(`DeepSeek error: ${deepseekResponse.error.message}`);
+              }
+
+              const assistantMessage = deepseekResponse.data.message;
+              fullResponse = assistantMessage;
+
+              // Send the response
+              sendSSE(JSON.stringify({ type: 'content', text: assistantMessage }));
+
+              // Save to DB
+              await supabase
+                .from('agent_messages')
+                .update({ content: fullResponse })
+                .eq('id', placeholderMsg.id);
+
+              sendSSE(JSON.stringify({ 
+                type: 'complete', 
+                conversationId: conversation.id 
+              }));
+
+              closeStream();
+              return; // Exit early for DeepSeek
+              
+            } else if (llmProvider === 'openai') {
+              // OpenAI implementation (streaming)
+              console.log('🚀 Routing to OpenAI...');
+              
+              response = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                },
+                body: JSON.stringify({
+                  model: 'gpt-4o',
+                  messages: [
+                    { role: 'system', content: enhancedSystemPrompt },
+                    ...anthropicMessages
+                  ],
+                  temperature: 0.7,
+                  stream: true
+                }),
+                signal: controller.signal
+              });
+              
+            } else {
+              // Default: Anthropic
+              console.log('🚀 Routing to Anthropic...');
+              
+              if (!ANTHROPIC_API_KEY) {
+                throw new Error('ANTHROPIC_API_KEY is required but not set');
+              }
+              
+              response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': ANTHROPIC_API_KEY,
+                  'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                  model: 'claude-sonnet-4-5',
+                  max_tokens: 64000,
+                  temperature: 0.7,
+                  system: enhancedSystemPrompt,
+                  messages: anthropicMessages,
+                  tools: tools,
+                  stream: true
+                }),
+                signal: controller.signal
+              });
+            }
           
             clearTimeout(timeout);
 
             if (!response.ok) {
               const errorBody = await response.text();
-              console.error('Anthropic API error details:', response.status, errorBody);
-              throw new Error(`Anthropic API error: ${response.status} - ${errorBody}`);
+              console.error(`${llmProvider.toUpperCase()} API error details:`, response.status, errorBody);
+              throw new Error(`${llmProvider.toUpperCase()} API error: ${response.status} - ${errorBody}`);
             }
           } catch (error: any) {
             clearTimeout(timeout);
@@ -793,7 +880,7 @@ ${agent.system_prompt}`;
           let buffer = '';
           let lastKeepAlive = Date.now();
 
-          console.log('🔄 Starting stream from Anthropic...');
+          console.log(`🔄 Starting stream from ${llmProvider.toUpperCase()}...`);
 
           // Send keep-alive every 15 seconds to prevent timeout
           const keepAliveInterval = setInterval(() => {
@@ -829,6 +916,26 @@ ${agent.system_prompt}`;
                 try {
                   const parsed = JSON.parse(data);
                   
+                  // Handle OpenAI streaming format
+                  if (llmProvider === 'openai') {
+                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
+                      fullResponse += newText;
+                      sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 5000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    continue; // Skip Anthropic-specific handling
+                  }
+                  
+                  // Anthropic-specific handling
                   // Handle tool use start
                   if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
                     toolUseId = parsed.content_block.id;

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
@@ -16,6 +17,7 @@ interface Agent {
   description: string;
   avatar: string | null;
   system_prompt: string;
+  llm_provider?: string;
 }
 
 interface CreateAgentModalProps {
@@ -30,6 +32,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [llmProvider, setLlmProvider] = useState("anthropic");
   const [loading, setLoading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
@@ -40,11 +43,13 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
+      setLlmProvider(editingAgent.llm_provider || "anthropic");
       setCreatedAgentId(editingAgent.id);
     } else if (!open) {
       setName("");
       setDescription("");
       setSystemPrompt("");
+      setLlmProvider("anthropic");
       setSelectedFiles([]);
       setCreatedAgentId(null);
     }
@@ -89,6 +94,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             name,
             description,
             system_prompt: systemPrompt,
+            llm_provider: llmProvider,
           })
           .eq("id", editingAgent.id)
           .select()
@@ -130,6 +136,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             slug: autoSlug,
             description,
             system_prompt: systemPrompt,
+            llm_provider: llmProvider,
             avatar: null,
             active: true,
             user_id: user.id
@@ -216,6 +223,43 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             />
             <p className="text-xs text-muted-foreground mt-1">
               Define the agent's personality, expertise, and behavior
+            </p>
+          </div>
+
+          {/* LLM Provider Selection */}
+          <div>
+            <Label htmlFor="llmProvider">AI Model Provider *</Label>
+            <Select 
+              value={llmProvider} 
+              onValueChange={setLlmProvider}
+              disabled={loading}
+            >
+              <SelectTrigger id="llmProvider">
+                <SelectValue placeholder="Select AI provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="anthropic">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Anthropic Claude</span>
+                    <span className="text-xs text-muted-foreground">Advanced reasoning, high quality</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="deepseek">
+                  <div className="flex flex-col">
+                    <span className="font-medium">DeepSeek R1</span>
+                    <span className="text-xs text-muted-foreground">Cost-effective, excellent reasoning</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai">
+                  <div className="flex flex-col">
+                    <span className="font-medium">OpenAI GPT</span>
+                    <span className="text-xs text-muted-foreground">Versatile, widely supported</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Choose which AI model will power this agent
             </p>
           </div>
 
