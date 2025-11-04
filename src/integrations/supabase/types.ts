@@ -490,6 +490,50 @@ export type Database = {
         }
         Relationships: []
       }
+      search_results_cache: {
+        Row: {
+          authors: string | null
+          conversation_id: string
+          created_at: string | null
+          id: string
+          result_number: number
+          source: string | null
+          title: string
+          url: string
+          year: string | null
+        }
+        Insert: {
+          authors?: string | null
+          conversation_id: string
+          created_at?: string | null
+          id?: string
+          result_number: number
+          source?: string | null
+          title: string
+          url: string
+          year?: string | null
+        }
+        Update: {
+          authors?: string | null
+          conversation_id?: string
+          created_at?: string | null
+          id?: string
+          result_number?: number
+          source?: string | null
+          title?: string
+          url?: string
+          year?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_results_cache_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           created_at: string | null

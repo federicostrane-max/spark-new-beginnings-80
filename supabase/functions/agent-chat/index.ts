@@ -217,16 +217,44 @@ function formatSearchResults(results: SearchResult[], topic: string, requestedCo
   return header + formattedResults + footer;
 }
 
-function extractCachedSearchResults(messages: any[]): SearchResult[] | null {
-  console.log(`🔍 [CACHE] Searching for cached results in ${messages.length} messages`);
-  // Find the most recent assistant message containing search results
+async function extractCachedSearchResults(
+  messages: any[], 
+  conversationId: string,
+  supabaseClient: any
+): Promise<SearchResult[] | null> {
+  console.log(`🔍 [CACHE] Searching for cached results in conversation ${conversationId}`);
+  
+  // First try to get results from database cache (most reliable, includes URLs)
+  try {
+    const { data: cachedResults, error } = await supabaseClient
+      .from('search_results_cache')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('result_number', { ascending: true });
+    
+    if (!error && cachedResults && cachedResults.length > 0) {
+      console.log(`✅ [CACHE] Found ${cachedResults.length} results in database cache`);
+      return cachedResults.map((r: any) => ({
+        number: r.result_number,
+        title: r.title,
+        authors: r.authors,
+        year: r.year,
+        source: r.source,
+        url: r.url
+      }));
+    }
+  } catch (dbError) {
+    console.error('⚠️ [CACHE] Database cache lookup failed:', dbError);
+  }
+  
+  // Fallback: extract from message history (no URLs)
+  console.log(`🔍 [CACHE] Fallback: Searching in ${messages.length} messages`);
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === 'assistant' && msg.content) {
       const match = msg.content.match(/Found (\d+) PDFs on/);
       if (match) {
         console.log(`✅ [CACHE] Found search results in message ${i}:`, match[0]);
-        // Extract results from formatted message
         const results: SearchResult[] = [];
         const lines = msg.content.split('\n');
         
@@ -239,23 +267,20 @@ function extractCachedSearchResults(messages: any[]): SearchResult[] | null {
               authors: resultMatch[3],
               year: resultMatch[4],
               source: resultMatch[5],
-              url: '' // URL not stored in formatted output - need to maintain separately
+              url: '' // URL not available from formatted message
             });
           }
         }
         
         if (results.length > 0) {
-          console.log(`✅ [CACHE] Extracted ${results.length} cached results`);
+          console.log(`⚠️ [CACHE] Extracted ${results.length} results but URLs missing`);
           return results;
-        } else {
-          console.log('⚠️ [CACHE] No valid results extracted from message');
-          return null;
         }
       }
     }
   }
   
-  console.log('❌ [CACHE] No cached search results found in conversation history');
+  console.log('❌ [CACHE] No cached search results found');
   return null;
 }
 
@@ -665,6 +690,36 @@ Deno.serve(async (req) => {
               // Execute web search immediately with requested count
               try {
                 const searchResults = await executeWebSearch(userIntent.topic, userIntent.count || 10);
+                
+                // Save results to database cache
+                console.log(`💾 [CACHE] Saving ${searchResults.length} results to database`);
+                const cacheInserts = searchResults.map(r => ({
+                  conversation_id: conversation.id,
+                  result_number: r.number,
+                  title: r.title,
+                  authors: r.authors,
+                  year: r.year,
+                  source: r.source,
+                  url: r.url
+                }));
+                
+                // Delete old cache for this conversation first
+                await supabase
+                  .from('search_results_cache')
+                  .delete()
+                  .eq('conversation_id', conversation.id);
+                
+                // Insert new cache
+                const { error: cacheError } = await supabase
+                  .from('search_results_cache')
+                  .insert(cacheInserts);
+                
+                if (cacheError) {
+                  console.error('⚠️ [CACHE] Failed to save to database:', cacheError);
+                } else {
+                  console.log('✅ [CACHE] Results saved to database successfully');
+                }
+                
                 workflowResponse = formatSearchResults(searchResults, userIntent.topic, userIntent.count);
                 
                 // Send formatted results to user
@@ -695,7 +750,7 @@ Deno.serve(async (req) => {
               workflowHandled = true;
               
               // Get cached search results from conversation history
-              const cachedResults = extractCachedSearchResults(truncatedMessages);
+              const cachedResults = await extractCachedSearchResults(truncatedMessages, conversation.id, supabase);
               
               if (cachedResults && cachedResults.length > 0) {
                 // If pdfNumbers is empty, download all; otherwise download specific ones
