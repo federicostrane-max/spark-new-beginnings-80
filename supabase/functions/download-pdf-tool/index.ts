@@ -15,16 +15,57 @@ serve(async (req) => {
   try {
     const { url, search_query } = await req.json();
     
+    console.log('[download-pdf-tool] ========== START ==========');
+    console.log('[download-pdf-tool] Input:', JSON.stringify({ url, search_query }).slice(0, 200));
+    
     if (!url) {
       throw new Error('URL is required');
     }
 
     console.log('📥 Downloading PDF from:', url);
 
-    // Download the PDF
-    const pdfResponse = await fetch(url);
-    if (!pdfResponse.ok) {
-      throw new Error(`Failed to download PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+    // Retry logic for unreliable PDFs
+    let pdfResponse: Response | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`📥 Download attempt ${attempt}/3...`);
+        pdfResponse = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; PDFBot/1.0)'
+          }
+        });
+        
+        if (pdfResponse.ok) {
+          console.log(`✅ Download successful on attempt ${attempt}`);
+          break;
+        }
+        
+        console.warn(`⚠️ Attempt ${attempt} failed with status ${pdfResponse.status}`);
+        
+        if (attempt < 3) {
+          const delayMs = 1000 * attempt;
+          console.log(`⏳ Waiting ${delayMs}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      } catch (fetchError) {
+        console.error(`❌ Attempt ${attempt} failed:`, fetchError);
+        if (attempt === 3) throw fetchError;
+        
+        const delayMs = 1000 * attempt;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!pdfResponse || !pdfResponse.ok) {
+      throw new Error(`Failed to download PDF after 3 attempts: ${pdfResponse?.status}`);
+    }
+
+    // Validate Content-Type
+    const contentType = pdfResponse.headers.get('content-type');
+    console.log(`📄 Content-Type: ${contentType}`);
+
+    if (!contentType?.includes('application/pdf') && !contentType?.includes('octet-stream')) {
+      throw new Error(`Invalid content type: ${contentType}. Expected PDF.`);
     }
 
     const pdfBlob = await pdfResponse.blob();
@@ -57,6 +98,34 @@ serve(async (req) => {
 
     console.log('✅ PDF uploaded to storage:', filePath);
 
+    // Extract text from PDF
+    console.log('📄 Extracting text from PDF...');
+    let extractedText = '';
+    let fullText = '';
+
+    try {
+      // Use PDF.js via CDN for Deno
+      const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/+esm');
+      
+      const pdfDoc = await pdfjs.getDocument({ data: new Uint8Array(pdfArrayBuffer) }).promise;
+      console.log(`📄 PDF has ${pdfDoc.numPages} pages`);
+      
+      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(' ');
+        fullText += pageText + '\n\n';
+      }
+      
+      extractedText = fullText.slice(0, 1000); // First 1000 chars for validation
+      console.log(`✅ Extracted ${fullText.length} characters (${pdfDoc.numPages} pages)`);
+      
+    } catch (extractError) {
+      console.error('⚠️ Failed to extract text:', extractError);
+      console.error('⚠️ Stack:', (extractError as Error).stack);
+      // Continue without text extraction (will skip AI validation)
+    }
+
     // Create document record
     const { data: document, error: docError } = await supabase
       .from('knowledge_documents')
@@ -79,9 +148,15 @@ serve(async (req) => {
 
     console.log('📝 Document record created:', document.id);
 
-    // Trigger validation (fire and forget - no await)
+    // Trigger validation with extracted text
+    console.log('[download-pdf-tool] Triggering validation with extracted text...');
     supabase.functions.invoke('validate-document', {
-      body: { documentId: document.id }
+      body: { 
+        documentId: document.id,
+        searchQuery: search_query,
+        extractedText: extractedText,
+        fullText: fullText
+      }
     }).then(result => {
       if (result.error) {
         console.error('Validation error:', result.error);
@@ -90,8 +165,11 @@ serve(async (req) => {
       }
     }).catch(err => {
       console.error('Validation invocation error:', err);
+      console.error('Stack:', (err as Error).stack);
     });
 
+    console.log('[download-pdf-tool] ========== END SUCCESS ==========');
+    
     return new Response(
       JSON.stringify({ 
         success: true,
@@ -106,7 +184,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in download-pdf-tool:', error);
+    console.error('[download-pdf-tool] ❌ ERROR:', error);
+    console.error('[download-pdf-tool] Stack:', (error as Error).stack);
+    console.log('[download-pdf-tool] ========== END ERROR ==========');
+    
     return new Response(
       JSON.stringify({ 
         success: false,

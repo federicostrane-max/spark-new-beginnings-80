@@ -10,6 +10,7 @@ interface ValidationRequest {
   documentId: string;
   searchQuery: string;
   extractedText: string; // First 500-1000 chars
+  fullText?: string; // Complete text for processing
 }
 
 interface ValidationResult {
@@ -28,6 +29,13 @@ serve(async (req) => {
     const requestBody = await req.json();
     const documentId = requestBody.documentId;
 
+    console.log(`[validate-document] ========== START ==========`);
+    console.log(`[validate-document] Input:`, JSON.stringify({
+      documentId,
+      hasExtractedText: !!requestBody.extractedText,
+      hasFullText: !!requestBody.fullText,
+      searchQuery: requestBody.searchQuery
+    }));
     console.log(`[validate-document] Starting validation for document ${documentId}`);
 
     // Initialize Supabase client
@@ -89,12 +97,17 @@ serve(async (req) => {
         })
         .eq('document_id', documentId);
       
-      // Trigger processing
+      // Trigger processing WITH fullText
       supabase.functions.invoke('process-document', {
-        body: { documentId }
-      }).then(() => console.log('[validate-document] Processing triggered'));
+        body: { 
+          documentId,
+          fullText: requestBody.fullText || ''
+        }
+      }).then(() => console.log('[validate-document] Processing triggered (no text)'));
 
-      return new Response(JSON.stringify({ 
+      console.log('[validate-document] ========== END (NO TEXT) ==========');
+      
+      return new Response(JSON.stringify({
         success: true, 
         reason: 'Documento accettato per il processing',
         textLength: 0
@@ -247,14 +260,22 @@ Rispondi SOLO con questo formato JSON:
       })
       .eq('document_id', documentId);
 
-    // Trigger processing
-    console.log('[validate-document] Triggering document processing...');
+    // Trigger processing WITH fullText
+    console.log('[validate-document] Triggering document processing with fullText...');
     supabase.functions.invoke('process-document', {
-      body: { documentId }
-    }).then(() => console.log('[validate-document] Processing triggered'))
-      .catch((err: Error) => console.error('[validate-document] Failed to trigger processing:', err));
+      body: { 
+        documentId,
+        fullText: requestBody.fullText || extractedText
+      }
+    }).then(() => console.log('[validate-document] Processing triggered with fullText'))
+      .catch((err: Error) => {
+        console.error('[validate-document] Failed to trigger processing:', err);
+        console.error('[validate-document] Stack:', err.stack);
+      });
 
-    return new Response(JSON.stringify({ 
+    console.log('[validate-document] ========== END SUCCESS ==========');
+    
+    return new Response(JSON.stringify({
       success: true, 
       reason: aiResult.motivazione,
       textLength 
@@ -263,8 +284,11 @@ Rispondi SOLO con questo formato JSON:
     });
 
   } catch (error) {
-    console.error('[validate-document] Error:', error);
-    return new Response(JSON.stringify({ 
+    console.error('[validate-document] ❌ ERROR:', error);
+    console.error('[validate-document] Stack:', (error as Error).stack);
+    console.log('[validate-document] ========== END ERROR ==========');
+    
+    return new Response(JSON.stringify({
       error: error instanceof Error ? error.message : 'Validation error' 
     }), {
       status: 500,

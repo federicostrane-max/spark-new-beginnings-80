@@ -24,9 +24,19 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Set timeout for processing
+  const timeoutId = setTimeout(() => {
+    throw new Error('Processing timeout after 5 minutes');
+  }, 5 * 60 * 1000);
+
   try {
     const { documentId, fullText }: ProcessRequest = await req.json();
 
+    console.log(`[process-document] ========== START ==========`);
+    console.log(`[process-document] Input:`, JSON.stringify({
+      documentId,
+      fullTextLength: fullText?.length || 0
+    }));
     console.log(`[process-document] Starting processing for document ${documentId}`);
 
     // Initialize Supabase client
@@ -176,8 +186,11 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       .eq('document_id', documentId);
 
     console.log('[process-document] Processing completed successfully!');
-
-    return new Response(JSON.stringify({ 
+    console.log('[process-document] ========== END SUCCESS ==========');
+    
+    clearTimeout(timeoutId);
+    
+    return new Response(JSON.stringify({
       success: true,
       analysis
     }), {
@@ -185,7 +198,11 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     });
 
   } catch (error) {
-    console.error('[process-document] Error:', error);
+    console.error('[process-document] ❌ ERROR:', error);
+    console.error('[process-document] Stack:', (error as Error).stack);
+    console.log('[process-document] ========== END ERROR ==========');
+    
+    clearTimeout(timeoutId);
 
     // Try to mark as failed in database
     try {
