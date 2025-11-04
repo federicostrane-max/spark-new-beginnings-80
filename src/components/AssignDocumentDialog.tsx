@@ -182,17 +182,17 @@ export const AssignDocumentDialog = ({
         </DialogHeader>
 
         {/* Document Preview */}
-        <div className="bg-muted p-4 rounded-lg space-y-2">
-          <div className="font-medium">{document.file_name}</div>
+        <div className="bg-muted p-3 md:p-4 rounded-lg space-y-2">
+          <div className="font-medium text-sm md:text-base break-words">{document.file_name}</div>
           {document.ai_summary && (
-            <p className="text-sm text-muted-foreground">{document.ai_summary}</p>
+            <p className="text-xs md:text-sm text-muted-foreground line-clamp-3">{document.ai_summary}</p>
           )}
-          <div className="flex flex-wrap gap-2 mt-2">
+          <div className="flex flex-wrap gap-1.5 md:gap-2 mt-2">
             {document.complexity_level && (
-              <Badge variant="secondary">{document.complexity_level}</Badge>
+              <Badge variant="secondary" className="text-xs">{document.complexity_level}</Badge>
             )}
             {document.keywords?.slice(0, 5).map((keyword, idx) => (
-              <Badge key={idx} variant="outline">
+              <Badge key={idx} variant="outline" className="text-xs">
                 {keyword}
               </Badge>
             ))}
@@ -209,34 +209,46 @@ export const AssignDocumentDialog = ({
             Nessun agente disponibile
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="font-medium text-sm">Agenti Disponibili</div>
-            {agents.map((agent) => (
-              <div
-                key={agent.id}
-                className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer"
-                onClick={() => toggleAgent(agent.id)}
-              >
-                <Checkbox
-                  checked={selectedAgents.has(agent.id)}
-                  onCheckedChange={() => toggleAgent(agent.id)}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium">{agent.name}</div>
-                  <div className="text-sm text-muted-foreground line-clamp-2">
-                    {agent.description}
+          <div className="space-y-2 md:space-y-3">
+            <div className="font-medium text-sm">Agenti Disponibili ({agents.length})</div>
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2">
+              {agents.map((agent) => (
+                <label
+                  key={agent.id}
+                  htmlFor={`agent-${agent.id}`}
+                  className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
+                >
+                  <Checkbox
+                    id={`agent-${agent.id}`}
+                    checked={selectedAgents.has(agent.id)}
+                    onCheckedChange={() => toggleAgent(agent.id)}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm md:text-base">{agent.name}</div>
+                    <div className="text-xs md:text-sm text-muted-foreground line-clamp-2">
+                      {agent.description}
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                </label>
+              ))}
+            </div>
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)}
+            className="w-full sm:w-auto"
+          >
             Annulla
           </Button>
-          <Button onClick={handleAssign} disabled={assigning}>
+          <Button 
+            onClick={handleAssign} 
+            disabled={assigning || selectedAgents.size === 0}
+            className="w-full sm:w-auto"
+          >
             {assigning ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
