@@ -7,9 +7,13 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Calendar, CheckCircle2, Hash, Tag, Gauge } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FileText, Calendar, CheckCircle2, Hash, Tag, Gauge, RefreshCw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { useState } from "react";
 
 interface KnowledgeDocument {
   id: string;
@@ -38,7 +42,36 @@ export const DocumentDetailsDialog = ({
   open,
   onOpenChange,
 }: DocumentDetailsDialogProps) => {
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  
   if (!document) return null;
+
+  const handleRegenerateSummary = async () => {
+    if (!document.id) return;
+
+    try {
+      setIsRegenerating(true);
+      toast.info("Rigenerazione summary in corso...");
+
+      const { error } = await supabase.functions.invoke("process-document", {
+        body: {
+          documentId: document.id,
+        },
+      });
+
+      if (error) throw error;
+
+      toast.success("Summary rigenerato con successo!");
+      onOpenChange(false);
+      
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+      console.error("Error regenerating summary:", error);
+      toast.error("Errore nella rigenerazione del summary");
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
 
   const getComplexityColor = (level?: string) => {
     switch (level?.toLowerCase()) {
@@ -70,13 +103,28 @@ export const DocumentDetailsDialog = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-xl">
-            <FileText className="h-5 w-5 text-primary" />
-            Dettagli Documento
-          </DialogTitle>
-          <DialogDescription className="text-base font-medium pt-2">
-            {document.file_name}
-          </DialogDescription>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <DialogTitle className="flex items-center gap-2 text-xl">
+                <FileText className="h-5 w-5 text-primary" />
+                Dettagli Documento
+              </DialogTitle>
+              <DialogDescription className="text-base font-medium pt-2">
+                {document.file_name}
+              </DialogDescription>
+            </div>
+            {document.validation_status === "validated" && !document.ai_summary && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRegenerateSummary}
+                disabled={isRegenerating}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRegenerating ? 'animate-spin' : ''}`} />
+                Rigenera
+              </Button>
+            )}
+          </div>
         </DialogHeader>
 
         <div className="space-y-6 pt-4">

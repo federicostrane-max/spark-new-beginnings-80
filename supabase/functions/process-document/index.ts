@@ -8,7 +8,7 @@ const corsHeaders = {
 
 interface ProcessRequest {
   documentId: string;
-  fullText: string; // Complete extracted text
+  fullText?: string; // Complete extracted text (optional, can be fetched from DB)
 }
 
 interface AIAnalysis {
@@ -30,12 +30,13 @@ serve(async (req) => {
   }, 5 * 60 * 1000);
 
   try {
-    const { documentId, fullText }: ProcessRequest = await req.json();
+    const { documentId, fullText: providedFullText }: ProcessRequest = await req.json();
 
     console.log(`[process-document] ========== START ==========`);
     console.log(`[process-document] Input:`, JSON.stringify({
       documentId,
-      fullTextLength: fullText?.length || 0
+      fullTextProvided: !!providedFullText,
+      fullTextLength: providedFullText?.length || 0
     }));
     console.log(`[process-document] Starting processing for document ${documentId}`);
 
@@ -43,6 +44,25 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // If fullText is not provided, fetch it from document_processing_cache
+    let fullText = providedFullText;
+    if (!fullText) {
+      console.log('[process-document] Full text not provided, fetching from cache...');
+      
+      const { data: cacheData, error: cacheError } = await supabase
+        .from('document_processing_cache')
+        .select('extracted_text')
+        .eq('document_id', documentId)
+        .single();
+
+      if (cacheError || !cacheData?.extracted_text) {
+        throw new Error(`Cannot retrieve extracted text for document ${documentId}: ${cacheError?.message || 'No text found'}`);
+      }
+
+      fullText = cacheData.extracted_text;
+      console.log(`[process-document] Retrieved text from cache (${fullText.length} chars)`);
+    }
 
     // Update status to processing
     await supabase
