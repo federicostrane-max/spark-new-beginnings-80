@@ -2,15 +2,56 @@ import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX, Maximize, Palette } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface PresentationSlide {
   title: string;
   content: string[];
   type: 'title' | 'content' | 'bullets' | 'conclusion';
 }
+
+type Theme = 'aurora' | 'midnight' | 'ocean' | 'sunset' | 'forest' | 'minimal';
+
+const themes: Record<Theme, { bg: string; accent: string; text: string }> = {
+  aurora: {
+    bg: 'from-purple-900 via-pink-800 to-indigo-900',
+    accent: 'bg-pink-500',
+    text: 'text-white'
+  },
+  midnight: {
+    bg: 'from-slate-900 via-blue-900 to-slate-900',
+    accent: 'bg-blue-400',
+    text: 'text-white'
+  },
+  ocean: {
+    bg: 'from-cyan-900 via-teal-800 to-blue-900',
+    accent: 'bg-cyan-400',
+    text: 'text-white'
+  },
+  sunset: {
+    bg: 'from-orange-800 via-red-700 to-purple-900',
+    accent: 'bg-orange-400',
+    text: 'text-white'
+  },
+  forest: {
+    bg: 'from-emerald-900 via-green-800 to-teal-900',
+    accent: 'bg-emerald-400',
+    text: 'text-white'
+  },
+  minimal: {
+    bg: 'from-gray-50 via-white to-gray-100',
+    accent: 'bg-gray-900',
+    text: 'text-gray-900'
+  }
+};
 
 const Presentation = () => {
   const [searchParams] = useSearchParams();
@@ -20,7 +61,10 @@ const Presentation = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [theme, setTheme] = useState<Theme>('aurora');
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -183,6 +227,32 @@ const Presentation = () => {
     }
   };
 
+  const toggleFullscreen = async () => {
+    if (!containerRef.current) return;
+
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
+      toast.error('Impossibile attivare fullscreen');
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -244,9 +314,17 @@ const Presentation = () => {
   }
 
   const slide = slides[currentSlide];
+  const currentTheme = themes[theme];
 
   return (
-    <div className="relative h-screen w-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+    <div 
+      ref={containerRef}
+      className={cn(
+        "relative h-screen w-screen overflow-hidden transition-all duration-500",
+        "bg-gradient-to-br",
+        currentTheme.bg
+      )}
+    >
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-50 p-3 md:p-4 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent">
         <Button
@@ -260,6 +338,27 @@ const Presentation = () => {
         </Button>
 
         <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
+                title="Cambia tema"
+              >
+                <Palette className="h-3 w-3 md:h-4 md:w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setTheme('aurora')}>🌈 Aurora</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme('midnight')}>🌙 Midnight</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme('ocean')}>🌊 Ocean</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme('sunset')}>🌅 Sunset</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme('forest')}>🌲 Forest</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTheme('minimal')}>⚪ Minimal</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <Button
             onClick={toggleAudio}
             variant="outline"
@@ -276,81 +375,154 @@ const Presentation = () => {
               <VolumeX className="h-3 w-3 md:h-4 md:w-4" />
             )}
           </Button>
+
+          <Button
+            onClick={toggleFullscreen}
+            variant="outline"
+            size="sm"
+            className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
+            title={isFullscreen ? "Esci da fullscreen" : "Fullscreen"}
+          >
+            <Maximize className="h-3 w-3 md:h-4 md:w-4" />
+          </Button>
           
-          <div className="text-white/80 text-xs md:text-sm font-medium">
+          <div className={cn("text-xs md:text-sm font-medium", currentTheme.text, "opacity-80")}>
             {currentSlide + 1} / {slides.length}
           </div>
         </div>
       </div>
 
       {/* Slide Content */}
-      <div className="absolute inset-0 flex items-center justify-center p-4 md:p-8">
+      <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
         <div 
           className={cn(
-            "w-full h-full flex flex-col items-center justify-center text-white text-center transition-all duration-500",
-            "animate-in fade-in slide-in-from-bottom-4"
+            "w-full h-full flex flex-col items-center justify-center text-center transition-all duration-700",
+            "animate-in fade-in slide-in-from-bottom-4",
+            currentTheme.text
           )}
           key={currentSlide}
         >
-          {/* Title */}
-          <h1 className={cn(
-            "font-bold mb-4 md:mb-8 px-2 md:px-4 leading-tight",
-            slide?.type === 'title' ? "text-3xl md:text-6xl" : "text-2xl md:text-4xl"
-          )}>
-            {slide?.title}
-          </h1>
+          {/* Decorative elements */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className={cn(
+              "absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl opacity-20",
+              currentTheme.accent
+            )} />
+            <div className={cn(
+              "absolute bottom-0 left-0 w-96 h-96 rounded-full blur-3xl opacity-20",
+              currentTheme.accent
+            )} />
+          </div>
 
-          {/* Content */}
-          {slide?.type === 'title' ? (
-            <p className="text-lg md:text-2xl opacity-90 px-4 md:px-8 max-w-3xl">
-              {slide.content[0]}
-            </p>
-          ) : (
-            <ul className="space-y-3 md:space-y-4 max-w-2xl text-left px-4 md:px-8">
-              {slide?.content.map((item, idx) => (
-                <li
-                  key={idx}
-                  className="text-sm md:text-lg leading-relaxed flex items-start gap-2 md:gap-3 animate-in fade-in slide-in-from-left"
-                  style={{ animationDelay: `${idx * 100}ms` }}
-                >
-                  <span className="text-primary text-lg md:text-xl flex-shrink-0">•</span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          {/* Main content container with glass effect */}
+          <div className={cn(
+            "relative z-10 max-w-5xl w-full",
+            slide?.type === 'title' ? "space-y-8" : "space-y-6",
+            "backdrop-blur-sm bg-white/5 rounded-3xl p-6 md:p-12",
+            "border border-white/10 shadow-2xl"
+          )}>
+            {/* Title with gradient */}
+            <h1 className={cn(
+              "font-bold leading-tight bg-gradient-to-r from-white via-white to-white/80 bg-clip-text text-transparent",
+              slide?.type === 'title' ? "text-4xl md:text-7xl" : "text-3xl md:text-5xl",
+              "drop-shadow-lg"
+            )}>
+              {slide?.title}
+            </h1>
+
+            {/* Content */}
+            {slide?.type === 'title' ? (
+              <p className="text-xl md:text-3xl opacity-90 px-4 md:px-8 leading-relaxed">
+                {slide.content[0]}
+              </p>
+            ) : slide?.type === 'conclusion' ? (
+              <div className="space-y-6">
+                <div className={cn("w-20 h-1 mx-auto rounded-full", currentTheme.accent)} />
+                {slide.content.map((item, idx) => (
+                  <p
+                    key={idx}
+                    className="text-lg md:text-2xl leading-relaxed px-4 md:px-12 animate-in fade-in slide-in-from-bottom"
+                    style={{ animationDelay: `${idx * 150}ms` }}
+                  >
+                    {item}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-4 md:gap-6">
+                {slide?.content.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className={cn(
+                      "flex items-start gap-3 md:gap-4 text-left p-4 md:p-6 rounded-2xl",
+                      "bg-white/5 backdrop-blur-sm border border-white/10",
+                      "hover:bg-white/10 transition-all duration-300",
+                      "animate-in fade-in slide-in-from-left"
+                    )}
+                    style={{ animationDelay: `${idx * 100}ms` }}
+                  >
+                    <div className={cn(
+                      "flex-shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center",
+                      currentTheme.accent,
+                      "text-white font-bold text-sm md:text-base"
+                    )}>
+                      {idx + 1}
+                    </div>
+                    <span className="text-base md:text-xl leading-relaxed pt-1">{item}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Navigation Controls */}
-      <div className="absolute bottom-4 md:bottom-8 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4">
+      <div className="absolute bottom-6 md:bottom-10 left-0 right-0 z-50 flex items-center justify-center gap-3 md:gap-4 px-4">
         <Button
           onClick={prevSlide}
           disabled={currentSlide === 0}
           size="lg"
-          className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-primary hover:bg-primary/90 shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
+          className={cn(
+            "h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl",
+            "backdrop-blur-md bg-white/10 hover:bg-white/20 border border-white/20",
+            "disabled:opacity-20 disabled:cursor-not-allowed",
+            "transition-all duration-300 hover:scale-110",
+            currentTheme.text
+          )}
         >
-          <ChevronLeft className="h-5 w-5 md:h-6 md:w-6" />
+          <ChevronLeft className="h-6 w-6 md:h-7 md:w-7" />
         </Button>
         
-        <div className="bg-background/90 backdrop-blur-sm px-3 py-1.5 md:px-4 md:py-2 rounded-full text-xs md:text-sm font-medium">
-          {currentSlide + 1} / {slides.length}
+        <div className="backdrop-blur-md bg-white/10 border border-white/20 px-4 py-2 md:px-6 md:py-3 rounded-full">
+          <span className={cn("text-sm md:text-base font-semibold", currentTheme.text)}>
+            {currentSlide + 1} / {slides.length}
+          </span>
         </div>
         
         <Button
           onClick={nextSlide}
           disabled={currentSlide === slides.length - 1}
           size="lg"
-          className="h-12 w-12 md:h-14 md:w-14 rounded-full bg-primary hover:bg-primary/90 shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
+          className={cn(
+            "h-14 w-14 md:h-16 md:w-16 rounded-full shadow-2xl",
+            "backdrop-blur-md bg-white/10 hover:bg-white/20 border border-white/20",
+            "disabled:opacity-20 disabled:cursor-not-allowed",
+            "transition-all duration-300 hover:scale-110",
+            currentTheme.text
+          )}
         >
-          <ChevronRight className="h-5 w-5 md:h-6 md:w-6" />
+          <ChevronRight className="h-6 w-6 md:h-7 md:w-7" />
         </Button>
       </div>
 
-      {/* Progress Bar */}
-      <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
+      {/* Enhanced Progress Bar */}
+      <div className="absolute bottom-0 left-0 right-0 h-2 bg-black/20 backdrop-blur-sm">
         <div 
-          className="h-full bg-primary transition-all duration-300"
+          className={cn(
+            "h-full transition-all duration-500 ease-out shadow-lg",
+            currentTheme.accent
+          )}
           style={{ width: `${((currentSlide + 1) / slides.length) * 100}%` }}
         />
       </div>
