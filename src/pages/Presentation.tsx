@@ -166,63 +166,45 @@ const Presentation = () => {
       // Combine title and content for narration
       const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
       
-      console.log('Requesting TTS for:', textToSpeak.substring(0, 100) + '...');
+      console.log('🎵 Starting TTS for:', textToSpeak.substring(0, 50) + '...');
 
-      const { data, error } = await supabase.functions.invoke('text-to-speech', {
-        body: { text: textToSpeak, voice: 'nova' }
-      });
+      // Get Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // Call edge function directly via fetch to get audio stream
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/text-to-speech`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ 
+            text: textToSpeak, 
+            voice: 'nova' 
+          })
+        }
+      );
 
-      if (error) {
-        console.error('TTS error:', error);
-        throw error;
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       }
 
-      console.log('TTS response received, type:', typeof data);
+      console.log('✅ TTS response OK, creating audio...');
 
-      // Create audio element and play
+      // Get audio blob
+      const audioBlob = await response.blob();
+      console.log('📦 Audio blob size:', audioBlob.size);
+
+      // Create audio element and play immediately
       const audio = new Audio();
-      
-      // Handle the response - it should be a blob/arraybuffer
-      let audioBlob: Blob;
-      
-      if (data instanceof Blob) {
-        audioBlob = data;
-      } else if (data instanceof ArrayBuffer) {
-        audioBlob = new Blob([data], { type: 'audio/mpeg' });
-      } else if (data instanceof ReadableStream) {
-        // Convert stream to blob
-        const reader = data.getReader();
-        const chunks: Uint8Array[] = [];
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-        }
-        
-        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-        const combined = new Uint8Array(totalLength);
-        let offset = 0;
-        
-        for (const chunk of chunks) {
-          combined.set(chunk, offset);
-          offset += chunk.length;
-        }
-        
-        audioBlob = new Blob([combined], { type: 'audio/mpeg' });
-      } else {
-        console.error('Unexpected data type:', data);
-        throw new Error('Formato audio non valido');
-      }
-
-      console.log('Audio blob created, size:', audioBlob.size);
-      
       const audioUrl = URL.createObjectURL(audioBlob);
       audio.src = audioUrl;
       audioRef.current = audio;
 
       audio.onended = () => {
-        console.log('Audio playback ended');
+        console.log('✅ Audio playback completed');
         setIsPlayingAudio(false);
         URL.revokeObjectURL(audioUrl);
         if (onComplete) {
@@ -231,20 +213,25 @@ const Presentation = () => {
       };
 
       audio.onerror = (e) => {
-        console.error('Audio playback error:', e);
+        console.error('❌ Audio playback error:', e);
         setIsPlayingAudio(false);
         URL.revokeObjectURL(audioUrl);
         toast.error('Errore riproduzione audio');
+        
+        // Continue to next slide even on error
+        if (isAutoPlaying && onComplete) {
+          setTimeout(onComplete, 1000);
+        }
       };
 
-      console.log('Starting audio playback...');
+      console.log('▶️ Starting audio playback...');
       await audio.play();
-      console.log('Audio playing successfully');
+      console.log('🎶 Audio playing!');
       
     } catch (error) {
-      console.error('Error playing slide audio:', error);
+      console.error('❌ Error in TTS:', error);
       setIsPlayingAudio(false);
-      toast.error('Errore nella generazione audio');
+      toast.error('Errore generazione audio');
       
       // If auto-playing, continue to next slide even if audio fails
       if (isAutoPlaying && onComplete) {
