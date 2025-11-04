@@ -41,6 +41,20 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Check for duplicate filename
+    console.log('[DUPLICATE CHECK] Verifying file does not exist...');
+    const { data: existingDoc } = await supabase
+      .from('knowledge_documents')
+      .select('id, file_name')
+      .eq('file_name', fileName)
+      .maybeSingle();
+
+    if (existingDoc) {
+      console.error('[DUPLICATE CHECK] ✗ File already exists:', fileName);
+      throw new Error(`Il documento "${fileName}" è già presente nel pool (ID: ${existingDoc.id})`);
+    }
+    console.log('[DUPLICATE CHECK] ✓ No duplicate found');
+
     // Step 1: Create document in knowledge_documents
     console.log('[STEP 1] Creating document in knowledge_documents...');
     

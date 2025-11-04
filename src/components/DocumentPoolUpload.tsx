@@ -51,6 +51,22 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     console.log('=== START SHARED POOL UPLOAD ===');
     console.log('Files:', selectedFiles.map(f => f.name));
 
+    // Check for duplicate filenames in database
+    const { data: existingDocs } = await supabase
+      .from('knowledge_documents')
+      .select('file_name')
+      .in('file_name', selectedFiles.map(f => f.name));
+
+    const existingFileNames = new Set(existingDocs?.map(d => d.file_name) || []);
+    const duplicates = selectedFiles.filter(f => existingFileNames.has(f.name));
+
+    if (duplicates.length > 0) {
+      const duplicateNames = duplicates.map(f => f.name).join(', ');
+      toast.error(`File già esistenti nel pool: ${duplicateNames}`);
+      console.log('=== UPLOAD BLOCKED - DUPLICATES DETECTED ===', duplicates.map(f => f.name));
+      return;
+    }
+
     setUploading(true);
     setProgress(0);
     let successCount = 0;
