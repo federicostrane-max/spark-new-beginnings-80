@@ -553,10 +553,10 @@ const Presentation = () => {
       </div>
 
       {/* Slide Content */}
-      <div className="absolute inset-0 flex items-center justify-center p-4 md:p-12">
+      <div className="absolute inset-0 flex items-center justify-center p-2 md:p-12 pt-16 md:pt-20 pb-24 md:pb-32">
         <div 
           className={cn(
-            "w-full h-full flex flex-col items-center justify-center text-center transition-all duration-700",
+            "w-full h-full flex flex-col items-center justify-center text-center transition-all duration-700 overflow-y-auto",
             "animate-in fade-in slide-in-from-bottom-4",
             currentTheme.text
           )}
@@ -565,43 +565,44 @@ const Presentation = () => {
           {/* Decorative elements */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <div className={cn(
-              "absolute top-0 right-0 w-96 h-96 rounded-full blur-3xl opacity-20",
+              "absolute top-0 right-0 w-64 h-64 md:w-96 md:h-96 rounded-full blur-3xl opacity-20",
               currentTheme.accent
             )} />
             <div className={cn(
-              "absolute bottom-0 left-0 w-96 h-96 rounded-full blur-3xl opacity-20",
+              "absolute bottom-0 left-0 w-64 h-64 md:w-96 md:h-96 rounded-full blur-3xl opacity-20",
               currentTheme.accent
             )} />
           </div>
 
           {/* Main content container with glass effect */}
           <div className={cn(
-            "relative z-10 max-w-5xl w-full",
-            slide?.type === 'title' ? "space-y-8" : "space-y-6",
-            "backdrop-blur-sm bg-white/5 rounded-3xl p-6 md:p-12",
-            "border border-white/10 shadow-2xl"
+            "relative z-10 max-w-5xl w-full my-auto",
+            slide?.type === 'title' ? "space-y-4 md:space-y-8" : "space-y-3 md:space-y-6",
+            "backdrop-blur-sm bg-white/5 rounded-2xl md:rounded-3xl p-3 md:p-12",
+            "border border-white/10 shadow-2xl",
+            "max-h-full overflow-y-auto"
           )}>
             {/* Title with gradient */}
             <h1 className={cn(
               "font-bold leading-tight bg-gradient-to-r from-white via-white to-white/80 bg-clip-text text-transparent",
-              slide?.type === 'title' ? "text-4xl md:text-7xl" : "text-3xl md:text-5xl",
-              "drop-shadow-lg"
+              slide?.type === 'title' ? "text-2xl md:text-7xl" : "text-xl md:text-5xl",
+              "drop-shadow-lg px-2 md:px-0"
             )}>
               {slide?.title}
             </h1>
 
             {/* Content */}
             {slide?.type === 'title' ? (
-              <p className="text-xl md:text-3xl opacity-90 px-4 md:px-8 leading-relaxed">
+              <p className="text-base md:text-3xl opacity-90 px-2 md:px-8 leading-relaxed">
                 {slide.content[0]}
               </p>
             ) : slide?.type === 'conclusion' ? (
-              <div className="space-y-6">
-                <div className={cn("w-20 h-1 mx-auto rounded-full", currentTheme.accent)} />
+              <div className="space-y-3 md:space-y-6">
+                <div className={cn("w-12 md:w-20 h-1 mx-auto rounded-full", currentTheme.accent)} />
                 {slide.content.map((item, idx) => (
                   <p
                     key={idx}
-                    className="text-lg md:text-2xl leading-relaxed px-4 md:px-12 animate-in fade-in slide-in-from-bottom"
+                    className="text-sm md:text-2xl leading-relaxed px-2 md:px-12 animate-in fade-in slide-in-from-bottom"
                     style={{ animationDelay: `${idx * 150}ms` }}
                   >
                     {item}
@@ -609,12 +610,12 @@ const Presentation = () => {
                 ))}
               </div>
             ) : (
-              <div className="grid gap-4 md:gap-6">
+              <div className="grid gap-2 md:gap-6">
                 {slide?.content.map((item, idx) => (
                   <div
                     key={idx}
                     className={cn(
-                      "flex items-start gap-3 md:gap-4 text-left p-4 md:p-6 rounded-2xl",
+                      "flex items-start gap-2 md:gap-4 text-left p-2 md:p-6 rounded-xl md:rounded-2xl",
                       "bg-white/5 backdrop-blur-sm border border-white/10",
                       "hover:bg-white/10 transition-all duration-300",
                       "animate-in fade-in slide-in-from-left"
@@ -622,13 +623,13 @@ const Presentation = () => {
                     style={{ animationDelay: `${idx * 100}ms` }}
                   >
                     <div className={cn(
-                      "flex-shrink-0 w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center",
+                      "flex-shrink-0 w-6 h-6 md:w-10 md:h-10 rounded-full flex items-center justify-center",
                       currentTheme.accent,
-                      "text-white font-bold text-sm md:text-base"
+                      "text-white font-bold text-xs md:text-base"
                     )}>
                       {idx + 1}
                     </div>
-                    <span className="text-base md:text-xl leading-relaxed pt-1">{item}</span>
+                    <span className="text-xs md:text-xl leading-relaxed pt-0.5 md:pt-1">{item}</span>
                   </div>
                 ))}
               </div>
