@@ -71,6 +71,10 @@ const Presentation = () => {
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isGeneratingAudioRef = useRef(false);
+  
+  // Audio cache for prefetching
+  const audioCacheRef = useRef<Map<number, string>>(new Map());
+  const prefetchingRef = useRef<Set<number>>(new Set());
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -154,38 +158,21 @@ const Presentation = () => {
   };
 
 
-  // Generate speech for current slide
-  const playSlideAudio = async (slide: PresentationSlide, onComplete?: () => void) => {
-    if (!isAudioEnabled && !isAutoPlaying) return;
-
-    // Prevent multiple simultaneous requests
-    if (isGeneratingAudioRef.current) {
-      console.log('⚠️ Audio generation already in progress, skipping...');
-      return;
-    }
-
-    isGeneratingAudioRef.current = true;
-
-    // Stop any currently playing audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-      setIsPlayingAudio(false);
-    }
-
+  // Prefetch audio for a specific slide
+  const prefetchAudio = async (slideIndex: number) => {
+    if (slideIndex < 0 || slideIndex >= slides.length) return;
+    if (audioCacheRef.current.has(slideIndex)) return; // Already cached
+    if (prefetchingRef.current.has(slideIndex)) return; // Already prefetching
+    
+    prefetchingRef.current.add(slideIndex);
+    const slide = slides[slideIndex];
+    
     try {
-      setIsLoadingAudio(true);
-      console.log('⏳ Loading audio...');
-
-      // Combine title and content for narration
-      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+      console.log(`🔄 Prefetching audio for slide ${slideIndex + 1}...`);
       
-      console.log('🎵 Starting TTS for:', textToSpeak.substring(0, 50) + '...');
-
-      // Get Supabase session
+      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
       const { data: { session } } = await supabase.auth.getSession();
       
-      // Call edge function directly via fetch to get audio stream
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/text-to-speech`,
         {
@@ -202,25 +189,87 @@ const Presentation = () => {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      console.log('✅ TTS response OK, creating audio...');
-
-      // Get audio blob
       const audioBlob = await response.blob();
-      console.log('📦 Audio blob size:', audioBlob.size);
-
-      // Create audio element and play immediately
-      const audio = new Audio();
       const audioUrl = URL.createObjectURL(audioBlob);
+      audioCacheRef.current.set(slideIndex, audioUrl);
+      
+      console.log(`✅ Prefetched audio for slide ${slideIndex + 1}`);
+    } catch (error) {
+      console.error(`❌ Failed to prefetch audio for slide ${slideIndex + 1}:`, error);
+    } finally {
+      prefetchingRef.current.delete(slideIndex);
+    }
+  };
+
+  // Play audio for current slide (with cache support)
+  const playSlideAudio = async (slide: PresentationSlide, slideIndex: number, onComplete?: () => void) => {
+    if (!isAudioEnabled && !isAutoPlaying) return;
+
+    if (isGeneratingAudioRef.current) {
+      console.log('⚠️ Audio generation already in progress, skipping...');
+      return;
+    }
+
+    isGeneratingAudioRef.current = true;
+
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsPlayingAudio(false);
+    }
+
+    try {
+      let audioUrl = audioCacheRef.current.get(slideIndex);
+      
+      if (!audioUrl) {
+        // Not in cache, generate it
+        setIsLoadingAudio(true);
+        console.log(`⏳ Loading audio for slide ${slideIndex + 1}...`);
+
+        const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/text-to-speech`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ 
+              text: textToSpeak, 
+              voice: 'nova' 
+            })
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        console.log('✅ TTS response OK, creating audio...');
+        const audioBlob = await response.blob();
+        audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Cache for future use
+        audioCacheRef.current.set(slideIndex, audioUrl);
+      } else {
+        console.log(`♻️ Using cached audio for slide ${slideIndex + 1}`);
+      }
+
+      // Create and play audio
+      const audio = new Audio();
       audio.src = audioUrl;
       audioRef.current = audio;
 
       audio.onended = () => {
         console.log('✅ Audio playback completed');
         setIsPlayingAudio(false);
-        URL.revokeObjectURL(audioUrl);
         if (onComplete) {
           onComplete();
         }
@@ -229,10 +278,8 @@ const Presentation = () => {
       audio.onerror = (e) => {
         console.error('❌ Audio playback error:', e);
         setIsPlayingAudio(false);
-        URL.revokeObjectURL(audioUrl);
         toast.error('Errore riproduzione audio');
         
-        // Continue to next slide even on error
         if (isAutoPlaying && onComplete) {
           setTimeout(onComplete, 1000);
         }
@@ -246,13 +293,17 @@ const Presentation = () => {
       await audio.play();
       console.log('🎶 Audio playing!');
       
+      // Prefetch next slide audio while playing
+      if (slideIndex + 1 < slides.length) {
+        prefetchAudio(slideIndex + 1);
+      }
+      
     } catch (error) {
       console.error('❌ Error in TTS:', error);
       setIsLoadingAudio(false);
       setIsPlayingAudio(false);
       toast.error('Errore generazione audio');
       
-      // If auto-playing, continue to next slide even if audio fails
       if (isAutoPlaying && onComplete) {
         setTimeout(onComplete, 2000);
       }
@@ -266,6 +317,12 @@ const Presentation = () => {
     setIsAutoPlaying(true);
     setCurrentSlide(0);
     
+    // Prefetch first two slides before starting
+    await Promise.all([
+      prefetchAudio(0),
+      prefetchAudio(1)
+    ]);
+    
     const playNext = async (index: number) => {
       if (index >= slides.length) {
         setIsAutoPlaying(false);
@@ -273,10 +330,9 @@ const Presentation = () => {
         return;
       }
 
-      await playSlideAudio(slides[index], () => {
+      await playSlideAudio(slides[index], index, () => {
         if (index < slides.length - 1) {
           setCurrentSlide(index + 1);
-          // Small delay before next slide
           autoPlayTimerRef.current = setTimeout(() => {
             playNext(index + 1);
           }, 500);
@@ -306,11 +362,10 @@ const Presentation = () => {
   // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
     if (slides.length > 0 && isAudioEnabled && !isAutoPlaying) {
-      playSlideAudio(slides[currentSlide]);
+      playSlideAudio(slides[currentSlide], currentSlide);
     }
 
     return () => {
-      // Cleanup audio when slide changes or component unmounts
       if (audioRef.current && !isAutoPlaying) {
         audioRef.current.pause();
         audioRef.current = null;
@@ -318,9 +373,13 @@ const Presentation = () => {
     };
   }, [currentSlide, slides, isAudioEnabled]);
 
-  // Cleanup on unmount
+  // Cleanup cache on unmount
   useEffect(() => {
     return () => {
+      // Clean up all cached audio URLs
+      audioCacheRef.current.forEach(url => URL.revokeObjectURL(url));
+      audioCacheRef.current.clear();
+      
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
