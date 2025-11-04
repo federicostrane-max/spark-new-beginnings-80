@@ -5,9 +5,19 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Upload, Loader2, X } from "lucide-react";
+import { Upload, Loader2, X, AlertTriangle } from "lucide-react";
 import { extractTextFromPDF } from "@/lib/pdfExtraction";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface DocumentPoolUploadProps {
   onUploadComplete: () => void;
@@ -16,8 +26,11 @@ interface DocumentPoolUploadProps {
 export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
   const [currentFile, setCurrentFile] = useState<string>("");
   const [progress, setProgress] = useState(0);
+  const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
+  const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -42,6 +55,15 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const removeDuplicatesAndContinue = () => {
+    const existingNames = new Set(duplicatesList.map(f => f.name));
+    const filteredFiles = selectedFiles.filter(f => !existingNames.has(f.name));
+    setSelectedFiles(filteredFiles);
+    setDuplicatesDialogOpen(false);
+    setDuplicatesList([]);
+    toast.success(`${duplicatesList.length} file duplicato/i rimosso/i dalla selezione`);
+  };
+
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
       toast.error("Nessun file selezionato");
@@ -52,19 +74,37 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     console.log('Files:', selectedFiles.map(f => f.name));
 
     // Check for duplicate filenames in database
-    const { data: existingDocs } = await supabase
-      .from('knowledge_documents')
-      .select('file_name')
-      .in('file_name', selectedFiles.map(f => f.name));
+    try {
+      setCheckingDuplicates(true);
+      toast.info("Verifica duplicati in corso...", { duration: 2000 });
+      console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
-    const existingFileNames = new Set(existingDocs?.map(d => d.file_name) || []);
-    const duplicates = selectedFiles.filter(f => existingFileNames.has(f.name));
+      const { data: existingDocs, error } = await supabase
+        .from('knowledge_documents')
+        .select('file_name')
+        .in('file_name', selectedFiles.map(f => f.name));
 
-    if (duplicates.length > 0) {
-      const duplicateNames = duplicates.map(f => f.name).join(', ');
-      toast.error(`File già esistenti nel pool: ${duplicateNames}`);
-      console.log('=== UPLOAD BLOCKED - DUPLICATES DETECTED ===', duplicates.map(f => f.name));
+      if (error) {
+        throw new Error(`Errore verifica duplicati: ${error.message}`);
+      }
+
+      const existingFileNames = new Set(existingDocs?.map(d => d.file_name) || []);
+      const duplicates = selectedFiles.filter(f => existingFileNames.has(f.name));
+
+      if (duplicates.length > 0) {
+        console.log('⚠️ DUPLICATES FOUND:', duplicates.map(f => f.name));
+        setDuplicatesList(duplicates);
+        setDuplicatesDialogOpen(true);
+        return;
+      }
+
+      console.log('✓ No duplicates found - proceeding with upload');
+    } catch (error: any) {
+      console.error('❌ Error checking duplicates:', error);
+      toast.error(`Errore durante la verifica: ${error.message}`);
       return;
+    } finally {
+      setCheckingDuplicates(false);
     }
 
     setUploading(true);
@@ -214,10 +254,15 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
 
         <Button
           onClick={handleUpload}
-          disabled={selectedFiles.length === 0 || uploading}
+          disabled={selectedFiles.length === 0 || uploading || checkingDuplicates}
           className="w-full"
         >
-          {uploading ? (
+          {checkingDuplicates ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Verifica in corso...
+            </>
+          ) : uploading ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               Caricamento in corso...
@@ -230,6 +275,40 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           )}
         </Button>
       </CardContent>
+
+      <AlertDialog open={duplicatesDialogOpen} onOpenChange={setDuplicatesDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              File Duplicati Trovati
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicatesList.length === 1 
+                ? 'Il seguente file esiste già nel database:'
+                : `I seguenti ${duplicatesList.length} file esistono già nel database:`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="max-h-60 overflow-y-auto bg-muted rounded-lg p-3">
+            <ul className="space-y-2">
+              {duplicatesList.map((file, idx) => (
+                <li key={idx} className="text-sm font-medium flex items-start gap-2">
+                  <span className="text-yellow-600">•</span>
+                  <span className="flex-1">{file.name}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDuplicatesList([])}>
+              Annulla
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={removeDuplicatesAndContinue}>
+              Rimuovi duplicati e continua
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 };
