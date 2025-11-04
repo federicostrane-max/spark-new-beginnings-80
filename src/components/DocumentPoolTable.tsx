@@ -28,23 +28,35 @@ import {
   Search,
   Filter,
   Link as LinkIcon,
+  Trash2,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface KnowledgeDocument {
   id: string;
   file_name: string;
-  search_query: string;
   validation_status: string;
   validation_reason: string;
   processing_status: string;
   ai_summary: string;
-  keywords: string[];
-  topics: string[];
-  complexity_level: string;
   text_length: number;
   created_at: string;
+  agent_names: string[];
+  agents_count: number;
+  keywords?: string[];
+  topics?: string[];
+  complexity_level?: string;
 }
 
 export const DocumentPoolTable = () => {
@@ -52,9 +64,10 @@ export const DocumentPoolTable = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [complexityFilter, setComplexityFilter] = useState<string>("all");
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(null);
 
   useEffect(() => {
     loadDocuments();
@@ -65,11 +78,42 @@ export const DocumentPoolTable = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from("knowledge_documents")
-        .select("*")
+        .select(`
+          *,
+          agent_document_links(
+            agent_id,
+            agents(name)
+          )
+        `)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setDocuments(data || []);
+
+      // Transform data to include agent info
+      const transformedData = (data || []).map((doc: any) => {
+        const links = doc.agent_document_links || [];
+        const agentNames = links
+          .map((link: any) => link.agents?.name)
+          .filter(Boolean);
+        
+        return {
+          id: doc.id,
+          file_name: doc.file_name,
+          validation_status: doc.validation_status,
+          validation_reason: doc.validation_reason,
+          processing_status: doc.processing_status,
+          ai_summary: doc.ai_summary,
+          text_length: doc.text_length,
+          created_at: doc.created_at,
+          agent_names: agentNames,
+          agents_count: agentNames.length,
+          keywords: doc.keywords || [],
+          topics: doc.topics || [],
+          complexity_level: doc.complexity_level || "",
+        };
+      });
+
+      setDocuments(transformedData);
     } catch (error: any) {
       console.error("Error loading documents:", error);
       toast.error("Errore nel caricamento dei documenti");
@@ -104,30 +148,65 @@ export const DocumentPoolTable = () => {
     return labels[status] || status;
   };
 
-  const getComplexityColor = (level: string) => {
-    const colors: Record<string, string> = {
-      basic: "bg-green-500/10 text-green-500",
-      intermediate: "bg-yellow-500/10 text-yellow-500",
-      advanced: "bg-red-500/10 text-red-500",
-    };
-    return colors[level] || "bg-muted text-muted-foreground";
+  const handleDelete = async (doc: KnowledgeDocument) => {
+    try {
+      const { error: linksError } = await supabase
+        .from("agent_document_links")
+        .delete()
+        .eq("document_id", doc.id);
+
+      if (linksError) throw linksError;
+
+      const { error: knowledgeError } = await supabase
+        .from("agent_knowledge")
+        .delete()
+        .eq("pool_document_id", doc.id);
+
+      if (knowledgeError) throw knowledgeError;
+
+      const { error: cacheError } = await supabase
+        .from("document_processing_cache")
+        .delete()
+        .eq("document_id", doc.id);
+
+      if (cacheError) throw cacheError;
+
+      const filePath = `${doc.id}/${doc.file_name}`;
+      const { error: storageError } = await supabase.storage
+        .from("knowledge-pdfs")
+        .remove([filePath]);
+
+      if (storageError) console.warn("Storage deletion warning:", storageError);
+
+      const { error: docError } = await supabase
+        .from("knowledge_documents")
+        .delete()
+        .eq("id", doc.id);
+
+      if (docError) throw docError;
+
+      toast.success("Documento eliminato con successo");
+      loadDocuments();
+    } catch (error: any) {
+      console.error("Error deleting document:", error);
+      toast.error("Errore nell'eliminazione del documento");
+    } finally {
+      setDeleteDialogOpen(false);
+      setDocToDelete(null);
+    }
   };
 
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
       searchQuery === "" ||
       doc.file_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      doc.search_query?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.ai_summary?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      doc.keywords?.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase()));
+      doc.agent_names?.some((name) => name.toLowerCase().includes(searchQuery.toLowerCase()));
 
     const matchesStatus =
       statusFilter === "all" || doc.validation_status === statusFilter;
 
-    const matchesComplexity =
-      complexityFilter === "all" || doc.complexity_level === complexityFilter;
-
-    return matchesSearch && matchesStatus && matchesComplexity;
+    return matchesSearch && matchesStatus;
   });
 
   return (
@@ -141,13 +220,13 @@ export const DocumentPoolTable = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Cerca</label>
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Nome file, keywords, summary..."
+                  placeholder="Nome file, summary, agenti..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
@@ -167,24 +246,6 @@ export const DocumentPoolTable = () => {
                   <SelectItem value="validation_failed">Non Valido</SelectItem>
                   <SelectItem value="ready_for_assignment">Pronto</SelectItem>
                   <SelectItem value="processing">In Elaborazione</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Complessità</label>
-              <Select
-                value={complexityFilter}
-                onValueChange={setComplexityFilter}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tutte</SelectItem>
-                  <SelectItem value="basic">Base</SelectItem>
-                  <SelectItem value="intermediate">Intermedio</SelectItem>
-                  <SelectItem value="advanced">Avanzato</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -217,11 +278,9 @@ export const DocumentPoolTable = () => {
                 <TableRow>
                   <TableHead>File</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Query</TableHead>
-                  <TableHead>Complessità</TableHead>
-                  <TableHead>Keywords</TableHead>
+                  <TableHead>Agenti Assegnati</TableHead>
                   <TableHead>Creato</TableHead>
-                  <TableHead>Azioni</TableHead>
+                  <TableHead className="text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -248,30 +307,20 @@ export const DocumentPoolTable = () => {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[150px] truncate text-sm text-muted-foreground">
-                        {doc.search_query || "-"}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {doc.complexity_level && (
-                        <Badge
-                          variant="secondary"
-                          className={getComplexityColor(doc.complexity_level)}
-                        >
-                          {doc.complexity_level}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1 max-w-[200px]">
-                        {doc.keywords?.slice(0, 3).map((keyword, idx) => (
-                          <Badge key={idx} variant="outline" className="text-xs">
-                            {keyword}
+                      <div className="flex flex-wrap gap-1">
+                        {doc.agents_count === 0 ? (
+                          <Badge variant="secondary" className="text-xs">
+                            Non assegnato
                           </Badge>
-                        ))}
-                        {doc.keywords?.length > 3 && (
-                          <Badge variant="outline" className="text-xs">
-                            +{doc.keywords.length - 3}
+                        ) : doc.agent_names.length <= 2 ? (
+                          doc.agent_names.map((name, idx) => (
+                            <Badge key={idx} variant="outline" className="text-xs">
+                              {name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <Badge variant="outline" className="text-xs" title={doc.agent_names.join(", ")}>
+                            {doc.agents_count} agenti
                           </Badge>
                         )}
                       </div>
@@ -282,18 +331,30 @@ export const DocumentPoolTable = () => {
                       })}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedDoc(doc);
-                          setAssignDialogOpen(true);
-                        }}
-                        disabled={doc.validation_status !== "validated"}
-                      >
-                        <LinkIcon className="h-4 w-4 mr-1" />
-                        Assegna
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedDoc(doc);
+                            setAssignDialogOpen(true);
+                          }}
+                          disabled={doc.validation_status !== "validated"}
+                        >
+                          <LinkIcon className="h-4 w-4 mr-1" />
+                          Assegna
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            setDocToDelete(doc);
+                            setDeleteDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -312,6 +373,38 @@ export const DocumentPoolTable = () => {
           onAssigned={loadDocuments}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conferma Eliminazione</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sei sicuro di voler eliminare il documento "{docToDelete?.file_name}"?
+              <br />
+              <br />
+              Questa azione eliminerà:
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>Il documento dal pool condiviso</li>
+                <li>Tutte le assegnazioni agli agenti ({docToDelete?.agents_count || 0})</li>
+                <li>Tutti i chunks e embeddings associati</li>
+                <li>Il file PDF dallo storage</li>
+              </ul>
+              <br />
+              <strong>Questa azione non può essere annullata.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => docToDelete && handleDelete(docToDelete)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Elimina
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

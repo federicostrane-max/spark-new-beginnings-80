@@ -26,9 +26,9 @@ interface AssignDocumentDialogProps {
     id: string;
     file_name: string;
     ai_summary: string;
-    keywords: string[];
-    topics: string[];
-    complexity_level: string;
+    keywords?: string[];
+    topics?: string[];
+    complexity_level?: string;
   };
   open: boolean;
   onOpenChange: (open: boolean) => void;
