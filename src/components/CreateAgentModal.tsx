@@ -174,6 +174,14 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const handleClone = async () => {
     if (!editingAgent) return;
     
+    console.log('🔄 [CLONE] Starting clone operation for agent:', {
+      id: editingAgent.id,
+      name: editingAgent.name,
+      llm_provider: editingAgent.llm_provider,
+      system_prompt_length: editingAgent.system_prompt?.length,
+      description: editingAgent.description
+    });
+    
     setLoading(true);
     try {
       // Get current user
@@ -195,9 +203,18 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       
       if (existing) {
         cloneSlug = `${cloneSlug}-${Date.now()}`;
+        console.log('⚠️ [CLONE] Slug already exists, using:', cloneSlug);
       }
 
       // Create cloned agent
+      console.log('📝 [CLONE] Creating cloned agent with data:', {
+        name: cloneName,
+        slug: cloneSlug,
+        llm_provider: editingAgent.llm_provider,
+        system_prompt_length: editingAgent.system_prompt?.length,
+        description_length: editingAgent.description?.length
+      });
+
       const { data: clonedAgent, error: cloneError } = await supabase
         .from("agents")
         .insert({
@@ -215,7 +232,16 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
       if (cloneError) throw cloneError;
 
+      console.log('✅ [CLONE] Cloned agent created:', {
+        id: clonedAgent.id,
+        name: clonedAgent.name,
+        llm_provider: clonedAgent.llm_provider,
+        system_prompt_matches: clonedAgent.system_prompt === editingAgent.system_prompt,
+        system_prompt_length: clonedAgent.system_prompt?.length
+      });
+
       // Clone knowledge base (direct uploads)
+      console.log('📚 [CLONE] Fetching direct upload knowledge...');
       const { data: knowledgeItems, error: knowledgeError } = await supabase
         .from("agent_knowledge")
         .select("*")
@@ -223,6 +249,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         .eq("source_type", "direct_upload");
 
       if (!knowledgeError && knowledgeItems && knowledgeItems.length > 0) {
+        console.log(`📚 [CLONE] Found ${knowledgeItems.length} direct upload knowledge items`);
+        
         const clonedKnowledge = knowledgeItems.map(item => ({
           agent_id: clonedAgent.id,
           document_name: item.document_name,
@@ -233,18 +261,29 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           source_type: "direct_upload"
         }));
 
-        await supabase
+        const { error: insertKnowledgeError } = await supabase
           .from("agent_knowledge")
           .insert(clonedKnowledge);
+
+        if (insertKnowledgeError) {
+          console.error('❌ [CLONE] Error cloning direct knowledge:', insertKnowledgeError);
+        } else {
+          console.log('✅ [CLONE] Direct knowledge cloned successfully');
+        }
+      } else {
+        console.log('ℹ️ [CLONE] No direct upload knowledge to clone');
       }
 
       // Clone pool document links
+      console.log('🔗 [CLONE] Fetching pool document links...');
       const { data: poolLinks, error: poolLinksError } = await supabase
         .from("agent_document_links")
         .select("*")
         .eq("agent_id", editingAgent.id);
 
       if (!poolLinksError && poolLinks && poolLinks.length > 0) {
+        console.log(`🔗 [CLONE] Found ${poolLinks.length} pool document links`);
+        
         const clonedLinks = poolLinks.map(link => ({
           agent_id: clonedAgent.id,
           document_id: link.document_id,
@@ -253,12 +292,20 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           confidence_score: link.confidence_score
         }));
 
-        await supabase
+        const { error: insertLinksError } = await supabase
           .from("agent_document_links")
           .insert(clonedLinks);
 
+        if (insertLinksError) {
+          console.error('❌ [CLONE] Error cloning pool links:', insertLinksError);
+        } else {
+          console.log('✅ [CLONE] Pool links cloned successfully');
+        }
+
         // Clone pool knowledge chunks
         const poolDocIds = poolLinks.map(l => l.document_id);
+        console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents...`);
+        
         const { data: poolKnowledge } = await supabase
           .from("agent_knowledge")
           .select("*")
@@ -267,6 +314,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           .in("pool_document_id", poolDocIds);
 
         if (poolKnowledge && poolKnowledge.length > 0) {
+          console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks`);
+          
           const clonedPoolKnowledge = poolKnowledge.map(item => ({
             agent_id: clonedAgent.id,
             document_name: item.document_name,
@@ -278,18 +327,48 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             pool_document_id: item.pool_document_id
           }));
 
-          await supabase
+          const { error: insertPoolKnowledgeError } = await supabase
             .from("agent_knowledge")
             .insert(clonedPoolKnowledge);
+
+          if (insertPoolKnowledgeError) {
+            console.error('❌ [CLONE] Error cloning pool knowledge:', insertPoolKnowledgeError);
+          } else {
+            console.log('✅ [CLONE] Pool knowledge cloned successfully');
+          }
+        } else {
+          console.log('ℹ️ [CLONE] No pool knowledge to clone');
         }
+      } else {
+        console.log('ℹ️ [CLONE] No pool document links to clone');
       }
+
+      // Final verification log
+      console.log('✅ [CLONE] Clone operation completed successfully!');
+      console.log('📊 [CLONE] Comparison:', {
+        original: {
+          name: editingAgent.name,
+          llm_provider: editingAgent.llm_provider,
+          system_prompt_length: editingAgent.system_prompt?.length
+        },
+        cloned: {
+          name: clonedAgent.name,
+          llm_provider: clonedAgent.llm_provider,
+          system_prompt_length: clonedAgent.system_prompt?.length
+        },
+        matches: {
+          llm_provider: editingAgent.llm_provider === clonedAgent.llm_provider,
+          system_prompt: editingAgent.system_prompt === clonedAgent.system_prompt,
+          description: editingAgent.description === clonedAgent.description
+        }
+      });
 
       toast.success(`Agente "${cloneName}" clonato con successo!`);
       onSuccess(clonedAgent);
       onOpenChange(false);
 
     } catch (error: any) {
-      console.error("Error cloning agent:", error);
+      console.error('❌ [CLONE] Fatal error during cloning:', error);
       toast.error("Errore durante la clonazione dell'agente");
     } finally {
       setLoading(false);
