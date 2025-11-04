@@ -728,28 +728,44 @@ ${agent.system_prompt}`;
             }
           ] : undefined;
 
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-5',
-              max_tokens: 64000,
-              temperature: 0.7,
-              system: enhancedSystemPrompt,
-              messages: anthropicMessages,
-              tools: tools,
-              stream: true
-            })
-          });
+          // Set timeout for API call (5 minutes)
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
+          
+          let response: Response;
+          try {
+            response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-sonnet-4-5',
+                max_tokens: 64000,
+                temperature: 0.7,
+                system: enhancedSystemPrompt,
+                messages: anthropicMessages,
+                tools: tools,
+                stream: true
+              }),
+              signal: controller.signal
+            });
+          
+            clearTimeout(timeout);
 
-          if (!response.ok) {
-            const errorBody = await response.text();
-            console.error('Anthropic API error details:', response.status, errorBody);
-            throw new Error(`Anthropic API error: ${response.status} - ${errorBody}`);
+            if (!response.ok) {
+              const errorBody = await response.text();
+              console.error('Anthropic API error details:', response.status, errorBody);
+              throw new Error(`Anthropic API error: ${response.status} - ${errorBody}`);
+            }
+          } catch (error: any) {
+            clearTimeout(timeout);
+            if (error.name === 'AbortError') {
+              throw new Error('Request timeout after 5 minutes');
+            }
+            throw error;
           }
 
           const reader = response.body?.getReader();
@@ -757,14 +773,22 @@ ${agent.system_prompt}`;
 
           const decoder = new TextDecoder();
           let buffer = '';
+          let lastKeepAlive = Date.now();
 
           console.log('🔄 Starting stream from Anthropic...');
+
+          // Send keep-alive every 15 seconds to prevent timeout
+          const keepAliveInterval = setInterval(() => {
+            sendSSE(':keep-alive\n\n');
+            console.log('📡 Keep-alive sent');
+          }, 15000);
 
           try {
             while (true) {
               const { done, value } = await reader.read();
               if (done) {
                 console.log(`✅ Stream ended. Total response length: ${fullResponse.length} chars`);
+                clearInterval(keepAliveInterval);
                 // Save before breaking
                 await supabase
                   .from('agent_messages')
@@ -798,55 +822,83 @@ ${agent.system_prompt}`;
                   // Accumulate tool input JSON
                   if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
                     toolUseInputJson += parsed.delta.partial_json;
-                    console.log('🔧 Tool input accumulated, length:', toolUseInputJson.length);
                   }
                   
-                  // Execute tool when block stops
-                  if (parsed.type === 'content_block_stop' && toolUseId && toolUseName) {
+                  // Handle tool use completion
+                  if (parsed.type === 'content_block_stop' && toolUseId) {
+                    console.log('🔧 Tool use complete, input JSON:', toolUseInputJson);
+                    
                     try {
-                      const toolInput = toolUseInputJson ? JSON.parse(toolUseInputJson) : {};
-                      console.log('🔧 Executing tool:', toolUseName, 'with input:', toolInput);
+                      const toolInput = JSON.parse(toolUseInputJson);
+                      
+                      // Execute the tool
+                      let toolResult: any = null;
                       
                       if (toolUseName === 'download_pdf') {
-                        const toolResult = await supabase.functions.invoke('download-pdf-tool', {
-                          body: toolInput
-                        });
+                        console.log('📥 Executing download_pdf with:', toolInput);
                         
-                        if (toolResult.error) {
-                          console.error('Tool execution error:', toolResult.error);
-                          fullResponse += `\n\n[Errore nel download del PDF: ${toolResult.error.message}]`;
+                        const { data: downloadData, error: downloadError } = await supabase.functions.invoke(
+                          'download-pdf-tool',
+                          {
+                            body: {
+                              url: toolInput.url,
+                              search_query: toolInput.search_query || 'User requested'
+                            }
+                          }
+                        );
+                        
+                        if (downloadError) {
+                          console.error('❌ Download error:', downloadError);
+                          toolResult = { success: false, error: downloadError.message };
                         } else {
-                          const result = toolResult.data;
-                          console.log('✅ Tool executed successfully:', result);
-                          fullResponse += `\n\n✅ PDF "${result.document.file_name}" scaricato con successo! Il documento è stato aggiunto al pool e sarà validato automaticamente.`;
+                          console.log('✅ Download successful:', downloadData);
+                          toolResult = downloadData;
                         }
-                        
-                        sendSSE(JSON.stringify({ 
-                          type: 'content', 
-                          text: fullResponse.slice(Math.max(0, fullResponse.lastIndexOf('\n\n')))
-                        }));
                       }
-                    } catch (toolError) {
-                      console.error('Error executing tool:', toolError);
-                      const errorMsg = toolError instanceof Error ? toolError.message : 'Unknown error';
-                      fullResponse += `\n\n[Errore nell'esecuzione del tool: ${errorMsg}]`;
+                      
+                      // Store tool result
+                      anthropicMessages.push({
+                        role: 'assistant',
+                        content: [
+                          {
+                            type: 'tool_use',
+                            id: toolUseId,
+                            name: toolUseName,
+                            input: toolInput
+                          }
+                        ]
+                      });
+                      
+                      anthropicMessages.push({
+                        role: 'user',
+                        content: [
+                          {
+                            type: 'tool_result',
+                            tool_use_id: toolUseId,
+                            content: JSON.stringify(toolResult)
+                          }
+                        ]
+                      });
+                      
+                      // Reset tool use tracking
+                      toolUseId = null;
+                      toolUseName = null;
+                      toolUseInputJson = '';
+                      
+                    } catch (jsonError) {
+                      console.error('❌ Error parsing tool input JSON:', jsonError, toolUseInputJson);
                     }
-                    
-                    // Reset tool state
-                    toolUseId = null;
-                    toolUseName = null;
-                    toolUseInputJson = '';
                   }
                   
-                  // Handle regular text content
+                  // Handle text content
                   if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                    const text = parsed.delta.text;
-                    fullResponse += text;
-                    sendSSE(JSON.stringify({ type: 'content', text }));
-
-                    // Periodic DB update (every 500ms)
+                    const newText = parsed.delta.text;
+                    fullResponse += newText;
+                    sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                    
+                    // Auto-save every 5 seconds during streaming
                     const now = Date.now();
-                    if (now - lastUpdateTime > 500) {
+                    if (now - lastUpdateTime > 5000) {
                       await supabase
                         .from('agent_messages')
                         .update({ content: fullResponse })
@@ -860,9 +912,11 @@ ${agent.system_prompt}`;
               }
             }
             console.log(`📝 Stream completed successfully. Final length: ${fullResponse.length} chars`);
+            clearInterval(keepAliveInterval);
           } catch (error) {
             console.error('❌ Streaming interrupted:', error);
             console.error('📊 Partial response length:', fullResponse.length);
+            clearInterval(keepAliveInterval);
             // Save whatever we have so far
             if (fullResponse) {
               await supabase

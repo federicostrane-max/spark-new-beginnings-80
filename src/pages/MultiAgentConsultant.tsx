@@ -237,6 +237,13 @@ export default function MultiAgentConsultant() {
     setIsStreaming(true);
 
     try {
+      // Create abort controller with 6 minute timeout (slightly longer than edge function)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+        console.error('Request timeout after 6 minutes');
+      }, 360000);
+      
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
         {
@@ -252,8 +259,11 @@ export default function MultiAgentConsultant() {
             attachments,
           }),
           keepalive: true,
+          signal: controller.signal
         }
       );
+      
+      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorData = await response.json();
