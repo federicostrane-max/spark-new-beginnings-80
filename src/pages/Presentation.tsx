@@ -184,45 +184,48 @@ const Presentation = () => {
       return;
     }
 
-    // Calculate text length for each content item to distribute time proportionally
-    const contentLengths = slide.content.map(item => item.length);
-    const totalLength = contentLengths.reduce((sum, len) => sum + len, 0);
+    // Calculate text segments: title + each content item
+    // The audio reads: "... [title]. [content[0]]. [content[1]]. ..."
+    const titleText = `... ${slide.title}`;
+    const textSegments = [titleText, ...slide.content];
+    const segmentLengths = textSegments.map(seg => seg.length);
+    const totalLength = segmentLengths.reduce((sum, len) => sum + len, 0);
     
-    console.log(`📊 Content lengths:`, contentLengths, `Total: ${totalLength}`);
+    console.log(`📊 Text segments:`, segmentLengths, `Total: ${totalLength}`);
     
-    // Small initial delay for audio to start speaking
+    // Show first content item immediately (title is being read at start)
     const initialDelay = 500;
-    
-    // Show first item after initial delay
     const timer0 = setTimeout(() => {
       console.log(`✨ Showing content item 1/${contentItemsCount}`);
       setVisibleContentItems([0]);
     }, initialDelay);
     animationTimersRef.current.push(timer0);
     
-    // Calculate timing for each item based on cumulative text length
-    // Each item appears slightly BEFORE the audio finishes reading the previous content
-    const anticipationOffset = 800; // Show text 800ms before it's about to be read
+    // Calculate timing for remaining items
+    // Each item appears when the voice is about to read it
     const totalAvailableTime = (audioDuration * 1000) - initialDelay;
     
     console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s`);
-    console.log(`   Initial delay: ${initialDelay}ms, Available time: ${totalAvailableTime}ms`);
+    console.log(`   Segments (including title): ${textSegments.length}, Available time: ${totalAvailableTime}ms`);
     
     for (let i = 1; i < contentItemsCount; i++) {
-      // Calculate the cumulative proportion of text that should be read BEFORE this item appears
-      // For item i, we want to show it after items 0 to i-1 have been read
-      const textBeforeThisItem = contentLengths.slice(0, i).reduce((sum, len) => sum + len, 0);
+      // Calculate cumulative text length UP TO and INCLUDING this item's position
+      // textSegments[0] = title
+      // textSegments[1] = content[0]
+      // textSegments[2] = content[1]
+      // So for content[i], we need segments 0 to i (inclusive of title + previous content)
+      const textBeforeThisItem = segmentLengths.slice(0, i + 1).reduce((sum, len) => sum + len, 0);
       const proportion = textBeforeThisItem / totalLength;
       
-      // Calculate when this item should appear
+      // Item should appear when the voice reaches this point
       const timeBasedOnProportion = totalAvailableTime * proportion;
-      const itemDelay = initialDelay + timeBasedOnProportion - anticipationOffset;
+      const itemDelay = initialDelay + timeBasedOnProportion;
       
-      // Ensure minimum spacing between items (at least 1 second)
-      const minDelay = initialDelay + (i * 1000);
+      // Ensure minimum spacing between items (at least 800ms)
+      const minDelay = initialDelay + (i * 800);
       const finalDelay = Math.max(itemDelay, minDelay);
       
-      console.log(`  Item ${i + 1}: ${Math.round(finalDelay)}ms (proportion: ${Math.round(proportion * 100)}%, text: ${textBeforeThisItem}/${totalLength})`);
+      console.log(`  Item ${i + 1}: ${Math.round(finalDelay)}ms (proportion: ${Math.round(proportion * 100)}%, cumulative: ${textBeforeThisItem}/${totalLength})`);
       
       const timer = setTimeout(() => {
         console.log(`✨ Showing content item ${i + 1}/${contentItemsCount}`);
