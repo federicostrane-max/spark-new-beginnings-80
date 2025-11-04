@@ -29,9 +29,17 @@ import {
   Filter,
   Link as LinkIcon,
   Trash2,
+  Info,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
+import { DocumentDetailsDialog } from "./DocumentDetailsDialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -68,6 +76,8 @@ export const DocumentPoolTable = () => {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [docToView, setDocToView] = useState<KnowledgeDocument | null>(null);
 
   useEffect(() => {
     loadDocuments();
@@ -292,9 +302,18 @@ export const DocumentPoolTable = () => {
                           {doc.file_name}
                         </div>
                         {doc.ai_summary && (
-                          <div className="text-xs text-muted-foreground truncate">
-                            {doc.ai_summary}
-                          </div>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="text-xs text-muted-foreground truncate cursor-help">
+                                  {doc.ai_summary}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-md">
+                                <p className="text-sm">{doc.ai_summary}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                         )}
                       </div>
                     </TableCell>
@@ -334,6 +353,17 @@ export const DocumentPoolTable = () => {
                       <div className="flex items-center justify-end gap-2">
                         <Button
                           size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setDocToView(doc);
+                            setDetailsDialogOpen(true);
+                          }}
+                          title="Vedi dettagli completi"
+                        >
+                          <Info className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
                           variant="outline"
                           onClick={() => {
                             setSelectedDoc(doc);
@@ -363,6 +393,13 @@ export const DocumentPoolTable = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Details Dialog */}
+      <DocumentDetailsDialog
+        document={docToView}
+        open={detailsDialogOpen}
+        onOpenChange={setDetailsDialogOpen}
+      />
 
       {/* Assign Dialog */}
       {selectedDoc && (
