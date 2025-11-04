@@ -152,11 +152,15 @@ export default function MultiAgentConsultant() {
     }
   };
 
+  const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
+
   const handleAgentCreated = (newAgent: Agent) => {
     // Auto-select the newly created agent
     handleSelectAgent(newAgent);
     console.log(`${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully`);
     setEditingAgent(null);
+    // Trigger sidebar refresh
+    setAgentUpdateTrigger(prev => prev + 1);
   };
 
   const handleDeleteAgent = async (agentId: string) => {
@@ -486,6 +490,7 @@ export default function MultiAgentConsultant() {
               setEditingAgent(agent);
               setShowCreateModal(true);
             }}
+            onAgentUpdate={() => setAgentUpdateTrigger(prev => prev + 1)}
           />
         </div>
       )}
@@ -507,6 +512,7 @@ export default function MultiAgentConsultant() {
                 setShowCreateModal(true);
                 setDrawerOpen(false);
               }}
+              onAgentUpdate={() => setAgentUpdateTrigger(prev => prev + 1)}
             />
           </SheetContent>
         </Sheet>

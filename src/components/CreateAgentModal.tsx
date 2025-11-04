@@ -189,7 +189,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       if (!user) throw new Error("User not authenticated");
 
       // Create clone with modified name
-      const cloneName = `${editingAgent.name} (Clone)`;
+      const cloneName = `${editingAgent.name} (copy)`;
       let cloneSlug = cloneName.toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');

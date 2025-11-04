@@ -34,13 +34,15 @@ interface AgentsSidebarProps {
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: (agent: Agent) => void;
+  onAgentUpdate?: () => void;
 }
 
 export const AgentsSidebar = ({ 
   currentAgentId, 
   onSelectAgent,
   onCreateAgent,
-  onEditAgent
+  onEditAgent,
+  onAgentUpdate
 }: AgentsSidebarProps) => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -52,6 +54,13 @@ export const AgentsSidebar = ({
   useEffect(() => {
     loadAgents();
   }, []);
+
+  // Reload agents when onAgentUpdate is called
+  useEffect(() => {
+    if (onAgentUpdate) {
+      loadAgents();
+    }
+  }, [onAgentUpdate]);
 
   const loadAgents = async () => {
     setLoading(true);
