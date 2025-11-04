@@ -297,7 +297,7 @@ export const DocumentPoolTable = () => {
                 {filteredDocuments.map((doc) => (
                   <TableRow key={doc.id}>
                     <TableCell>
-                      <div className="max-w-[200px]">
+                      <div className="max-w-md">
                         <div className="font-medium truncate" title={doc.file_name}>
                           {doc.file_name}
                         </div>
@@ -305,9 +305,9 @@ export const DocumentPoolTable = () => {
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <div className="text-xs text-muted-foreground truncate cursor-help">
-                                  {doc.ai_summary}
-                                </div>
+                            <div className="text-sm text-muted-foreground line-clamp-2 cursor-help hover:text-foreground transition-colors">
+                              {doc.ai_summary}
+                            </div>
                               </TooltipTrigger>
                               <TooltipContent className="max-w-md">
                                 <p className="text-sm">{doc.ai_summary}</p>
@@ -351,17 +351,18 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setDocToView(doc);
-                            setDetailsDialogOpen(true);
-                          }}
-                          title="Vedi dettagli completi"
-                        >
-                          <Info className="h-4 w-4" />
-                        </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setDocToView(doc);
+                          setDetailsDialogOpen(true);
+                        }}
+                        className="text-blue-600"
+                        title="Vedi dettagli completi"
+                      >
+                        <Info className="h-4 w-4" />
+                      </Button>
                         <Button
                           size="sm"
                           variant="outline"
