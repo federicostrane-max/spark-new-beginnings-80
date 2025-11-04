@@ -45,23 +45,24 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // If fullText is not provided, fetch it from document_processing_cache
+    // If fullText is not provided, reconstruct it from agent_knowledge chunks
     let fullText = providedFullText;
     if (!fullText) {
-      console.log('[process-document] Full text not provided, fetching from cache...');
+      console.log('[process-document] Full text not provided, reconstructing from chunks...');
       
-      const { data: cacheData, error: cacheError } = await supabase
-        .from('document_processing_cache')
-        .select('extracted_text')
-        .eq('document_id', documentId)
-        .single();
+      const { data: chunks, error: chunksError } = await supabase
+        .from('agent_knowledge')
+        .select('content')
+        .eq('pool_document_id', documentId)
+        .order('created_at', { ascending: true });
 
-      if (cacheError || !cacheData?.extracted_text) {
-        throw new Error(`Cannot retrieve extracted text for document ${documentId}: ${cacheError?.message || 'No text found'}`);
+      if (chunksError || !chunks || chunks.length === 0) {
+        throw new Error(`Cannot retrieve chunks for document ${documentId}: ${chunksError?.message || 'No chunks found'}`);
       }
 
-      fullText = cacheData.extracted_text;
-      console.log(`[process-document] Retrieved text from cache (${fullText.length} chars)`);
+      // Reconstruct full text from chunks (remove potential duplicates from overlap)
+      fullText = chunks.map(c => c.content).join(' ');
+      console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
     }
 
     // Update status to processing
