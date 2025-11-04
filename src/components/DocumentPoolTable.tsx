@@ -303,7 +303,9 @@ export const DocumentPoolTable = () => {
               <p>Nessun documento trovato</p>
             </div>
           ) : (
-            <div className="rounded-md border overflow-x-auto">
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block rounded-md border overflow-x-auto">
               <Table key={`table-${documents.length}-${Date.now()}`}>
               <TableHeader>
                 <TableRow>
@@ -413,6 +415,94 @@ export const DocumentPoolTable = () => {
               </TableBody>
             </Table>
             </div>
+
+              {/* Mobile Cards */}
+              <div className="md:hidden space-y-4">
+                {filteredDocuments.map((doc) => (
+                  <Card key={doc.id}>
+                    <CardContent className="pt-6 space-y-3">
+                      <div>
+                        <div className="font-medium break-words text-sm mb-1">
+                          {doc.file_name}
+                        </div>
+                        {doc.ai_summary && (
+                          <div className="text-xs text-muted-foreground line-clamp-2">
+                            {doc.ai_summary}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 text-sm">
+                        {getStatusIcon(doc.validation_status)}
+                        <span>{getStatusLabel(doc.validation_status)}</span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {doc.agents_count === 0 ? (
+                          <Badge variant="secondary" className="text-xs">
+                            Non assegnato
+                          </Badge>
+                        ) : doc.agent_names.length <= 2 ? (
+                          doc.agent_names.map((name, idx) => (
+                            <Badge key={idx} variant="outline" className="text-xs">
+                              {name}
+                            </Badge>
+                          ))
+                        ) : (
+                          <Badge variant="outline" className="text-xs">
+                            {doc.agents_count} agenti
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(doc.created_at), {
+                          addSuffix: true,
+                        })}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setDocToView(doc);
+                            setDetailsDialogOpen(true);
+                          }}
+                          className="flex-1"
+                        >
+                          <Info className="h-4 w-4 mr-1" />
+                          Info
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedDoc(doc);
+                            setAssignDialogOpen(true);
+                          }}
+                          disabled={doc.validation_status !== "validated"}
+                          className="flex-1"
+                        >
+                          <LinkIcon className="h-4 w-4 mr-1" />
+                          Assegna
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => {
+                            setDocToDelete(doc);
+                            setDeleteDialogOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
