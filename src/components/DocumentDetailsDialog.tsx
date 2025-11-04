@@ -113,7 +113,7 @@ export const DocumentDetailsDialog = ({
                 {document.file_name}
               </DialogDescription>
             </div>
-            {document.validation_status === "validated" && !document.ai_summary && (
+            {document.validation_status === "validated" && (!document.ai_summary || document.ai_summary.trim() === "") && (
               <Button
                 size="sm"
                 variant="outline"
@@ -121,7 +121,7 @@ export const DocumentDetailsDialog = ({
                 disabled={isRegenerating}
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${isRegenerating ? 'animate-spin' : ''}`} />
-                Rigenera
+                Rigenera Summary
               </Button>
             )}
           </div>
