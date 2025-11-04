@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
       }))
     ];
 
-    console.log('🚀 Calling DeepSeek API...');
+    console.log('🚀 Calling DeepSeek API with streaming...');
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
         messages: deepseekMessages,
         temperature: 0.7,
         max_tokens: 4000,
-        stream: false
+        stream: true // Enable streaming
       }),
     });
 
@@ -57,16 +57,82 @@ Deno.serve(async (req) => {
       throw new Error(`DeepSeek API error: ${response.status}`);
     }
 
-    const data = await response.json();
-    console.log('✅ DeepSeek response received');
+    console.log('✅ DeepSeek streaming started');
 
-    const assistantMessage = data.choices[0].message.content;
+    // Create a TransformStream to handle SSE formatting
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        if (!reader) {
+          controller.close();
+          return;
+        }
 
-    return new Response(JSON.stringify({ 
-      message: assistantMessage,
-      usage: data.usage 
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullMessage = '';
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              console.log('✅ DeepSeek stream complete. Total length:', fullMessage.length);
+              
+              // Send final message with usage stats
+              const finalData = JSON.stringify({ 
+                message: fullMessage,
+                done: true
+              });
+              controller.enqueue(new TextEncoder().encode(`data: ${finalData}\n\n`));
+              controller.close();
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line.trim() || line.startsWith(':')) continue;
+              if (!line.startsWith('data: ')) continue;
+
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                
+                // Extract content delta from DeepSeek response
+                if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                  const chunk = parsed.choices[0].delta.content;
+                  fullMessage += chunk;
+                  
+                  // Forward the chunk to client
+                  const chunkData = JSON.stringify({ 
+                    message: chunk,
+                    done: false
+                  });
+                  controller.enqueue(new TextEncoder().encode(`data: ${chunkData}\n\n`));
+                }
+              } catch (e) {
+                console.error('Error parsing DeepSeek chunk:', e);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ DeepSeek streaming error:', error);
+          controller.error(error);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: { 
+        ...corsHeaders, 
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      },
     });
 
   } catch (error) {

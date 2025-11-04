@@ -784,47 +784,35 @@ ${agent.system_prompt}`;
           try {
             // Route to appropriate LLM provider
             if (llmProvider === 'deepseek') {
-              // Call DeepSeek via edge function
+              // DeepSeek with direct streaming
               console.log('🚀 ROUTING TO DEEPSEEK');
               console.log(`   Model: deepseek-reasoner`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
-              const deepseekResponse = await supabase.functions.invoke('deepseek-chat', {
-                body: {
-                  messages: anthropicMessages,
-                  systemPrompt: enhancedSystemPrompt
-                }
-              });
-
-              if (deepseekResponse.error) {
-                throw new Error(`DeepSeek error: ${deepseekResponse.error.message}`);
+              if (!DEEPSEEK_API_KEY) {
+                throw new Error('DEEPSEEK_API_KEY is required but not set');
               }
-
-              const assistantMessage = deepseekResponse.data.message;
-              fullResponse = assistantMessage;
-
-              console.log('✅ DEEPSEEK RESPONSE RECEIVED');
-              console.log(`   Length: ${assistantMessage.length} chars`);
-              console.log(`   Usage: ${JSON.stringify(deepseekResponse.data.usage || {})}`);
-
-              // Send the response
-              sendSSE(JSON.stringify({ type: 'content', text: assistantMessage }));
-
-              // Save to DB
-              await supabase
-                .from('agent_messages')
-                .update({ content: fullResponse })
-                .eq('id', placeholderMsg.id);
-
-              sendSSE(JSON.stringify({ 
-                type: 'complete', 
-                conversationId: conversation.id,
-                llmProvider: llmProvider  // Send provider info to client
-              }));
-
-              console.log('🏁 DEEPSEEK REQUEST COMPLETED');
-              closeStream();
-              return; // Exit early for DeepSeek
+              
+              const deepseekMessages = [
+                { role: 'system', content: enhancedSystemPrompt },
+                ...anthropicMessages
+              ];
+              
+              response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'deepseek-reasoner',
+                  messages: deepseekMessages,
+                  temperature: 0.7,
+                  max_tokens: 4000,
+                  stream: true
+                }),
+                signal: controller.signal
+              });
               
             } else if (llmProvider === 'openai') {
               // OpenAI implementation (streaming)
