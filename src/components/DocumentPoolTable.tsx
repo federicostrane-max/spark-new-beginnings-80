@@ -30,6 +30,7 @@ import {
   Link as LinkIcon,
   Trash2,
   Info,
+  RefreshCw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
@@ -70,6 +71,7 @@ interface KnowledgeDocument {
 export const DocumentPoolTable = () => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
@@ -83,9 +85,15 @@ export const DocumentPoolTable = () => {
     loadDocuments();
   }, []);
 
+  useEffect(() => {
+    console.log('[DocumentPoolTable] Component mounted');
+    console.log('[DocumentPoolTable] Documents loaded:', documents.length);
+  }, [documents]);
+
   const loadDocuments = async () => {
     try {
       setLoading(true);
+      setError(null);
       const { data, error } = await supabase
         .from("knowledge_documents")
         .select(`
@@ -125,7 +133,8 @@ export const DocumentPoolTable = () => {
 
       setDocuments(transformedData);
     } catch (error: any) {
-      console.error("Error loading documents:", error);
+      console.error('[DocumentPoolTable] Load error:', error);
+      setError(error.message || "Errore sconosciuto");
       toast.error("Errore nel caricamento dei documenti");
     } finally {
       setLoading(false);
@@ -278,12 +287,24 @@ export const DocumentPoolTable = () => {
             <div className="text-center py-8 text-muted-foreground">
               Caricamento...
             </div>
+          ) : error ? (
+            <div className="text-center py-12">
+              <XCircle className="mx-auto h-12 w-12 text-destructive mb-4" />
+              <p className="text-lg font-medium mb-2">Errore nel caricamento</p>
+              <p className="text-muted-foreground mb-4">{error}</p>
+              <Button onClick={loadDocuments} variant="outline">
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Riprova
+              </Button>
+            </div>
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              Nessun documento trovato
+              <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+              <p>Nessun documento trovato</p>
             </div>
           ) : (
-            <Table>
+            <div className="rounded-md border overflow-x-auto">
+              <Table key={`table-${documents.length}-${Date.now()}`}>
               <TableHeader>
                 <TableRow>
                   <TableHead>File</TableHead>
@@ -391,6 +412,7 @@ export const DocumentPoolTable = () => {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
