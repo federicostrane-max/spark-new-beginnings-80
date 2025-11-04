@@ -11,17 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import mermaid from "mermaid";
 
 interface PresentationSlide {
   title: string;
   content: string[];
-  type: 'title' | 'content' | 'bullets' | 'conclusion' | 'table' | 'diagram' | 'tree';
-  tableData?: {
-    headers: string[];
-    rows: string[][];
-  };
-  diagramCode?: string;
+  type: 'title' | 'content' | 'bullets' | 'conclusion';
 }
 
 type Theme = 'aurora' | 'midnight' | 'ocean' | 'sunset' | 'forest' | 'minimal';
@@ -74,7 +68,6 @@ const Presentation = () => {
   const [showControls, setShowControls] = useState(true);
   const [visibleContentItems, setVisibleContentItems] = useState<number[]>([]);
   const [animationInProgress, setAnimationInProgress] = useState(false);
-  const [diagramSvg, setDiagramSvg] = useState<string>('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,25 +83,6 @@ const Presentation = () => {
   const agentId = searchParams.get("agentId");
 
   useEffect(() => {
-    // Initialize Mermaid
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      suppressErrorRendering: true, // Disable error bomb icon
-      themeVariables: {
-        primaryColor: '#a855f7',
-        primaryTextColor: '#fff',
-        primaryBorderColor: '#c084fc',
-        lineColor: '#e879f9',
-        secondaryColor: '#ec4899',
-        tertiaryColor: '#8b5cf6',
-      },
-      flowchart: {
-        curve: 'basis',
-        padding: 20,
-      },
-    });
-
     if (!messageId) {
       toast.error("No message ID provided");
       navigate("/");
@@ -192,68 +166,56 @@ const Presentation = () => {
     animationTimersRef.current = [];
   };
 
-  // Render Mermaid diagrams with fallback
-  const renderMermaidDiagram = async (code: string, elementId: string) => {
-    try {
-      const { svg } = await mermaid.render(elementId, code);
-      return svg;
-    } catch (error) {
-      console.error('Mermaid render error:', error);
-      // Return a simple fallback message
-      return `<div class="text-center p-8 text-white/70">
-        <p class="text-lg">Diagramma non disponibile</p>
-        <p class="text-sm mt-2">Errore nella sintassi del diagramma</p>
-      </div>`;
-    }
-  };
-
-  // Calculate progressive reveal timing based on audio duration
-  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number, slideType: string) => {
+  // Calculate progressive reveal timing - show items BEFORE audio starts reading them
+  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number) => {
     clearAnimationTimers();
     setVisibleContentItems([]);
     setAnimationInProgress(true);
 
-    if (contentItemsCount === 0 || slideType === 'diagram' || slideType === 'tree' || slideType === 'table') {
-      // For visual slides, show everything at once after a brief delay
-      const timer = setTimeout(() => {
-        setVisibleContentItems([0]);
-        setAnimationInProgress(false);
-      }, 500);
-      animationTimersRef.current.push(timer);
+    if (contentItemsCount === 0) {
+      setAnimationInProgress(false);
       return;
     }
 
-    // For title slides, show everything at once
+    // For title slides, show everything immediately
     if (contentItemsCount === 1) {
       setVisibleContentItems([0]);
       setAnimationInProgress(false);
       return;
     }
 
-    // Calculate timing: leave 15% at start for title, distribute rest evenly
-    const titleDelay = audioDuration * 0.15;
-    const remainingTime = audioDuration * 0.85;
-    const timePerItem = remainingTime / contentItemsCount;
+    // Show all items slightly BEFORE the audio reads them
+    // First item appears immediately, rest appear progressively
+    const timers: NodeJS.Timeout[] = [];
+    
+    // Show first item immediately
+    setVisibleContentItems([0]);
+    
+    // Calculate timing: distribute items across 80% of audio duration
+    const revealDuration = audioDuration * 0.8;
+    const timePerItem = revealDuration / (contentItemsCount - 1);
 
-    // Show items progressively
-    for (let i = 0; i < contentItemsCount; i++) {
-      const delay = titleDelay + (i * timePerItem);
+    // Show remaining items progressively, starting slightly ahead
+    for (let i = 1; i < contentItemsCount; i++) {
+      const delay = (i * timePerItem) * 1000; // Convert to ms
       const timer = setTimeout(() => {
         setVisibleContentItems(prev => [...prev, i]);
         if (i === contentItemsCount - 1) {
           setAnimationInProgress(false);
         }
-      }, delay * 1000);
-      animationTimersRef.current.push(timer);
+      }, delay);
+      timers.push(timer);
     }
+    
+    animationTimersRef.current = timers;
   };
 
 
   // Prefetch audio for a specific slide
   const prefetchAudio = async (slideIndex: number) => {
     if (slideIndex < 0 || slideIndex >= slides.length) return;
-    if (audioCacheRef.current.has(slideIndex)) return; // Already cached
-    if (prefetchingRef.current.has(slideIndex)) return; // Already prefetching
+    if (audioCacheRef.current.has(slideIndex)) return;
+    if (prefetchingRef.current.has(slideIndex)) return;
     
     prefetchingRef.current.add(slideIndex);
     const slide = slides[slideIndex];
@@ -261,16 +223,7 @@ const Presentation = () => {
     try {
       console.log(`🔄 Prefetching audio for slide ${slideIndex + 1}...`);
       
-      // For diagram/table/tree slides, only read title and content description
-      let textToSpeak = slide.title;
-      if (slide.type === 'diagram' || slide.type === 'tree') {
-        textToSpeak += '. ' + slide.content.join('. ');
-      } else if (slide.type === 'table') {
-        textToSpeak += '. Tabella con dati comparativi.';
-      } else {
-        textToSpeak += '. ' + slide.content.join('. ');
-      }
-      
+      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
       const { data: { session } } = await supabase.auth.getSession();
       
       const response = await fetch(
@@ -330,16 +283,7 @@ const Presentation = () => {
         setIsLoadingAudio(true);
         console.log(`⏳ Loading audio for slide ${slideIndex + 1}...`);
 
-        // For diagram/table/tree slides, only read title and content description
-        let textToSpeak = slide.title;
-        if (slide.type === 'diagram' || slide.type === 'tree') {
-          textToSpeak += '. ' + slide.content.join('. ');
-        } else if (slide.type === 'table') {
-          textToSpeak += '. Tabella con dati comparativi.';
-        } else {
-          textToSpeak += '. ' + slide.content.join('. ');
-        }
-        
+        const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
         const { data: { session } } = await supabase.auth.getSession();
         
         const response = await fetch(
@@ -378,8 +322,8 @@ const Presentation = () => {
 
       audio.onloadedmetadata = () => {
         const duration = audio.duration;
-        const contentCount = slide.type === 'table' ? slide.tableData?.rows.length || 0 : slide.content.length;
-        scheduleProgressiveReveal(duration, contentCount, slide.type);
+        const contentCount = slide.content.length;
+        scheduleProgressiveReveal(duration, contentCount);
       };
 
       audio.onended = () => {
@@ -479,22 +423,6 @@ const Presentation = () => {
     setIsPlayingAudio(false);
     setAnimationInProgress(false);
   };
-
-  // Render Mermaid diagrams when slide changes
-  useEffect(() => {
-    const renderDiagrams = async () => {
-      if (slides.length > 0 && (slides[currentSlide]?.type === 'diagram' || slides[currentSlide]?.type === 'tree')) {
-        const slide = slides[currentSlide];
-        if (slide.diagramCode) {
-          const svg = await renderMermaidDiagram(slide.diagramCode, `mermaid-${currentSlide}`);
-          setDiagramSvg(svg || '');
-        }
-      } else {
-        setDiagramSvg('');
-      }
-    };
-    renderDiagrams();
-  }, [currentSlide, slides]);
 
   // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
@@ -890,64 +818,6 @@ const Presentation = () => {
                   </p>
                 ))}
               </div>
-            ) : slide?.type === 'table' && slide.tableData ? (
-              <div className={cn(
-                "overflow-x-auto transition-all duration-700",
-                visibleContentItems.includes(0) ? "opacity-100 scale-100" : "opacity-0 scale-95"
-              )}>
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr>
-                      {slide.tableData.headers.map((header, idx) => (
-                        <th
-                          key={idx}
-                          className={cn(
-                            "px-3 md:px-6 py-2 md:py-4 text-xs md:text-lg font-semibold",
-                            "border-b-2 border-white/30",
-                            currentTheme.accent,
-                            "text-white"
-                          )}
-                        >
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slide.tableData.rows.map((row, rowIdx) => (
-                      <tr
-                        key={rowIdx}
-                        className={cn(
-                          "transition-all duration-500 hover:bg-white/10",
-                          visibleContentItems.includes(0) && `animate-in fade-in slide-in-from-bottom-2`,
-                          visibleContentItems.includes(0) ? "" : "opacity-0"
-                        )}
-                        style={{ animationDelay: `${rowIdx * 100}ms` }}
-                      >
-                        {row.map((cell, cellIdx) => (
-                          <td
-                            key={cellIdx}
-                            className={cn(
-                              "px-3 md:px-6 py-2 md:py-3 text-xs md:text-base",
-                              "border-b border-white/10 text-center"
-                            )}
-                          >
-                            {cell}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (slide?.type === 'diagram' || slide?.type === 'tree') && slide.diagramCode ? (
-              <div
-                className={cn(
-                  "transition-all duration-700",
-                  visibleContentItems.includes(0) ? "opacity-100 scale-100" : "opacity-0 scale-90"
-                )}
-                dangerouslySetInnerHTML={{ __html: diagramSvg }}
-              />
             ) : (
               <div className="grid gap-2 md:gap-6">
                 {slide?.content.map((item, idx) => (
