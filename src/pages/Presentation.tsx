@@ -66,11 +66,14 @@ const Presentation = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [visibleContentItems, setVisibleContentItems] = useState<number[]>([]);
+  const [animationInProgress, setAnimationInProgress] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isGeneratingAudioRef = useRef(false);
+  const animationTimersRef = useRef<NodeJS.Timeout[]>([]);
   
   // Audio cache for prefetching
   const audioCacheRef = useRef<Map<number, string>>(new Map());
@@ -154,6 +157,48 @@ const Presentation = () => {
       navigate("/");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Clear all animation timers
+  const clearAnimationTimers = () => {
+    animationTimersRef.current.forEach(timer => clearTimeout(timer));
+    animationTimersRef.current = [];
+  };
+
+  // Calculate progressive reveal timing based on audio duration
+  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number) => {
+    clearAnimationTimers();
+    setVisibleContentItems([]);
+    setAnimationInProgress(true);
+
+    if (contentItemsCount === 0) {
+      setAnimationInProgress(false);
+      return;
+    }
+
+    // For title slides, show everything at once
+    if (contentItemsCount === 1) {
+      setVisibleContentItems([0]);
+      setAnimationInProgress(false);
+      return;
+    }
+
+    // Calculate timing: leave 15% at start for title, distribute rest evenly
+    const titleDelay = audioDuration * 0.15;
+    const remainingTime = audioDuration * 0.85;
+    const timePerItem = remainingTime / contentItemsCount;
+
+    // Show items progressively
+    for (let i = 0; i < contentItemsCount; i++) {
+      const delay = titleDelay + (i * timePerItem);
+      const timer = setTimeout(() => {
+        setVisibleContentItems(prev => [...prev, i]);
+        if (i === contentItemsCount - 1) {
+          setAnimationInProgress(false);
+        }
+      }, delay * 1000);
+      animationTimersRef.current.push(timer);
     }
   };
 
@@ -267,9 +312,19 @@ const Presentation = () => {
       audio.src = audioUrl;
       audioRef.current = audio;
 
+      audio.onloadedmetadata = () => {
+        const duration = audio.duration;
+        const contentCount = slide.content.length;
+        scheduleProgressiveReveal(duration, contentCount);
+      };
+
       audio.onended = () => {
         console.log('✅ Audio playback completed');
         setIsPlayingAudio(false);
+        clearAnimationTimers();
+        // Show all items at the end in case timing was off
+        setVisibleContentItems(Array.from({ length: slide.content.length }, (_, i) => i));
+        setAnimationInProgress(false);
         if (onComplete) {
           onComplete();
         }
@@ -348,6 +403,7 @@ const Presentation = () => {
 
   const stopAutoPlay = () => {
     setIsAutoPlaying(false);
+    clearAnimationTimers();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -357,10 +413,16 @@ const Presentation = () => {
       autoPlayTimerRef.current = null;
     }
     setIsPlayingAudio(false);
+    setAnimationInProgress(false);
   };
 
   // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
+    // Reset visible items when slide changes
+    setVisibleContentItems([]);
+    setAnimationInProgress(false);
+    clearAnimationTimers();
+
     if (slides.length > 0 && isAudioEnabled && !isAutoPlaying) {
       playSlideAudio(slides[currentSlide], currentSlide);
     }
@@ -370,6 +432,7 @@ const Presentation = () => {
         audioRef.current.pause();
         audioRef.current = null;
       }
+      clearAnimationTimers();
     };
   }, [currentSlide, slides, isAudioEnabled]);
 
@@ -379,6 +442,7 @@ const Presentation = () => {
       // Clean up all cached audio URLs
       audioCacheRef.current.forEach(url => URL.revokeObjectURL(url));
       audioCacheRef.current.clear();
+      clearAnimationTimers();
       
       if (audioRef.current) {
         audioRef.current.pause();
@@ -393,6 +457,7 @@ const Presentation = () => {
   const nextSlide = () => {
     if (isAutoPlaying) return;
     if (currentSlide < slides.length - 1) {
+      clearAnimationTimers();
       setCurrentSlide(currentSlide + 1);
     }
   };
@@ -400,17 +465,22 @@ const Presentation = () => {
   const prevSlide = () => {
     if (isAutoPlaying) return;
     if (currentSlide > 0) {
+      clearAnimationTimers();
       setCurrentSlide(currentSlide - 1);
     }
   };
 
   const toggleAudio = () => {
-    if (isLoadingAudio) return; // Prevent toggling while loading
+    if (isLoadingAudio) return;
     
-    setIsAudioEnabled(!isAudioEnabled);
-    if (audioRef.current && !isAudioEnabled) {
+    const newState = !isAudioEnabled;
+    setIsAudioEnabled(newState);
+    
+    if (audioRef.current && !newState) {
       audioRef.current.pause();
       setIsPlayingAudio(false);
+      clearAnimationTimers();
+      setAnimationInProgress(false);
     }
   };
 
@@ -715,7 +785,11 @@ const Presentation = () => {
 
             {/* Content */}
             {slide?.type === 'title' ? (
-              <p className="text-base md:text-3xl opacity-90 px-2 md:px-8 leading-relaxed">
+              <p className={cn(
+                "text-base md:text-3xl opacity-90 px-2 md:px-8 leading-relaxed",
+                "transition-all duration-700",
+                visibleContentItems.includes(0) ? "opacity-90 translate-y-0" : "opacity-0 translate-y-4"
+              )}>
                 {slide.content[0]}
               </p>
             ) : slide?.type === 'conclusion' ? (
@@ -724,8 +798,13 @@ const Presentation = () => {
                 {slide.content.map((item, idx) => (
                   <p
                     key={idx}
-                    className="text-sm md:text-2xl leading-relaxed px-2 md:px-12 animate-in fade-in slide-in-from-bottom"
-                    style={{ animationDelay: `${idx * 150}ms` }}
+                    className={cn(
+                      "text-sm md:text-2xl leading-relaxed px-2 md:px-12",
+                      "transition-all duration-700 ease-out",
+                      visibleContentItems.includes(idx) 
+                        ? "opacity-100 translate-y-0" 
+                        : "opacity-0 translate-y-8"
+                    )}
                   >
                     {item}
                   </p>
@@ -739,15 +818,17 @@ const Presentation = () => {
                     className={cn(
                       "flex items-start gap-2 md:gap-4 text-left p-2 md:p-6 rounded-xl md:rounded-2xl",
                       "bg-white/5 backdrop-blur-sm border border-white/10",
-                      "hover:bg-white/10 transition-all duration-300",
-                      "animate-in fade-in slide-in-from-left"
+                      "hover:bg-white/10 transition-all duration-700 ease-out",
+                      visibleContentItems.includes(idx)
+                        ? "opacity-100 translate-x-0 scale-100"
+                        : "opacity-0 -translate-x-12 scale-95"
                     )}
-                    style={{ animationDelay: `${idx * 100}ms` }}
                   >
                     <div className={cn(
-                      "flex-shrink-0 w-6 h-6 md:w-10 md:h-10 rounded-full flex items-center justify-center",
+                      "flex-shrink-0 w-6 h-6 md:w-10 md:h-10 rounded-full flex items-center justify-center transition-all duration-500",
                       currentTheme.accent,
-                      "text-white font-bold text-xs md:text-base"
+                      "text-white font-bold text-xs md:text-base",
+                      visibleContentItems.includes(idx) ? "scale-100 rotate-0" : "scale-0 -rotate-180"
                     )}>
                       {idx + 1}
                     </div>
