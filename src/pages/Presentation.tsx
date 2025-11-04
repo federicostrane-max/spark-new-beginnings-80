@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronLeft, ChevronRight, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,9 @@ const Presentation = () => {
   const [slides, setSlides] = useState<PresentationSlide[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const messageId = searchParams.get("messageId");
   const agentId = searchParams.get("agentId");
@@ -106,9 +109,77 @@ const Presentation = () => {
     }
   };
 
+  // Generate speech for current slide
+  const playSlideAudio = async (slide: PresentationSlide) => {
+    if (!isAudioEnabled) return;
+
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    try {
+      setIsPlayingAudio(true);
+
+      // Combine title and content for narration
+      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+
+      const { data, error } = await supabase.functions.invoke('text-to-speech', {
+        body: { text: textToSpeak, voice: 'nova' }
+      });
+
+      if (error) throw error;
+
+      // Create audio element and play
+      const audio = new Audio();
+      const blob = new Blob([data], { type: 'audio/mpeg' });
+      audio.src = URL.createObjectURL(blob);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        URL.revokeObjectURL(audio.src);
+      };
+
+      audio.onerror = () => {
+        setIsPlayingAudio(false);
+        URL.revokeObjectURL(audio.src);
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error('Error playing slide audio:', error);
+      setIsPlayingAudio(false);
+    }
+  };
+
+  // Auto-play audio when slide changes
+  useEffect(() => {
+    if (slides.length > 0 && isAudioEnabled) {
+      playSlideAudio(slides[currentSlide]);
+    }
+
+    return () => {
+      // Cleanup audio when slide changes or component unmounts
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [currentSlide, slides, isAudioEnabled]);
+
   const prevSlide = () => {
     if (currentSlide > 0) {
       setCurrentSlide(currentSlide - 1);
+    }
+  };
+
+  const toggleAudio = () => {
+    setIsAudioEnabled(!isAudioEnabled);
+    if (audioRef.current && !isAudioEnabled) {
+      audioRef.current.pause();
+      setIsPlayingAudio(false);
     }
   };
 
@@ -187,9 +258,28 @@ const Presentation = () => {
           <ArrowLeft className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
           Indietro
         </Button>
-        
-        <div className="text-white/80 text-xs md:text-sm font-medium">
-          {currentSlide + 1} / {slides.length}
+
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={toggleAudio}
+            variant="outline"
+            size="sm"
+            className={cn(
+              "bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm",
+              isPlayingAudio && "animate-pulse"
+            )}
+            title={isAudioEnabled ? "Disattiva audio" : "Attiva audio"}
+          >
+            {isAudioEnabled ? (
+              <Volume2 className="h-3 w-3 md:h-4 md:w-4" />
+            ) : (
+              <VolumeX className="h-3 w-3 md:h-4 md:w-4" />
+            )}
+          </Button>
+          
+          <div className="text-white/80 text-xs md:text-sm font-medium">
+            {currentSlide + 1} / {slides.length}
+          </div>
         </div>
       </div>
 
