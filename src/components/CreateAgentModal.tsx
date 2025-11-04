@@ -6,9 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Copy } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
+import { toast } from "sonner";
 
 interface Agent {
   id: string;
@@ -165,6 +166,131 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       }
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClone = async () => {
+    if (!editingAgent) return;
+    
+    setLoading(true);
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+
+      // Create clone with modified name
+      const cloneName = `${editingAgent.name} (Clone)`;
+      let cloneSlug = cloneName.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+
+      // Ensure unique slug
+      const { data: existing } = await supabase
+        .from("agents")
+        .select("id")
+        .eq("slug", cloneSlug)
+        .maybeSingle();
+      
+      if (existing) {
+        cloneSlug = `${cloneSlug}-${Date.now()}`;
+      }
+
+      // Create cloned agent
+      const { data: clonedAgent, error: cloneError } = await supabase
+        .from("agents")
+        .insert({
+          name: cloneName,
+          slug: cloneSlug,
+          description: editingAgent.description,
+          system_prompt: editingAgent.system_prompt,
+          llm_provider: editingAgent.llm_provider,
+          avatar: editingAgent.avatar,
+          active: true,
+          user_id: user.id
+        })
+        .select()
+        .single();
+
+      if (cloneError) throw cloneError;
+
+      // Clone knowledge base (direct uploads)
+      const { data: knowledgeItems, error: knowledgeError } = await supabase
+        .from("agent_knowledge")
+        .select("*")
+        .eq("agent_id", editingAgent.id)
+        .eq("source_type", "direct_upload");
+
+      if (!knowledgeError && knowledgeItems && knowledgeItems.length > 0) {
+        const clonedKnowledge = knowledgeItems.map(item => ({
+          agent_id: clonedAgent.id,
+          document_name: item.document_name,
+          content: item.content,
+          category: item.category,
+          summary: item.summary,
+          embedding: item.embedding,
+          source_type: "direct_upload"
+        }));
+
+        await supabase
+          .from("agent_knowledge")
+          .insert(clonedKnowledge);
+      }
+
+      // Clone pool document links
+      const { data: poolLinks, error: poolLinksError } = await supabase
+        .from("agent_document_links")
+        .select("*")
+        .eq("agent_id", editingAgent.id);
+
+      if (!poolLinksError && poolLinks && poolLinks.length > 0) {
+        const clonedLinks = poolLinks.map(link => ({
+          agent_id: clonedAgent.id,
+          document_id: link.document_id,
+          assignment_type: link.assignment_type,
+          assigned_by: user.id,
+          confidence_score: link.confidence_score
+        }));
+
+        await supabase
+          .from("agent_document_links")
+          .insert(clonedLinks);
+
+        // Clone pool knowledge chunks
+        const poolDocIds = poolLinks.map(l => l.document_id);
+        const { data: poolKnowledge } = await supabase
+          .from("agent_knowledge")
+          .select("*")
+          .eq("agent_id", editingAgent.id)
+          .eq("source_type", "pool")
+          .in("pool_document_id", poolDocIds);
+
+        if (poolKnowledge && poolKnowledge.length > 0) {
+          const clonedPoolKnowledge = poolKnowledge.map(item => ({
+            agent_id: clonedAgent.id,
+            document_name: item.document_name,
+            content: item.content,
+            category: item.category,
+            summary: item.summary,
+            embedding: item.embedding,
+            source_type: "pool",
+            pool_document_id: item.pool_document_id
+          }));
+
+          await supabase
+            .from("agent_knowledge")
+            .insert(clonedPoolKnowledge);
+        }
+      }
+
+      toast.success(`Agente "${cloneName}" clonato con successo!`);
+      onSuccess(clonedAgent);
+      onOpenChange(false);
+
+    } catch (error: any) {
+      console.error("Error cloning agent:", error);
+      toast.error("Errore durante la clonazione dell'agente");
     } finally {
       setLoading(false);
     }
@@ -331,7 +457,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
           {/* Submit */}
           <div className="flex gap-2 justify-between">
-            <div>
+            <div className="flex gap-2">
               {editingAgent && onDelete && (
                 <Button 
                   type="button" 
@@ -343,6 +469,17 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                   disabled={loading}
                 >
                   Delete Agent
+                </Button>
+              )}
+              {editingAgent && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={handleClone}
+                  disabled={loading}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Clone Agent
                 </Button>
               )}
             </div>
