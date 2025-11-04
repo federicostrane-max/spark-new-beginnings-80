@@ -68,12 +68,22 @@ export const ChatMessage = ({
     }
   };
 
-  const handleLongPressStart = () => {
+  const touchStartY = useRef(0);
+  const hasMoved = useRef(false);
+
+  const handleLongPressStart = (e: React.TouchEvent | React.MouseEvent) => {
     if (selectionMode) return;
+    
+    // Track initial touch position to detect scrolling
+    if ('touches' in e) {
+      touchStartY.current = e.touches[0].clientY;
+      hasMoved.current = false;
+    }
     
     setIsLongPressing(true);
     longPressTimer.current = setTimeout(() => {
-      if (onLongPress) {
+      // Only trigger long press if user hasn't scrolled
+      if (!hasMoved.current && onLongPress) {
         onLongPress();
         // Vibrazione per feedback tattile (se disponibile)
         if (navigator.vibrate) {
@@ -81,7 +91,18 @@ export const ChatMessage = ({
         }
       }
       setIsLongPressing(false);
-    }, 1200);
+    }, 800); // Reduced from 1200ms to 800ms for better UX
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // Detect if user is scrolling
+    if (touchStartY.current) {
+      const deltaY = Math.abs(e.touches[0].clientY - touchStartY.current);
+      if (deltaY > 10) { // 10px threshold
+        hasMoved.current = true;
+        handleLongPressEnd();
+      }
+    }
   };
 
   const handleLongPressEnd = () => {
@@ -90,6 +111,8 @@ export const ChatMessage = ({
       longPressTimer.current = null;
     }
     setIsLongPressing(false);
+    touchStartY.current = 0;
+    hasMoved.current = false;
   };
 
   const isUser = role === "user";
@@ -99,12 +122,10 @@ export const ChatMessage = ({
 
   return (
     <div 
-      className="mb-4 group relative"
+      className="mb-4 group relative touch-pan-y"
       onClick={selectionMode ? onToggleSelection : undefined}
-      onMouseDown={!selectionMode ? handleLongPressStart : undefined}
-      onMouseUp={handleLongPressEnd}
-      onMouseLeave={handleLongPressEnd}
       onTouchStart={!selectionMode ? handleLongPressStart : undefined}
+      onTouchMove={!selectionMode ? handleTouchMove : undefined}
       onTouchEnd={handleLongPressEnd}
       onTouchCancel={handleLongPressEnd}
     >
@@ -126,13 +147,14 @@ export const ChatMessage = ({
         className={cn(
           "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
           "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
+          "touch-pan-y select-none",
           isUser && !selectionMode && "ml-auto",
           selectionMode && "ml-8",
           isUser 
             ? "bg-primary text-primary-foreground" 
             : "bg-muted text-foreground",
           isSelected && "ring-2 ring-primary",
-          isLongPressing && "scale-95 opacity-80",
+          isLongPressing && !hasMoved.current && "scale-95 opacity-80",
           isStreaming && !isUser && "ring-2 ring-primary/30 animate-pulse"
         )}
       >
