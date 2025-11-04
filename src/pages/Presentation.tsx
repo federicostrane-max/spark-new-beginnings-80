@@ -698,7 +698,7 @@ const Presentation = () => {
       )}>
         {!isFullscreen && (
           <Button
-            onClick={() => navigate("/")}
+            onClick={() => navigate(-1)}
             variant="outline"
             size="sm"
             className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
