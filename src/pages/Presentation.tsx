@@ -190,14 +190,18 @@ const Presentation = () => {
     animationTimersRef.current = [];
   };
 
-  // Render Mermaid diagrams
+  // Render Mermaid diagrams with fallback
   const renderMermaidDiagram = async (code: string, elementId: string) => {
     try {
       const { svg } = await mermaid.render(elementId, code);
       return svg;
     } catch (error) {
       console.error('Mermaid render error:', error);
-      return null;
+      // Return a simple fallback message
+      return `<div class="text-center p-8 text-white/70">
+        <p class="text-lg">Diagramma non disponibile</p>
+        <p class="text-sm mt-2">Errore nella sintassi del diagramma</p>
+      </div>`;
     }
   };
 
@@ -255,7 +259,16 @@ const Presentation = () => {
     try {
       console.log(`🔄 Prefetching audio for slide ${slideIndex + 1}...`);
       
-      const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+      // For diagram/table/tree slides, only read title and content description
+      let textToSpeak = slide.title;
+      if (slide.type === 'diagram' || slide.type === 'tree') {
+        textToSpeak += '. ' + slide.content.join('. ');
+      } else if (slide.type === 'table') {
+        textToSpeak += '. Tabella con dati comparativi.';
+      } else {
+        textToSpeak += '. ' + slide.content.join('. ');
+      }
+      
       const { data: { session } } = await supabase.auth.getSession();
       
       const response = await fetch(
@@ -315,7 +328,16 @@ const Presentation = () => {
         setIsLoadingAudio(true);
         console.log(`⏳ Loading audio for slide ${slideIndex + 1}...`);
 
-        const textToSpeak = `${slide.title}. ${slide.content.join('. ')}`;
+        // For diagram/table/tree slides, only read title and content description
+        let textToSpeak = slide.title;
+        if (slide.type === 'diagram' || slide.type === 'tree') {
+          textToSpeak += '. ' + slide.content.join('. ');
+        } else if (slide.type === 'table') {
+          textToSpeak += '. Tabella con dati comparativi.';
+        } else {
+          textToSpeak += '. ' + slide.content.join('. ');
+        }
+        
         const { data: { session } } = await supabase.auth.getSession();
         
         const response = await fetch(
@@ -463,11 +485,9 @@ const Presentation = () => {
         const slide = slides[currentSlide];
         if (slide.diagramCode) {
           const svg = await renderMermaidDiagram(slide.diagramCode, `mermaid-${currentSlide}`);
-          if (svg) {
-            const element = document.getElementById(`mermaid-${currentSlide}`);
-            if (element) {
-              element.innerHTML = svg;
-            }
+          const element = document.getElementById(`mermaid-${currentSlide}`);
+          if (element && svg) {
+            element.innerHTML = svg;
           }
         }
       }
