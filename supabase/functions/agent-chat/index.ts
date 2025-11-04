@@ -90,13 +90,64 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
 }
 
 async function executeWebSearch(topic: string): Promise<SearchResult[]> {
-  console.log('🔍 [WEB SEARCH] Starting search for topic:', topic);
+  console.log('🔍 [WEB SEARCH] Starting Google Custom Search for topic:', topic);
   
-  // Call Lovable AI web_search tool via edge function
-  // For now, simulate - you'll need to implement actual web_search integration
-  
-  // This is a placeholder - replace with actual Lovable AI web_search call
-  const searchQuery = `${topic} PDF site:arxiv.org OR site:researchgate.net OR site:scholar.google.com filetype:pdf`;
+  try {
+    const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
+    const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+    
+    if (!apiKey || !searchEngineId) {
+      console.error('❌ Missing Google Custom Search credentials');
+      throw new Error('Google Custom Search not configured');
+    }
+    
+    // Construct search query optimized for academic PDFs
+    const searchQuery = `${topic} filetype:pdf`;
+    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=10`;
+    
+    console.log('📡 Calling Google Custom Search API...');
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Google API Error:', response.status, errorText);
+      throw new Error(`Google Custom Search failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.items || data.items.length === 0) {
+      console.log('⚠️ No results found for:', topic);
+      return [];
+    }
+    
+    // Transform Google results to SearchResult format
+    const results: SearchResult[] = data.items.map((item: any, index: number) => {
+      // Extract metadata from snippet/title
+      const yearMatch = item.snippet?.match(/\b(19|20)\d{2}\b/);
+      const year = yearMatch ? yearMatch[0] : undefined;
+      
+      // Try to extract authors from snippet (heuristic)
+      const authorsMatch = item.snippet?.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/);
+      const authors = authorsMatch ? authorsMatch[0] : undefined;
+      
+      return {
+        number: index + 1,
+        title: item.title.replace(' [PDF]', '').trim(),
+        authors,
+        year,
+        source: new URL(item.link).hostname,
+        url: item.link
+      };
+    });
+    
+    console.log(`✅ [WEB SEARCH] Found ${results.length} PDFs`);
+    return results;
+    
+  } catch (error) {
+    console.error('❌ [WEB SEARCH] Error:', error);
+    throw error;
+  }
   
   // TODO: Call actual web_search tool here
   // For now, return mock data
