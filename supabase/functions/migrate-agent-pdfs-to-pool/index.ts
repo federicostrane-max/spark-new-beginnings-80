@@ -182,7 +182,7 @@ serve(async (req) => {
             .insert({
               document_id: documentId,
               agent_id: docInfo.agent_id,
-              assignment_type: 'auto_migrated',
+              assignment_type: 'manual',
               confidence_score: 1.0,
             });
 
@@ -201,7 +201,7 @@ serve(async (req) => {
         const { data: updatedChunks, error: updateError } = await supabase
           .from('agent_knowledge')
           .update({
-            source_type: 'pool',
+            source_type: 'shared_pool',
             pool_document_id: documentId,
           })
           .eq('document_name', docInfo.document_name)

@@ -74,7 +74,7 @@ serve(async (req) => {
       .insert({
         document_id: documentId,
         agent_id: agentId,
-        assignment_type: 'auto_upload',
+        assignment_type: 'manual',
         confidence_score: 1.0,
       });
 
@@ -145,7 +145,7 @@ serve(async (req) => {
             content: chunk.content,
             embedding: chunk.embedding,
             category: 'General',
-            source_type: 'pool',
+            source_type: 'shared_pool',
             pool_document_id: documentId,
           }))
         );

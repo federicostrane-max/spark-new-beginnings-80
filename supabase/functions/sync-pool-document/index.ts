@@ -72,7 +72,7 @@ serve(async (req) => {
       .select('id')
       .eq('agent_id', agentId)
       .eq('pool_document_id', documentId)
-      .eq('source_type', 'pool');
+      .eq('source_type', 'shared_pool');
 
     if (existingChunks && existingChunks.length > 0) {
       console.log(`[sync-pool-document] Document already synced (${existingChunks.length} chunks)`);
@@ -181,7 +181,7 @@ serve(async (req) => {
           category: poolDoc.topics?.[0] || 'General',
           summary: poolDoc.ai_summary || `Part ${i + 1} of ${poolDoc.file_name}`,
           embedding: embedding,
-          source_type: 'pool',
+          source_type: 'shared_pool',
           pool_document_id: documentId,
         });
 
