@@ -63,11 +63,19 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
     }
   }
   
-  // DOWNLOAD COMMAND: "Download #2, #5", "Get PDFs #1, #3, #7"
+  // DOWNLOAD COMMAND: "Download #2, #5", "Get PDFs #1, #3, #7", "Download all"
   const downloadPattern = /download|get|scarica/i;
   const numberPattern = /#(\d+)/g;
   
   if (downloadPattern.test(message)) {
+    // Check for "all" command first (download all, scaricali tutti, get all)
+    const allPattern = /\b(all|tutti|everything|tutte|tutto)\b/i;
+    if (allPattern.test(message)) {
+      console.log('✅ [INTENT PARSER] Detected DOWNLOAD_COMMAND for ALL PDFs');
+      return { type: 'DOWNLOAD_COMMAND', pdfNumbers: [] }; // Empty array signals "download all"
+    }
+    
+    // Otherwise look for specific numbers
     const matches = Array.from(message.matchAll(numberPattern));
     if (matches.length > 0) {
       const pdfNumbers = matches.map(m => parseInt(m[1]));
@@ -682,17 +690,20 @@ Deno.serve(async (req) => {
               }
             }
             
-            if (userIntent.type === 'DOWNLOAD_COMMAND' && userIntent.pdfNumbers) {
-              console.log('⬇️ [WORKFLOW] Handling DOWNLOAD_COMMAND automatically for:', userIntent.pdfNumbers);
+            if (userIntent.type === 'DOWNLOAD_COMMAND' && userIntent.pdfNumbers !== undefined) {
+              console.log('⬇️ [WORKFLOW] Handling DOWNLOAD_COMMAND automatically for:', userIntent.pdfNumbers.length === 0 ? 'ALL PDFs' : userIntent.pdfNumbers);
               workflowHandled = true;
               
               // Get cached search results from conversation history
               const cachedResults = extractCachedSearchResults(truncatedMessages);
               
               if (cachedResults && cachedResults.length > 0) {
-                const selectedPdfs = userIntent.pdfNumbers
-                  .map(num => cachedResults[num - 1])
-                  .filter(Boolean);
+                // If pdfNumbers is empty, download all; otherwise download specific ones
+                const selectedPdfs = userIntent.pdfNumbers.length === 0 
+                  ? cachedResults 
+                  : userIntent.pdfNumbers
+                      .map(num => cachedResults[num - 1])
+                      .filter(Boolean);
                 
                 // Execute downloads
                 const downloadResults = await executeDownloads(selectedPdfs, message);
