@@ -74,6 +74,7 @@ const Presentation = () => {
   const [showControls, setShowControls] = useState(true);
   const [visibleContentItems, setVisibleContentItems] = useState<number[]>([]);
   const [animationInProgress, setAnimationInProgress] = useState(false);
+  const [diagramSvg, setDiagramSvg] = useState<string>('');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const autoPlayTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,6 +94,7 @@ const Presentation = () => {
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
+      suppressErrorRendering: true, // Disable error bomb icon
       themeVariables: {
         primaryColor: '#a855f7',
         primaryTextColor: '#fff',
@@ -485,11 +487,10 @@ const Presentation = () => {
         const slide = slides[currentSlide];
         if (slide.diagramCode) {
           const svg = await renderMermaidDiagram(slide.diagramCode, `mermaid-${currentSlide}`);
-          const element = document.getElementById(`mermaid-${currentSlide}`);
-          if (element && svg) {
-            element.innerHTML = svg;
-          }
+          setDiagramSvg(svg || '');
         }
+      } else {
+        setDiagramSvg('');
       }
     };
     renderDiagrams();
@@ -945,15 +946,8 @@ const Presentation = () => {
                   "transition-all duration-700",
                   visibleContentItems.includes(0) ? "opacity-100 scale-100" : "opacity-0 scale-90"
                 )}
-              >
-                <div 
-                  id={`mermaid-${currentSlide}`}
-                  className="mermaid-diagram flex items-center justify-center p-4 md:p-8"
-                  dangerouslySetInnerHTML={{
-                    __html: slide.diagramCode
-                  }}
-                />
-              </div>
+                dangerouslySetInnerHTML={{ __html: diagramSvg }}
+              />
             ) : (
               <div className="grid gap-2 md:gap-6">
                 {slide?.content.map((item, idx) => (
