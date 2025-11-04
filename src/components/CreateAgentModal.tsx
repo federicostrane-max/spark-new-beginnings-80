@@ -240,16 +240,50 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         system_prompt_length: clonedAgent.system_prompt?.length
       });
 
-      // Clone knowledge base (direct uploads)
-      console.log('📚 [CLONE] Fetching direct upload knowledge...');
+      // Clone knowledge base (direct uploads and any non-pool documents)
+      console.log('📚 [CLONE] Fetching all knowledge (direct uploads + NULL source_type)...');
+      
+      // First, check ALL knowledge items for debugging
+      const { data: allKnowledge, error: allKnowledgeError } = await supabase
+        .from("agent_knowledge")
+        .select("id, document_name, source_type, pool_document_id")
+        .eq("agent_id", editingAgent.id);
+      
+      if (allKnowledge) {
+        console.log(`🔍 [CLONE DEBUG] Total knowledge items in original agent: ${allKnowledge.length}`);
+        console.log('🔍 [CLONE DEBUG] Source types breakdown:', 
+          allKnowledge.reduce((acc, item) => {
+            const type = item.source_type || 'NULL';
+            acc[type] = (acc[type] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>)
+        );
+      }
+      
+      // Fetch non-pool documents (direct_upload or NULL)
       const { data: knowledgeItems, error: knowledgeError } = await supabase
         .from("agent_knowledge")
         .select("*")
         .eq("agent_id", editingAgent.id)
-        .eq("source_type", "direct_upload");
+        .or("source_type.eq.direct_upload,source_type.is.null");
+
+      if (knowledgeError) {
+        console.error('❌ [CLONE] Error fetching knowledge:', knowledgeError);
+        console.error('❌ [CLONE] Error details:', {
+          message: knowledgeError.message,
+          code: knowledgeError.code,
+          details: knowledgeError.details,
+          hint: knowledgeError.hint
+        });
+      }
 
       if (!knowledgeError && knowledgeItems && knowledgeItems.length > 0) {
-        console.log(`📚 [CLONE] Found ${knowledgeItems.length} direct upload knowledge items`);
+        console.log(`📚 [CLONE] Found ${knowledgeItems.length} direct upload knowledge items to clone`);
+        console.log('📚 [CLONE] Documents to clone:', knowledgeItems.map(k => ({
+          name: k.document_name,
+          source_type: k.source_type,
+          has_embedding: !!k.embedding
+        })));
         
         const clonedKnowledge = knowledgeItems.map(item => ({
           agent_id: clonedAgent.id,
@@ -258,20 +292,31 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           category: item.category,
           summary: item.summary,
           embedding: item.embedding,
-          source_type: "direct_upload"
+          source_type: item.source_type || "direct_upload"
         }));
 
-        const { error: insertKnowledgeError } = await supabase
+        console.log(`💾 [CLONE] Attempting to insert ${clonedKnowledge.length} knowledge items...`);
+        const { data: insertedData, error: insertKnowledgeError } = await supabase
           .from("agent_knowledge")
-          .insert(clonedKnowledge);
+          .insert(clonedKnowledge)
+          .select();
 
         if (insertKnowledgeError) {
           console.error('❌ [CLONE] Error cloning direct knowledge:', insertKnowledgeError);
+          console.error('❌ [CLONE] Insert error details:', {
+            message: insertKnowledgeError.message,
+            code: insertKnowledgeError.code,
+            details: insertKnowledgeError.details,
+            hint: insertKnowledgeError.hint
+          });
         } else {
-          console.log('✅ [CLONE] Direct knowledge cloned successfully');
+          console.log(`✅ [CLONE] Direct knowledge cloned successfully! Inserted ${insertedData?.length || 0} items`);
         }
       } else {
-        console.log('ℹ️ [CLONE] No direct upload knowledge to clone');
+        console.warn('⚠️ [CLONE] No direct upload knowledge to clone!');
+        if (allKnowledge && allKnowledge.length > 0) {
+          console.warn('⚠️ [CLONE] Original agent HAS knowledge but none matched the filter!');
+        }
       }
 
       // Clone pool document links
