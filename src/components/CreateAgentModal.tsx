@@ -458,24 +458,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             />
           </div>
 
-          {/* System Prompt */}
-          <div>
-            <Label htmlFor="systemPrompt">System Prompt *</Label>
-            <Textarea 
-              id="systemPrompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="You are a marketing expert specialized in..."
-              rows={6}
-              className="font-mono text-sm"
-              required
-              disabled={loading}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Define the agent's personality, expertise, and behavior
-            </p>
-          </div>
-
           {/* LLM Provider Selection */}
           <div>
             <Label htmlFor="llmProvider">AI Model Provider *</Label>
@@ -510,6 +492,24 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </Select>
             <p className="text-xs text-muted-foreground mt-1">
               Choose which AI model will power this agent
+            </p>
+          </div>
+
+          {/* System Prompt */}
+          <div>
+            <Label htmlFor="systemPrompt">System Prompt *</Label>
+            <Textarea 
+              id="systemPrompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a marketing expert specialized in..."
+              rows={6}
+              className="font-mono text-sm"
+              required
+              disabled={loading}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Define the agent's personality, expertise, and behavior
             </p>
           </div>
 
@@ -579,54 +579,50 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </div>
           )}
 
-          {/* Submit */}
-          <div className="flex gap-2 justify-between">
-            <div className="flex gap-2">
-              {editingAgent && onDelete && (
-                <Button 
-                  type="button" 
-                  variant="destructive" 
-                  onClick={() => {
-                    onDelete(editingAgent.id);
-                    onOpenChange(false);
-                  }}
-                  disabled={loading}
-                >
-                  Delete Agent
-                </Button>
-              )}
-              {editingAgent && (
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={handleClone}
-                  disabled={loading}
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Clone Agent
-                </Button>
-              )}
-            </div>
-            <div className="flex gap-2">
+          {/* Actions */}
+          <div className="flex gap-2 justify-end">
+            {editingAgent && onDelete && (
+              <Button 
+                type="button" 
+                variant="destructive" 
+                onClick={() => {
+                  onDelete(editingAgent.id);
+                  onOpenChange(false);
+                }}
+                disabled={loading}
+              >
+                Delete Agent
+              </Button>
+            )}
+            {editingAgent && (
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={() => onOpenChange(false)}
+                onClick={handleClone}
                 disabled={loading}
               >
-                Cancel
+                <Copy className="h-4 w-4 mr-2" />
+                Clone Agent
               </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {editingAgent ? 'Updating...' : 'Creating...'}
-                  </>
-                ) : (
-                  editingAgent ? "Update Agent" : "Create Agent"
-                )}
-              </Button>
-            </div>
+            )}
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => onOpenChange(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {editingAgent ? 'Updating...' : 'Creating...'}
+                </>
+              ) : (
+                editingAgent ? "Update Agent" : "Create Agent"
+              )}
+            </Button>
           </div>
         </form>
       </DialogContent>
