@@ -24,6 +24,7 @@ export default function DocumentPool() {
   const [migrating, setMigrating] = useState(false);
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [checkingMigration, setCheckingMigration] = useState(true);
+  const [tableKey, setTableKey] = useState(0);
 
   useEffect(() => {
     checkMigrationStatus();
@@ -51,6 +52,11 @@ export default function DocumentPool() {
     } finally {
       setCheckingMigration(false);
     }
+  };
+
+  const handleUploadComplete = () => {
+    setTableKey(prev => prev + 1);
+    checkMigrationStatus();
   };
 
   const handleMigration = async () => {
@@ -88,7 +94,7 @@ export default function DocumentPool() {
       await checkMigrationStatus();
       
       // Trigger table refresh
-      window.location.reload();
+      setTableKey(prev => prev + 1);
       
     } catch (error: any) {
       console.error('[Migration Error]', error);
@@ -153,10 +159,10 @@ export default function DocumentPool() {
         )}
 
         <div className="mb-6">
-          <DocumentPoolUpload onUploadComplete={checkMigrationStatus} />
+          <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
         </div>
 
-        <DocumentPoolTable />
+        <DocumentPoolTable key={tableKey} />
       </div>
 
       {/* Migration Confirmation Dialog */}
