@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -16,6 +17,7 @@ interface ChatMessageProps {
   onToggleSelection?: () => void;
   onLongPress?: () => void;
   forceExpanded?: boolean;
+  agentId?: string;
 }
 
 export const ChatMessage = ({ 
@@ -27,7 +29,8 @@ export const ChatMessage = ({
   selectionMode = false,
   onToggleSelection,
   onLongPress,
-  forceExpanded
+  forceExpanded,
+  agentId
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -35,6 +38,7 @@ export const ChatMessage = ({
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (forceExpanded !== undefined) {
@@ -198,7 +202,7 @@ export const ChatMessage = ({
               </Button>
             )}
 
-            {/* Bottoni Copy e TTS - solo quando NON è in streaming */}
+            {/* Bottoni Copy, TTS e Presentation - solo quando NON è in streaming */}
             {!isStreaming && (
               <>
                 <Button
@@ -246,6 +250,24 @@ export const ChatMessage = ({
                     <Play className="h-3 w-3" />
                   )}
                 </Button>
+
+                {!isUser && content.length > 100 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/presentation?messageId=${id}${agentId ? `&agentId=${agentId}` : ''}`);
+                    }}
+                    className={cn("h-8 px-2 gap-1")}
+                    title="Crea presentazione"
+                  >
+                    <Presentation className="h-3 w-3" />
+                    <span className="text-xs hidden sm:inline">Slideshow</span>
+                  </Button>
+                )}
               </>
             )}
           </div>

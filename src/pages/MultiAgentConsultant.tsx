@@ -635,6 +635,7 @@ export default function MultiAgentConsultant() {
                         onToggleSelection={() => {}}
                         onLongPress={() => handleStartSelection(msg.id)}
                         forceExpanded={allMessagesExpanded}
+                        agentId={currentAgent?.id}
                       />
                     ))
                   )}
