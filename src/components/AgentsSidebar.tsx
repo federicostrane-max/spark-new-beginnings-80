@@ -134,8 +134,9 @@ export const AgentsSidebar = ({
       </div>
 
       {/* Agents List */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-1 p-2">
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full">
+          <div className="space-y-1 p-2">
           {loading ? (
             <div className="text-sm text-sidebar-foreground/70 text-center py-4">Loading...</div>
           ) : agents.length === 0 ? (
@@ -161,7 +162,8 @@ export const AgentsSidebar = ({
             ))
           )}
         </div>
-      </ScrollArea>
+        </ScrollArea>
+      </div>
 
       {/* Logout Button */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
