@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Loader2, Trash2, FileText, Plus } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
 import {
   Dialog,
@@ -218,59 +219,57 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       ) : documents.length === 0 ? (
-        <div className="text-center py-8 border-2 border-dashed rounded-lg">
-          <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground mb-4">
+        <div className="text-center py-4 border-2 border-dashed rounded-lg">
+          <FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+          <p className="text-sm text-muted-foreground">
             Nessun documento assegnato a questo agente
           </p>
-          <Button onClick={() => setShowAssignDialog(true)} variant="outline" type="button">
-            <Plus className="h-4 w-4 mr-2" />
-            Assegna il primo documento
-          </Button>
         </div>
       ) : (
         <div className="w-full overflow-hidden border rounded-lg">
-          <Table className="table-fixed w-full">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[45%]">Nome Documento</TableHead>
-                <TableHead className="w-[35%]">Assegnato</TableHead>
-                <TableHead className="w-[20%] text-right">Azioni</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {documents.map((doc) => (
-                <TableRow key={doc.link_id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2 min-w-0 max-w-full">
-                      <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      <span className="truncate" title={doc.file_name}>
-                        {doc.file_name}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                    {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: undefined })}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleUnassignDocument(doc.link_id, doc.file_name);
-                      }}
-                      type="button"
-                      title="Rimuovi assegnazione"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </TableCell>
+          <ScrollArea className="h-[300px]">
+            <Table className="table-fixed w-full">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[45%]">Nome Documento</TableHead>
+                  <TableHead className="w-[35%]">Assegnato</TableHead>
+                  <TableHead className="w-[20%] text-right">Azioni</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {documents.map((doc) => (
+                  <TableRow key={doc.link_id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2 min-w-0 max-w-full">
+                        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <span className="truncate" title={doc.file_name}>
+                          {doc.file_name}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                      {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: undefined })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleUnassignDocument(doc.link_id, doc.file_name);
+                        }}
+                        type="button"
+                        title="Rimuovi assegnazione"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ScrollArea>
         </div>
       )}
 
