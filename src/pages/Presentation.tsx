@@ -105,51 +105,79 @@ const Presentation = () => {
   };
 
   useEffect(() => {
-    if (slides.length > 0 && deckRef.current && !revealRef.current) {
-      // Dynamic import for Reveal.js
-      import('reveal.js').then(({ default: Reveal }) => {
-        if (deckRef.current) {
-          revealRef.current = new Reveal(deckRef.current, {
-            embedded: false,
-            hash: true,
-            transition: 'slide',
-            backgroundTransition: 'fade',
-            controls: true,
-            controlsLayout: 'bottom-right',
-            controlsBackArrows: 'visible',
-            progress: true,
-            center: true,
-            touch: true,
-            loop: false,
-            keyboard: true,
-            overview: true,
-            slideNumber: 'c/t',
-            width: '100%',
-            height: '100%',
-            margin: 0.1,
-            minScale: 0.2,
-            maxScale: 2.0,
-          });
-
-          revealRef.current.initialize().then(() => {
-            console.log('Reveal.js initialized with', slides.length, 'slides');
-            revealRef.current.on('slidechanged', (event: any) => {
-              setCurrentSlideIndex(event.indexh);
-              console.log('Changed to slide', event.indexh);
-            });
-            // Hide instructions after 5 seconds
-            setTimeout(() => setShowInstructions(false), 5000);
-          });
-        }
-      }).catch(err => {
-        console.error('Error loading Reveal.js:', err);
-        toast.error('Failed to initialize presentation');
-      });
+    if (slides.length === 0 || !deckRef.current || revealRef.current) {
+      return;
     }
+
+    // Wait for DOM to be fully ready
+    const initializeReveal = async () => {
+      try {
+        console.log('Starting Reveal.js initialization...');
+        
+        // Dynamic import for Reveal.js
+        const { default: Reveal } = await import('reveal.js');
+        
+        // Ensure DOM is ready
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (!deckRef.current) {
+          console.error('Deck ref lost during initialization');
+          return;
+        }
+
+        console.log('Creating Reveal instance with', slides.length, 'slides');
+        
+        const deck = new Reveal(deckRef.current, {
+          embedded: false,
+          hash: true,
+          transition: 'slide',
+          backgroundTransition: 'fade',
+          controls: true,
+          controlsLayout: 'bottom-right',
+          controlsBackArrows: 'visible',
+          progress: true,
+          center: true,
+          touch: true,
+          loop: false,
+          keyboard: true,
+          overview: true,
+          slideNumber: 'c/t',
+          width: '100%',
+          height: '100%',
+          margin: 0.1,
+          minScale: 0.2,
+          maxScale: 2.0,
+        });
+
+        await deck.initialize();
+        
+        console.log('Reveal.js initialized successfully');
+        revealRef.current = deck;
+        
+        deck.on('slidechanged', (event: any) => {
+          const newIndex = event.indexh;
+          console.log('Slide changed to:', newIndex);
+          setCurrentSlideIndex(newIndex);
+        });
+        
+        // Hide instructions after 5 seconds
+        setTimeout(() => setShowInstructions(false), 5000);
+        
+      } catch (error) {
+        console.error('Error initializing Reveal.js:', error);
+        toast.error('Failed to initialize presentation');
+      }
+    };
+
+    initializeReveal();
 
     return () => {
       if (revealRef.current) {
-        revealRef.current.destroy();
+        try {
+          revealRef.current.destroy();
+        } catch (e) {
+          console.error('Error destroying Reveal:', e);
+        }
         revealRef.current = null;
       }
     };
