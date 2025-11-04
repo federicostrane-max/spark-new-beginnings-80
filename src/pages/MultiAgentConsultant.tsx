@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTTS } from "@/contexts/TTSContext";
@@ -52,6 +52,7 @@ export default function MultiAgentConsultant() {
   const { preGenerateAudio } = useTTS();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -125,6 +126,25 @@ export default function MultiAgentConsultant() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [currentConversation?.id, isStreaming]);
+
+  // Auto-select agent from URL parameter when returning from presentation
+  useEffect(() => {
+    const urlAgentId = searchParams.get('agentId');
+    if (urlAgentId && session?.user?.id && !currentAgent) {
+      // Load the agent from the URL parameter
+      supabase
+        .from('agents')
+        .select('*')
+        .eq('id', urlAgentId)
+        .eq('user_id', session.user.id)
+        .single()
+        .then(({ data: agent, error }) => {
+          if (!error && agent) {
+            handleSelectAgent(agent);
+          }
+        });
+    }
+  }, [searchParams, session?.user?.id, currentAgent]);
 
   const handleSelectAgent = async (agent: Agent) => {
     setCurrentAgent(agent);

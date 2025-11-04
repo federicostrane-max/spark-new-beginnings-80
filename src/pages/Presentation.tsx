@@ -698,7 +698,13 @@ const Presentation = () => {
       )}>
         {!isFullscreen && (
           <Button
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (agentId) {
+                navigate(`/?agentId=${agentId}`);
+              } else {
+                navigate(-1);
+              }
+            }}
             variant="outline"
             size="sm"
             className="bg-background/90 backdrop-blur-sm hover:bg-background text-xs md:text-sm"
