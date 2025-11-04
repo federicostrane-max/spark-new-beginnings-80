@@ -557,14 +557,6 @@ export default function MultiAgentConsultant() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => navigate("/documents")}
-                            title="Pool Documenti"
-                          >
-                            <Database className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
                             onClick={() => {
                               setEditingAgent(currentAgent);
                               setShowCreateModal(true);
