@@ -184,13 +184,17 @@ const Presentation = () => {
       return;
     }
 
+    // Show first item immediately when audio starts
+    setVisibleContentItems([0]);
+    
     // Calculate time per item based on actual audio duration
-    // Distribute items evenly across the audio duration
+    // Remaining items are distributed across the audio duration
     const timePerItem = (audioDuration * 1000) / contentItemsCount;
     
     console.log(`📊 Progressive reveal: ${contentItemsCount} items over ${audioDuration}s (${timePerItem}ms per item)`);
     
-    for (let i = 0; i < contentItemsCount; i++) {
+    // Schedule remaining items to appear after the previous one has been read
+    for (let i = 1; i < contentItemsCount; i++) {
       const delay = i * timePerItem;
       const timer = setTimeout(() => {
         console.log(`✨ Showing content item ${i + 1}/${contentItemsCount}`);
@@ -200,6 +204,11 @@ const Presentation = () => {
         }
       }, delay);
       animationTimersRef.current.push(timer);
+    }
+    
+    // If only one item, mark as complete
+    if (contentItemsCount === 1) {
+      setAnimationInProgress(false);
     }
   };
 
