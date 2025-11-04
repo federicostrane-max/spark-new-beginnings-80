@@ -66,6 +66,7 @@ interface KnowledgeDocument {
   keywords?: string[];
   topics?: string[];
   complexity_level?: string;
+  agent_ids?: string[];
 }
 
 export const DocumentPoolTable = () => {
@@ -74,6 +75,8 @@ export const DocumentPoolTable = () => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -83,6 +86,7 @@ export const DocumentPoolTable = () => {
 
   useEffect(() => {
     loadDocuments();
+    loadAvailableAgents();
   }, []);
 
   useEffect(() => {
@@ -100,7 +104,7 @@ export const DocumentPoolTable = () => {
           *,
           agent_document_links(
             agent_id,
-            agents(name)
+            agents(id, name)
           )
         `)
         .order("created_at", { ascending: false });
@@ -128,6 +132,7 @@ export const DocumentPoolTable = () => {
           keywords: doc.keywords || [],
           topics: doc.topics || [],
           complexity_level: doc.complexity_level || "",
+          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
         };
       });
 
@@ -138,6 +143,34 @@ export const DocumentPoolTable = () => {
       toast.error("Errore nel caricamento dei documenti");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAvailableAgents = async () => {
+    try {
+      // Query per ottenere solo gli agenti che hanno almeno un documento assegnato
+      const { data, error } = await supabase
+        .from("agent_document_links")
+        .select(`
+          agents(id, name)
+        `);
+
+      if (error) throw error;
+
+      // Estrarre agenti unici
+      const uniqueAgents = new Map<string, { id: string; name: string }>();
+      data?.forEach((link: any) => {
+        if (link.agents) {
+          uniqueAgents.set(link.agents.id, {
+            id: link.agents.id,
+            name: link.agents.name,
+          });
+        }
+      });
+
+      setAvailableAgents(Array.from(uniqueAgents.values()).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (error: any) {
+      console.error('[DocumentPoolTable] Error loading agents:', error);
     }
   };
 
@@ -225,7 +258,12 @@ export const DocumentPoolTable = () => {
     const matchesStatus =
       statusFilter === "all" || doc.validation_status === statusFilter;
 
-    return matchesSearch && matchesStatus;
+    const matchesAgent =
+      agentFilter === "all" ||
+      (agentFilter === "none" && doc.agents_count === 0) ||
+      ((doc as any).agent_ids?.includes(agentFilter));
+
+    return matchesSearch && matchesStatus && matchesAgent;
   });
 
   return (
@@ -239,7 +277,7 @@ export const DocumentPoolTable = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Cerca</label>
               <div className="relative">
@@ -259,12 +297,30 @@ export const DocumentPoolTable = () => {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-background">
                   <SelectItem value="all">Tutti</SelectItem>
                   <SelectItem value="validated">Validato</SelectItem>
                   <SelectItem value="validation_failed">Non Valido</SelectItem>
                   <SelectItem value="ready_for_assignment">Pronto</SelectItem>
                   <SelectItem value="processing">In Elaborazione</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Agente</label>
+              <Select value={agentFilter} onValueChange={setAgentFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-background">
+                  <SelectItem value="all">Tutti</SelectItem>
+                  <SelectItem value="none">Nessuno</SelectItem>
+                  {availableAgents.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
