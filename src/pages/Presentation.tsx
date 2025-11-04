@@ -288,8 +288,9 @@ const Presentation = () => {
   const playSlideAudio = async (slide: PresentationSlide, slideIndex: number, onComplete?: () => void) => {
     if (!isAudioEnabled && !isAutoPlaying) return;
 
-    if (isGeneratingAudioRef.current) {
-      console.log('⚠️ Audio generation already in progress, skipping...');
+    // Prevent multiple audio playbacks at the same time
+    if (isGeneratingAudioRef.current || isPlayingAudio || isLoadingAudio) {
+      console.log('⚠️ Audio already playing or loading, skipping...');
       return;
     }
 
@@ -298,8 +299,10 @@ const Presentation = () => {
     // Stop any currently playing audio
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.src = '';
       audioRef.current = null;
       setIsPlayingAudio(false);
+      setIsLoadingAudio(false);
     }
 
     try {
@@ -449,16 +452,27 @@ const Presentation = () => {
   };
 
   const stopAutoPlay = () => {
+    console.log('⏹️ Stopping auto-play...');
     setIsAutoPlaying(false);
+    
+    // Stop audio completely
     if (audioRef.current) {
       audioRef.current.pause();
+      audioRef.current.src = '';
       audioRef.current = null;
     }
+    
+    // Clear timers
     if (autoPlayTimerRef.current) {
       clearTimeout(autoPlayTimerRef.current);
       autoPlayTimerRef.current = null;
     }
+    clearAnimationTimers();
+    
+    // Reset states
     setIsPlayingAudio(false);
+    setIsLoadingAudio(false);
+    isGeneratingAudioRef.current = false;
   };
 
   // Manual audio play when slide changes (only if not auto-playing)
@@ -479,18 +493,30 @@ const Presentation = () => {
   // Cleanup cache on unmount
   useEffect(() => {
     return () => {
-      // Clean up all cached audio URLs
-      audioCacheRef.current.forEach(url => URL.revokeObjectURL(url));
-      audioCacheRef.current.clear();
-      clearAnimationTimers();
+      console.log('🧹 Cleaning up presentation...');
       
+      // Stop and cleanup audio
       if (audioRef.current) {
         audioRef.current.pause();
+        audioRef.current.src = '';
         audioRef.current = null;
       }
+      
+      // Clear all timers
+      clearAnimationTimers();
       if (autoPlayTimerRef.current) {
         clearTimeout(autoPlayTimerRef.current);
       }
+      
+      // Clean up all cached audio URLs
+      audioCacheRef.current.forEach(url => URL.revokeObjectURL(url));
+      audioCacheRef.current.clear();
+      
+      // Reset states
+      setIsPlayingAudio(false);
+      setIsLoadingAudio(false);
+      setIsAutoPlaying(false);
+      isGeneratingAudioRef.current = false;
     };
   }, []);
 
