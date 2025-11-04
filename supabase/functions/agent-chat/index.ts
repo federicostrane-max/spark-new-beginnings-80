@@ -553,13 +553,22 @@ Deno.serve(async (req) => {
         let placeholderMsg: any = null; // Declare outside try block for catch access
 
         try {
+          console.log('='.repeat(80));
+          console.log('🤖 LLM ROUTING INFO:');
+          console.log(`   Agent: ${agent.name} (${agent.slug})`);
+          console.log(`   Selected Provider: ${llmProvider.toUpperCase()}`);
+          console.log(`   Conversation ID: ${conversation.id}`);
+          console.log(`   User Message: ${message.slice(0, 100)}...`);
+          console.log('='.repeat(80));
+
           // Create placeholder message in DB FIRST
           const { data: placeholder, error: placeholderError } = await supabase
             .from('agent_messages')
             .insert({
               conversation_id: conversation.id,
               role: 'assistant',
-              content: ''
+              content: '',
+              llm_provider: llmProvider  // Track which LLM will respond
             })
             .select()
             .single();
@@ -776,7 +785,10 @@ ${agent.system_prompt}`;
             // Route to appropriate LLM provider
             if (llmProvider === 'deepseek') {
               // Call DeepSeek via edge function
-              console.log('🚀 Routing to DeepSeek...');
+              console.log('🚀 ROUTING TO DEEPSEEK');
+              console.log(`   Model: deepseek-reasoner`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
+              
               const deepseekResponse = await supabase.functions.invoke('deepseek-chat', {
                 body: {
                   messages: anthropicMessages,
@@ -791,6 +803,10 @@ ${agent.system_prompt}`;
               const assistantMessage = deepseekResponse.data.message;
               fullResponse = assistantMessage;
 
+              console.log('✅ DEEPSEEK RESPONSE RECEIVED');
+              console.log(`   Length: ${assistantMessage.length} chars`);
+              console.log(`   Usage: ${JSON.stringify(deepseekResponse.data.usage || {})}`);
+
               // Send the response
               sendSSE(JSON.stringify({ type: 'content', text: assistantMessage }));
 
@@ -802,15 +818,19 @@ ${agent.system_prompt}`;
 
               sendSSE(JSON.stringify({ 
                 type: 'complete', 
-                conversationId: conversation.id 
+                conversationId: conversation.id,
+                llmProvider: llmProvider  // Send provider info to client
               }));
 
+              console.log('🏁 DEEPSEEK REQUEST COMPLETED');
               closeStream();
               return; // Exit early for DeepSeek
               
             } else if (llmProvider === 'openai') {
               // OpenAI implementation (streaming)
-              console.log('🚀 Routing to OpenAI...');
+              console.log('🚀 ROUTING TO OPENAI');
+              console.log(`   Model: gpt-4o`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
               
               response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
@@ -832,7 +852,9 @@ ${agent.system_prompt}`;
               
             } else {
               // Default: Anthropic
-              console.log('🚀 Routing to Anthropic...');
+              console.log('🚀 ROUTING TO ANTHROPIC');
+              console.log(`   Model: claude-sonnet-4-5`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
               
               if (!ANTHROPIC_API_KEY) {
                 throw new Error('ANTHROPIC_API_KEY is required but not set');
@@ -1055,12 +1077,21 @@ ${agent.system_prompt}`;
           // Final update to DB
           await supabase
             .from('agent_messages')
-            .update({ content: fullResponse })
+            .update({ 
+              content: fullResponse,
+              llm_provider: llmProvider  // Persist which LLM was used
+            })
             .eq('id', placeholderMsg.id);
+
+          console.log('✅ LLM REQUEST COMPLETED');
+          console.log(`   Provider: ${llmProvider.toUpperCase()}`);
+          console.log(`   Response length: ${fullResponse.length} chars`);
+          console.log('='.repeat(80));
 
           sendSSE(JSON.stringify({ 
             type: 'complete', 
-            conversationId: conversation.id 
+            conversationId: conversation.id,
+            llmProvider: llmProvider  // Send provider info to client
           }));
           
           closeStream();

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
@@ -18,6 +19,7 @@ interface ChatMessageProps {
   onLongPress?: () => void;
   forceExpanded?: boolean;
   agentId?: string;
+  llmProvider?: string;
 }
 
 export const ChatMessage = ({ 
@@ -30,7 +32,8 @@ export const ChatMessage = ({
   onToggleSelection,
   onLongPress,
   forceExpanded,
-  agentId
+  agentId,
+  llmProvider
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -39,6 +42,21 @@ export const ChatMessage = ({
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
   const navigate = useNavigate();
+
+  // Get LLM provider badge info
+  const getLLMBadge = () => {
+    if (!llmProvider || role === 'user') return null;
+    
+    const badges = {
+      anthropic: { label: 'Claude', color: 'bg-purple-500/10 text-purple-600 border-purple-500/20' },
+      deepseek: { label: 'DeepSeek', color: 'bg-blue-500/10 text-blue-600 border-blue-500/20' },
+      openai: { label: 'GPT', color: 'bg-green-500/10 text-green-600 border-green-500/20' },
+    };
+    
+    return badges[llmProvider as keyof typeof badges] || null;
+  };
+
+  const llmBadge = getLLMBadge();
 
   useEffect(() => {
     if (forceExpanded !== undefined) {
@@ -181,6 +199,16 @@ export const ChatMessage = ({
             <span className="text-xs text-muted-foreground animate-pulse">
               Sto scrivendo...
             </span>
+          </div>
+        )}
+
+        {/* LLM Provider Badge - only for assistant messages */}
+        {llmBadge && !isStreaming && (
+          <div className="flex items-center gap-1 mt-2">
+            <Sparkles className="h-3 w-3 text-muted-foreground" />
+            <Badge variant="outline" className={cn("text-xs font-medium border", llmBadge.color)}>
+              {llmBadge.label}
+            </Badge>
           </div>
         )}
 

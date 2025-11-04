@@ -38,6 +38,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  llm_provider?: string;
 }
 
 interface Conversation {
@@ -201,7 +202,18 @@ export default function MultiAgentConsultant() {
         .order("created_at");
 
       if (msgsError) throw msgsError;
-      setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content })));
+      
+      // Log LLM providers for debugging
+      const llmProviders = msgs.filter(m => m.llm_provider).map(m => ({
+        role: m.role,
+        provider: m.llm_provider,
+        messagePreview: m.content.substring(0, 50)
+      }));
+      if (llmProviders.length > 0) {
+        console.log('💡 LLM Providers in conversation:', llmProviders);
+      }
+      
+      setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content, llm_provider: m.llm_provider })));
     } catch (error: any) {
       console.error("Error loading conversation:", error);
     } finally {
@@ -330,7 +342,7 @@ export default function MultiAgentConsultant() {
             const parsed = JSON.parse(data);
 
             if (parsed.type === "message_start") {
-              console.log("Message started:", parsed.messageId);
+              console.log("📨 Message started:", parsed.messageId);
               lastMessageId = parsed.messageId;
             } else if (parsed.type === "content" && parsed.text) {
               accumulatedText += parsed.text;
@@ -340,6 +352,19 @@ export default function MultiAgentConsultant() {
                 )
               );
             } else if (parsed.type === "complete") {
+              console.log("✅ Streaming complete");
+              
+              // Log LLM provider info
+              if (parsed.llmProvider) {
+                console.log('🤖 LLM Provider used:', parsed.llmProvider.toUpperCase());
+                // Update message with LLM provider
+                setMessages((prev) => 
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, llm_provider: parsed.llmProvider } : m
+                  )
+                );
+              }
+              
               if (parsed.conversationId && !currentConversation) {
                 setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: (text || accumulatedText || "Chat").slice(0, 50) });
               }
@@ -636,6 +661,7 @@ export default function MultiAgentConsultant() {
                         onLongPress={() => handleStartSelection(msg.id)}
                         forceExpanded={allMessagesExpanded}
                         agentId={currentAgent?.id}
+                        llmProvider={(msg as any).llm_provider}
                       />
                     ))
                   )}
