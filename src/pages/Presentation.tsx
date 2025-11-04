@@ -166,48 +166,16 @@ const Presentation = () => {
     animationTimersRef.current = [];
   };
 
-  // Calculate progressive reveal timing - show items BEFORE audio starts reading them
-  const scheduleProgressiveReveal = (audioDuration: number, contentItemsCount: number) => {
+  // Show all content BEFORE audio starts reading
+  const showAllContentBeforeAudio = () => {
     clearAnimationTimers();
-    setVisibleContentItems([]);
-    setAnimationInProgress(true);
+    const slide = slides[currentSlide];
+    if (!slide) return;
 
-    if (contentItemsCount === 0) {
-      setAnimationInProgress(false);
-      return;
-    }
-
-    // For title slides, show everything immediately
-    if (contentItemsCount === 1) {
-      setVisibleContentItems([0]);
-      setAnimationInProgress(false);
-      return;
-    }
-
-    // Show all items slightly BEFORE the audio reads them
-    // First item appears immediately, rest appear progressively
-    const timers: NodeJS.Timeout[] = [];
-    
-    // Show first item immediately
-    setVisibleContentItems([0]);
-    
-    // Calculate timing: distribute items across 80% of audio duration
-    const revealDuration = audioDuration * 0.8;
-    const timePerItem = revealDuration / (contentItemsCount - 1);
-
-    // Show remaining items progressively, starting slightly ahead
-    for (let i = 1; i < contentItemsCount; i++) {
-      const delay = (i * timePerItem) * 1000; // Convert to ms
-      const timer = setTimeout(() => {
-        setVisibleContentItems(prev => [...prev, i]);
-        if (i === contentItemsCount - 1) {
-          setAnimationInProgress(false);
-        }
-      }, delay);
-      timers.push(timer);
-    }
-    
-    animationTimersRef.current = timers;
+    // Show all items immediately
+    const allIndices = Array.from({ length: slide.content.length }, (_, i) => i);
+    setVisibleContentItems(allIndices);
+    setAnimationInProgress(false);
   };
 
 
@@ -322,7 +290,12 @@ const Presentation = () => {
       audio.src = audioUrl;
       audioRef.current = audio;
 
-      // Add a small delay before playing to ensure audio is fully loaded
+      // Show all content FIRST, then wait 1 second before playing audio
+      showAllContentBeforeAudio();
+      
+      // Wait 1 second to let user see the content before audio starts
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       audio.oncanplaythrough = async () => {
         try {
           console.log('▶️ Starting audio playback...');
@@ -345,19 +318,9 @@ const Presentation = () => {
         }
       };
 
-      audio.onloadedmetadata = () => {
-        const duration = audio.duration;
-        const contentCount = slide.content.length;
-        scheduleProgressiveReveal(duration, contentCount);
-      };
-
       audio.onended = () => {
         console.log('✅ Audio playback completed');
         setIsPlayingAudio(false);
-        clearAnimationTimers();
-        // Show all items at the end in case timing was off
-        setVisibleContentItems(Array.from({ length: slide.content.length }, (_, i) => i));
-        setAnimationInProgress(false);
         if (onComplete) {
           onComplete();
         }
@@ -424,7 +387,6 @@ const Presentation = () => {
 
   const stopAutoPlay = () => {
     setIsAutoPlaying(false);
-    clearAnimationTimers();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -434,16 +396,10 @@ const Presentation = () => {
       autoPlayTimerRef.current = null;
     }
     setIsPlayingAudio(false);
-    setAnimationInProgress(false);
   };
 
   // Manual audio play when slide changes (only if not auto-playing)
   useEffect(() => {
-    // Reset visible items when slide changes
-    setVisibleContentItems([]);
-    setAnimationInProgress(false);
-    clearAnimationTimers();
-
     if (slides.length > 0 && isAudioEnabled && !isAutoPlaying) {
       playSlideAudio(slides[currentSlide], currentSlide);
     }
@@ -478,7 +434,6 @@ const Presentation = () => {
   const nextSlide = () => {
     if (isAutoPlaying) return;
     if (currentSlide < slides.length - 1) {
-      clearAnimationTimers();
       setCurrentSlide(currentSlide + 1);
     }
   };
@@ -486,7 +441,6 @@ const Presentation = () => {
   const prevSlide = () => {
     if (isAutoPlaying) return;
     if (currentSlide > 0) {
-      clearAnimationTimers();
       setCurrentSlide(currentSlide - 1);
     }
   };
@@ -500,8 +454,6 @@ const Presentation = () => {
     if (audioRef.current && !newState) {
       audioRef.current.pause();
       setIsPlayingAudio(false);
-      clearAnimationTimers();
-      setAnimationInProgress(false);
     }
   };
 
