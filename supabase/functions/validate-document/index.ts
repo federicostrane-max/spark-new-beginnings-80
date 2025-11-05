@@ -158,44 +158,37 @@ serve(async (req) => {
     console.log(`[validate-document] Technical validation passed (${textLength} chars)`);
 
     // ========================================
-    // STEP 2: AI Relevance Check (Gemini Flash)
+    // STEP 2: Generate Complete AI Summary
     // ========================================
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
     if (!lovableApiKey) {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    const prompt = `Query di ricerca originale: "${searchQuery}"
+    console.log('[validate-document] Generating complete AI summary for validation...');
 
-TITOLO ATTESO: "${expected_title || 'N/A'}"
-AUTORE ATTESO: "${expected_author || 'N/A'}"
+    const summaryPrompt = `Analizza questo documento e genera un riepilogo strutturato completo.
 
-Campione di testo estratto dal PDF (primi 500 caratteri):
+TESTO COMPLETO DEL DOCUMENTO:
 """
-${extractedText.slice(0, 500)}
+${extractedText}
 """
 
-Valuta se questo documento è RILEVANTE per la query di ricerca.
-
-Considera:
-- Il titolo del PDF corrisponde al titolo atteso? (confronto flessibile)
-- L'autore corrisponde se specificato?
-- Il documento tratta l'argomento cercato?
-- Le informazioni sembrano utili per rispondere alla query?
-- Il contenuto è coerente con quello che ci si aspetta?
+Genera un'analisi completa che includa:
+1. Un riepilogo dettagliato del contenuto (3-5 frasi)
+2. I concetti chiave e argomenti principali
+3. Le parole chiave più rilevanti
+4. Il livello di complessità del documento
 
 Rispondi SOLO con questo formato JSON:
 {
-  "rilevante": true/false,
-  "motivazione": "Spiegazione breve in 1-2 frasi del perché è rilevante o non rilevante",
-  "title_match": true/false/null,
-  "author_match": true/false/null,
-  "content_relevant": true/false
+  "summary": "Riepilogo dettagliato del documento in 3-5 frasi",
+  "keywords": ["parola1", "parola2", "parola3", ...],
+  "topics": ["argomento1", "argomento2", ...],
+  "complexity_level": "beginner|intermediate|advanced"
 }`;
 
-    console.log('[validate-document] Calling Lovable AI for relevance check...');
-
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const summaryResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${lovableApiKey}`,
@@ -206,45 +199,141 @@ Rispondi SOLO con questo formato JSON:
         messages: [
           { 
             role: 'system', 
-            content: 'Sei un validatore di documenti. Rispondi SOLO con JSON valido nel formato richiesto.' 
+            content: 'Sei un esperto di analisi documentale. Rispondi SOLO con JSON valido nel formato richiesto.' 
           },
-          { role: 'user', content: prompt }
+          { role: 'user', content: summaryPrompt }
         ],
         temperature: 0.3,
       }),
     });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('[validate-document] AI API error:', aiResponse.status, errorText);
+    if (!summaryResponse.ok) {
+      const errorText = await summaryResponse.text();
+      console.error('[validate-document] AI API error:', summaryResponse.status, errorText);
       
-      if (aiResponse.status === 429) {
+      if (summaryResponse.status === 429) {
         throw new Error('Rate limit exceeded. Please try again later.');
       }
-      if (aiResponse.status === 402) {
+      if (summaryResponse.status === 402) {
         throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
       }
       
-      throw new Error(`AI API error: ${aiResponse.status}`);
+      throw new Error(`AI API error: ${summaryResponse.status}`);
     }
 
-    const aiData = await aiResponse.json();
-    const aiContent = aiData.choices?.[0]?.message?.content;
+    const summaryData = await summaryResponse.json();
+    const summaryContent = summaryData.choices?.[0]?.message?.content;
 
-    console.log('[validate-document] AI response:', aiContent);
+    console.log('[validate-document] AI summary response:', summaryContent);
 
-    // Parse AI response
-    let aiResult: { rilevante: boolean; motivazione: string };
+    // Parse summary response
+    let aiSummary: { summary: string; keywords: string[]; topics: string[]; complexity_level: string };
     try {
-      // Try to extract JSON from the response (in case AI adds extra text)
-      const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
+      const jsonMatch = summaryContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        aiSummary = JSON.parse(jsonMatch[0]);
+      } else {
+        aiSummary = JSON.parse(summaryContent);
+      }
+    } catch (parseError) {
+      console.error('[validate-document] Failed to parse AI summary:', parseError);
+      throw new Error('Failed to generate document summary');
+    }
+
+    // ========================================
+    // STEP 3: Validate Relevance Using Summary
+    // ========================================
+    console.log('[validate-document] Validating relevance using generated summary...');
+
+    const relevancePrompt = `Query di ricerca originale: "${searchQuery}"
+
+TITOLO ATTESO: "${expected_title || 'N/A'}"
+AUTORE ATTESO: "${expected_author || 'N/A'}"
+
+RIEPILOGO COMPLETO DEL DOCUMENTO:
+${aiSummary.summary}
+
+PAROLE CHIAVE:
+${aiSummary.keywords.join(', ')}
+
+ARGOMENTI:
+${aiSummary.topics.join(', ')}
+
+Valuta se questo documento è DAVVERO RILEVANTE per la query di ricerca.
+
+SII RIGOROSO: accetta solo documenti che trattano DIRETTAMENTE l'argomento cercato.
+Un documento può sembrare correlato ma non essere realmente pertinente al topic specifico.
+
+Considera:
+- Il titolo del PDF corrisponde al titolo atteso? (confronto flessibile)
+- L'autore corrisponde se specificato?
+- Il contenuto del documento (dal riepilogo) tratta DIRETTAMENTE l'argomento cercato?
+- Le parole chiave e gli argomenti sono STRETTAMENTE correlati alla query?
+
+Rispondi SOLO con questo formato JSON:
+{
+  "rilevante": true/false,
+  "motivazione": "Spiegazione breve in 2-3 frasi del perché è rilevante o non rilevante",
+  "confidence": 0-100
+}
+
+Se confidence < 70, considera il documento NON rilevante.`;
+
+    const relevanceResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'Sei un validatore rigoroso di documenti. Rispondi SOLO con JSON valido nel formato richiesto. Sii critico e accetta solo documenti davvero pertinenti.' 
+          },
+          { role: 'user', content: relevancePrompt }
+        ],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!relevanceResponse.ok) {
+      const errorText = await relevanceResponse.text();
+      console.error('[validate-document] AI API error:', relevanceResponse.status, errorText);
+      
+      if (relevanceResponse.status === 429) {
+        throw new Error('Rate limit exceeded. Please try again later.');
+      }
+      if (relevanceResponse.status === 402) {
+        throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
+      }
+      
+      throw new Error(`AI API error: ${relevanceResponse.status}`);
+    }
+
+    const relevanceData = await relevanceResponse.json();
+    const relevanceContent = relevanceData.choices?.[0]?.message?.content;
+
+    console.log('[validate-document] AI relevance response:', relevanceContent);
+
+    // Parse relevance response
+    let aiResult: { rilevante: boolean; motivazione: string; confidence?: number };
+    try {
+      const jsonMatch = relevanceContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         aiResult = JSON.parse(jsonMatch[0]);
       } else {
-        aiResult = JSON.parse(aiContent);
+        aiResult = JSON.parse(relevanceContent);
+      }
+      
+      // Apply confidence threshold
+      if (aiResult.confidence !== undefined && aiResult.confidence < 70) {
+        aiResult.rilevante = false;
+        aiResult.motivazione = `Bassa confidenza (${aiResult.confidence}%): ${aiResult.motivazione}`;
       }
     } catch (parseError) {
-      console.error('[validate-document] Failed to parse AI response:', parseError);
+      console.error('[validate-document] Failed to parse AI relevance response:', parseError);
       // Fallback: assume relevant if parsing fails
       aiResult = { 
         rilevante: true, 
@@ -253,23 +342,65 @@ Rispondi SOLO con questo formato JSON:
     }
 
     // ========================================
-    // STEP 3: Final Decision
+    // STEP 4: Final Decision
     // ========================================
     if (!aiResult.rilevante) {
       const reason = `Non rilevante per la ricerca: ${aiResult.motivazione}`;
-      await markValidationFailed(supabase, documentId, reason, textLength);
+      console.log(`[validate-document] ❌ Document rejected: ${reason}`);
+      
+      // Delete document from storage
+      const { error: deleteStorageError } = await supabase.storage
+        .from('knowledge-pdfs')
+        .remove([doc.file_path]);
+      
+      if (deleteStorageError) {
+        console.error('[validate-document] Failed to delete from storage:', deleteStorageError);
+      } else {
+        console.log('[validate-document] ✅ Document deleted from storage');
+      }
+      
+      // Delete from database
+      await supabase
+        .from('knowledge_documents')
+        .delete()
+        .eq('id', documentId);
+      
+      await supabase
+        .from('document_processing_cache')
+        .delete()
+        .eq('document_id', documentId);
+      
+      // Update queue entry if exists
+      const { data: queueEntry } = await supabase
+        .from('pdf_download_queue')
+        .select('id')
+        .eq('document_id', documentId)
+        .single();
+
+      if (queueEntry) {
+        await supabase
+          .from('pdf_download_queue')
+          .update({
+            status: 'rejected',
+            error_message: reason,
+            validation_result: aiResult,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', queueEntry.id);
+      }
       
       return new Response(JSON.stringify({ 
         success: false, 
-        reason 
+        reason,
+        deleted: true
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 400
       });
     }
 
-    // ✅ VALIDATION PASSED
-    console.log('[validate-document] Validation successful!');
+    // ✅ VALIDATION PASSED - Save AI summary
+    console.log('[validate-document] ✅ Validation successful! Saving AI summary...');
 
     await supabase
       .from('knowledge_documents')
@@ -278,7 +409,12 @@ Rispondi SOLO con questo formato JSON:
         processing_status: 'pending_processing',
         validation_reason: `Documento valido: ${aiResult.motivazione}`,
         validation_date: new Date().toISOString(),
-        text_length: textLength
+        text_length: textLength,
+        // Save the AI-generated metadata
+        ai_summary: aiSummary.summary,
+        keywords: aiSummary.keywords,
+        topics: aiSummary.topics,
+        complexity_level: aiSummary.complexity_level
       })
       .eq('id', documentId);
 

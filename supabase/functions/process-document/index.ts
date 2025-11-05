@@ -77,17 +77,44 @@ serve(async (req) => {
       .eq('document_id', documentId);
 
     // ========================================
-    // AI Analysis with Lovable AI (Gemini Flash)
+    // Check if AI Summary Already Exists (from Validation)
     // ========================================
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
-      throw new Error('LOVABLE_API_KEY not configured');
+    // With the new flow, AI summary is generated during validation
+    // We only need to verify it exists and use it
+    console.log('[process-document] Checking for existing AI summary from validation...');
+    
+    const { data: docData, error: docError } = await supabase
+      .from('knowledge_documents')
+      .select('ai_summary, keywords, topics, complexity_level')
+      .eq('id', documentId)
+      .single();
+
+    if (docError) {
+      throw new Error(`Failed to retrieve document metadata: ${docError.message}`);
     }
 
-    // Prepare text sample (first 2000 chars for analysis)
-    const textSample = fullText.slice(0, 2000);
+    let analysis: AIAnalysis;
 
-    const prompt = `Analizza questo estratto di documento PDF e genera metadati strutturati.
+    if (docData?.ai_summary && docData?.keywords && docData?.topics && docData?.complexity_level) {
+      // AI summary already exists from validation phase - reuse it
+      console.log('[process-document] ✅ Using AI summary from validation phase');
+      analysis = {
+        summary: docData.ai_summary,
+        keywords: docData.keywords,
+        topics: docData.topics,
+        complexity_level: docData.complexity_level as 'basic' | 'intermediate' | 'advanced'
+      };
+    } else {
+      // Fallback: generate AI summary if not present (shouldn't happen with new flow)
+      console.log('[process-document] ⚠️ AI summary not found from validation, generating now (fallback)...');
+      
+      const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+      if (!lovableApiKey) {
+        throw new Error('LOVABLE_API_KEY not configured');
+      }
+
+      const textSample = fullText.slice(0, 2000);
+      const prompt = `Analizza questo estratto di documento PDF e genera metadati strutturati.
 
 TESTO DEL DOCUMENTO:
 """
@@ -98,7 +125,7 @@ ${fullText.length > 2000 ? '\n...(testo troncato)...' : ''}
 Genera un'analisi JSON con:
 1. **summary**: Riassunto chiaro in 2-3 frasi di cosa tratta il documento (max 200 caratteri)
 2. **keywords**: Array di 5-10 parole chiave principali (termini tecnici, concetti chiave)
-3. **topics**: Array di 3-5 argomenti/temi trattati (es: "Machine Learning", "Python", "REST APIs")
+3. **topics**: Array di 3-5 argomenti/temi trattati
 4. **complexity_level**: Valuta il livello tecnico: "basic", "intermediate", o "advanced"
 
 IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
@@ -109,77 +136,60 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
   "complexity_level": "basic|intermediate|advanced"
 }`;
 
-    console.log('[process-document] Calling Lovable AI for document analysis...');
+      const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'Sei un esperto analista di documenti tecnici. Rispondi SOLO con JSON valido nel formato richiesto, senza testo aggiuntivo.' 
+            },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.4,
+        }),
+      });
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'Sei un esperto analista di documenti tecnici. Rispondi SOLO con JSON valido nel formato richiesto, senza testo aggiuntivo.' 
-          },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.4,
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('[process-document] AI API error:', aiResponse.status, errorText);
-      
-      if (aiResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (aiResponse.status === 402) {
-        throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
-      }
-      
-      throw new Error(`AI API error: ${aiResponse.status}`);
-    }
-
-    const aiData = await aiResponse.json();
-    const aiContent = aiData.choices?.[0]?.message?.content;
-
-    console.log('[process-document] AI response:', aiContent);
-
-    // Parse AI response
-    let analysis: AIAnalysis;
-    try {
-      // Extract JSON from response (handle potential markdown code blocks)
-      const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analysis = JSON.parse(jsonMatch[0]);
-      } else {
-        analysis = JSON.parse(aiContent);
+      if (!aiResponse.ok) {
+        const errorText = await aiResponse.text();
+        console.error('[process-document] AI API error:', aiResponse.status, errorText);
+        throw new Error(`AI API error: ${aiResponse.status}`);
       }
 
-      // Validate required fields
-      if (!analysis.summary || !analysis.keywords || !analysis.topics || !analysis.complexity_level) {
-        throw new Error('Missing required fields in AI response');
-      }
+      const aiData = await aiResponse.json();
+      const aiContent = aiData.choices?.[0]?.message?.content;
+      console.log('[process-document] AI fallback response:', aiContent);
 
-      // Ensure complexity_level is valid
-      if (!['basic', 'intermediate', 'advanced'].includes(analysis.complexity_level)) {
-        analysis.complexity_level = 'intermediate'; // Default fallback
-      }
+      try {
+        const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+        } else {
+          analysis = JSON.parse(aiContent);
+        }
 
-    } catch (parseError) {
-      console.error('[process-document] Failed to parse AI response:', parseError);
-      
-      // Fallback analysis
-      analysis = {
-        summary: 'Documento processato con successo. Analisi AI non disponibile.',
-        keywords: ['documento', 'contenuto'],
-        topics: ['Generale'],
-        complexity_level: 'intermediate'
-      };
+        if (!analysis.summary || !analysis.keywords || !analysis.topics || !analysis.complexity_level) {
+          throw new Error('Missing required fields in AI response');
+        }
+
+        if (!['basic', 'intermediate', 'advanced'].includes(analysis.complexity_level)) {
+          analysis.complexity_level = 'intermediate';
+        }
+
+      } catch (parseError) {
+        console.error('[process-document] Failed to parse AI response:', parseError);
+        analysis = {
+          summary: 'Documento processato con successo. Analisi AI non disponibile.',
+          keywords: ['documento', 'contenuto'],
+          topics: ['Generale'],
+          complexity_level: 'intermediate'
+        };
+      }
     }
 
     // ========================================
