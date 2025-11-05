@@ -384,7 +384,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           .from("agent_knowledge")
           .select("*")
           .eq("agent_id", editingAgent.id)
-          .eq("source_type", "pool")
+          .or("source_type.eq.pool,source_type.eq.shared_pool")
           .in("pool_document_id", poolDocIds);
 
         if (poolKnowledge && poolKnowledge.length > 0) {
@@ -397,7 +397,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             category: item.category,
             summary: item.summary,
             embedding: item.embedding,
-            source_type: "pool",
+            source_type: item.source_type, // Mantieni il source_type originale (pool o shared_pool)
             pool_document_id: item.pool_document_id
           }));
 

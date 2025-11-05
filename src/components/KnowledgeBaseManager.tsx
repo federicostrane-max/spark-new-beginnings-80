@@ -206,7 +206,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
     } catch (error: any) {
       console.error('❌ Full re-download error:', error);
-      toast.error(`Errore re-download ${fileName}: ${error.message}`);
+      toast.error(`Errore re-download ${fileName}: ${error.message || 'Errore sconosciuto'}`);
+      // NON chiudere il modale, rimani sulla pagina
     }
   };
 
@@ -255,7 +256,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       toast.error(`${fileName} non ha chunks. Usa "Re-download" per risolvere.`);
     } catch (error: any) {
       console.error('❌ Sync check error:', error);
-      toast.error(`Errore verifica ${fileName}: ${error.message}`);
+      toast.error(`Errore verifica ${fileName}: ${error.message || 'Errore sconosciuto'}`);
+      // NON chiudere il modale, rimani sulla pagina
     }
   };
 
