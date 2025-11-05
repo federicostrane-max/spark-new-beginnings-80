@@ -358,6 +358,10 @@ function formatDownloadResults(results: any[]): string {
 }
 
 Deno.serve(async (req) => {
+  // Generate unique request ID for tracking
+  const requestId = crypto.randomUUID().substring(0, 8);
+  const requestStartTime = Date.now();
+  
   console.log('=== AGENT CHAT REQUEST RECEIVED ===');
   console.log('Method:', req.method);
   console.log('URL:', req.url);
@@ -398,6 +402,15 @@ Deno.serve(async (req) => {
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const { conversationId, message, agentSlug, attachments } = requestBody;
+
+    // Detailed request logging
+    console.log('🆔 [REQ-' + requestId + '] New request received');
+    console.log('   User:', user.id);
+    console.log('   Conversation:', conversationId || 'NEW');
+    console.log('   Agent:', agentSlug);
+    console.log('   Message length:', message.length, 'chars');
+    console.log('   Attachments:', attachments?.length || 0);
+    console.log('   Timestamp:', new Date().toISOString());
 
     console.log('Processing chat for agent:', agentSlug);
 
@@ -587,7 +600,7 @@ Deno.serve(async (req) => {
 
         try {
           console.log('='.repeat(80));
-          console.log('🤖 LLM ROUTING INFO:');
+          console.log('🤖 [REQ-' + requestId + '] LLM ROUTING INFO:');
           console.log(`   Agent: ${agent.name} (${agent.slug})`);
           console.log(`   Selected Provider: ${llmProvider.toUpperCase()}`);
           console.log(`   Conversation ID: ${conversation.id}`);
@@ -955,8 +968,10 @@ ${agent.system_prompt}`;
           const decoder = new TextDecoder();
           let buffer = '';
           let lastKeepAlive = Date.now();
+          let chunkCount = 0;
+          let lastProgressLog = Date.now();
 
-          console.log(`🔄 Starting stream from ${llmProvider.toUpperCase()}...`);
+          console.log(`🔄 [REQ-${requestId}] Starting stream from ${llmProvider.toUpperCase()}...`);
 
           // Send keep-alive every 15 seconds to prevent timeout
           const keepAliveInterval = setInterval(() => {
@@ -968,7 +983,9 @@ ${agent.system_prompt}`;
             while (true) {
               const { done, value } = await reader.read();
               if (done) {
-                console.log(`✅ Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
+                const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+                console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
+                console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
                 clearInterval(keepAliveInterval);
                 // Save before breaking
                 await supabase
@@ -991,34 +1008,36 @@ ${agent.system_prompt}`;
 
                 const data = line.slice(6);
                 if (data === '[DONE]') {
-                  console.log(`🏁 [${llmProvider.toUpperCase()}] Received [DONE] signal`);
+                  console.log(`🏁 [REQ-${requestId}] [${llmProvider.toUpperCase()}] Received [DONE] signal`);
                   continue;
                 }
 
                 try {
                   const parsed = JSON.parse(data);
+                  chunkCount++;
                   
                   // Handle DeepSeek streaming format
                   if (llmProvider === 'deepseek') {
-                    console.log('🔵 [DEEPSEEK] Parsed chunk:', JSON.stringify(parsed).substring(0, 200));
-                    
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
-                      console.log('🔵 [DEEPSEEK] Content chunk length:', newText.length);
                       fullResponse += newText;
                       sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
+                      // Log progress every 500 chars
                       const now = Date.now();
+                      if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
+                        const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
+                        console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
+                        lastProgressLog = now;
+                      }
+                      
                       if (now - lastUpdateTime > 5000) {
-                        console.log('🔵 [DEEPSEEK] Saving intermediate response, length:', fullResponse.length);
                         await supabase
                           .from('agent_messages')
                           .update({ content: fullResponse })
                           .eq('id', placeholderMsg.id);
                         lastUpdateTime = now;
                       }
-                    } else {
-                      console.log('🔵 [DEEPSEEK] No content in delta:', JSON.stringify(parsed.choices?.[0]?.delta || 'no delta'));
                     }
                     continue; // Skip OpenAI/Anthropic-specific handling
                   }
@@ -1030,7 +1049,14 @@ ${agent.system_prompt}`;
                       fullResponse += newText;
                       sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
+                      // Log progress every 500 chars
                       const now = Date.now();
+                      if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
+                        const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
+                        console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
+                        lastProgressLog = now;
+                      }
+                      
                       if (now - lastUpdateTime > 5000) {
                         await supabase
                           .from('agent_messages')
@@ -1128,8 +1154,15 @@ ${agent.system_prompt}`;
                     fullResponse += newText;
                     sendSSE(JSON.stringify({ type: 'content', text: newText }));
                     
-                    // Auto-save every 5 seconds during streaming
+                    // Log progress every 500 chars
                     const now = Date.now();
+                    if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
+                      const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
+                      console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
+                      lastProgressLog = now;
+                    }
+                    
+                    // Auto-save every 5 seconds during streaming
                     if (now - lastUpdateTime > 5000) {
                       await supabase
                         .from('agent_messages')
@@ -1143,11 +1176,21 @@ ${agent.system_prompt}`;
                 }
               }
             }
-            console.log(`📝 Stream completed successfully. Final length: ${fullResponse.length} chars`);
+            const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+            console.log(`📝 [REQ-${requestId}] Stream completed successfully`);
+            console.log(`   Final length: ${fullResponse.length} chars`);
+            console.log(`   Duration: ${totalDuration}s`);
+            console.log(`   Chunks processed: ${chunkCount}`);
             clearInterval(keepAliveInterval);
           } catch (error) {
-            console.error('❌ Streaming interrupted:', error);
-            console.error('📊 Partial response length:', fullResponse.length);
+            const errorDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+            console.error(`❌ [REQ-${requestId}] Streaming interrupted after ${errorDuration}s`);
+            console.error('   Error:', error);
+            console.error('   Error type:', error instanceof Error ? error.name : typeof error);
+            console.error('   Stack:', error instanceof Error ? error.stack : 'N/A');
+            console.error(`   Conversation: ${conversation.id}`);
+            console.error(`   Partial response: ${fullResponse.length} chars`);
+            console.error(`   Provider: ${llmProvider}`);
             clearInterval(keepAliveInterval);
             // Save whatever we have so far
             if (fullResponse) {
@@ -1168,9 +1211,13 @@ ${agent.system_prompt}`;
             })
             .eq('id', placeholderMsg.id);
 
-          console.log('✅ LLM REQUEST COMPLETED');
+          const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+          console.log('='.repeat(80));
+          console.log(`✅ [REQ-${requestId}] LLM REQUEST COMPLETED`);
           console.log(`   Provider: ${llmProvider.toUpperCase()}`);
           console.log(`   Response length: ${fullResponse.length} chars`);
+          console.log(`   Total duration: ${totalDuration}s`);
+          console.log(`   Chunks processed: ${chunkCount}`);
           console.log('='.repeat(80));
 
           sendSSE(JSON.stringify({ 
