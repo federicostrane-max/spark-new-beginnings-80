@@ -65,7 +65,7 @@ export default function MultiAgentConsultant() {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
-  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean | undefined>(undefined);
+  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(true);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
