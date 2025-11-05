@@ -98,35 +98,7 @@ serve(async (req) => {
 
     console.log('✅ PDF uploaded to storage:', filePath);
 
-    // Extract text from PDF
-    console.log('📄 Extracting text from PDF...');
-    let extractedText = '';
-    let fullText = '';
-
-    try {
-      // Use PDF.js via CDN for Deno
-      const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/+esm');
-      
-      const pdfDoc = await pdfjs.getDocument({ data: new Uint8Array(pdfArrayBuffer) }).promise;
-      console.log(`📄 PDF has ${pdfDoc.numPages} pages`);
-      
-      for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-        const page = await pdfDoc.getPage(pageNum);
-        const content = await page.getTextContent();
-        const pageText = content.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + '\n\n';
-      }
-      
-      extractedText = fullText.slice(0, 1000); // First 1000 chars for validation
-      console.log(`✅ Extracted ${fullText.length} characters (${pdfDoc.numPages} pages)`);
-      
-    } catch (extractError) {
-      console.error('⚠️ Failed to extract text:', extractError);
-      console.error('⚠️ Stack:', (extractError as Error).stack);
-      // Continue without text extraction (will skip AI validation)
-    }
-
-    // Create document record
+    // Create document record (skip text extraction - will be done by process-document)
     const { data: document, error: docError } = await supabase
       .from('knowledge_documents')
       .insert({
@@ -135,7 +107,7 @@ serve(async (req) => {
         source_url: url,
         search_query: search_query || null,
         file_size_bytes: pdfArrayBuffer.byteLength,
-        validation_status: 'pending',
+        validation_status: 'validated', // Skip validation, go directly to processing
         processing_status: 'downloaded'
       })
       .select()
@@ -147,26 +119,32 @@ serve(async (req) => {
     }
 
     console.log('📝 Document record created:', document.id);
+    
+    // Update queue entry to processing
+    await supabase
+      .from('pdf_download_queue')
+      .update({
+        status: 'processing',
+        document_id: document.id,
+        downloaded_file_name: fileName
+      })
+      .eq('url', url)
+      .eq('search_query', search_query || '');
 
-    // Trigger validation with extracted text
-    console.log('[download-pdf-tool] Triggering validation with extracted text...');
-    supabase.functions.invoke('validate-document', {
+    // Trigger processing directly (process-document will extract text)
+    console.log('[download-pdf-tool] Triggering process-document...');
+    supabase.functions.invoke('process-document', {
       body: { 
-        documentId: document.id,
-        searchQuery: search_query,
-        extractedText: extractedText,
-        fullText: fullText,
-        expected_title,
-        expected_author
+        documentId: document.id
       }
     }).then(result => {
       if (result.error) {
-        console.error('Validation error:', result.error);
+        console.error('Processing error:', result.error);
       } else {
-        console.log('✅ Validation completed for:', document.id);
+        console.log('✅ Processing started for:', document.id);
       }
     }).catch(err => {
-      console.error('Validation invocation error:', err);
+      console.error('Processing invocation error:', err);
       console.error('Stack:', (err as Error).stack);
     });
 
