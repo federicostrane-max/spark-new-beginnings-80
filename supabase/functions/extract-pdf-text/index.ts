@@ -86,7 +86,7 @@ serve(async (req) => {
       throw new Error(`OCR extraction failed: ${ocrError.message}`);
     }
 
-    const extractedText = ocrData?.text || '';
+    const extractedText = ocrData?.extractedText || '';
 
     if (!extractedText || extractedText.trim().length < 10) {
       throw new Error('Extracted text too short or empty. PDF might be corrupted or contain only images.');
