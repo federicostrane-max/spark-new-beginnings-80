@@ -33,11 +33,25 @@ export const AdminPanel = () => {
     try {
       console.log('🔄 Calling retry-failed-documents...');
       
+      // Timeout più lungo per gestire il delay tra documenti (90 secondi)
+      const timeout = 90000;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
       const { data, error } = await supabase.functions.invoke('retry-failed-documents', {
-        body: {}
+        body: {},
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
+
       if (error) {
+        // Se è un timeout, mostra un messaggio più informativo
+        if (error.message?.includes('aborted') || error.message?.includes('timeout')) {
+          toast.warning('⏱️ Timeout - Il processo continua in background. Ricarica la pagina tra qualche minuto.');
+          setProcessing(false);
+          return;
+        }
         throw error;
       }
 
@@ -60,7 +74,13 @@ export const AdminPanel = () => {
 
     } catch (error: any) {
       console.error('❌ Error:', error);
-      toast.error(`Errore: ${error.message || 'Operazione fallita'}`);
+      
+      // Gestione specifica per timeout o abort
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        toast.warning('⏱️ Timeout raggiunto - Il processo continua in background. Ricarica la pagina tra qualche minuto per vedere i risultati.');
+      } else {
+        toast.error(`Errore: ${error.message || 'Operazione fallita'}`);
+      }
     } finally {
       setProcessing(false);
     }
@@ -91,7 +111,8 @@ export const AdminPanel = () => {
             <h3 className="text-lg font-semibold mb-1">Processa Documenti Validati</h3>
             <p className="text-sm text-muted-foreground">
               Trova e processa tutti i documenti che sono validati ma non hanno chunks in agent_knowledge
-              (documenti bloccati in stato "downloaded")
+              (documenti bloccati in stato "downloaded"). 
+              ⏱️ Nota: Con molti documenti, il processo può richiedere diversi minuti.
             </p>
           </div>
 
