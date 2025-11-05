@@ -1327,6 +1327,70 @@ function formatDownloadResults(results: any[]): string {
 }
 
 /**
+ * Retrieves and formats feedback about documents that failed validation
+ */
+async function formatValidationFeedback(
+  conversationId: string, 
+  supabaseClient: any
+): Promise<string> {
+  console.log(`🔍 [VALIDATION FEEDBACK] Checking for rejected documents in conversation ${conversationId}`);
+  
+  try {
+    // Get rejected documents from the queue
+    const { data: rejectedDocs, error } = await supabaseClient
+      .from('pdf_download_queue')
+      .select('expected_title, expected_author, validation_result, error_message, completed_at')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'rejected')
+      .order('completed_at', { ascending: false });
+    
+    if (error) {
+      console.error('❌ [VALIDATION FEEDBACK] Error fetching rejected docs:', error);
+      return '';
+    }
+    
+    if (!rejectedDocs || rejectedDocs.length === 0) {
+      console.log('✅ [VALIDATION FEEDBACK] No rejected documents found');
+      return '';
+    }
+    
+    console.log(`📊 [VALIDATION FEEDBACK] Found ${rejectedDocs.length} rejected documents`);
+    
+    // Format feedback message
+    let feedback = `\n\n---\n\n### 📋 Documenti Non Validati (${rejectedDocs.length})\n\n`;
+    feedback += `I seguenti documenti sono stati scaricati ma non hanno superato la validazione AI e sono stati eliminati:\n\n`;
+    
+    rejectedDocs.forEach((doc: any, index: number) => {
+      const validationResult = doc.validation_result || {};
+      const aiSummary = validationResult.summary || 'Nessun riassunto disponibile';
+      const aiMotivazione = validationResult.motivazione || doc.error_message || 'Nessuna motivazione disponibile';
+      
+      feedback += `**${index + 1}. ${doc.expected_title}**\n`;
+      
+      if (doc.expected_author) {
+        feedback += `   _Autore: ${doc.expected_author}_\n`;
+      }
+      
+      feedback += `   **Motivo del rifiuto:** ${aiMotivazione}\n`;
+      
+      if (aiSummary && aiSummary !== 'Nessun riassunto disponibile') {
+        feedback += `   **Contenuto rilevato:** ${aiSummary.slice(0, 200)}${aiSummary.length > 200 ? '...' : ''}\n`;
+      }
+      
+      feedback += '\n';
+    });
+    
+    feedback += `\n💡 _Se ritieni che uno di questi documenti sia stato erroneamente rifiutato, puoi cercare di scaricarlo nuovamente con una query di ricerca più specifica._`;
+    
+    return feedback;
+    
+  } catch (err) {
+    console.error('❌ [VALIDATION FEEDBACK] Exception:', err);
+    return '';
+  }
+}
+
+/**
  * Estrae entries PDF da una tabella markdown
  * Formato atteso: | # | Title | Author(s) | URL | Source | Year |
  */
@@ -2052,6 +2116,16 @@ Deno.serve(async (req) => {
                 // Execute downloads WITH RETRY LOGIC
                 const downloadResults = await executeDownloads(selectedPdfs, message, supabase);
                 workflowResponse = formatDownloadResults(downloadResults);
+                
+                // Wait 3 seconds for validation to complete and check for rejected documents
+                console.log('⏳ [WORKFLOW] Waiting 3 seconds for validation to complete...');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Get validation feedback for rejected documents
+                const validationFeedback = await formatValidationFeedback(conversationId, supabase);
+                if (validationFeedback) {
+                  workflowResponse += validationFeedback;
+                }
                 
                 sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
                 fullResponse = workflowResponse;
