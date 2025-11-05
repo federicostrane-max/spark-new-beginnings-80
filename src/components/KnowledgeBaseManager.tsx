@@ -157,133 +157,99 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     }
   };
 
-  const handleFullRedownload = async (docId: string, fileName: string) => {
-    console.log('🔄 FULL RE-DOWNLOAD for document:', fileName, 'ID:', docId);
-    
-    // Previeni chiusura modale durante l'operazione
-    const preventClose = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    
-    try {
-      toast.info(`Rimozione chunks esistenti per ${fileName}...`);
-      
-      // Step 1: Delete ALL existing chunks for this document+agent
-      console.log('🗑️ Deleting all existing chunks...');
-      const { error: deleteError } = await supabase
-        .from('agent_knowledge')
-        .delete()
-        .eq('agent_id', agentId)
-        .eq('pool_document_id', docId);
-      
-      if (deleteError) {
-        console.error('❌ Delete error:', deleteError);
-        throw deleteError;
-      }
-      
-      console.log('✅ All chunks deleted successfully');
-      toast.info(`Re-sincronizzazione completa di ${fileName}...`);
-      
-      // Step 2: Wait a bit for database commit
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Step 3: Perform fresh sync
-      console.log('🔄 Starting fresh sync...');
-      const { data, error } = await supabase.functions.invoke('sync-pool-document', {
-        body: { documentId: docId, agentId }
-      });
 
-      if (error) {
-        console.error('❌ Sync error:', error);
-        throw new Error(error.message || 'Errore sincronizzazione');
-      }
-      
-      if (!data) {
-        throw new Error('Nessun dato ricevuto dalla sincronizzazione');
-      }
-      
-      console.log('✅ Fresh sync response:', data);
-      toast.success(`${fileName} ri-sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
-      
-      // Step 4: Wait for final database commit (increased to 5s for large documents)
-      console.log('⏳ Waiting for final database commit...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Step 5: Reload documents to reflect new state
-      console.log('🔄 Reloading documents...');
-      await loadDocuments();
-      
-      // Notify parent to update badge
-      if (onDocsUpdated) {
-        onDocsUpdated();
-      }
-    } catch (error: any) {
-      console.error('❌ Full re-download error:', error);
-      const errorMessage = error?.message || error?.error_description || 'Errore sconosciuto';
-      toast.error(`Errore re-download ${fileName}: ${errorMessage}`, {
-        duration: 5000,
-      });
-      // NON chiudere il modale - rimani sulla pagina
+  const handleSyncAllMissing = async () => {
+    const missingDocs = documents.filter(doc => doc.syncStatus === 'missing');
+    
+    if (missingDocs.length === 0) {
+      toast.info('Nessun documento da sincronizzare');
+      return;
     }
-  };
 
-  const handleResync = async (docId: string, fileName: string) => {
-    console.log('🔄 Quick re-sync check for document:', fileName, 'ID:', docId);
-    try {
-      toast.info(`Verifica sincronizzazione di ${fileName}...`);
+    console.log(`🔄 Starting batch sync for ${missingDocs.length} documents`);
+    toast.info(`Sincronizzazione di ${missingDocs.length} documenti...`);
+
+    let successCount = 0;
+    let failedDocs: typeof missingDocs = [];
+
+    // STEP 1: Try quick resync (check if chunks exist)
+    console.log('📋 STEP 1: Checking existing chunks for all documents...');
+    
+    for (let i = 0; i < missingDocs.length; i++) {
+      const doc = missingDocs[i];
+      console.log(`Checking ${i + 1}/${missingDocs.length}: ${doc.file_name}`);
       
-      // Check if chunks already exist
-      console.log('🔍 Checking if chunks exist for document...');
-      const { data: existingChunks, error: checkError } = await supabase
-        .from('agent_knowledge')
-        .select('id, source_type')
-        .eq('agent_id', agentId)
-        .eq('pool_document_id', docId);
-      
-      if (checkError) {
-        console.error('❌ Check error:', checkError);
-        throw checkError;
-      }
-      
-      console.log('📊 Existing chunks found:', {
-        fileName,
-        chunkCount: existingChunks?.length || 0,
-        sourceTypes: existingChunks?.map(c => c.source_type)
-      });
-      
-      if (existingChunks && existingChunks.length > 0) {
-        // Document is already synced! Just update UI
-        console.log('✅ Document already has', existingChunks.length, 'chunks - updating UI');
-        toast.success(`${fileName} già sincronizzato (${existingChunks.length} chunks trovati)`);
-        
-        // Update the document status in state immediately
-        setDocuments(prev => prev.map(doc => 
-          doc.id === docId 
-            ? { ...doc, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
-            : doc
-        ));
-        
-        // Notify parent to update badge
-        if (onDocsUpdated) {
-          onDocsUpdated();
+      try {
+        const { data: existingChunks } = await supabase
+          .from('agent_knowledge')
+          .select('id')
+          .eq('agent_id', agentId)
+          .eq('pool_document_id', doc.id);
+
+        if (existingChunks && existingChunks.length > 0) {
+          console.log(`✅ ${doc.file_name} già sincronizzato (${existingChunks.length} chunks)`);
+          setDocuments(prev => prev.map(d => 
+            d.id === doc.id 
+              ? { ...d, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
+              : d
+          ));
+          successCount++;
+        } else {
+          failedDocs.push(doc);
         }
-        return;
+      } catch (error) {
+        console.error(`Error checking ${doc.file_name}:`, error);
+        failedDocs.push(doc);
       }
-      
-      // No chunks found - suggest full re-download instead
-      console.log('⚠️ No chunks found - suggesting full re-download');
-      toast.error(`${fileName} non ha chunks. Usa "Re-download" per risolvere.`, {
-        duration: 5000,
-      });
-    } catch (error: any) {
-      console.error('❌ Sync check error:', error);
-      const errorMessage = error?.message || error?.error_description || 'Errore sconosciuto';
-      toast.error(`Errore verifica ${fileName}: ${errorMessage}`, {
-        duration: 5000,
-      });
-      // NON chiudere il modale - rimani sulla pagina
     }
+
+    // STEP 2: Re-download failed documents
+    if (failedDocs.length > 0) {
+      console.log(`📥 STEP 2: Re-downloading ${failedDocs.length} documents...`);
+      toast.info(`Re-download di ${failedDocs.length} documenti...`);
+
+      for (let i = 0; i < failedDocs.length; i++) {
+        const doc = failedDocs[i];
+        console.log(`Re-downloading ${i + 1}/${failedDocs.length}: ${doc.file_name}`);
+        
+        try {
+          // Delete existing chunks
+          await supabase
+            .from('agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .eq('pool_document_id', doc.id);
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Sync document
+          const { data, error } = await supabase.functions.invoke('sync-pool-document', {
+            body: { documentId: doc.id, agentId }
+          });
+
+          if (error) throw error;
+
+          console.log(`✅ ${doc.file_name} sincronizzato (${data?.chunksCount || 0} chunks)`);
+          successCount++;
+        } catch (error: any) {
+          console.error(`❌ Failed to sync ${doc.file_name}:`, error);
+        }
+      }
+    }
+
+    // Wait for final commit
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Reload all documents
+    await loadDocuments();
+
+    if (onDocsUpdated) {
+      onDocsUpdated();
+    }
+
+    toast.success(`Sincronizzazione completata: ${successCount}/${missingDocs.length} documenti`, {
+      duration: 5000,
+    });
   };
 
   const loadPoolDocuments = async () => {
@@ -441,17 +407,34 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h3 className="text-lg font-semibold">Documenti Assegnati dal Pool</h3>
           <p className="text-sm text-muted-foreground">
             Questi documenti sono condivisi nel pool e assegnati a {agentName}
           </p>
         </div>
-        <Button onClick={() => setShowAssignDialog(true)} size="sm" type="button">
-          <Plus className="h-4 w-4 mr-2" />
-          Assegna Documento
-        </Button>
+        <div className="flex gap-2">
+          {documents.some(doc => doc.syncStatus === 'missing') && (
+            <Button 
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSyncAllMissing();
+              }} 
+              size="sm" 
+              type="button"
+              variant="default"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Sincronizza Tutti
+            </Button>
+          )}
+          <Button onClick={() => setShowAssignDialog(true)} size="sm" type="button">
+            <Plus className="h-4 w-4 mr-2" />
+            Assegna Documento
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -518,40 +501,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                         </>
                       )}
                     </div>
-
-                    {/* Action buttons for missing sync */}
-                    {doc.syncStatus === 'missing' && (
-                      <div className="flex flex-col gap-2 pt-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleResync(doc.id, doc.file_name);
-                          }}
-                          className="w-full justify-start"
-                        >
-                          <RefreshCw className="h-4 w-4 mr-2" />
-                          Verifica sincronizzazione
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleFullRedownload(doc.id, doc.file_name);
-                          }}
-                          className="w-full justify-start"
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          Re-download completo
-                        </Button>
-                      </div>
-                    )}
                     
                     {/* Date */}
                     <div className="text-xs text-muted-foreground">
@@ -599,39 +548,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                             </>
                           )}
                           {doc.syncStatus === 'missing' && (
-                            <div className="flex items-center gap-2">
+                            <>
                               <AlertCircle className="h-4 w-4 text-destructive" />
-                              <div className="flex gap-1">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleResync(doc.id, doc.file_name);
-                                  }}
-                                  className="h-7 px-2 text-xs"
-                                >
-                                  <RefreshCw className="h-3 w-3 mr-1" />
-                                  Verifica
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="default"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleFullRedownload(doc.id, doc.file_name);
-                                  }}
-                                  className="h-7 px-2 text-xs"
-                                >
-                                  <Download className="h-3 w-3 mr-1" />
-                                  Re-download
-                                </Button>
-                              </div>
-                            </div>
+                              <span className="text-sm text-destructive">Non sincronizzato</span>
+                            </>
                           )}
                         </div>
                       </TableCell>
