@@ -65,7 +65,7 @@ export default function MultiAgentConsultant() {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
-  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(true);
+  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -238,6 +238,11 @@ export default function MultiAgentConsultant() {
       }
       
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content, llm_provider: m.llm_provider })));
+      
+      // Force scroll to last message after loading
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      }, 100);
     } catch (error: any) {
       console.error("Error loading conversation:", error);
     } finally {
