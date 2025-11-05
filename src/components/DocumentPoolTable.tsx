@@ -365,26 +365,26 @@ export const DocumentPoolTable = () => {
               <Table key={`table-${documents.length}-${Date.now()}`}>
               <TableHeader>
                 <TableRow>
-                  <TableHead>File</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Agenti Assegnati</TableHead>
-                  <TableHead>Creato</TableHead>
-                  <TableHead className="text-right">Azioni</TableHead>
+                  <TableHead className="w-[35%]">File</TableHead>
+                  <TableHead className="w-[15%]">Status</TableHead>
+                  <TableHead className="w-[20%]">Agenti Assegnati</TableHead>
+                  <TableHead className="w-[15%]">Creato</TableHead>
+                  <TableHead className="w-[15%] text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredDocuments.map((doc) => (
                   <TableRow key={doc.id}>
-                    <TableCell>
-                      <div className="max-w-md">
-                        <div className="font-medium truncate" title={doc.file_name}>
+                    <TableCell className="max-w-0">
+                      <div className="space-y-1">
+                        <div className="font-medium truncate text-sm" title={doc.file_name}>
                           {doc.file_name}
                         </div>
                         {doc.ai_summary && (
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                            <div className="text-sm text-muted-foreground line-clamp-2 cursor-help hover:text-foreground transition-colors">
+                            <div className="text-xs text-muted-foreground line-clamp-1 cursor-help hover:text-foreground transition-colors">
                               {doc.ai_summary}
                             </div>
                               </TooltipTrigger>
@@ -407,29 +407,29 @@ export const DocumentPoolTable = () => {
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {doc.agents_count === 0 ? (
-                          <Badge variant="secondary" className="text-xs">
+                          <Badge variant="secondary" className="text-xs whitespace-nowrap">
                             Non assegnato
                           </Badge>
-                        ) : doc.agent_names.length <= 2 ? (
+                        ) : doc.agent_names.length <= 1 ? (
                           doc.agent_names.map((name, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
+                            <Badge key={idx} variant="outline" className="text-xs truncate max-w-[120px]" title={name}>
                               {name}
                             </Badge>
                           ))
                         ) : (
-                          <Badge variant="outline" className="text-xs" title={doc.agent_names.join(", ")}>
+                          <Badge variant="outline" className="text-xs whitespace-nowrap" title={doc.agent_names.join(", ")}>
                             {doc.agents_count} agenti
                           </Badge>
                         )}
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatDistanceToNow(new Date(doc.created_at), {
                         addSuffix: true,
                       })}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1">
                       <Button
                         size="sm"
                         variant="outline"
@@ -437,10 +437,10 @@ export const DocumentPoolTable = () => {
                           setDocToView(doc);
                           setDetailsDialogOpen(true);
                         }}
-                        className="text-blue-600"
+                        className="text-blue-600 h-8 w-8 p-0"
                         title="Vedi dettagli completi"
                       >
-                        <Info className="h-4 w-4" />
+                        <Info className="h-3.5 w-3.5" />
                       </Button>
                         <Button
                           size="sm"
@@ -450,9 +450,10 @@ export const DocumentPoolTable = () => {
                             setAssignDialogOpen(true);
                           }}
                           disabled={doc.validation_status !== "validated"}
+                          className="h-8 w-8 p-0"
+                          title="Assegna agenti"
                         >
-                          <LinkIcon className="h-4 w-4 mr-1" />
-                          Assegna
+                          <LinkIcon className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           size="sm"
@@ -461,8 +462,10 @@ export const DocumentPoolTable = () => {
                             setDocToDelete(doc);
                             setDeleteDialogOpen(true);
                           }}
+                          className="h-8 w-8 p-0"
+                          title="Elimina"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
                     </TableCell>
