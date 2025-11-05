@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download } from "lucide-react";
+import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
@@ -23,7 +23,7 @@ interface KnowledgeDocument {
   created_at: string;
   assignment_type: string;
   link_id: string;
-  syncStatus?: 'synced' | 'missing' | 'checking';
+  syncStatus?: 'synced' | 'missing' | 'checking' | 'storage_missing';
   chunkCount?: number;
 }
 
@@ -244,17 +244,31 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         }
       }
 
-      // Show detailed error for failed files
+      // Mark documents with storage issues as storage_missing
       if (remainingFailed.length > 0) {
-        const fileNotFoundCount = remainingFailed.filter(f => 
-          f.error.includes('not found') || f.error.includes('File not found')
-        ).length;
+        const storageIssues = remainingFailed.filter(f => 
+          f.error.includes('not found in storage') || f.error.includes('File not found')
+        );
         
-        if (fileNotFoundCount > 0) {
+        if (storageIssues.length > 0) {
+          // Update document status to storage_missing
+          setDocuments(prev => prev.map(d => {
+            const hasStorageIssue = storageIssues.some(si => si.doc.id === d.id);
+            return hasStorageIssue ? { ...d, syncStatus: 'storage_missing' as const } : d;
+          }));
+          
           toast.error(
-            `${fileNotFoundCount} file non trovati nello storage. Potrebbero essere stati spostati o eliminati.`, 
-            { duration: 7000 }
+            `${storageIssues.length} file(s) non trovati nello storage. Usa "Rimuovi Documenti Rotti" per pulire.`, 
+            { duration: 8000 }
           );
+        }
+        
+        const otherErrors = remainingFailed.filter(f => 
+          !f.error.includes('not found in storage') && !f.error.includes('File not found')
+        );
+        
+        if (otherErrors.length > 0) {
+          toast.error(`Errore nella sincronizzazione di ${otherErrors.length} documento/i`);
         }
         
         console.warn('❌ Failed documents:', remainingFailed.map(f => ({
@@ -282,6 +296,44 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         `Sincronizzati ${successCount}/${missingDocs.length} documenti. ${failedCount} file hanno problemi.`,
         { duration: 7000 }
       );
+    }
+  };
+
+  const handleRemoveBrokenDocs = async () => {
+    const brokenDocs = documents.filter(doc => doc.syncStatus === 'storage_missing');
+    
+    if (brokenDocs.length === 0) {
+      toast.info('Nessun documento rotto da rimuovere');
+      return;
+    }
+
+    if (!confirm(`Vuoi rimuovere ${brokenDocs.length} documento/i con file mancanti dal database?`)) {
+      return;
+    }
+
+    try {
+      // Remove agent_document_links for broken documents
+      for (const doc of brokenDocs) {
+        const { error } = await supabase
+          .from('agent_document_links')
+          .delete()
+          .eq('id', doc.link_id);
+
+        if (error) {
+          console.error(`Error removing link for ${doc.file_name}:`, error);
+          throw error;
+        }
+      }
+
+      toast.success(`${brokenDocs.length} documento/i rotti rimossi con successo`);
+      await loadDocuments();
+      
+      if (onDocsUpdated) {
+        onDocsUpdated();
+      }
+    } catch (error) {
+      console.error('Error removing broken docs:', error);
+      toast.error('Errore nella rimozione dei documenti rotti');
     }
   };
 
@@ -463,6 +515,21 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
               Sincronizza Tutti
             </Button>
           )}
+          {documents.some(doc => doc.syncStatus === 'storage_missing') && (
+            <Button 
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleRemoveBrokenDocs();
+              }} 
+              size="sm" 
+              type="button"
+              variant="destructive"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Rimuovi Documenti Rotti
+            </Button>
+          )}
           <Button onClick={() => setShowAssignDialog(true)} size="sm" type="button">
             <Plus className="h-4 w-4 mr-2" />
             Assegna Documento
@@ -533,6 +600,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                           <span className="text-destructive">Non sincronizzato</span>
                         </>
                       )}
+                      {doc.syncStatus === 'storage_missing' && (
+                        <>
+                          <XCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                          <span className="text-red-600">File mancante</span>
+                        </>
+                      )}
                     </div>
                     
                     {/* Date */}
@@ -584,6 +657,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                             <>
                               <AlertCircle className="h-4 w-4 text-destructive" />
                               <span className="text-sm text-destructive">Non sincronizzato</span>
+                            </>
+                          )}
+                          {doc.syncStatus === 'storage_missing' && (
+                            <>
+                              <XCircle className="h-4 w-4 text-red-600" />
+                              <span className="text-sm text-red-600">File mancante</span>
                             </>
                           )}
                         </div>
