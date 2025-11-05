@@ -1507,13 +1507,22 @@ Deno.serve(async (req) => {
           try {
             // Check if user is asking for list of documents
             const listQueryPatterns = [
-              /quali (pdf|documenti|libri|file)/i,
-              /what (pdfs?|documents?|books?|files?)/i,
-              /list (of )?(pdfs?|documents?|books?|files?)/i,
-              /show (me )?(all )?(pdfs?|documents?|books?|files?)/i,
-              /elenco (dei )?(pdf|documenti|libri)/i,
-              /do you have any (pdfs?|documents?|books?)/i,
-              /hai (dei )?(pdf|documenti|libri)/i
+              // Pattern italiani migliorati
+              /qual[ei]\s+(pdf|documenti|libri|file|doc)/i,
+              /hai\s+(?:dei\s+|nel\s+|nel\s+tuo\s+)?(pdf|documenti|libri|file)/i,
+              /elenco\s+(?:dei\s+)?(pdf|documenti|libri)/i,
+              /dimmi\s+(?:quali?|cosa)\s+.{0,30}(pdf|documenti|libri|knowledge\s*base)/i,
+              /mostra(?:mi)?\s+.{0,20}(pdf|documenti|libri)/i,
+              /cosa\s+(?:c'è|hai)\s+(?:nel|in)\s+.{0,20}(knowledge|base|documenti)/i,
+              /possiedi\s+.{0,20}(pdf|documenti|libri)/i,
+              
+              // Pattern inglesi migliorati
+              /what\s+(pdfs?|documents?|books?|files?)/i,
+              /list\s+(?:of\s+)?(?:all\s+)?(pdfs?|documents?|books?|files?)/i,
+              /show\s+(?:me\s+)?(?:all\s+)?(?:your\s+)?(pdfs?|documents?|books?|files?)/i,
+              /do\s+you\s+have\s+(?:any\s+)?(pdfs?|documents?|books?|files?)/i,
+              /what'?s?\s+in\s+(?:your\s+|the\s+)?(knowledge\s*base|library)/i,
+              /tell\s+me\s+(?:about\s+)?(?:your\s+)?(pdfs?|documents?|books?)/i
             ];
             
             const isListQuery = listQueryPatterns.some(pattern => pattern.test(message));
