@@ -10,7 +10,7 @@ import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Database } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Database, AlertCircle } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,7 @@ export default function MultiAgentConsultant() {
   const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
   const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [unsyncedDocsCount, setUnsyncedDocsCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
 
@@ -148,6 +149,30 @@ export default function MultiAgentConsultant() {
 
   const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
 
+  // Check for unsynced documents when agent changes
+  useEffect(() => {
+    if (currentAgent?.id) {
+      checkUnsyncedDocs(currentAgent.id);
+    } else {
+      setUnsyncedDocsCount(0);
+    }
+  }, [currentAgent?.id]);
+
+  const checkUnsyncedDocs = async (agentId: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
+        body: { agentId, autoFix: false }
+      });
+
+      if (!error && data?.statuses) {
+        const missingCount = data.statuses.filter((s: any) => s.status === 'missing').length;
+        setUnsyncedDocsCount(missingCount);
+      }
+    } catch (error) {
+      console.error('Error checking unsynced docs:', error);
+    }
+  };
+
   const handleSelectAgent = useCallback(async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
@@ -181,6 +206,10 @@ export default function MultiAgentConsultant() {
     setEditingAgent(null);
     // Trigger sidebar refresh
     setAgentUpdateTrigger(prev => prev + 1);
+    // Recheck unsynced docs
+    if (newAgent?.id) {
+      checkUnsyncedDocs(newAgent.id);
+    }
   }, [handleSelectAgent]);
 
   const handleDeleteAgent = async (agentId: string) => {
@@ -553,6 +582,7 @@ export default function MultiAgentConsultant() {
         onSuccess={handleAgentCreated}
         editingAgent={editingAgent}
         onDelete={handleDeleteAgent}
+        onDocsUpdated={() => currentAgent?.id && checkUnsyncedDocs(currentAgent.id)}
       />
 
       {/* Forward Message Dialog */}
@@ -606,8 +636,14 @@ export default function MultiAgentConsultant() {
                                setShowCreateModal(true);
                              }}
                              title="Modifica agente"
+                             className="relative"
                            >
                              <Edit className="h-4 w-4" />
+                             {unsyncedDocsCount > 0 && (
+                               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                                 {unsyncedDocsCount}
+                               </span>
+                             )}
                            </Button>
                        </div>
                   </>

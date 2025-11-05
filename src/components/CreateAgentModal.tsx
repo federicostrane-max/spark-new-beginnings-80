@@ -28,9 +28,10 @@ interface CreateAgentModalProps {
   onSuccess: (agent: Agent) => void;
   editingAgent?: Agent | null;
   onDelete?: (agentId: string) => void;
+  onDocsUpdated?: () => void;
 }
 
-export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, onDelete }: CreateAgentModalProps) => {
+export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, onDelete, onDocsUpdated }: CreateAgentModalProps) => {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -562,6 +563,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               <KnowledgeBaseManager 
                 agentId={editingAgent.id}
                 agentName={editingAgent.name}
+                onDocsUpdated={onDocsUpdated}
               />
             </div>
           )}

@@ -67,12 +67,24 @@ serve(async (req) => {
     // ========================================
     const { data: syncedChunks, error: chunksError } = await supabase
       .from('agent_knowledge')
-      .select('pool_document_id, document_name, id')
+      .select('pool_document_id, document_name, id, source_type')
       .eq('agent_id', agentId)
-      .eq('source_type', 'shared_pool')
+      .or('source_type.eq.shared_pool,source_type.eq.pool')
       .not('pool_document_id', 'is', null);
 
-    if (chunksError) throw chunksError;
+    if (chunksError) {
+      console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
+      throw chunksError;
+    }
+
+    console.log(`[check-and-sync-all] Raw chunks data:`, {
+      totalChunks: syncedChunks?.length || 0,
+      sampleChunks: syncedChunks?.slice(0, 3).map(c => ({
+        pool_document_id: c.pool_document_id,
+        source_type: c.source_type,
+        document_name: c.document_name
+      }))
+    });
 
     // Group chunks by document
     const syncedDocMap = new Map<string, number>();
@@ -84,6 +96,12 @@ serve(async (req) => {
     });
 
     console.log(`[check-and-sync-all] Found chunks for ${syncedDocMap.size} documents`);
+    console.log('[check-and-sync-all] Document chunk counts:', 
+      Array.from(syncedDocMap.entries()).map(([docId, count]) => ({
+        docId: docId.substring(0, 8) + '...',
+        chunks: count
+      }))
+    );
 
     // ========================================
     // STEP 3: Find discrepancies

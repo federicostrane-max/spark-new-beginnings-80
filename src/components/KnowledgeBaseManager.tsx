@@ -29,6 +29,7 @@ interface KnowledgeDocument {
 interface KnowledgeBaseManagerProps {
   agentId: string;
   agentName: string;
+  onDocsUpdated?: () => void;
 }
 
 interface PoolDocument {
@@ -39,7 +40,7 @@ interface PoolDocument {
   isAssigned: boolean;
 }
 
-export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManagerProps) => {
+export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: KnowledgeBaseManagerProps) => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
@@ -143,6 +144,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
           return doc;
         });
         setDocuments(updatedDocs);
+        
+        // Notify parent component about doc updates
+        if (onDocsUpdated) {
+          onDocsUpdated();
+        }
       }
     } catch (error) {
       console.error('❌ Error checking sync statuses:', error);
@@ -153,6 +159,21 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
     console.log('🔄 Re-syncing document:', fileName, 'ID:', docId);
     try {
       toast.info(`Sincronizzazione di ${fileName}...`);
+      
+      // Force a fresh check before syncing
+      console.log('🔍 Checking current sync status before re-sync...');
+      const { data: checkData } = await supabase.functions.invoke('check-and-sync-all', {
+        body: { agentId, autoFix: false }
+      });
+      
+      if (checkData) {
+        console.log('📊 Current sync status:', {
+          totalAssigned: checkData.totalAssigned,
+          totalSynced: checkData.totalSynced,
+          missingCount: checkData.missingCount,
+          documentStatus: checkData.statuses?.find((s: any) => s.documentId === docId)
+        });
+      }
       
       const { data, error } = await supabase.functions.invoke('sync-pool-document', {
         body: { documentId: docId, agentId }
@@ -169,6 +190,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       
       console.log('🔄 Reloading documents...');
       await loadDocuments();
+      
+      // Notify parent to update badge
+      if (onDocsUpdated) {
+        onDocsUpdated();
+      }
     } catch (error: any) {
       console.error('❌ Error re-syncing document:', error);
       toast.error(`Errore nella sincronizzazione: ${error.message || 'Errore sconosciuto'}`);
@@ -282,6 +308,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       setShowAssignDialog(false);
       setSyncProgress(null);
       loadDocuments();
+      
+      // Notify parent to update badge
+      if (onDocsUpdated) {
+        onDocsUpdated();
+      }
     } catch (error: any) {
       console.error('❌ Error assigning documents:', error);
       toast.error('Errore nell\'assegnazione dei documenti');
@@ -304,6 +335,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       console.log('✅ UNASSIGN SUCCESS - Document unassigned:', fileName);
       toast.success(`Documento "${fileName}" rimosso dalla knowledge base`);
       loadDocuments();
+      
+      // Notify parent to update badge
+      if (onDocsUpdated) {
+        onDocsUpdated();
+      }
     } catch (error: any) {
       console.error('❌ Error unassigning document:', error);
       toast.error('Errore nella rimozione del documento');
