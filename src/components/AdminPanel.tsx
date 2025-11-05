@@ -16,71 +16,64 @@ interface ProcessingResult {
   error?: string;
 }
 
+interface BatchSummary {
+  processed: number;
+  successful: number;
+  errors: number;
+  totalStuck: number;
+  remainingStuck: number;
+}
+
 export const AdminPanel = () => {
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<ProcessingResult[] | null>(null);
-  const [summary, setSummary] = useState<{
-    processed: number;
-    successful: number;
-    errors: number;
-  } | null>(null);
+  const [summary, setSummary] = useState<BatchSummary | null>(null);
 
   const handleRetryFailedDocuments = async () => {
     setProcessing(true);
-    setResults(null);
-    setSummary(null);
+    const previousResults = results || [];
 
     try {
-      console.log('🔄 Calling retry-failed-documents...');
+      console.log('🔄 Calling retry-failed-documents with batch limit 5...');
       
-      // Timeout più lungo per gestire il delay tra documenti (90 secondi)
-      const timeout = 90000;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
-
       const { data, error } = await supabase.functions.invoke('retry-failed-documents', {
-        body: {},
-        signal: controller.signal
+        body: { limit: 5 }
       });
 
-      clearTimeout(timeoutId);
-
       if (error) {
-        // Se è un timeout, mostra un messaggio più informativo
-        if (error.message?.includes('aborted') || error.message?.includes('timeout')) {
-          toast.warning('⏱️ Timeout - Il processo continua in background. Ricarica la pagina tra qualche minuto.');
-          setProcessing(false);
-          return;
-        }
         throw error;
       }
 
       console.log('✅ Processing complete:', data);
       
-      setResults(data.results || []);
+      // Append new results to previous ones
+      setResults([...previousResults, ...(data.results || [])]);
       setSummary({
         processed: data.processed || 0,
         successful: data.successful || 0,
-        errors: data.errors || 0
+        errors: data.errors || 0,
+        totalStuck: data.totalStuck || 0,
+        remainingStuck: data.remainingStuck || 0
       });
 
       if (data.successful > 0) {
-        toast.success(`✅ ${data.successful} documento/i processato/i con successo!`);
+        const remainingMsg = data.remainingStuck > 0 
+          ? ` - Rimangono ${data.remainingStuck} documenti da processare` 
+          : ' - Tutti i documenti sono stati processati!';
+        toast.success(`✅ Processati ${data.successful} documenti con successo!${remainingMsg}`);
       }
       
       if (data.errors > 0) {
         toast.error(`⚠️ ${data.errors} documento/i con errori`);
       }
+      
+      if (data.remainingStuck === 0 && data.totalStuck > 0) {
+        toast.success('🎉 Tutti i documenti sono stati processati!');
+      }
 
     } catch (error: any) {
       console.error('❌ Error:', error);
-      
-      // Gestione specifica per timeout o abort
-      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
-        toast.warning('⏱️ Timeout raggiunto - Il processo continua in background. Ricarica la pagina tra qualche minuto per vedere i risultati.');
-      } else {
-        toast.error(`Errore: ${error.message || 'Operazione fallita'}`);
-      }
+      toast.error(`Errore: ${error.message || 'Operazione fallita'}`);
     } finally {
       setProcessing(false);
     }
@@ -108,11 +101,10 @@ export const AdminPanel = () => {
         {/* Retry Failed Documents */}
         <div className="space-y-3">
           <div>
-            <h3 className="text-lg font-semibold mb-1">Processa Documenti Validati</h3>
+            <h3 className="text-lg font-semibold mb-1">Processa Documenti Validati (Batch)</h3>
             <p className="text-sm text-muted-foreground">
-              Trova e processa tutti i documenti che sono validati ma non hanno chunks in agent_knowledge
-              (documenti bloccati in stato "downloaded"). 
-              ⏱️ Nota: Con molti documenti, il processo può richiedere diversi minuti.
+              Processa fino a 5 documenti alla volta che sono validati ma bloccati in stato "downloaded". 
+              Se ci sono più documenti da processare, clicca il pulsante più volte.
             </p>
           </div>
 
@@ -124,12 +116,12 @@ export const AdminPanel = () => {
             {processing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
+                Processing Batch...
               </>
             ) : (
               <>
                 <RefreshCw className="mr-2 h-4 w-4" />
-                Processa Documenti Bloccati
+                Processa Batch (5 documenti)
               </>
             )}
           </Button>
@@ -137,27 +129,52 @@ export const AdminPanel = () => {
 
         {/* Summary */}
         {summary && (
-          <Alert>
-            <AlertDescription>
-              <div className="space-y-2">
-                <div className="font-semibold">Riepilogo Processing:</div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">Totale</div>
-                    <div className="text-2xl font-bold">{summary.processed}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Successo</div>
-                    <div className="text-2xl font-bold text-green-600">{summary.successful}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Errori</div>
-                    <div className="text-2xl font-bold text-red-600">{summary.errors}</div>
+          <div className="space-y-4">
+            <Alert>
+              <AlertDescription>
+                <div className="space-y-2">
+                  <div className="font-semibold">Ultimo Batch:</div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Processati</div>
+                      <div className="text-2xl font-bold">{summary.processed}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Successo</div>
+                      <div className="text-2xl font-bold text-green-600">{summary.successful}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Errori</div>
+                      <div className="text-2xl font-bold text-red-600">{summary.errors}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </AlertDescription>
-          </Alert>
+              </AlertDescription>
+            </Alert>
+
+            {summary.remainingStuck > 0 && (
+              <Alert className="border-yellow-500/50 bg-yellow-500/10">
+                <AlertDescription>
+                  <div className="font-semibold">
+                    ⚠️ Rimangono <span className="text-yellow-600">{summary.remainingStuck}</span> documenti da processare
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Clicca di nuovo il pulsante per processare il prossimo batch
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {summary.remainingStuck === 0 && summary.totalStuck > 0 && (
+              <Alert className="border-green-500/50 bg-green-500/10">
+                <AlertDescription>
+                  <div className="font-semibold text-green-600">
+                    ✅ Tutti i documenti sono stati processati!
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
         )}
 
         {/* Results Table */}

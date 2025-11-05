@@ -22,13 +22,26 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Find documents that are validated but not processed
-    // (status = 'downloaded' instead of 'ready_for_assignment')
+    // Get batch limit from request body (default 5)
+    const { limit = 5 } = await req.json().catch(() => ({ limit: 5 }));
+    console.log(`[retry-failed-documents] Processing max ${limit} documents per batch`);
+
+    // Count total stuck documents
+    const { count: totalStuck } = await supabase
+      .from('knowledge_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('validation_status', 'validated')
+      .eq('processing_status', 'downloaded');
+
+    console.log(`[retry-failed-documents] Total stuck documents: ${totalStuck || 0}`);
+
+    // Find documents that are validated but not processed (limited by batch size)
     const { data: stuckDocuments, error: queryError } = await supabase
       .from('knowledge_documents')
       .select('id, file_name, validation_status, processing_status')
       .eq('validation_status', 'validated')
-      .eq('processing_status', 'downloaded');
+      .eq('processing_status', 'downloaded')
+      .limit(limit);
 
     if (queryError) {
       throw new Error(`Query failed: ${queryError.message}`);
@@ -109,10 +122,18 @@ serve(async (req) => {
     const successCount = results.filter(r => r.status === 'success').length;
     const errorCount = results.filter(r => r.status === 'error').length;
 
+    // Count remaining stuck documents after processing
+    const { count: remainingStuck } = await supabase
+      .from('knowledge_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('validation_status', 'validated')
+      .eq('processing_status', 'downloaded');
+
     console.log(`\n[retry-failed-documents] ========== SUMMARY ==========`);
-    console.log(`  Total documents: ${results.length}`);
+    console.log(`  Batch size: ${results.length}`);
     console.log(`  Successful: ${successCount}`);
     console.log(`  Errors: ${errorCount}`);
+    console.log(`  Remaining stuck: ${remainingStuck || 0}`);
     console.log('[retry-failed-documents] ========== END ==========');
 
     return new Response(
@@ -122,6 +143,8 @@ serve(async (req) => {
         processed: results.length,
         successful: successCount,
         errors: errorCount,
+        totalStuck: totalStuck || 0,
+        remainingStuck: remainingStuck || 0,
         results
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
