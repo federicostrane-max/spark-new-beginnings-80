@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2, FileText, Plus } from "lucide-react";
+import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
@@ -22,6 +22,8 @@ interface KnowledgeDocument {
   created_at: string;
   assignment_type: string;
   link_id: string;
+  syncStatus?: 'synced' | 'missing' | 'checking';
+  chunkCount?: number;
 }
 
 interface KnowledgeBaseManagerProps {
@@ -45,6 +47,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   const [loadingPool, setLoadingPool] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
   const [assigning, setAssigning] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
+  const [syncStatuses, setSyncStatuses] = useState<Map<string, 'synced' | 'syncing' | 'error'>>(new Map());
 
   useEffect(() => {
     loadDocuments();
@@ -85,15 +89,68 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
           created_at: (link.knowledge_documents as any).created_at,
           assignment_type: link.assignment_type,
           link_id: link.id,
+          syncStatus: 'checking',
+          chunkCount: 0,
         }));
 
       console.log('📄 LOAD ASSIGNED DOCUMENTS SUCCESS, found:', transformedData.length, 'documents');
       setDocuments(transformedData);
+
+      // Check sync status for each document
+      if (transformedData.length > 0) {
+        checkSyncStatuses(transformedData);
+      }
     } catch (error: any) {
       console.error('❌ Error loading assigned documents:', error);
     } finally {
       setLoading(false);
       console.log('📄 LOAD ASSIGNED DOCUMENTS END');
+    }
+  };
+
+  const checkSyncStatuses = async (docs: KnowledgeDocument[]) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
+        body: { agentId, autoFix: false }
+      });
+
+      if (error) throw error;
+
+      if (data?.statuses) {
+        const updatedDocs = docs.map(doc => {
+          const status = data.statuses.find((s: any) => s.documentId === doc.id);
+          if (status) {
+            return {
+              ...doc,
+              syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
+              chunkCount: status.chunkCount || 0,
+            };
+          }
+          return doc;
+        });
+        setDocuments(updatedDocs);
+      }
+    } catch (error) {
+      console.error('❌ Error checking sync statuses:', error);
+    }
+  };
+
+  const handleResync = async (docId: string, fileName: string) => {
+    console.log('🔄 Re-syncing document:', fileName);
+    try {
+      toast.info(`Sincronizzazione di ${fileName}...`);
+      
+      const { data, error } = await supabase.functions.invoke('sync-pool-document', {
+        body: { documentId: docId, agentId }
+      });
+
+      if (error) throw error;
+
+      toast.success(`${fileName} sincronizzato con successo`);
+      loadDocuments();
+    } catch (error: any) {
+      console.error('❌ Error re-syncing document:', error);
+      toast.error(`Errore nella sincronizzazione di ${fileName}`);
     }
   };
 
@@ -147,8 +204,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
     console.log('🔗 ASSIGN DOCUMENTS START');
     try {
       setAssigning(true);
+      const docArray = Array.from(selectedDocuments);
+      setSyncProgress({ current: 0, total: docArray.length });
 
-      const assignments = Array.from(selectedDocuments).map(docId => ({
+      const assignments = docArray.map(docId => ({
         document_id: docId,
         agent_id: agentId,
         assignment_type: 'manual',
@@ -161,16 +220,46 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
-      // Sync each document to create chunks
-      for (const docId of selectedDocuments) {
-        supabase.functions.invoke('sync-pool-document', {
-          body: { documentId: docId, agentId }
-        });
+      // Sync each document and wait for completion
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (let i = 0; i < docArray.length; i++) {
+        const docId = docArray[i];
+        const docName = poolDocuments.find(d => d.id === docId)?.file_name || 'Unknown';
+        
+        console.log(`🔄 Syncing document ${i + 1}/${docArray.length}: ${docName}`);
+        setSyncProgress({ current: i + 1, total: docArray.length });
+        
+        try {
+          const { data, error: syncError } = await supabase.functions.invoke('sync-pool-document', {
+            body: { documentId: docId, agentId }
+          });
+
+          if (syncError) throw syncError;
+          
+          console.log(`✅ Synced ${docName}:`, data);
+          successCount++;
+          setSyncStatuses(prev => new Map(prev).set(docId, 'synced'));
+        } catch (syncError: any) {
+          console.error(`❌ Error syncing ${docName}:`, syncError);
+          errorCount++;
+          setSyncStatuses(prev => new Map(prev).set(docId, 'error'));
+        }
       }
 
-      console.log('✅ ASSIGN SUCCESS - Assigned', selectedDocuments.size, 'documents');
-      toast.success(`${selectedDocuments.size} documento/i assegnato/i con successo. Creazione chunks in corso...`);
+      console.log(`✅ ASSIGN COMPLETE - Success: ${successCount}, Errors: ${errorCount}`);
+      
+      if (errorCount === 0) {
+        toast.success(`${successCount} documento/i assegnato/i e sincronizzato/i con successo`);
+      } else if (successCount > 0) {
+        toast.warning(`${successCount} documento/i sincronizzato/i, ${errorCount} con errori`);
+      } else {
+        toast.error('Errore nella sincronizzazione dei documenti');
+      }
+
       setShowAssignDialog(false);
+      setSyncProgress(null);
       loadDocuments();
     } catch (error: any) {
       console.error('❌ Error assigning documents:', error);
@@ -238,8 +327,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
             <Table className="table-fixed w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[45%]">Nome Documento</TableHead>
-                  <TableHead className="w-[35%]">Assegnato</TableHead>
+                  <TableHead className="w-[35%]">Nome Documento</TableHead>
+                  <TableHead className="w-[25%]">Stato Sync</TableHead>
+                  <TableHead className="w-[20%]">Assegnato</TableHead>
                   <TableHead className="w-[20%] text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
@@ -252,6 +342,37 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                         <span className="truncate" title={doc.file_name}>
                           {doc.file_name}
                         </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {doc.syncStatus === 'checking' && (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">Verifica...</span>
+                          </>
+                        )}
+                        {doc.syncStatus === 'synced' && (
+                          <>
+                            <CheckCircle2 className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-green-600">
+                              Sincronizzato ({doc.chunkCount} chunks)
+                            </span>
+                          </>
+                        )}
+                        {doc.syncStatus === 'missing' && (
+                          <>
+                            <AlertCircle className="h-4 w-4 text-destructive" />
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-sm text-destructive"
+                              onClick={() => handleResync(doc.id, doc.file_name)}
+                            >
+                              Ri-sincronizza
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
@@ -344,9 +465,18 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
           </div>
 
           <div className="flex justify-between items-center pt-4 border-t">
-            <p className="text-sm text-muted-foreground">
-              {selectedDocuments.size} documento/i selezionato/i
-            </p>
+            <div className="text-sm">
+              {syncProgress ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Sincronizzazione {syncProgress.current}/{syncProgress.total}...</span>
+                </div>
+              ) : (
+                <span className="text-muted-foreground">
+                  {selectedDocuments.size} documento/i selezionato/i
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -362,7 +492,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
                 type="button"
               >
                 {assigning && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Assegna Documenti
+                Assegna e Sincronizza
               </Button>
             </div>
           </div>

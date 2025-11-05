@@ -150,7 +150,7 @@ serve(async (req) => {
       
       console.log(`[sync-pool-document] Processing chunk ${i + 1}/${chunks.length}`);
 
-      // Generate embedding
+      // Generate embedding with newer model
       const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
         method: 'POST',
         headers: {
@@ -158,7 +158,7 @@ serve(async (req) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'text-embedding-ada-002',
+          model: 'text-embedding-3-small',
           input: chunk,
         }),
       });
