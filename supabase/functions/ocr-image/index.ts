@@ -36,18 +36,36 @@ serve(async (req) => {
       throw new Error('GOOGLE_AI_STUDIO_API_KEY not configured');
     }
 
-    console.log('Performing OCR on image:', fileName);
+    console.log('[ocr-image] Processing file:', fileName || imageUrl);
 
-    // Fetch image and convert to base64
+    // Fetch image/PDF and convert to base64
+    console.log('[ocr-image] Fetching from URL...');
     const imageResponse = await fetch(imageUrl);
+    
+    if (!imageResponse.ok) {
+      throw new Error(`Failed to fetch file: ${imageResponse.status} ${imageResponse.statusText}`);
+    }
+    
     const imageBuffer = await imageResponse.arrayBuffer();
-    const fileSizeKB = (imageBuffer.byteLength / 1024).toFixed(2);
-    console.log(`File size: ${fileSizeKB} KB`);
+    const fileSizeMB = (imageBuffer.byteLength / (1024 * 1024)).toFixed(2);
+    console.log(`[ocr-image] File downloaded: ${fileSizeMB} MB`);
     
     // Use chunked conversion for large files to avoid stack overflow
+    console.log('[ocr-image] Converting to base64...');
     const base64Image = arrayBufferToBase64(imageBuffer);
+    console.log('[ocr-image] Conversion complete');
+
+    // Determine if it's a PDF or image
+    const isPDF = fileName?.toLowerCase().endsWith('.pdf') || false;
+    const mimeType = isPDF ? 'application/pdf' : (imageResponse.headers.get('content-type') || 'image/jpeg');
+    const prompt = isPDF 
+      ? "Extract all text from this PDF document. Return only the extracted text, preserving the original structure and formatting as much as possible. Do not add any commentary or explanations."
+      : "Extract all text from this image. Return only the extracted text, nothing else.";
+
+    console.log(`[ocr-image] Processing as: ${mimeType}`);
 
     // Call Google Vision API
+    console.log('[ocr-image] Calling Google Gemini API...');
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${googleApiKey}`,
       {
@@ -56,10 +74,10 @@ serve(async (req) => {
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: "Extract all text from this image. Return only the extracted text, nothing else." },
+              { text: prompt },
               {
                 inline_data: {
-                  mime_type: imageResponse.headers.get('content-type') || 'image/jpeg',
+                  mime_type: mimeType,
                   data: base64Image
                 }
               }
