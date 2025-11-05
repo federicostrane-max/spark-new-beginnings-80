@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Plus, LogOut, BookOpen, Trash2, Edit, Database } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -168,7 +168,7 @@ export const AgentsSidebar = ({
         </ScrollArea>
       </div>
 
-      {/* Logout Button */}
+      {/* Footer Buttons */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
         <Button 
           variant="ghost" 
@@ -177,6 +177,14 @@ export const AgentsSidebar = ({
         >
           <Database className="h-4 w-4" />
           Pool Documenti
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
+          onClick={() => navigate("/admin")}
+        >
+          <Settings className="h-4 w-4" />
+          Admin Panel
         </Button>
         <Button 
           variant="ghost" 
