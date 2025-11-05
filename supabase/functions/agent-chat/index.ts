@@ -375,14 +375,18 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
       if (fileSizeBytes !== null && fileSizeBytes !== undefined) {
         const fileSizeMB = fileSizeBytes / 1024 / 1024;
         
-        if (fileSizeMB > 5) {
-          // Likely a book or comprehensive document
+        if (fileSizeMB > 3) {
+          // Likely a book (>3MB)
+          credibilityScore = Math.min(10, credibilityScore + 2);
+          console.log(`📚 Large file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (+2 score → ${credibilityScore})`);
+        } else if (fileSizeMB >= 1 && fileSizeMB <= 3) {
+          // Likely a handbook/comprehensive guide (1-3MB)
           credibilityScore = Math.min(10, credibilityScore + 1);
-          console.log(`📖 Large file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (+1 score → ${credibilityScore})`);
-        } else if (fileSizeMB < 1) {
-          // Likely a short article
-          credibilityScore = Math.max(1, credibilityScore - 1);
-          console.log(`📄 Small file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (-1 score → ${credibilityScore})`);
+          console.log(`📖 Medium file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (+1 score → ${credibilityScore})`);
+        } else if (fileSizeMB < 0.5) {
+          // Very small article
+          credibilityScore = Math.max(1, credibilityScore - 2);
+          console.log(`📄 Very small file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (-2 score → ${credibilityScore})`);
         }
       }
       
@@ -479,10 +483,17 @@ function formatSearchResults(results: SearchResult[], topic: string, requestedCo
       formatted += `    Credibility: ${r.credibilityScore}/10\n`;
     }
     
-    // File Size line with Book/Article indicator
+    // File Size line with Book/Handbook/Article indicator
     if (r.file_size_bytes) {
       const fileSizeMB = (r.file_size_bytes / (1024 * 1024)).toFixed(1);
-      const sizeLabel = r.file_size_bytes > 5 * 1024 * 1024 ? '📚 Book' : '📄 Article';
+      let sizeLabel = '📄 Article';
+      
+      if (r.file_size_bytes > 3 * 1024 * 1024) {
+        sizeLabel = '📚 Book';
+      } else if (r.file_size_bytes >= 1 * 1024 * 1024) {
+        sizeLabel = '📖 Handbook';
+      }
+      
       formatted += `    Size: ${fileSizeMB} MB ${sizeLabel}\n`;
     }
     
