@@ -302,9 +302,14 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     
     // Create 3 search queries targeting different domains - prioritizing books
     const searchQueries = [
-      `${topic} (book OR textbook OR handbook) filetype:pdf site:edu`,              // Academic institutions - books
-      `${topic} (book OR textbook OR handbook OR manual) filetype:pdf (site:arxiv.org OR site:ieee.org OR site:acm.org OR site:springer.com)`, // Academic publishers - books
-      `${topic} (book OR textbook OR handbook OR guide) filetype:pdf`                         // General PDF search - books
+      // Query 1: Academic sources (NO book filter obbligatorio)
+      `${topic} filetype:pdf (site:edu OR site:ac.uk OR site:edu.au)`,
+      
+      // Query 2: Publishers + comprehensive content (suggerisce ma non forza)
+      `${topic} filetype:pdf (site:springer.com OR site:ieee.org OR site:acm.org OR site:oreilly.com OR site:manning.com) (book OR handbook OR guide OR comprehensive)`,
+      
+      // Query 3: General open access (include research papers)
+      `${topic} filetype:pdf (article OR paper OR study OR research OR guide OR handbook)`
     ];
     
     const allPdfResults: any[] = [];
@@ -539,6 +544,40 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
       };
     });
     
+    // PHASE 3.5: Semantic relevance boost
+    console.log('🎯 [PHASE 3.5] Applying semantic relevance boost...');
+    
+    const topicKeywords = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    console.log(`🔍 Topic keywords for relevance check: ${topicKeywords.join(', ')}`);
+    
+    enrichedResults.forEach((result) => {
+      const titleLower = result.title.toLowerCase();
+      
+      // Count how many topic keywords appear in title
+      const keywordMatches = topicKeywords.filter(keyword => 
+        titleLower.includes(keyword)
+      ).length;
+      
+      const relevanceRatio = keywordMatches / topicKeywords.length;
+      
+      // Boost score if highly relevant
+      if (relevanceRatio >= 0.7) {
+        // 70%+ keywords matched → strong relevance
+        result.credibilityScore = Math.min(10, (result.credibilityScore || 0) + 2);
+        console.log(`🎯 High relevance: "${result.title.slice(0, 60)}..." (${(relevanceRatio * 100).toFixed(0)}% match, +2 score)`);
+      } else if (relevanceRatio >= 0.4) {
+        // 40-69% keywords matched → medium relevance
+        result.credibilityScore = Math.min(10, (result.credibilityScore || 0) + 1);
+        console.log(`🎯 Medium relevance: "${result.title.slice(0, 60)}..." (${(relevanceRatio * 100).toFixed(0)}% match, +1 score)`);
+      } else if (relevanceRatio < 0.3) {
+        // <30% keywords matched → tangential, penalize
+        result.credibilityScore = Math.max(1, (result.credibilityScore || 0) - 1);
+        console.log(`⚠️ Low relevance: "${result.title.slice(0, 60)}..." (${(relevanceRatio * 100).toFixed(0)}% match, -1 score)`);
+      }
+    });
+    
+    console.log(`✅ [PHASE 3.5] Semantic relevance scoring completed`);
+    
     // PHASE 4: Quality filtering & sorting (prioritize books)
     console.log('✨ [PHASE 4] Quality filtering & sorting (books first)...');
     
@@ -741,13 +780,12 @@ async function queryCoreAPI(topic: string, maxResults: number = 10): Promise<Sea
   console.log(`📖 [CORE API] Searching for: ${topic}`);
   
   try {
-    // CORE API v3 endpoint (free tier, no API key needed for basic search)
+    // CORE API v3 (open access research papers)
     const url = `https://api.core.ac.uk/v3/search/works?q=${encodeURIComponent(topic)}&limit=${maxResults}`;
     
     const response = await fetch(url, {
       headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; ResearchBot/1.0)'
+        'Accept': 'application/json'
       }
     });
     
@@ -757,25 +795,88 @@ async function queryCoreAPI(topic: string, maxResults: number = 10): Promise<Sea
     }
     
     const data = await response.json();
-    const works = data.results || [];
+    const items = data.results || [];
     
-    if (works.length === 0) {
+    if (items.length === 0) {
       console.log(`ℹ️ [CORE API] No results found`);
       return [];
     }
     
-    const results = works.map((work: any, index: number): SearchResult | null => {
-      const title = work.title || 'Untitled';
-      const authors = work.authors?.map((a: any) => a.name).join(', ') || undefined;
-      const year = work.yearPublished?.toString() || work.publishedDate?.match(/\d{4}/)?.[0] || undefined;
+    const results: SearchResult[] = items.map((item: any, index: number) => {
+      const title = item.title || 'Untitled';
+      const authors = item.authors?.join(', ') || undefined;
+      const year = item.yearPublished?.toString() || undefined;
+      
+      // Try to get download URL
+      const pdfUrl = item.downloadUrl || item.sourceFulltextUrls?.[0];
+      
+      if (!pdfUrl) return null;
+      
+      return {
+        number: index + 1,
+        title,
+        authors,
+        year,
+        source: item.publisher || 'core.ac.uk',
+        url: pdfUrl,
+        credibilityScore: 6, // CORE = open access repository
+        source_type: 'core_api',
+        verified: true,
+        file_size_bytes: undefined
+      };
+    }).filter((r: SearchResult | null): r is SearchResult => r !== null);
+    
+    console.log(`✅ [CORE API] Found ${results.length} results with download links`);
+    return results;
+    
+  } catch (error) {
+    console.error(`❌ [CORE API] Error:`, error);
+    return [];
+  }
+}
+
+// Crossref API Query (Google Scholar proxy for general topics)
+async function queryCrossrefAPI(topic: string, maxResults: number = 10): Promise<SearchResult[]> {
+  console.log(`📚 [Crossref API] Searching for: ${topic}`);
+  
+  try {
+    // Crossref API (gratuito, no key necessaria)
+    const url = `https://api.crossref.org/works?query=${encodeURIComponent(topic)}&rows=${maxResults}&filter=type:book-chapter,type:monograph,type:journal-article&sort=relevance`;
+    
+    const response = await fetch(url, {
+      headers: { 
+        'User-Agent': 'ResearchBot/1.0 (mailto:research@example.com)',
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`❌ [Crossref API] HTTP ${response.status}`);
+      return [];
+    }
+    
+    const data = await response.json();
+    const items = data.message?.items || [];
+    
+    if (items.length === 0) {
+      console.log(`ℹ️ [Crossref API] No results found`);
+      return [];
+    }
+    
+    const results: SearchResult[] = items.map((item: any, index: number) => {
+      const title = item.title?.[0] || 'Untitled';
+      const authors = item.author?.map((a: any) => 
+        `${a.given || ''} ${a.family || ''}`.trim()
+      ).join(', ') || undefined;
+      const year = item.published?.['date-parts']?.[0]?.[0]?.toString() || undefined;
       
       // Try to find PDF link
-      let pdfUrl = work.downloadUrl;
-      if (!pdfUrl && work.links) {
-        const pdfLink = work.links.find((link: any) => 
-          link.type === 'download' || link.url?.endsWith('.pdf')
-        );
-        pdfUrl = pdfLink?.url;
+      let pdfUrl = item.link?.find((l: any) => 
+        l['content-type'] === 'application/pdf'
+      )?.URL;
+      
+      if (!pdfUrl && item.URL) {
+        pdfUrl = item.URL;
       }
       
       if (!pdfUrl) return null;
@@ -785,20 +886,20 @@ async function queryCoreAPI(topic: string, maxResults: number = 10): Promise<Sea
         title,
         authors,
         year,
-        source: new URL(pdfUrl).hostname,
+        source: item.publisher || 'crossref.org',
         url: pdfUrl,
-        credibilityScore: 7,
-        source_type: 'core_api',
+        credibilityScore: 7, // Crossref = curated database
+        source_type: 'crossref_api',
         verified: true,
         file_size_bytes: undefined
       };
     }).filter((r: SearchResult | null): r is SearchResult => r !== null);
     
-    console.log(`✅ [CORE API] Found ${results.length} results with PDF links`);
+    console.log(`✅ [Crossref API] Found ${results.length} results with links`);
     return results;
     
   } catch (error) {
-    console.error(`❌ [CORE API] Error:`, error);
+    console.error(`❌ [Crossref API] Error:`, error);
     return [];
   }
 }
@@ -835,6 +936,12 @@ async function enrichWithRepositoryAPIs(
   // Always query CORE (general academic)
   console.log(`📖 [API ENRICHMENT] Querying CORE (general academic)...`);
   apiPromises.push(queryCoreAPI(topic, 5));
+  
+  // Crossref for non-STEM topics (business, management, social science)
+  if (!isCS && !isMedBio) {
+    console.log(`📚 [API ENRICHMENT] Querying Crossref (general/business topic detected)...`);
+    apiPromises.push(queryCrossrefAPI(topic, 8));
+  }
   
   // Wait for all API queries
   const apiResultsArrays = await Promise.all(apiPromises);
