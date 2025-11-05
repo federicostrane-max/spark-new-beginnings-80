@@ -247,11 +247,11 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     // PHASE 1: Multi-domain direct PDF search
     console.log('📚 [PHASE 1] Multi-domain PDF search...');
     
-    // Create 3 search queries targeting different domains
+    // Create 3 search queries targeting different domains - prioritizing books
     const searchQueries = [
-      `${topic} filetype:pdf site:edu`,              // Academic institutions
-      `${topic} filetype:pdf (site:arxiv.org OR site:ieee.org OR site:acm.org OR site:springer.com)`, // Academic publishers
-      `${topic} filetype:pdf`                         // General PDF search
+      `${topic} (book OR textbook OR handbook) filetype:pdf site:edu`,              // Academic institutions - books
+      `${topic} (book OR textbook OR handbook OR manual) filetype:pdf (site:arxiv.org OR site:ieee.org OR site:acm.org OR site:springer.com)`, // Academic publishers - books
+      `${topic} (book OR textbook OR handbook OR guide) filetype:pdf`                         // General PDF search - books
     ];
     
     const allPdfResults: any[] = [];
@@ -334,13 +334,13 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
       console.error('⚠️ Metadata extraction error:', error);
     }
     
-    // PHASE 3: Merge data and calculate credibility
-    console.log('🎯 [PHASE 3] Enriching results...');
+    // PHASE 3: Merge data and calculate credibility with book prioritization
+    console.log('🎯 [PHASE 3] Enriching results with smart book scoring...');
     
     const enrichedResults: SearchResult[] = topResults.map((pdf: any, index: number) => {
       const metadata = metadataList[index] || {};
       
-      // Calculate credibility score based on domain
+      // Calculate base credibility score based on domain
       let credibilityScore = 3; // Default
       const domain = pdf.domain.toLowerCase();
       
@@ -354,6 +354,36 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
         credibilityScore = 6;
       } else if (domain.includes('researchgate') || domain.includes('academia')) {
         credibilityScore = 5;
+      }
+      
+      // BOOK DETECTION BONUS: Check for book-related keywords in title
+      const title = pdf.title.toLowerCase();
+      const isLikelyBook = 
+        title.includes('book') || 
+        title.includes('textbook') || 
+        title.includes('handbook') || 
+        title.includes('guide') ||
+        title.includes('manual');
+      
+      if (isLikelyBook) {
+        credibilityScore = Math.min(10, credibilityScore + 2);
+        console.log(`📚 Book keyword detected: "${pdf.title.slice(0, 60)}..." (+2 score → ${credibilityScore})`);
+      }
+      
+      // FILE SIZE BONUS/PENALTY: Reward large files (books), penalize small files (articles)
+      const fileSizeBytes = metadata.file_size_bytes;
+      if (fileSizeBytes !== null && fileSizeBytes !== undefined) {
+        const fileSizeMB = fileSizeBytes / 1024 / 1024;
+        
+        if (fileSizeMB > 5) {
+          // Likely a book or comprehensive document
+          credibilityScore = Math.min(10, credibilityScore + 1);
+          console.log(`📖 Large file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (+1 score → ${credibilityScore})`);
+        } else if (fileSizeMB < 1) {
+          // Likely a short article
+          credibilityScore = Math.max(1, credibilityScore - 1);
+          console.log(`📄 Small file (${fileSizeMB.toFixed(1)}MB): "${pdf.title.slice(0, 60)}..." (-1 score → ${credibilityScore})`);
+        }
       }
       
       // Extract year from metadata or snippet
@@ -380,15 +410,21 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
       };
     });
     
-    // PHASE 4: Quality filtering & sorting
-    console.log('✨ [PHASE 4] Quality filtering...');
+    // PHASE 4: Quality filtering & sorting (prioritize books)
+    console.log('✨ [PHASE 4] Quality filtering & sorting (books first)...');
     
-    // Sort by credibility score (descending), then by year (descending)
+    // Sort by: 1) credibility score, 2) file size (bigger = better), 3) year (recent = better)
     enrichedResults.sort((a, b) => {
       const scoreA = a.credibilityScore || 0;
       const scoreB = b.credibilityScore || 0;
       if (scoreB !== scoreA) return scoreB - scoreA;
       
+      // If same credibility, prefer larger files (books)
+      const sizeA = a.file_size_bytes || 0;
+      const sizeB = b.file_size_bytes || 0;
+      if (sizeB !== sizeA) return sizeB - sizeA;
+      
+      // If same size, prefer recent
       const yearA = parseInt(a.year || '0');
       const yearB = parseInt(b.year || '0');
       return yearB - yearA;
@@ -443,10 +479,11 @@ function formatSearchResults(results: SearchResult[], topic: string, requestedCo
       formatted += `    Credibility: ${r.credibilityScore}/10\n`;
     }
     
-    // File Size line (convert bytes to MB)
+    // File Size line with Book/Article indicator
     if (r.file_size_bytes) {
-      const fileSizeMB = (r.file_size_bytes / (1024 * 1024)).toFixed(2);
-      formatted += `    File Size: ${fileSizeMB} MB\n`;
+      const fileSizeMB = (r.file_size_bytes / (1024 * 1024)).toFixed(1);
+      const sizeLabel = r.file_size_bytes > 5 * 1024 * 1024 ? '📚 Book' : '📄 Article';
+      formatted += `    Size: ${fileSizeMB} MB ${sizeLabel}\n`;
     }
     
     // Source domain line

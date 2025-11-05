@@ -17,6 +17,7 @@ interface ExtractedMetadata {
   source_type: string;
   citations: number | null;
   domain: string;
+  file_size_bytes: number | null;
 }
 
 function classifySourceType(domain: string, html: string): string {
@@ -40,7 +41,8 @@ async function extractMetadata(url: string): Promise<ExtractedMetadata> {
     publisher: null,
     source_type: classifySourceType(domain, ''),
     citations: null,
-    domain
+    domain,
+    file_size_bytes: null
   };
   
   try {
@@ -59,6 +61,14 @@ async function extractMetadata(url: string): Promise<ExtractedMetadata> {
     
     if (!response.ok) {
       return defaultResult;
+    }
+    
+    // Capture file size from Content-Length header
+    const contentLength = response.headers.get('Content-Length');
+    const fileSizeBytes = contentLength ? parseInt(contentLength) : null;
+    
+    if (fileSizeBytes) {
+      console.log(`📏 ${url.slice(0, 60)}...: ${(fileSizeBytes / 1024 / 1024).toFixed(2)} MB`);
     }
     
     const html = await response.text();
@@ -90,7 +100,8 @@ async function extractMetadata(url: string): Promise<ExtractedMetadata> {
           publisher,
           source_type: classifySourceType(domain, html),
           citations,
-          domain
+          domain,
+          file_size_bytes: fileSizeBytes
         };
       } catch (jsonError) {
         console.error('JSON-LD parsing error:', jsonError);
@@ -150,7 +161,8 @@ async function extractMetadata(url: string): Promise<ExtractedMetadata> {
       publisher,
       source_type: classifySourceType(domain, html),
       citations: null,
-      domain
+      domain,
+      file_size_bytes: fileSizeBytes
     };
     
   } catch (error) {
