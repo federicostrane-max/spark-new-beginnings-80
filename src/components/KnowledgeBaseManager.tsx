@@ -192,9 +192,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       console.log('✅ Fresh sync response:', data);
       toast.success(`${fileName} ri-sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
       
-      // Step 4: Wait for final database commit
+      // Step 4: Wait for final database commit (increased to 5s for large documents)
       console.log('⏳ Waiting for final database commit...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 5000));
       
       // Step 5: Reload documents to reflect new state
       console.log('🔄 Reloading documents...');
