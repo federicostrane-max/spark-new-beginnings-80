@@ -51,6 +51,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const [assigning, setAssigning] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [syncStatuses, setSyncStatuses] = useState<Map<string, 'synced' | 'syncing' | 'error'>>(new Map());
+  const [hasTriedQuickSync, setHasTriedQuickSync] = useState(false);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -98,6 +99,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       console.log('📄 LOAD ASSIGNED DOCUMENTS SUCCESS, found:', transformedData.length, 'documents');
       setDocuments(transformedData);
+      
+      // Reset quick sync flag when loading documents
+      setHasTriedQuickSync(false);
 
       // Check sync status for each document
       if (transformedData.length > 0) {
@@ -158,7 +162,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   };
 
 
-  const handleSyncAllMissing = async () => {
+  const handleSyncAllMissing = async (forceRedownload = false) => {
     const missingDocs = documents.filter(doc => doc.syncStatus === 'missing');
     
     if (missingDocs.length === 0) {
@@ -166,53 +170,75 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       return;
     }
 
-    console.log(`🔄 Starting batch sync for ${missingDocs.length} documents`);
-    toast.info(`Sincronizzazione di ${missingDocs.length} documenti...`, { duration: 3000 });
-
     let successCount = 0;
     let failedDocs: Array<{doc: typeof missingDocs[0], error: string}> = [];
 
-    // STEP 1: Try quick resync (check if chunks exist)
-    console.log('📋 STEP 1: Checking existing chunks for all documents...');
-    
-    for (let i = 0; i < missingDocs.length; i++) {
-      const doc = missingDocs[i];
-      console.log(`Checking ${i + 1}/${missingDocs.length}: ${doc.file_name}`);
+    // STEP 1: Quick resync (only if not forced and not already tried)
+    if (!forceRedownload && !hasTriedQuickSync) {
+      console.log(`🔄 STEP 1: Quick resync check for ${missingDocs.length} documents`);
+      toast.info(`Verifica rapida di ${missingDocs.length} documenti...`, { duration: 3000 });
       
-      try {
-        const { data: existingChunks } = await supabase
-          .from('agent_knowledge')
-          .select('id')
-          .eq('agent_id', agentId)
-          .eq('pool_document_id', doc.id);
+      for (let i = 0; i < missingDocs.length; i++) {
+        const doc = missingDocs[i];
+        console.log(`Checking ${i + 1}/${missingDocs.length}: ${doc.file_name}`);
+        
+        try {
+          const { data: existingChunks } = await supabase
+            .from('agent_knowledge')
+            .select('id')
+            .eq('agent_id', agentId)
+            .eq('pool_document_id', doc.id);
 
-        if (existingChunks && existingChunks.length > 0) {
-          console.log(`✅ ${doc.file_name} già sincronizzato (${existingChunks.length} chunks)`);
-          setDocuments(prev => prev.map(d => 
-            d.id === doc.id 
-              ? { ...d, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
-              : d
-          ));
-          successCount++;
-        } else {
-          failedDocs.push({ doc, error: 'no_chunks' });
+          if (existingChunks && existingChunks.length > 0) {
+            console.log(`✅ ${doc.file_name} già sincronizzato (${existingChunks.length} chunks)`);
+            setDocuments(prev => prev.map(d => 
+              d.id === doc.id 
+                ? { ...d, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
+                : d
+            ));
+            successCount++;
+          } else {
+            failedDocs.push({ doc, error: 'no_chunks' });
+          }
+        } catch (error) {
+          console.error(`Error checking ${doc.file_name}:`, error);
+          failedDocs.push({ doc, error: error instanceof Error ? error.message : 'Unknown error' });
         }
-      } catch (error) {
-        console.error(`Error checking ${doc.file_name}:`, error);
-        failedDocs.push({ doc, error: error instanceof Error ? error.message : 'Unknown error' });
       }
+
+      setHasTriedQuickSync(true);
+      
+      // If some docs are still missing, show message
+      if (failedDocs.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await loadDocuments();
+        
+        if (successCount > 0) {
+          toast.success(`✅ ${successCount} documenti già sincronizzati`);
+        }
+        toast.info(`${failedDocs.length} documenti richiedono re-download. Clicca "Riscarica Tutti".`, { duration: 5000 });
+        return;
+      }
+      
+      // All synced!
+      await loadDocuments();
+      toast.success(`✅ Tutti i ${successCount} documenti sincronizzati!`);
+      if (onDocsUpdated) onDocsUpdated();
+      return;
     }
 
-    // STEP 2: Re-download failed documents
-    if (failedDocs.length > 0) {
-      console.log(`📥 STEP 2: Re-downloading ${failedDocs.length} documents...`);
-      toast.info(`Re-download di ${failedDocs.length} documenti...`, { duration: 3000 });
+    // STEP 2: Full re-download (if forced or already tried quick sync)
+    const docsToRedownload = forceRedownload || hasTriedQuickSync ? missingDocs : failedDocs.map(f => f.doc);
+    
+    if (docsToRedownload.length > 0) {
+      console.log(`📥 STEP 2: Re-downloading ${docsToRedownload.length} documents...`);
+      toast.info(`Re-download di ${docsToRedownload.length} documenti...`, { duration: 3000 });
 
       const remainingFailed: typeof failedDocs = [];
 
-      for (let i = 0; i < failedDocs.length; i++) {
-        const { doc } = failedDocs[i];
-        console.log(`Re-downloading ${i + 1}/${failedDocs.length}: ${doc.file_name}`);
+      for (let i = 0; i < docsToRedownload.length; i++) {
+        const doc = docsToRedownload[i];
+        console.log(`Re-downloading ${i + 1}/${docsToRedownload.length}: ${doc.file_name}`);
         
         try {
           // Delete existing chunks
@@ -238,8 +264,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         } catch (error: any) {
           const errorMessage = error?.message || error?.error_description || 'Unknown error';
           console.error(`❌ Failed to sync ${doc.file_name}:`, errorMessage);
-          
-          // Keep track of files that couldn't be synced
           remainingFailed.push({ doc, error: errorMessage });
         }
       }
@@ -251,7 +275,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         );
         
         if (storageIssues.length > 0) {
-          // Update document status to storage_missing
           setDocuments(prev => prev.map(d => {
             const hasStorageIssue = storageIssues.some(si => si.doc.id === d.id);
             return hasStorageIssue ? { ...d, syncStatus: 'storage_missing' as const } : d;
@@ -278,22 +301,21 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
     }
 
-    // Wait for final commit
     await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Reload all documents
     await loadDocuments();
 
     if (onDocsUpdated) {
       onDocsUpdated();
     }
 
-    const failedCount = missingDocs.length - successCount;
+    const totalMissing = missingDocs.length;
+    const failedCount = totalMissing - successCount;
+    
     if (failedCount === 0) {
       toast.success(`✅ Tutti i ${successCount} documenti sincronizzati!`, { duration: 5000 });
     } else {
       toast.warning(
-        `Sincronizzati ${successCount}/${missingDocs.length} documenti. ${failedCount} file hanno problemi.`,
+        `Sincronizzati ${successCount}/${totalMissing} documenti. ${failedCount} file hanno problemi.`,
         { duration: 7000 }
       );
     }
@@ -505,14 +527,23 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                handleSyncAllMissing();
+                handleSyncAllMissing(hasTriedQuickSync);
               }} 
               size="sm" 
               type="button"
               variant="default"
             >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Sincronizza Tutti
+              {hasTriedQuickSync ? (
+                <>
+                  <Download className="h-4 w-4 mr-2" />
+                  Riscarica Tutti
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Sincronizza Tutti
+                </>
+              )}
             </Button>
           )}
           {documents.some(doc => doc.syncStatus === 'storage_missing') && (
