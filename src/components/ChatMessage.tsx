@@ -86,6 +86,14 @@ export const ChatMessage = ({
     }
   };
 
+  const handleMessageClick = (e: React.MouseEvent | React.TouchEvent) => {
+    if (selectionMode && onToggleSelection) {
+      e.preventDefault();
+      e.stopPropagation();
+      onToggleSelection();
+    }
+  };
+
   const touchStartY = useRef(0);
   const hasMoved = useRef(false);
 
@@ -141,10 +149,10 @@ export const ChatMessage = ({
   return (
     <div 
       className="mb-4 group relative touch-pan-y"
-      onClick={selectionMode ? onToggleSelection : undefined}
+      onClick={selectionMode ? handleMessageClick : undefined}
+      onTouchEnd={selectionMode ? handleMessageClick : handleLongPressEnd}
       onTouchStart={!selectionMode ? handleLongPressStart : undefined}
       onTouchMove={!selectionMode ? handleTouchMove : undefined}
-      onTouchEnd={handleLongPressEnd}
       onTouchCancel={handleLongPressEnd}
     >
       {selectionMode && (
