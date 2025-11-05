@@ -70,6 +70,7 @@ interface KnowledgeDocument {
   topics?: string[];
   complexity_level?: string;
   agent_ids?: string[];
+  search_query?: string;
 }
 
 export const DocumentPoolTable = () => {
@@ -297,6 +298,30 @@ export const DocumentPoolTable = () => {
     setSelectedDocIds(new Set());
     setBulkDeleteDialogOpen(false);
     loadDocuments();
+  };
+
+  const handleRetryValidation = async (doc: KnowledgeDocument) => {
+    try {
+      toast.info(`Validazione di ${doc.file_name} in corso...`);
+      
+      const { error } = await supabase.functions.invoke('validate-document', {
+        body: {
+          documentId: doc.id,
+          searchQuery: doc.search_query || '',
+          fullText: ''
+        }
+      });
+
+      if (error) {
+        toast.error(`Errore nella validazione: ${error.message}`);
+      } else {
+        toast.success('Validazione avviata con successo');
+        // Reload after 2 seconds to see the result
+        setTimeout(() => loadDocuments(), 2000);
+      }
+    } catch (error: any) {
+      toast.error(`Errore: ${error.message}`);
+    }
   };
 
   const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
@@ -534,6 +559,17 @@ export const DocumentPoolTable = () => {
                       >
                         <Info className="h-3.5 w-3.5" />
                       </Button>
+                      {doc.validation_status === "validating" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRetryValidation(doc)}
+                          className="text-yellow-600 h-8 w-8 p-0"
+                          title="Riprova validazione"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                         <Button
                           size="sm"
                           variant="outline"

@@ -466,7 +466,7 @@ serve(async (req) => {
         source_url: url,
         search_query: search_query || null,
         file_size_bytes: pdfArrayBuffer.byteLength,
-        validation_status: 'validated', // Skip validation, go directly to processing
+        validation_status: 'validating', // Start with validating status
         processing_status: 'downloaded'
       })
       .select()
@@ -498,25 +498,29 @@ serve(async (req) => {
 
     // Trigger validation (which will extract text and then call process-document)
     console.log('[download-pdf-tool] Triggering validate-document...');
-    supabase.functions.invoke('validate-document', {
-      body: { 
-        documentId: document.id,
-        searchQuery: search_query,
-        expected_title: expected_title,
-        expected_author: expected_author,
-        // Note: extractedText not provided, validate-document will handle PDF extraction
-        fullText: '' // Will be extracted by validate-document if needed
-      }
-    }).then(result => {
-      if (result.error) {
-        console.error('Validation error:', result.error);
+    
+    try {
+      const { data: validationResult, error: validationError } = await supabase.functions.invoke('validate-document', {
+        body: { 
+          documentId: document.id,
+          searchQuery: search_query,
+          expected_title: expected_title,
+          expected_author: expected_author,
+          // Note: extractedText not provided, validate-document will handle PDF extraction
+          fullText: '' // Will be extracted by validate-document if needed
+        }
+      });
+      
+      if (validationError) {
+        console.error('❌ Validation error:', validationError);
+        // Don't throw - let the document remain in "validating" state for manual retry
       } else {
-        console.log('✅ Validation started for:', document.id);
+        console.log('✅ Validation triggered successfully for:', document.id);
       }
-    }).catch(err => {
-      console.error('Validation invocation error:', err);
-      console.error('Stack:', (err as Error).stack);
-    });
+    } catch (err) {
+      console.error('❌ Validation invocation exception:', err);
+      // Don't throw - let the document remain in "validating" state for manual retry
+    }
 
     console.log('[download-pdf-tool] ========== END SUCCESS ==========');
     console.log('[download-pdf-tool] Summary:', {
