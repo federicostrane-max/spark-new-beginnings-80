@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { url, search_query } = await req.json();
+    const { url, search_query, expected_title, expected_author } = await req.json();
     
     console.log('[download-pdf-tool] ========== START ==========');
     console.log('[download-pdf-tool] Input:', JSON.stringify({ url, search_query }).slice(0, 200));
@@ -155,7 +155,9 @@ serve(async (req) => {
         documentId: document.id,
         searchQuery: search_query,
         extractedText: extractedText,
-        fullText: fullText
+        fullText: fullText,
+        expected_title,
+        expected_author
       }
     }).then(result => {
       if (result.error) {

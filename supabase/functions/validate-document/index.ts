@@ -28,6 +28,8 @@ serve(async (req) => {
   try {
     const requestBody = await req.json();
     const documentId = requestBody.documentId;
+    const expected_title = requestBody.expected_title;
+    const expected_author = requestBody.expected_author;
 
     console.log(`[validate-document] ========== START ==========`);
     console.log(`[validate-document] Input:`, JSON.stringify({
@@ -146,6 +148,9 @@ serve(async (req) => {
 
     const prompt = `Query di ricerca originale: "${searchQuery}"
 
+TITOLO ATTESO: "${expected_title || 'N/A'}"
+AUTORE ATTESO: "${expected_author || 'N/A'}"
+
 Campione di testo estratto dal PDF (primi 500 caratteri):
 """
 ${extractedText.slice(0, 500)}
@@ -154,6 +159,8 @@ ${extractedText.slice(0, 500)}
 Valuta se questo documento è RILEVANTE per la query di ricerca.
 
 Considera:
+- Il titolo del PDF corrisponde al titolo atteso? (confronto flessibile)
+- L'autore corrisponde se specificato?
 - Il documento tratta l'argomento cercato?
 - Le informazioni sembrano utili per rispondere alla query?
 - Il contenuto è coerente con quello che ci si aspetta?
@@ -161,7 +168,10 @@ Considera:
 Rispondi SOLO con questo formato JSON:
 {
   "rilevante": true/false,
-  "motivazione": "Spiegazione breve in 1-2 frasi del perché è rilevante o non rilevante"
+  "motivazione": "Spiegazione breve in 1-2 frasi del perché è rilevante o non rilevante",
+  "title_match": true/false/null,
+  "author_match": true/false/null,
+  "content_relevant": true/false
 }`;
 
     console.log('[validate-document] Calling Lovable AI for relevance check...');
@@ -260,6 +270,25 @@ Rispondi SOLO con questo formato JSON:
       })
       .eq('document_id', documentId);
 
+    // Update pdf_download_queue if this download was queued
+    const { data: queueEntry } = await supabase
+      .from('pdf_download_queue')
+      .select('id')
+      .eq('document_id', documentId)
+      .single();
+
+    if (queueEntry) {
+      console.log(`📝 [validate-document] Updating queue entry ${queueEntry.id.slice(0, 8)}`);
+      await supabase
+        .from('pdf_download_queue')
+        .update({
+          status: 'completed',
+          validation_result: aiResult,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', queueEntry.id);
+    }
+
     // Trigger processing WITH fullText
     console.log('[validate-document] Triggering document processing with fullText...');
     supabase.functions.invoke('process-document', {
@@ -322,4 +351,22 @@ async function markValidationFailed(
       error_message: reason
     })
     .eq('document_id', documentId);
+
+  // Update pdf_download_queue if exists
+  const { data: queueEntry } = await supabase
+    .from('pdf_download_queue')
+    .select('id')
+    .eq('document_id', documentId)
+    .single();
+
+  if (queueEntry) {
+    await supabase
+      .from('pdf_download_queue')
+      .update({
+        status: 'failed',
+        error_message: reason,
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', queueEntry.id);
+  }
 }

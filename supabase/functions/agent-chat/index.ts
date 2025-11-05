@@ -357,6 +357,303 @@ function formatDownloadResults(results: any[]): string {
   return header + formattedResults;
 }
 
+/**
+ * Estrae entries PDF da una tabella markdown
+ * Formato atteso: | # | Title | Author(s) | URL | Source | Year |
+ */
+function parsePdfTableFromMarkdown(markdownText: string): Array<{
+  title: string;
+  author: string;
+  url: string;
+  source: string;
+  year: string;
+}> {
+  const results: Array<any> = [];
+  
+  // Regex per righe tabella: | 1 | Title | Author | URL | Source | Year |
+  const tableRowRegex = /\|\s*(\d+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*(https?:\/\/[^|\s]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/g;
+  
+  let match;
+  while ((match = tableRowRegex.exec(markdownText)) !== null) {
+    const [, number, title, author, url, source, year] = match;
+    
+    results.push({
+      title: title.trim(),
+      author: author.trim(),
+      url: url.trim(),
+      source: source.trim(),
+      year: year.trim()
+    });
+  }
+  
+  console.log(`📊 Parsed ${results.length} PDF entries from markdown table`);
+  return results;
+}
+
+/**
+ * Processa il download di un singolo PDF dalla queue
+ */
+async function processDownload(queueId: string, supabaseClient: any, requestId: string) {
+  const logPrefix = `🔄 [REQ-${requestId}][DOWNLOAD-${queueId.slice(0, 8)}]`;
+  console.log(`${logPrefix} Starting download process`);
+  
+  try {
+    // 1. Aggiorna status a 'downloading'
+    const { error: updateError } = await supabaseClient
+      .from('pdf_download_queue')
+      .update({ 
+        status: 'downloading',
+        started_at: new Date().toISOString()
+      })
+      .eq('id', queueId);
+    
+    if (updateError) {
+      console.error(`${logPrefix} Failed to update status:`, updateError);
+      return;
+    }
+    
+    // 2. Recupera dati dalla queue
+    const { data: queueEntry, error: fetchError } = await supabaseClient
+      .from('pdf_download_queue')
+      .select('*')
+      .eq('id', queueId)
+      .single();
+    
+    if (fetchError || !queueEntry) {
+      console.error(`${logPrefix} Failed to fetch queue entry:`, fetchError);
+      return;
+    }
+    
+    console.log(`${logPrefix} Downloading: ${queueEntry.expected_title}`);
+    console.log(`${logPrefix} URL: ${queueEntry.url}`);
+    
+    // 3. Incrementa download_attempts
+    await supabaseClient
+      .from('pdf_download_queue')
+      .update({ download_attempts: (queueEntry.download_attempts || 0) + 1 })
+      .eq('id', queueId);
+    
+    // 4. Chiama download-pdf-tool
+    const { data: downloadResult, error: downloadError } = await supabaseClient.functions.invoke(
+      'download-pdf-tool',
+      {
+        body: {
+          url: queueEntry.url,
+          search_query: queueEntry.search_query,
+          expected_title: queueEntry.expected_title,
+          expected_author: queueEntry.expected_author
+        }
+      }
+    );
+    
+    if (downloadError || !downloadResult?.success) {
+      const errorMsg = downloadError?.message || downloadResult?.error || 'Unknown error';
+      console.error(`${logPrefix} Download failed:`, errorMsg);
+      
+      await supabaseClient
+        .from('pdf_download_queue')
+        .update({
+          status: 'failed',
+          error_message: errorMsg,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', queueId);
+      
+      return;
+    }
+    
+    console.log(`${logPrefix} ✅ PDF downloaded: ${downloadResult.document.file_name}`);
+    
+    // 5. Aggiorna con document_id e status 'validating'
+    await supabaseClient
+      .from('pdf_download_queue')
+      .update({
+        status: 'validating',
+        document_id: downloadResult.document.id,
+        downloaded_file_name: downloadResult.document.file_name
+      })
+      .eq('id', queueId);
+    
+    // 6. Attendi validazione (polling)
+    await waitForValidation(queueId, downloadResult.document.id, supabaseClient, requestId);
+    
+  } catch (error) {
+    console.error(`${logPrefix} Unexpected error:`, error);
+    
+    await supabaseClient
+      .from('pdf_download_queue')
+      .update({
+        status: 'failed',
+        error_message: error instanceof Error ? error.message : 'Unknown error',
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', queueId);
+  }
+}
+
+/**
+ * Attende che validate-document completi la validazione
+ */
+async function waitForValidation(
+  queueId: string, 
+  documentId: string, 
+  supabaseClient: any,
+  requestId: string,
+  maxAttempts: number = 30
+) {
+  const logPrefix = `⏳ [REQ-${requestId}][VALIDATE-${queueId.slice(0, 8)}]`;
+  
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(resolve => setTimeout(resolve, 2000)); // 2s interval
+    
+    const { data: queueEntry } = await supabaseClient
+      .from('pdf_download_queue')
+      .select('status, validation_result')
+      .eq('id', queueId)
+      .single();
+    
+    if (queueEntry?.status === 'completed' || queueEntry?.status === 'failed') {
+      console.log(`${logPrefix} Validation complete: ${queueEntry.status}`);
+      return;
+    }
+    
+    // Check se validate-document ha aggiornato knowledge_documents
+    const { data: doc } = await supabaseClient
+      .from('knowledge_documents')
+      .select('validation_status')
+      .eq('id', documentId)
+      .single();
+    
+    if (doc?.validation_status === 'validated' || doc?.validation_status === 'validation_failed') {
+      const finalStatus = doc.validation_status === 'validated' ? 'completed' : 'failed';
+      console.log(`${logPrefix} Document validation: ${doc.validation_status} → ${finalStatus}`);
+      
+      await supabaseClient
+        .from('pdf_download_queue')
+        .update({
+          status: finalStatus,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', queueId);
+      
+      return;
+    }
+  }
+  
+  console.error(`${logPrefix} Validation timeout after ${maxAttempts * 2}s`);
+  await supabaseClient
+    .from('pdf_download_queue')
+    .update({
+      status: 'failed',
+      error_message: 'Validation timeout',
+      completed_at: new Date().toISOString()
+    })
+    .eq('id', queueId);
+}
+
+/**
+ * Genera messaggio di riepilogo dei download
+ */
+async function generateDownloadSummary(
+  conversationId: string,
+  supabaseClient: any,
+  requestId: string
+) {
+  const logPrefix = `📊 [REQ-${requestId}][SUMMARY]`;
+  
+  // Attendi che tutti i download siano completati (max 5 minuti)
+  const maxWait = 300; // 5 minutes
+  const checkInterval = 5; // 5 seconds
+  let elapsed = 0;
+  
+  while (elapsed < maxWait) {
+    await new Promise(resolve => setTimeout(resolve, checkInterval * 1000));
+    elapsed += checkInterval;
+    
+    const { data: pending } = await supabaseClient
+      .from('pdf_download_queue')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .in('status', ['pending', 'downloading', 'validating']);
+    
+    if (!pending || pending.length === 0) {
+      break; // Tutti completati
+    }
+    
+    console.log(`${logPrefix} Waiting for ${pending.length} downloads... (${elapsed}s)`);
+  }
+  
+  // Recupera tutti i risultati
+  const { data: results } = await supabaseClient
+    .from('pdf_download_queue')
+    .select(`
+      *,
+      knowledge_documents (
+        file_name,
+        file_size_bytes,
+        validation_status
+      )
+    `)
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: false });
+  
+  if (!results || results.length === 0) {
+    console.log(`${logPrefix} No results to summarize`);
+    return;
+  }
+  
+  const completed = results.filter((r: any) => r.status === 'completed');
+  const failed = results.filter((r: any) => r.status === 'failed');
+  
+  // Genera messaggio
+  const summary = `
+## 📦 DOWNLOAD REPORT
+
+**Risultati:**
+- ✅ Scaricati con successo: ${completed.length}
+- ❌ Falliti: ${failed.length}
+- 📊 Totale: ${results.length}
+
+### Dettagli
+
+${results.map((r: any, idx: number) => {
+  const icon = r.status === 'completed' ? '✅' : '❌';
+  const sizeInfo = r.knowledge_documents?.file_size_bytes 
+    ? ` (${(r.knowledge_documents.file_size_bytes / 1024 / 1024).toFixed(2)} MB)`
+    : '';
+  
+  return `
+**${idx + 1}. ${icon} ${r.expected_title}**
+- Autore: ${r.expected_author || 'N/A'}
+- URL: ${r.url}
+${r.status === 'completed' 
+  ? `- ✅ File scaricato: \`${r.downloaded_file_name}\`${sizeInfo}
+- Validazione: ${r.knowledge_documents?.validation_status || 'pending'}`
+  : `- ❌ Errore: ${r.error_message || 'Unknown error'}
+- Tentativi: ${r.download_attempts}`
+}
+`;
+}).join('\n')}
+
+${completed.length > 0 ? '✨ I PDF validati sono ora disponibili nella knowledge base.' : ''}
+`;
+  
+  // Salva come messaggio assistente
+  const { error } = await supabaseClient
+    .from('agent_messages')
+    .insert({
+      conversation_id: conversationId,
+      role: 'assistant',
+      content: summary.trim()
+    });
+  
+  if (error) {
+    console.error(`${logPrefix} Failed to save summary:`, error);
+  } else {
+    console.log(`${logPrefix} ✅ Summary saved to conversation`);
+  }
+}
+
 Deno.serve(async (req) => {
   // Generate unique request ID for tracking
   const requestId = crypto.randomUUID().substring(0, 8);
@@ -1251,6 +1548,53 @@ ${agent.system_prompt}`;
               llm_provider: llmProvider  // Persist which LLM was used
             })
             .eq('id', placeholderMsg.id);
+
+          // ========== POST-PROCESSING: PARSING TABELLA PDF ==========
+          if (agent.slug === 'knowledge-search-expert-1') {
+            console.log(`📋 [REQ-${requestId}] Checking for PDF table in response`);
+            
+            const pdfEntries = parsePdfTableFromMarkdown(fullResponse);
+            
+            if (pdfEntries.length > 0) {
+              console.log(`📥 [REQ-${requestId}] Found ${pdfEntries.length} PDFs to queue for download`);
+              
+              // Inserisci nella queue
+              for (const entry of pdfEntries) {
+                const { data: queueEntry, error: queueError } = await supabase
+                  .from('pdf_download_queue')
+                  .insert({
+                    conversation_id: conversation.id,
+                    agent_id: agent.id,
+                    expected_title: entry.title,
+                    expected_author: entry.author,
+                    url: entry.url,
+                    source: entry.source,
+                    year: entry.year,
+                    search_query: message,
+                    status: 'pending'
+                  })
+                  .select()
+                  .single();
+                
+                if (queueError) {
+                  console.error(`❌ [REQ-${requestId}] Failed to queue: ${entry.title}`, queueError);
+                  continue;
+                }
+                
+                console.log(`✅ [REQ-${requestId}] Queued: ${entry.title} (${queueEntry.id.slice(0, 8)})`);
+                
+                // Triggera download in background (using Promise without await)
+                processDownload(queueEntry.id, supabase, requestId).catch(err => {
+                  console.error(`Failed to process download ${queueEntry.id}:`, err);
+                });
+              }
+              
+              // Dopo tutti i download, genera summary (in background)
+              generateDownloadSummary(conversation.id, supabase, requestId).catch(err => {
+                console.error(`Failed to generate summary for ${conversation.id}:`, err);
+              });
+            }
+          }
 
           const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
           console.log('='.repeat(80));

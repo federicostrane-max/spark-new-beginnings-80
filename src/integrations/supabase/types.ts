@@ -454,6 +454,91 @@ export type Database = {
         }
         Relationships: []
       }
+      pdf_download_queue: {
+        Row: {
+          agent_id: string
+          completed_at: string | null
+          conversation_id: string
+          created_at: string | null
+          document_id: string | null
+          download_attempts: number | null
+          downloaded_file_name: string | null
+          error_message: string | null
+          expected_author: string | null
+          expected_title: string
+          id: string
+          search_query: string
+          source: string | null
+          started_at: string | null
+          status: string
+          url: string
+          validation_result: Json | null
+          year: string | null
+        }
+        Insert: {
+          agent_id: string
+          completed_at?: string | null
+          conversation_id: string
+          created_at?: string | null
+          document_id?: string | null
+          download_attempts?: number | null
+          downloaded_file_name?: string | null
+          error_message?: string | null
+          expected_author?: string | null
+          expected_title: string
+          id?: string
+          search_query: string
+          source?: string | null
+          started_at?: string | null
+          status?: string
+          url: string
+          validation_result?: Json | null
+          year?: string | null
+        }
+        Update: {
+          agent_id?: string
+          completed_at?: string | null
+          conversation_id?: string
+          created_at?: string | null
+          document_id?: string | null
+          download_attempts?: number | null
+          downloaded_file_name?: string | null
+          error_message?: string | null
+          expected_author?: string | null
+          expected_title?: string
+          id?: string
+          search_query?: string
+          source?: string | null
+          started_at?: string | null
+          status?: string
+          url?: string
+          validation_result?: Json | null
+          year?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pdf_download_queue_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pdf_download_queue_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pdf_download_queue_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pdf_exports: {
         Row: {
           conversations_count: number | null
