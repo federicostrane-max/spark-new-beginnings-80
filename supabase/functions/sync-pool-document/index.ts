@@ -165,6 +165,25 @@ serve(async (req) => {
     
     console.log(`[sync-pool-document] Clean path: ${cleanPath}`);
     
+    // Verify file exists before attempting download
+    const { data: fileList, error: listError } = await supabase
+      .storage
+      .from('knowledge-pdfs')
+      .list(cleanPath.split('/').slice(0, -1).join('/') || '');
+
+    if (listError) {
+      console.error('[sync-pool-document] Error listing files:', listError);
+      throw new Error(`Cannot verify file existence: ${listError.message || 'Unknown error'}`);
+    }
+
+    const fileName = cleanPath.split('/').pop();
+    const fileExists = fileList?.some(file => file.name === fileName);
+
+    if (!fileExists) {
+      console.error(`[sync-pool-document] File not found in storage: ${cleanPath}`);
+      throw new Error(`File not found in storage: ${poolDoc.file_name}. The file may have been moved or deleted.`);
+    }
+    
     const { data: fileData, error: downloadError } = await supabase
       .storage
       .from('knowledge-pdfs')
@@ -172,7 +191,7 @@ serve(async (req) => {
 
     if (downloadError) {
       console.error('[sync-pool-document] Download error:', downloadError);
-      throw new Error(`Failed to download PDF: ${downloadError.message}`);
+      throw new Error(`Failed to download PDF: ${downloadError.message || JSON.stringify(downloadError)}`);
     }
 
     if (!fileData) {

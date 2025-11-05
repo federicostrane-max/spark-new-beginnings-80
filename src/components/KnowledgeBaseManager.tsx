@@ -167,10 +167,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     }
 
     console.log(`🔄 Starting batch sync for ${missingDocs.length} documents`);
-    toast.info(`Sincronizzazione di ${missingDocs.length} documenti...`);
+    toast.info(`Sincronizzazione di ${missingDocs.length} documenti...`, { duration: 3000 });
 
     let successCount = 0;
-    let failedDocs: typeof missingDocs = [];
+    let failedDocs: Array<{doc: typeof missingDocs[0], error: string}> = [];
 
     // STEP 1: Try quick resync (check if chunks exist)
     console.log('📋 STEP 1: Checking existing chunks for all documents...');
@@ -195,21 +195,23 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           ));
           successCount++;
         } else {
-          failedDocs.push(doc);
+          failedDocs.push({ doc, error: 'no_chunks' });
         }
       } catch (error) {
         console.error(`Error checking ${doc.file_name}:`, error);
-        failedDocs.push(doc);
+        failedDocs.push({ doc, error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
 
     // STEP 2: Re-download failed documents
     if (failedDocs.length > 0) {
       console.log(`📥 STEP 2: Re-downloading ${failedDocs.length} documents...`);
-      toast.info(`Re-download di ${failedDocs.length} documenti...`);
+      toast.info(`Re-download di ${failedDocs.length} documenti...`, { duration: 3000 });
+
+      const remainingFailed: typeof failedDocs = [];
 
       for (let i = 0; i < failedDocs.length; i++) {
-        const doc = failedDocs[i];
+        const { doc } = failedDocs[i];
         console.log(`Re-downloading ${i + 1}/${failedDocs.length}: ${doc.file_name}`);
         
         try {
@@ -227,13 +229,38 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             body: { documentId: doc.id, agentId }
           });
 
-          if (error) throw error;
+          if (error) {
+            throw new Error(error.message || 'Sync failed');
+          }
 
           console.log(`✅ ${doc.file_name} sincronizzato (${data?.chunksCount || 0} chunks)`);
           successCount++;
         } catch (error: any) {
-          console.error(`❌ Failed to sync ${doc.file_name}:`, error);
+          const errorMessage = error?.message || error?.error_description || 'Unknown error';
+          console.error(`❌ Failed to sync ${doc.file_name}:`, errorMessage);
+          
+          // Keep track of files that couldn't be synced
+          remainingFailed.push({ doc, error: errorMessage });
         }
+      }
+
+      // Show detailed error for failed files
+      if (remainingFailed.length > 0) {
+        const fileNotFoundCount = remainingFailed.filter(f => 
+          f.error.includes('not found') || f.error.includes('File not found')
+        ).length;
+        
+        if (fileNotFoundCount > 0) {
+          toast.error(
+            `${fileNotFoundCount} file non trovati nello storage. Potrebbero essere stati spostati o eliminati.`, 
+            { duration: 7000 }
+          );
+        }
+        
+        console.warn('❌ Failed documents:', remainingFailed.map(f => ({
+          file: f.doc.file_name,
+          error: f.error
+        })));
       }
     }
 
@@ -247,9 +274,15 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       onDocsUpdated();
     }
 
-    toast.success(`Sincronizzazione completata: ${successCount}/${missingDocs.length} documenti`, {
-      duration: 5000,
-    });
+    const failedCount = missingDocs.length - successCount;
+    if (failedCount === 0) {
+      toast.success(`✅ Tutti i ${successCount} documenti sincronizzati!`, { duration: 5000 });
+    } else {
+      toast.warning(
+        `Sincronizzati ${successCount}/${missingDocs.length} documenti. ${failedCount} file hanno problemi.`,
+        { duration: 7000 }
+      );
+    }
   };
 
   const loadPoolDocuments = async () => {
