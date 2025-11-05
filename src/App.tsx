@@ -9,6 +9,7 @@ import MultiAgentConsultant from "./pages/MultiAgentConsultant";
 import DocumentPool from "./pages/DocumentPool";
 import Presentation from "./pages/Presentation";
 import Auth from "./pages/Auth";
+import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 
@@ -55,6 +56,14 @@ const App = () => {
                 element={
                   <ProtectedRoute>
                     <Presentation />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute>
+                    <Admin />
                   </ProtectedRoute>
                 }
               />
