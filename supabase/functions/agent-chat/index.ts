@@ -456,7 +456,7 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     // PHASE 3: Merge data and calculate credibility with book prioritization
     console.log('🎯 [PHASE 3] Enriching results with smart book scoring...');
     
-    let enrichedResults: SearchResult[] = topResults.map((pdf: any, index: number) => {
+    const enrichedResults: SearchResult[] = topResults.map((pdf: any, index: number) => {
       const metadata = metadataList[index] || {};
       
       // Calculate base credibility score based on domain
@@ -577,59 +577,6 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     });
     
     console.log(`✅ [PHASE 3.5] Semantic relevance scoring completed`);
-    
-    // PHASE 3.6: URL Pre-validation to eliminate invalid/unreachable PDFs
-    console.log('🔍 [PHASE 3.6] Pre-validating PDF URLs...');
-    const preValidationStart = Date.now();
-    
-    const validatedResults = await Promise.all(
-      enrichedResults.map(async (result) => {
-        try {
-          // Quick HEAD request to verify URL is valid and returns PDF
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-          
-          const response = await fetch(result.url, {
-            method: 'HEAD',
-            signal: controller.signal,
-            redirect: 'follow'
-          });
-          
-          clearTimeout(timeoutId);
-          
-          const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-          const isValidPDF = response.ok && 
-            (contentType.includes('application/pdf') || 
-             contentType.includes('pdf') ||
-             result.url.toLowerCase().endsWith('.pdf'));
-          
-          if (isValidPDF) {
-            console.log(`✅ Valid PDF: "${result.title.slice(0, 50)}..." (${response.status})`);
-            return { ...result, url_validated: true };
-          } else {
-            console.log(`❌ Invalid content (${response.status}, ${contentType}): "${result.title.slice(0, 50)}..."`);
-            return null;
-          }
-        } catch (error: any) {
-          if (error.name === 'AbortError') {
-            console.log(`⏱️ Timeout validating: "${result.title.slice(0, 50)}..."`);
-          } else {
-            console.log(`❌ Unreachable URL: "${result.title.slice(0, 50)}..." - ${error.message}`);
-          }
-          return null;
-        }
-      })
-    );
-    
-    // Filter out null results (invalid URLs)
-    const beforeCount = enrichedResults.length;
-    enrichedResults = validatedResults.filter((r): r is SearchResult & { url_validated: true } => r !== null);
-    const afterCount = enrichedResults.length;
-    const validationDuration = ((Date.now() - preValidationStart) / 1000).toFixed(1);
-    
-    console.log(`✅ [PHASE 3.6] URL validation completed in ${validationDuration}s`);
-    console.log(`   - Valid PDFs: ${afterCount}/${beforeCount} (${Math.round(afterCount/beforeCount*100)}%)`);
-    console.log(`   - Filtered out: ${beforeCount - afterCount} invalid/unreachable URLs`);
     
     // PHASE 4: Quality filtering & sorting (prioritize books)
     console.log('✨ [PHASE 4] Quality filtering & sorting (books first)...');
