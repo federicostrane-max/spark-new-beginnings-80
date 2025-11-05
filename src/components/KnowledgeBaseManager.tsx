@@ -146,11 +146,16 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
-      toast.success(`${fileName} sincronizzato con successo`);
+      console.log('✅ Sync response:', data);
+      toast.success(`${fileName} sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
+      
+      // Wait 2 seconds to ensure database commit is complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       loadDocuments();
     } catch (error: any) {
       console.error('❌ Error re-syncing document:', error);
-      toast.error(`Errore nella sincronizzazione di ${fileName}`);
+      toast.error(`Errore nella sincronizzazione: ${error.message || 'Errore sconosciuto'}`);
     }
   };
 
