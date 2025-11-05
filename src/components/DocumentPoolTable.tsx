@@ -86,6 +86,8 @@ export const DocumentPoolTable = () => {
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [docToView, setDocToView] = useState<KnowledgeDocument | null>(null);
+  const [agentsListDialogOpen, setAgentsListDialogOpen] = useState(false);
+  const [agentsListDoc, setAgentsListDoc] = useState<KnowledgeDocument | null>(null);
   
   // Bulk actions state
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
@@ -479,16 +481,37 @@ export const DocumentPoolTable = () => {
                           <Badge variant="secondary" className="text-xs whitespace-nowrap">
                             Non assegnato
                           </Badge>
-                        ) : doc.agent_names.length <= 1 ? (
-                          doc.agent_names.map((name, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs truncate max-w-[120px]" title={name}>
-                              {name}
-                            </Badge>
-                          ))
-                        ) : (
-                          <Badge variant="outline" className="text-xs whitespace-nowrap" title={doc.agent_names.join(", ")}>
-                            {doc.agents_count} agenti
+                        ) : doc.agent_names.length === 1 ? (
+                          <Badge variant="outline" className="text-xs truncate max-w-[120px]" title={doc.agent_names[0]}>
+                            {doc.agent_names[0]}
                           </Badge>
+                        ) : doc.agent_names.length === 2 ? (
+                          <>
+                            {doc.agent_names.map((name, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs truncate max-w-[120px]" title={name}>
+                                {name}
+                              </Badge>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            {doc.agent_names.slice(0, 2).map((name, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs truncate max-w-[120px]" title={name}>
+                                {name}
+                              </Badge>
+                            ))}
+                            <Badge 
+                              variant="outline" 
+                              className="text-xs whitespace-nowrap cursor-pointer hover:bg-muted" 
+                              onClick={() => {
+                                setAgentsListDoc(doc);
+                                setAgentsListDialogOpen(true);
+                              }}
+                              title="Clicca per vedere tutti gli agenti"
+                            >
+                              e altri {doc.agents_count - 2}
+                            </Badge>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -800,6 +823,28 @@ export const DocumentPoolTable = () => {
             >
               Elimina Tutto
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Agents List Dialog */}
+      <AlertDialog open={agentsListDialogOpen} onOpenChange={setAgentsListDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Agenti Assegnati</AlertDialogTitle>
+            <AlertDialogDescription>
+              {agentsListDoc?.file_name}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {agentsListDoc?.agent_names.map((name, idx) => (
+              <div key={idx} className="flex items-center gap-2 p-2 rounded-md bg-muted/50">
+                <span className="text-sm font-medium">{name}</span>
+              </div>
+            ))}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogAction>Chiudi</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

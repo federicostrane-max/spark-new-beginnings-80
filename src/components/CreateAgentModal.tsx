@@ -36,8 +36,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [systemPrompt, setSystemPrompt] = useState("");
   const [llmProvider, setLlmProvider] = useState("anthropic");
   const [loading, setLoading] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const isEditingRef = useRef(false);
   const previousPromptRef = useRef<string>("");
@@ -51,7 +49,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
       setLlmProvider(editingAgent.llm_provider || "anthropic");
-      setCreatedAgentId(editingAgent.id);
       previousPromptRef.current = editingAgent.system_prompt;
     } else if (!open) {
       // Reset quando il modale si chiude
@@ -59,27 +56,10 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setDescription("");
       setSystemPrompt("");
       setLlmProvider("anthropic");
-      setSelectedFiles([]);
-      setCreatedAgentId(null);
       isEditingRef.current = false;
       previousPromptRef.current = "";
     }
   }, [open]);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    const pdfFiles = files.filter(file => file.type === 'application/pdf');
-    
-    if (pdfFiles.length !== files.length) {
-      console.warn("Solo file PDF sono supportati");
-    }
-    
-    setSelectedFiles(prev => [...prev, ...pdfFiles]);
-  };
-
-  const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -165,17 +145,10 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         console.log("Agent created successfully");
         
-        // If there are files to upload, set the agent ID for upload
-        if (selectedFiles.length > 0) {
-          setCreatedAgentId(data.id);
-        } else {
-          onSuccess(data);
-          onOpenChange(false);
-        }
-      }
-      
-      // Reset form only if no files to upload
-      if (selectedFiles.length === 0) {
+        onSuccess(data);
+        onOpenChange(false);
+        
+        // Reset form
         setName("");
         setDescription("");
         setSystemPrompt("");
@@ -589,62 +562,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               <KnowledgeBaseManager 
                 agentId={editingAgent.id}
                 agentName={editingAgent.name}
-              />
-            </div>
-          )}
-
-          {/* Knowledge Base Upload - Solo per nuovi agenti */}
-          {!editingAgent && !createdAgentId && (
-            <div>
-              <Label htmlFor="pdfFiles">Knowledge Base (PDF files - Opzionale)</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Carica documenti PDF per arricchire la conoscenza dell'agente
-              </p>
-              <Input
-                id="pdfFiles"
-                type="file"
-                accept="application/pdf"
-                multiple
-                onChange={handleFileChange}
-                disabled={loading}
-                className="cursor-pointer"
-              />
-              {selectedFiles.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between text-sm">
-                      <span className="truncate">{file.name}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFile(index)}
-                        disabled={loading}
-                      >
-                        Rimuovi
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          
-          {!editingAgent && createdAgentId && (
-            <div className="space-y-2">
-              <Label>Carica Knowledge Base</Label>
-              <p className="text-xs text-muted-foreground mb-2">
-                Agente creato! Ora carica i documenti PDF
-              </p>
-              <PDFKnowledgeUpload
-                agentId={createdAgentId}
-                onUploadComplete={() => {
-                  console.log("Knowledge base caricata");
-                  setSelectedFiles([]);
-                  setCreatedAgentId(null);
-                  onSuccess({ id: createdAgentId } as Agent);
-                  onOpenChange(false);
-                }}
               />
             </div>
           )}
