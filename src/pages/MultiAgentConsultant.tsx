@@ -6,7 +6,7 @@ import { useTTS } from "@/contexts/TTSContext";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
-
+import { ExportChatPDF } from "@/components/ExportChatPDF";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -647,23 +647,28 @@ export default function MultiAgentConsultant() {
                               </Button>
                             </>
                           )}
-                           <Button
-                             variant="ghost"
-                             size="icon"
-                             onClick={() => {
-                               setEditingAgent(currentAgent);
-                               setShowCreateModal(true);
-                             }}
-                             title="Modifica agente"
-                             className="relative"
-                           >
-                             <Edit className="h-4 w-4" />
-                             {unsyncedDocsCount > 0 && (
-                               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                                 {unsyncedDocsCount}
-                               </span>
-                             )}
-                           </Button>
+                            <ExportChatPDF
+                              conversationId={currentConversation.id}
+                              agentName={currentAgent.name}
+                              messages={messages as any}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setEditingAgent(currentAgent);
+                                setShowCreateModal(true);
+                              }}
+                              title="Modifica agente"
+                              className="relative"
+                            >
+                              <Edit className="h-4 w-4" />
+                              {unsyncedDocsCount > 0 && (
+                                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                                  {unsyncedDocsCount}
+                                </span>
+                              )}
+                            </Button>
                        </div>
                   </>
                 ) : (
