@@ -12,6 +12,22 @@ interface SyncRequest {
 }
 
 /**
+ * Converts ArrayBuffer to base64 in chunks to avoid stack overflow
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000; // 32KB chunks
+  let result = '';
+  
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    result += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  
+  return btoa(result);
+}
+
+/**
  * Chunka il testo in blocchi di dimensione fissa con overlap
  */
 function chunkText(text: string, chunkSize = 1000, overlap = 200): string[] {
@@ -190,7 +206,7 @@ serve(async (req) => {
     console.log('[sync-pool-document] Extracting text from PDF...');
     
     const arrayBuffer = await fileData.arrayBuffer();
-    const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64Pdf = arrayBufferToBase64(arrayBuffer);
     
     const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-pdf-text`, {
       method: 'POST',
