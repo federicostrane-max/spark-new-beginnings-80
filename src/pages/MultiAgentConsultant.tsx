@@ -583,42 +583,33 @@ export default function MultiAgentConsultant() {
                        <div className="min-w-0 flex-1">
                          <h1 className="font-semibold truncate">{currentAgent.name}</h1>
                        </div>
+                        </div>
+                         <div className="flex items-center gap-2 flex-shrink-0">
+                           {messages.length > 0 && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
+                                className="gap-2"
+                                title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
+                              >
+                                {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
+                              </Button>
+                            </>
+                          )}
+                           <Button
+                             variant="ghost"
+                             size="icon"
+                             onClick={() => {
+                               setEditingAgent(currentAgent);
+                               setShowCreateModal(true);
+                             }}
+                             title="Modifica agente"
+                           >
+                             <Edit className="h-4 w-4" />
+                           </Button>
                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditingAgent(currentAgent);
-                              setShowCreateModal(true);
-                            }}
-                            title="Modifica agente"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          {messages.length > 0 && (
-                           <>
-                             <Button
-                               variant="ghost"
-                               size="sm"
-                               onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
-                               className="gap-2"
-                               title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
-                             >
-                               {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
-                             </Button>
-                             <Button
-                               variant="ghost"
-                               size="sm"
-                               onClick={() => setShowDeleteAllDialog(true)}
-                               className="gap-2 text-destructive hover:text-destructive"
-                               title="Cancella tutti i messaggi"
-                             >
-                               <Trash2 className="h-4 w-4" />
-                             </Button>
-                           </>
-                         )}
-                      </div>
                   </>
                 ) : (
                   <>

@@ -567,7 +567,39 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           )}
 
           {/* Actions */}
-          <div className="flex gap-2 justify-end">
+          <div className="flex flex-col gap-3">
+            <div className="flex gap-2 justify-end">
+              {editingAgent && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={handleClone}
+                  disabled={loading}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Clone Agent
+                </Button>
+              )}
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => onOpenChange(false)}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {editingAgent ? 'Updating...' : 'Creating...'}
+                  </>
+                ) : (
+                  editingAgent ? "Update Agent" : "Create Agent"
+                )}
+              </Button>
+            </div>
+            
             {editingAgent && onDelete && (
               <Button 
                 type="button" 
@@ -577,39 +609,11 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                   onOpenChange(false);
                 }}
                 disabled={loading}
+                className="w-full"
               >
                 Delete Agent
               </Button>
             )}
-            {editingAgent && (
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={handleClone}
-                disabled={loading}
-              >
-                <Copy className="h-4 w-4 mr-2" />
-                Clone Agent
-              </Button>
-            )}
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => onOpenChange(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {editingAgent ? 'Updating...' : 'Creating...'}
-                </>
-              ) : (
-                editingAgent ? "Update Agent" : "Create Agent"
-              )}
-            </Button>
           </div>
         </form>
 

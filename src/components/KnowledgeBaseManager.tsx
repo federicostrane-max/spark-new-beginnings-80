@@ -110,16 +110,30 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
   const checkSyncStatuses = async (docs: KnowledgeDocument[]) => {
     try {
+      console.log('🔍 Checking sync status for', docs.length, 'documents...');
+      
       const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
         body: { agentId, autoFix: false }
       });
 
       if (error) throw error;
 
+      console.log('📊 Sync check response:', {
+        totalAssigned: data?.totalAssigned,
+        totalSynced: data?.totalSynced,
+        missingCount: data?.missingCount,
+        statuses: data?.statuses?.map((s: any) => ({
+          fileName: s.fileName,
+          status: s.status,
+          chunkCount: s.chunkCount
+        }))
+      });
+
       if (data?.statuses) {
         const updatedDocs = docs.map(doc => {
           const status = data.statuses.find((s: any) => s.documentId === doc.id);
           if (status) {
+            console.log(`  ${status.fileName}: ${status.status} (${status.chunkCount} chunks)`);
             return {
               ...doc,
               syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
@@ -136,7 +150,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
   };
 
   const handleResync = async (docId: string, fileName: string) => {
-    console.log('🔄 Re-syncing document:', fileName);
+    console.log('🔄 Re-syncing document:', fileName, 'ID:', docId);
     try {
       toast.info(`Sincronizzazione di ${fileName}...`);
       
@@ -149,10 +163,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
       console.log('✅ Sync response:', data);
       toast.success(`${fileName} sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
       
-      // Wait 2 seconds to ensure database commit is complete
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait 3 seconds to ensure database commit is complete and indexes are updated
+      console.log('⏳ Waiting for database commit...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
-      loadDocuments();
+      console.log('🔄 Reloading documents...');
+      await loadDocuments();
     } catch (error: any) {
       console.error('❌ Error re-syncing document:', error);
       toast.error(`Errore nella sincronizzazione: ${error.message || 'Errore sconosciuto'}`);
