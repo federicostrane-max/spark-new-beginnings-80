@@ -118,16 +118,27 @@ serve(async (req) => {
         pool_document_id: documentId,
       }));
 
-      const { error: insertError } = await supabase
-        .from('agent_knowledge')
-        .insert(chunksToInsert);
+      // Insert in batches to avoid timeout with large documents
+      const BATCH_SIZE = 50;
+      let totalInserted = 0;
+      
+      for (let i = 0; i < chunksToInsert.length; i += BATCH_SIZE) {
+        const batch = chunksToInsert.slice(i, i + BATCH_SIZE);
+        console.log(`[sync-pool-document] Inserting batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(chunksToInsert.length / BATCH_SIZE)} (${batch.length} chunks)`);
+        
+        const { error: insertError } = await supabase
+          .from('agent_knowledge')
+          .insert(batch);
 
-      if (insertError) {
-        console.error('[sync-pool-document] Error copying chunks:', insertError);
-        throw insertError;
+        if (insertError) {
+          console.error('[sync-pool-document] Error copying batch:', insertError);
+          throw insertError;
+        }
+        
+        totalInserted += batch.length;
       }
 
-      console.log(`[sync-pool-document] ✓ Successfully copied ${poolChunks.length} chunks to agent`);
+      console.log(`[sync-pool-document] ✓ Successfully copied ${totalInserted} chunks to agent`);
 
       return new Response(JSON.stringify({ 
         success: true,
