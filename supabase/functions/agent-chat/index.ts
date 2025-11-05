@@ -1017,10 +1017,11 @@ Deno.serve(async (req) => {
           // ============================================
           let workflowHandled = false;
           let workflowResponse = '';
+          let userIntent: UserIntent | undefined; // Declare it here for logging later
           
           if (agent.slug === 'knowledge-search-expert') {
             console.log('🤖 [WORKFLOW] Knowledge Search Expert detected, checking intent...');
-            const userIntent = parseKnowledgeSearchIntent(message);
+            userIntent = parseKnowledgeSearchIntent(message); // Assign to the outer variable
             console.log('🤖 [WORKFLOW] Intent result:', userIntent);
             
             if (userIntent.type === 'SEARCH_REQUEST' && userIntent.topic) {
