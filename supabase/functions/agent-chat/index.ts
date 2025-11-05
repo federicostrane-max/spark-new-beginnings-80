@@ -1496,7 +1496,7 @@ ${agent.system_prompt}`;
             console.log('================================================================================');
             
             // VALIDATION: Detect simulated downloads (hallucination detection)
-            if (agent.slug === 'knowledge-search-expert' && toolCallCount === 0) {
+            if (agent.slug.includes('knowledge-search-expert') && toolCallCount === 0) {
               const lowerResponse = fullResponse.toLowerCase();
               const downloadIndicators = ['✅', 'downloaded', 'scaricato', 'saved', 'salvato', 'mb'];
               const pdfIndicators = ['pdf', '.pdf', 'document'];
@@ -1550,7 +1550,7 @@ ${agent.system_prompt}`;
             .eq('id', placeholderMsg.id);
 
           // ========== POST-PROCESSING: PARSING TABELLA PDF ==========
-          if (agent.slug === 'knowledge-search-expert-1') {
+          if (agent.slug.includes('knowledge-search-expert')) {
             console.log(`📋 [REQ-${requestId}] Checking for PDF table in response`);
             
             const pdfEntries = parsePdfTableFromMarkdown(fullResponse);
