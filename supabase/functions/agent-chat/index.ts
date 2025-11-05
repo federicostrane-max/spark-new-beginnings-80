@@ -1774,11 +1774,11 @@ Deno.serve(async (req) => {
       // Skip if content is empty or whitespace
       if (!m.content || m.content.trim() === '') return false;
       
-      // For user messages, check if next message is a duplicate
-      if (m.role === 'user' && index < arr.length - 1) {
-        const nextMsg = arr[index + 1];
-        // Skip this message if next is also user with identical content
-        if (nextMsg.role === 'user' && nextMsg.content === m.content) {
+      // For user messages, check if previous message is a duplicate
+      if (m.role === 'user' && index > 0) {
+        const prevMsg = arr[index - 1];
+        // Skip this message if previous is also user with identical content
+        if (prevMsg.role === 'user' && prevMsg.content === m.content) {
           console.log('🧹 Skipping duplicate user message:', m.content.slice(0, 50));
           return false;
         }
