@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
@@ -50,6 +51,7 @@ export const AgentsSidebar = ({
   const [loading, setLoading] = useState(true);
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
+  const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
 
   useEffect(() => {
     loadAgents();
@@ -82,6 +84,26 @@ export const AgentsSidebar = ({
       setLoading(false);
     }
   };
+
+  // Check for stuck documents on mount
+  useEffect(() => {
+    const checkStuckDocuments = async () => {
+      const { data, error } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('validation_status', 'validated')
+        .eq('processing_status', 'downloaded');
+
+      if (!error && data !== null) {
+        setStuckDocumentsCount(data.length || 0);
+      }
+    };
+
+    checkStuckDocuments();
+    // Refresh every 30 seconds
+    const interval = setInterval(checkStuckDocuments, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -184,7 +206,12 @@ export const AgentsSidebar = ({
           onClick={() => navigate("/admin")}
         >
           <Settings className="h-4 w-4" />
-          Admin Panel
+          <span className="flex-1 text-left">Admin Panel</span>
+          {stuckDocumentsCount > 0 && (
+            <Badge variant="destructive" className="ml-auto">
+              {stuckDocumentsCount}
+            </Badge>
+          )}
         </Button>
         <Button 
           variant="ghost" 
