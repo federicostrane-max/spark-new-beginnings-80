@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -37,24 +37,29 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [loading, setLoading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
+  const isEditingRef = useRef(false);
 
   // Load agent data when editing
   useEffect(() => {
-    if (open && editingAgent) {
+    if (open && editingAgent && !isEditingRef.current) {
+      // Prima apertura del modale con questo agente
+      isEditingRef.current = true;
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
       setLlmProvider(editingAgent.llm_provider || "anthropic");
       setCreatedAgentId(editingAgent.id);
     } else if (!open) {
+      // Reset quando il modale si chiude
       setName("");
       setDescription("");
       setSystemPrompt("");
       setLlmProvider("anthropic");
       setSelectedFiles([]);
       setCreatedAgentId(null);
+      isEditingRef.current = false;
     }
-  }, [open, editingAgent]);
+  }, [open]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);

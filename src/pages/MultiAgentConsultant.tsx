@@ -177,11 +177,11 @@ export default function MultiAgentConsultant() {
   const handleAgentCreated = useCallback((newAgent: Agent) => {
     // Auto-select the newly created agent
     handleSelectAgent(newAgent);
-    console.log(`${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully`);
+    console.log(`${newAgent.name} created/updated successfully`);
     setEditingAgent(null);
     // Trigger sidebar refresh
     setAgentUpdateTrigger(prev => prev + 1);
-  }, [handleSelectAgent, editingAgent]);
+  }, [handleSelectAgent]);
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
