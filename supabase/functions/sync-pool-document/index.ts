@@ -209,34 +209,35 @@ serve(async (req) => {
       throw new Error('No file data returned from storage');
     }
 
-    // Use Lovable AI OCR to extract text
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
-
-    const formData = new FormData();
-    formData.append('file', fileData, poolDoc.file_name);
-
-    console.log('[sync-pool-document] Extracting text with OCR...');
+    // Use extract-pdf-text edge function instead of OCR
+    console.log('[sync-pool-document] Extracting text from PDF...');
     
-    const ocrResponse = await fetch(`${supabaseUrl}/functions/v1/ocr-image`, {
+    const arrayBuffer = await fileData.arrayBuffer();
+    const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    
+    const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-pdf-text`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
       },
-      body: formData,
+      body: JSON.stringify({ 
+        pdfBase64: base64Pdf,
+        fileName: poolDoc.file_name 
+      }),
     });
 
-    if (!ocrResponse.ok) {
-      throw new Error(`OCR failed: ${ocrResponse.status}`);
+    if (!extractResponse.ok) {
+      const errorText = await extractResponse.text();
+      console.error('[sync-pool-document] Text extraction failed:', errorText);
+      throw new Error(`Text extraction failed: ${extractResponse.status} - ${errorText}`);
     }
 
-    const ocrData = await ocrResponse.json();
-    const fullText = ocrData.text || '';
+    const extractData = await extractResponse.json();
+    const fullText = extractData.text || '';
 
     if (!fullText || fullText.trim().length < 100) {
-      throw new Error('Extracted text too short or empty');
+      throw new Error(`Extracted text too short or empty (${fullText.length} chars). PDF may be scanned or corrupted.`);
     }
 
     console.log(`[sync-pool-document] Extracted ${fullText.length} characters`);
