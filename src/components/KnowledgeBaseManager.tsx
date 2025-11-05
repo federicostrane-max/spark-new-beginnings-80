@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle } from "lucide-react";
+import { logger } from "@/lib/logger";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
@@ -59,7 +60,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   }, [agentId]);
 
   const loadDocuments = async () => {
-    console.log('📄 LOAD ASSIGNED DOCUMENTS START - Agent:', agentId);
+    logger.info('knowledge-base', 'Loading assigned documents', { agentId }, { agentId });
     try {
       setLoading(true);
       
@@ -81,7 +82,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         .eq('agent_id', agentId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        logger.error('knowledge-base', 'Failed to load assigned documents', error, { agentId });
+        throw error;
+      }
 
       // Transform data to flat structure
       const transformedData: KnowledgeDocument[] = (data || [])
@@ -97,7 +101,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           chunkCount: 0,
         }));
 
-      console.log('📄 LOAD ASSIGNED DOCUMENTS SUCCESS, found:', transformedData.length, 'documents');
+      logger.success('knowledge-base', `Loaded ${transformedData.length} assigned documents`, undefined, { agentId });
       setDocuments(transformedData);
 
       // Check sync status for each document
@@ -105,39 +109,35 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         checkSyncStatuses(transformedData);
       }
     } catch (error: any) {
-      console.error('❌ Error loading assigned documents:', error);
+      logger.error('knowledge-base', 'Error loading assigned documents', error, { agentId });
     } finally {
       setLoading(false);
-      console.log('📄 LOAD ASSIGNED DOCUMENTS END');
     }
   };
 
   const checkSyncStatuses = async (docs: KnowledgeDocument[]) => {
     try {
-      console.log('🔍 Checking sync status for', docs.length, 'documents...');
+      logger.info('document-sync', `Checking sync status for ${docs.length} documents`, undefined, { agentId });
       
       const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
         body: { agentId, autoFix: false }
       });
 
-      if (error) throw error;
-
-      console.log('📊 Sync check response:', {
-        totalAssigned: data?.totalAssigned,
-        totalSynced: data?.totalSynced,
-        missingCount: data?.missingCount,
-        statuses: data?.statuses?.map((s: any) => ({
-          fileName: s.fileName,
-          status: s.status,
-          chunkCount: s.chunkCount
-        }))
-      });
+      if (error) {
+        logger.error('document-sync', 'Failed to check sync statuses', error, { agentId });
+        throw error;
+      }
 
       if (data?.statuses) {
         const updatedDocs = docs.map(doc => {
           const status = data.statuses.find((s: any) => s.documentId === doc.id);
           if (status) {
-            console.log(`  ${status.fileName}: ${status.status} (${status.chunkCount} chunks)`);
+            if (status.status !== 'synced') {
+              logger.warning('document-sync', `Document not synced: ${status.fileName}`, 
+                { status: status.status, chunkCount: status.chunkCount }, 
+                { agentId, documentId: doc.id }
+              );
+            }
             return {
               ...doc,
               syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
@@ -147,6 +147,16 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           return doc;
         });
         setDocuments(updatedDocs);
+        
+        const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
+        if (missingCount > 0) {
+          logger.warning('document-sync', `${missingCount} documents not synced`, 
+            { total: docs.length, missing: missingCount }, 
+            { agentId }
+          );
+        } else {
+          logger.success('document-sync', 'All documents synced successfully', undefined, { agentId });
+        }
         
         // Reset quick sync flag only if all documents are synced
         const allSynced = updatedDocs.every(doc => doc.syncStatus === 'synced');
@@ -160,7 +170,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         }
       }
     } catch (error) {
-      console.error('❌ Error checking sync statuses:', error);
+      logger.error('document-sync', 'Error checking sync statuses', error, { agentId });
     }
   };
 
@@ -178,12 +188,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
     // STEP 1: Quick resync (only if not forced and not already tried)
     if (!forceRedownload && !hasTriedQuickSync) {
-      console.log(`🔄 STEP 1: Quick resync check for ${missingDocs.length} documents`);
+      logger.info('document-sync', `Quick resync check for ${missingDocs.length} documents`, undefined, { agentId });
       toast.info(`Verifica rapida di ${missingDocs.length} documenti...`, { duration: 3000 });
       
       for (let i = 0; i < missingDocs.length; i++) {
         const doc = missingDocs[i];
-        console.log(`Checking ${i + 1}/${missingDocs.length}: ${doc.file_name}`);
         
         try {
           const { data: existingChunks } = await supabase
@@ -193,7 +202,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             .eq('pool_document_id', doc.id);
 
           if (existingChunks && existingChunks.length > 0) {
-            console.log(`✅ ${doc.file_name} già sincronizzato (${existingChunks.length} chunks)`);
+            logger.success('document-sync', `Document already synced: ${doc.file_name}`, 
+              { chunkCount: existingChunks.length }, 
+              { agentId, documentId: doc.id }
+            );
             setDocuments(prev => prev.map(d => 
               d.id === doc.id 
                 ? { ...d, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
@@ -201,10 +213,15 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             ));
             successCount++;
           } else {
+            logger.warning('document-sync', `Document has no chunks: ${doc.file_name}`, undefined, 
+              { agentId, documentId: doc.id }
+            );
             failedDocs.push({ doc, error: 'no_chunks' });
           }
         } catch (error) {
-          console.error(`Error checking ${doc.file_name}:`, error);
+          logger.error('document-sync', `Error checking document: ${doc.file_name}`, error, 
+            { agentId, documentId: doc.id }
+          );
           failedDocs.push({ doc, error: error instanceof Error ? error.message : 'Unknown error' });
         }
       }
@@ -234,14 +251,13 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     const docsToRedownload = forceRedownload || hasTriedQuickSync ? missingDocs : failedDocs.map(f => f.doc);
     
     if (docsToRedownload.length > 0) {
-      console.log(`📥 STEP 2: Re-downloading ${docsToRedownload.length} documents...`);
+      logger.info('document-sync', `Re-downloading ${docsToRedownload.length} documents`, undefined, { agentId });
       toast.info(`Re-download di ${docsToRedownload.length} documenti...`, { duration: 3000 });
 
       const remainingFailed: typeof failedDocs = [];
 
       for (let i = 0; i < docsToRedownload.length; i++) {
         const doc = docsToRedownload[i];
-        console.log(`Re-downloading ${i + 1}/${docsToRedownload.length}: ${doc.file_name}`);
         
         try {
           // Delete existing chunks
@@ -262,11 +278,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             throw new Error(error.message || 'Sync failed');
           }
 
-          console.log(`✅ ${doc.file_name} sincronizzato (${data?.chunksCount || 0} chunks)`);
+          logger.success('document-sync', `Document synced successfully: ${doc.file_name}`, 
+            { chunksCount: data?.chunksCount }, 
+            { agentId, documentId: doc.id }
+          );
           successCount++;
         } catch (error: any) {
           const errorMessage = error?.message || error?.error_description || 'Unknown error';
-          console.error(`❌ Failed to sync ${doc.file_name}:`, errorMessage);
+          logger.error('document-sync', `Failed to sync document: ${doc.file_name}`, 
+            { error: errorMessage }, 
+            { agentId, documentId: doc.id }
+          );
           remainingFailed.push({ doc, error: errorMessage });
         }
       }

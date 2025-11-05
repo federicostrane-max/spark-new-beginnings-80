@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle } from "lucide-react";
+import { useAgentHealth, usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,6 +54,11 @@ export const AgentsSidebar = ({
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
+  
+  // Health monitoring
+  const agentIds = agents.map(a => a.id);
+  const { healthStatus, getAgentStatus } = useAgentHealth(agentIds);
+  const poolHealth = usePoolDocumentsHealth();
 
   useEffect(() => {
     loadAgents();
@@ -167,24 +174,58 @@ export const AgentsSidebar = ({
           ) : agents.length === 0 ? (
             <div className="text-sm text-sidebar-foreground/70 text-center py-4">No agents yet</div>
           ) : (
-            agents.map((agent) => (
-              <button
-                key={agent.id}
-                onClick={() => onSelectAgent(agent)}
-                className={cn(
-                  "flex items-center gap-3 w-full rounded-lg p-3 transition-colors text-left",
-                  agent.id === currentAgentId
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                    : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
-                )}
-              >
-                <div className="text-2xl flex-shrink-0">{agent.avatar || "🤖"}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
-                  <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
-                </div>
-              </button>
-            ))
+            agents.map((agent) => {
+              const agentHealth = getAgentStatus(agent.id);
+              const showHealthBadge = agentHealth?.hasIssues;
+              
+              return (
+                <TooltipProvider key={agent.id}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => onSelectAgent(agent)}
+                        className={cn(
+                          "flex items-center gap-3 w-full rounded-lg p-3 transition-colors text-left relative",
+                          agent.id === currentAgentId
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
+                        )}
+                      >
+                        <div className="relative text-2xl flex-shrink-0">
+                          {agent.avatar || "🤖"}
+                          {showHealthBadge && (
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-destructive rounded-full border-2 border-sidebar" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
+                          <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
+                        </div>
+                        {showHealthBadge && (
+                          <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
+                        )}
+                      </button>
+                    </TooltipTrigger>
+                    {showHealthBadge && (
+                      <TooltipContent side="right" className="max-w-xs">
+                        <div className="space-y-1">
+                          <p className="font-semibold">Problemi rilevati:</p>
+                          {agentHealth.unsyncedCount > 0 && (
+                            <p className="text-sm">• {agentHealth.unsyncedCount} documento/i non sincronizzato/i</p>
+                          )}
+                          {agentHealth.errorCount > 0 && (
+                            <p className="text-sm">• {agentHealth.errorCount} errore/i recente/i</p>
+                          )}
+                          {agentHealth.warningCount > 0 && (
+                            <p className="text-sm">• {agentHealth.warningCount} avviso/i</p>
+                          )}
+                        </div>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })
           )}
         </div>
         </ScrollArea>
@@ -198,7 +239,12 @@ export const AgentsSidebar = ({
           onClick={() => navigate("/documents")}
         >
           <Database className="h-4 w-4" />
-          Pool Documenti
+          <span className="flex-1 text-left">Pool Documenti</span>
+          {poolHealth.hasIssues && (
+            <Badge variant="destructive" className="ml-auto">
+              {poolHealth.issueCount}
+            </Badge>
+          )}
         </Button>
         <Button 
           variant="ghost" 
