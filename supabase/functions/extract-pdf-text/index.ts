@@ -8,7 +8,7 @@ const corsHeaders = {
 
 interface ExtractionRequest {
   documentId?: string;
-  filePath?: string; // Alternative: provide file path directly
+  filePath?: string;
 }
 
 serve(async (req) => {
@@ -31,7 +31,7 @@ serve(async (req) => {
     if (documentId && !filePath) {
       const { data: doc, error: docError } = await supabase
         .from('knowledge_documents')
-        .select('file_path')
+        .select('file_path, file_name')
         .eq('id', documentId)
         .single();
 
@@ -60,65 +60,34 @@ serve(async (req) => {
 
     console.log(`[extract-pdf-text] PDF downloaded, size: ${pdfBlob.size} bytes`);
 
-    // Convert to base64 for AI processing
-    const arrayBuffer = await pdfBlob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    
-    // Convert to base64 in chunks to avoid memory issues
-    const chunkSize = 1024 * 1024; // 1MB chunks
-    let base64 = '';
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
-      base64 += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
-    }
+    // Use OCR function to extract text (works for both text PDFs and scanned PDFs)
+    console.log('[extract-pdf-text] Calling ocr-image for text extraction...');
 
-    console.log(`[extract-pdf-text] PDF converted to base64, length: ${base64.length}`);
+    // Create FormData to send PDF
+    const formData = new FormData();
+    formData.append('file', pdfBlob, filePath.split('/').pop() || 'document.pdf');
 
-    // Extract text using Lovable AI (Gemini Pro supports document understanding)
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
-
-    console.log('[extract-pdf-text] Calling Lovable AI for text extraction...');
-
-    // For large PDFs, use a more efficient approach: extract first N pages
-    // Gemini Pro has better document understanding capabilities
-    const extractionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    // Call ocr-image function
+    const ocrResponse = await fetch(`${supabaseUrl}/functions/v1/ocr-image`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json'
+        'Authorization': `Bearer ${supabaseKey}`,
       },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash', // Fast model for extraction
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: 'Extract ALL text content from this PDF document. Return ONLY the raw extracted text without any formatting, headers, or commentary. Include all paragraphs, maintaining the original structure.'
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:application/pdf;base64,${base64.slice(0, 5000000)}` // Limit to ~5MB base64
-              }
-            }
-          ]
-        }],
-        max_tokens: 16000 // Allow long responses
-      })
+      body: formData,
     });
 
-    if (!extractionResponse.ok) {
-      const errorText = await extractionResponse.text();
-      console.error('[extract-pdf-text] AI extraction failed:', extractionResponse.status, errorText);
-      throw new Error(`AI extraction failed: ${extractionResponse.status}`);
+    if (!ocrResponse.ok) {
+      const errorText = await ocrResponse.text();
+      console.error('[extract-pdf-text] OCR failed:', ocrResponse.status, errorText);
+      throw new Error(`OCR extraction failed: ${ocrResponse.status} - ${errorText}`);
     }
 
-    const extractionData = await extractionResponse.json();
-    const extractedText = extractionData.choices?.[0]?.message?.content || '';
+    const ocrData = await ocrResponse.json();
+    const extractedText = ocrData.text || '';
+
+    if (!extractedText || extractedText.trim().length < 10) {
+      throw new Error('Extracted text too short or empty. PDF might be corrupted or contain only images.');
+    }
 
     console.log(`[extract-pdf-text] ✅ Extraction successful: ${extractedText.length} characters`);
 
@@ -133,10 +102,18 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[extract-pdf-text] ❌ ERROR:', error);
+    
+    // Provide more detailed error message
+    let errorMessage = 'Unknown error';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      console.error('[extract-pdf-text] Error stack:', error.stack);
+    }
+
     return new Response(
       JSON.stringify({ 
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
         text: ''
       }),
       {
