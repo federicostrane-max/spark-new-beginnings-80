@@ -834,6 +834,8 @@ Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address 
 ${agent.system_prompt}`;
 
           // Define tools for Knowledge Search Expert agent
+          let toolCallCount = 0; // Track tool calls for validation
+          
           const tools = agent.slug === 'knowledge-search-expert' ? [
             {
               name: 'download_pdf',
@@ -854,6 +856,12 @@ ${agent.system_prompt}`;
               }
             }
           ] : undefined;
+          
+          // Log tool availability
+          if (tools) {
+            console.log(`🔧 [REQ-${requestId}] Tools available to agent:`);
+            tools.forEach(tool => console.log(`   - ${tool.name}: enabled`));
+          }
 
           // Set timeout for API call (5 minutes)
           const controller = new AbortController();
@@ -1093,7 +1101,11 @@ ${agent.system_prompt}`;
                       let toolResult: any = null;
                       
                       if (toolUseName === 'download_pdf') {
-                        console.log('📥 Executing download_pdf with:', toolInput);
+                        toolCallCount++; // Increment tool call counter
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: download_pdf`);
+                        console.log('   Input parameters:', JSON.stringify(toolInput));
+                        console.log('   Conversation:', conversation.id);
+                        console.log('   Timestamp:', new Date().toISOString());
                         
                         const { data: downloadData, error: downloadError } = await supabase.functions.invoke(
                           'download-pdf-tool',
@@ -1177,10 +1189,38 @@ ${agent.system_prompt}`;
               }
             }
             const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
-            console.log(`📝 [REQ-${requestId}] Stream completed successfully`);
-            console.log(`   Final length: ${fullResponse.length} chars`);
-            console.log(`   Duration: ${totalDuration}s`);
-            console.log(`   Chunks processed: ${chunkCount}`);
+            console.log('================================================================================');
+            console.log(`📊 [REQ-${requestId}] Request statistics:`);
+            console.log('   Total duration:', totalDuration + 's');
+            console.log('   Response length:', fullResponse.length, 'chars');
+            console.log('   Chunks processed:', chunkCount);
+            console.log('   Tools called:', toolCallCount);
+            console.log('   LLM Provider:', llmProvider.toUpperCase());
+            console.log('================================================================================');
+            
+            // VALIDATION: Detect simulated downloads (hallucination detection)
+            if (agent.slug === 'knowledge-search-expert' && toolCallCount === 0) {
+              const lowerResponse = fullResponse.toLowerCase();
+              const downloadIndicators = ['✅', 'downloaded', 'scaricato', 'saved', 'salvato', 'mb'];
+              const pdfIndicators = ['pdf', '.pdf', 'document'];
+              
+              const hasDownloadIndicator = downloadIndicators.some(ind => lowerResponse.includes(ind));
+              const hasPdfIndicator = pdfIndicators.some(ind => lowerResponse.includes(ind));
+              
+              if (hasDownloadIndicator && hasPdfIndicator) {
+                console.log('⚠️⚠️⚠️ [REQ-' + requestId + '] CRITICAL: TOOL USAGE MISMATCH DETECTED ⚠️⚠️⚠️');
+                console.log('   Response indicates downloads but NO tool was called');
+                console.log('   Response excerpt:', fullResponse.slice(0, 300).replace(/\n/g, ' '));
+                console.log('   Conversation:', conversation.id);
+                console.log('   Agent:', agent.slug);
+                console.log('   ❌ WARNING: Agent is HALLUCINATING instead of using tools');
+                console.log('   ❌ PDFs were NOT actually downloaded to the document pool');
+                console.log('   ✅ ACTION NEEDED: Review and update agent system prompt');
+                console.log('================================================================================');
+              }
+            }
+            
+            console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
             clearInterval(keepAliveInterval);
           } catch (error) {
             const errorDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
@@ -1190,6 +1230,7 @@ ${agent.system_prompt}`;
             console.error('   Stack:', error instanceof Error ? error.stack : 'N/A');
             console.error(`   Conversation: ${conversation.id}`);
             console.error(`   Partial response: ${fullResponse.length} chars`);
+            console.error(`   Tools called before error: ${toolCallCount}`);
             console.error(`   Provider: ${llmProvider}`);
             clearInterval(keepAliveInterval);
             // Save whatever we have so far
