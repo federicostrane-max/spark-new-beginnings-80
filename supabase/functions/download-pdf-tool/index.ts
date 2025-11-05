@@ -68,6 +68,79 @@ serve(async (req) => {
       );
     }
 
+    // STEP 2: Validate link availability BEFORE downloading (Hewson 2014 best practice)
+    console.log('🔍 [PRE-CHECK] Validating link availability...');
+    
+    const validateLinkAvailability = async (url: string): Promise<{
+      available: boolean;
+      isPdf: boolean;
+      error?: string;
+    }> => {
+      try {
+        console.log(`🔍 [PRE-CHECK] Testing: ${url.slice(0, 80)}...`);
+        
+        const response = await fetch(url, { 
+          method: 'HEAD',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/pdf,*/*'
+          },
+          signal: AbortSignal.timeout(5000)
+        });
+        
+        const contentType = response.headers.get('content-type') || '';
+        const isPdf = contentType.includes('application/pdf') || contentType.includes('octet-stream');
+        
+        if (!response.ok) {
+          return { 
+            available: false, 
+            isPdf: false, 
+            error: `HTTP ${response.status}` 
+          };
+        }
+        
+        if (!isPdf) {
+          return { 
+            available: true, 
+            isPdf: false, 
+            error: `Invalid content-type: ${contentType}` 
+          };
+        }
+        
+        console.log(`✅ [PRE-CHECK] Link is valid and accessible`);
+        return { available: true, isPdf: true };
+        
+      } catch (error) {
+        console.error(`❌ [PRE-CHECK] Validation failed:`, error);
+        return { 
+          available: false, 
+          isPdf: false, 
+          error: error instanceof Error ? error.message : 'Timeout or network error' 
+        };
+      }
+    };
+    
+    const validation = await validateLinkAvailability(url);
+    
+    if (!validation.available || !validation.isPdf) {
+      const errorMsg = validation.error || 'Link not accessible or not a PDF';
+      console.error(`❌ [PRE-CHECK] ${errorMsg}`);
+      
+      // Update queue entry as failed
+      await supabase
+        .from('pdf_download_queue')
+        .update({
+          status: 'failed',
+          error_message: `Link validation failed: ${errorMsg}`,
+          completed_at: new Date().toISOString()
+        })
+        .eq('url', url)
+        .eq('search_query', search_query || '');
+      
+      throw new Error(`Cannot download PDF: ${errorMsg}`);
+    }
+    
+    console.log('✅ [PRE-CHECK] Link is valid, proceeding with download...');
     console.log('📥 Downloading PDF from:', url);
 
     // User-Agent rotation to bypass 403 errors

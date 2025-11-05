@@ -231,6 +231,59 @@ async function executeWebSearch(topic: string, count: number = 10): Promise<Sear
   }
 }
 
+// Anti-paywall detection (Webb 2017 best practice)
+async function checkPaywall(url: string): Promise<{
+  hasPaywall: boolean;
+  indicators: string[];
+}> {
+  try {
+    console.log(`🔒 [PAYWALL CHECK] Testing: ${url.slice(0, 60)}...`);
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (!response.ok) {
+      if (response.status === 403 || response.status === 401) {
+        return { hasPaywall: true, indicators: [`HTTP ${response.status}`] };
+      }
+      return { hasPaywall: false, indicators: [] };
+    }
+    
+    const html = await response.text();
+    const htmlLower = html.toLowerCase();
+    
+    const PAYWALL_INDICATORS = [
+      'login', 'signin', 'sign in', 'sign-in',
+      'purchase', 'subscribe', 'subscription',
+      'institutional access', 'buy article',
+      'purchase pdf', 'download pdf requires',
+      'paywall', 'access denied',
+      'this content is not available',
+      'create account to read'
+    ];
+    
+    const foundIndicators = PAYWALL_INDICATORS.filter(indicator => 
+      htmlLower.includes(indicator)
+    );
+    
+    if (foundIndicators.length > 0) {
+      console.log(`⚠️ [PAYWALL] Detected indicators:`, foundIndicators.slice(0, 3));
+      return { hasPaywall: true, indicators: foundIndicators };
+    }
+    
+    console.log(`✅ [PAYWALL CHECK] No paywall detected`);
+    return { hasPaywall: false, indicators: [] };
+    
+  } catch (error) {
+    console.error(`⚠️ [PAYWALL CHECK] Error:`, error);
+    return { hasPaywall: false, indicators: [] };
+  }
+}
+
 async function executeEnhancedSearch(topic: string, count: number = 10, supabaseClient: any): Promise<SearchResult[]> {
   console.log('🔍 [ENHANCED SEARCH] Direct PDF search for:', topic);
   console.log(`📊 Requested count: ${count}`);
@@ -292,25 +345,70 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     
     const searchResults = await Promise.all(searchPromises);
     
-    // Flatten and deduplicate
-    for (const results of searchResults) {
-      for (const result of results) {
-        if (!seenUrls.has(result.url)) {
-          seenUrls.add(result.url);
-          allPdfResults.push(result);
-        }
+    // STRATIFIED SAMPLING: Separate results by query type (Hewson 2014 methodology)
+    const eduResults: any[] = [];
+    const publisherResults: any[] = [];
+    const generalResults: any[] = [];
+    
+    const eduUrls = new Set<string>();
+    const publisherUrls = new Set<string>();
+    const generalUrls = new Set<string>();
+    
+    // Deduplicate within each category
+    for (const result of searchResults[0]) {
+      if (!eduUrls.has(result.url)) {
+        eduUrls.add(result.url);
+        eduResults.push(result);
       }
     }
     
-    console.log(`✅ [PHASE 1] Found ${allPdfResults.length} unique PDFs`);
+    for (const result of searchResults[1]) {
+      if (!eduUrls.has(result.url) && !publisherUrls.has(result.url)) {
+        publisherUrls.add(result.url);
+        publisherResults.push(result);
+      }
+    }
     
-    if (allPdfResults.length === 0) {
+    for (const result of searchResults[2]) {
+      if (!eduUrls.has(result.url) && 
+          !publisherUrls.has(result.url) && 
+          !generalUrls.has(result.url)) {
+        generalUrls.add(result.url);
+        generalResults.push(result);
+      }
+    }
+    
+    console.log(`✅ [PHASE 1] Stratified results: .edu=${eduResults.length}, publishers=${publisherResults.length}, general=${generalResults.length}`);
+    
+    if (eduResults.length === 0 && publisherResults.length === 0 && generalResults.length === 0) {
       console.log('⚠️ No PDFs found, falling back to simple search');
       return await executeWebSearch(topic, count);
     }
     
-    // Take top N based on count
-    const topResults = allPdfResults.slice(0, Math.min(count * 2, allPdfResults.length));
+    // STRATIFIED SELECTION: Apply weighting (50% .edu, 30% publishers, 20% general)
+    const WEIGHTS = {
+      edu: 0.5,
+      publishers: 0.3,
+      general: 0.2
+    };
+    
+    const eduCount = Math.ceil(count * WEIGHTS.edu);
+    const publisherCount = Math.ceil(count * WEIGHTS.publishers);
+    const generalCount = Math.ceil(count * WEIGHTS.general);
+    
+    console.log(`📊 [STRATIFIED SELECTION] Target: .edu=${eduCount}, publishers=${publisherCount}, general=${generalCount}`);
+    
+    const selectedEdu = eduResults.slice(0, eduCount);
+    const selectedPublishers = publisherResults.slice(0, publisherCount);
+    const selectedGeneral = generalResults.slice(0, generalCount);
+    
+    const topResults = [
+      ...selectedEdu,
+      ...selectedPublishers,
+      ...selectedGeneral
+    ].slice(0, count * 2);
+    
+    console.log(`✅ [STRATIFIED] Selected ${topResults.length} PDFs (edu=${selectedEdu.length}, pub=${selectedPublishers.length}, gen=${selectedGeneral.length})`);
     
     // PHASE 2: Extract metadata for enrichment
     console.log(`📊 [PHASE 2] Extracting metadata for ${topResults.length} PDFs...`);
@@ -333,6 +431,22 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
     } catch (error) {
       console.error('⚠️ Metadata extraction error:', error);
     }
+    
+    // PHASE 2.5: Check for paywalls on top results (Webb 2017 anti-paywall strategy)
+    console.log(`🔒 [PHASE 2.5] Checking for paywalls on top ${Math.min(10, topResults.length)} results...`);
+    
+    const paywallChecks = await Promise.all(
+      topResults.slice(0, 10).map(async (pdf: any) => {
+        const check = await checkPaywall(pdf.url);
+        return { url: pdf.url, ...check };
+      })
+    );
+    
+    const paywallMap = new Map(
+      paywallChecks.map(check => [check.url, check])
+    );
+    
+    console.log(`✅ [PHASE 2.5] Paywall check completed. Found ${paywallChecks.filter(c => c.hasPaywall).length} paywalled PDFs`);
     
     // PHASE 3: Merge data and calculate credibility with book prioritization
     console.log('🎯 [PHASE 3] Enriching results with smart book scoring...');
@@ -390,8 +504,18 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
         }
       }
       
+      // PAYWALL PENALTY: Severely penalize paywalled content (Webb 2017)
+      const paywallCheck = paywallMap.get(pdf.url);
+      let accessType: 'open' | 'restricted' = 'open';
+      
+      if (paywallCheck?.hasPaywall) {
+        credibilityScore = Math.max(1, credibilityScore - 5);
+        accessType = 'restricted';
+        console.log(`🔒 Paywall detected for "${pdf.title.slice(0, 60)}..." (-5 score → ${credibilityScore})`);
+      }
+      
       // Extract year from metadata or snippet
-      const year = metadata.year?.toString() || 
+      const year = metadata.year?.toString() ||
                    pdf.snippet.match(/\b(19|20)\d{2}\b/)?.[0] || 
                    null;
       
@@ -410,7 +534,8 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
         credibilityScore,
         source_type: metadata.source_type || 'web',
         verified: true,
-        file_size_bytes: metadata.file_size_bytes || null
+        file_size_bytes: metadata.file_size_bytes || null,
+        accessType
       };
     });
     
