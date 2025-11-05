@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Database, CheckCircle, XCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ProcessingLogs } from "./ProcessingLogs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface ProcessingResult {
   id: string;
@@ -65,17 +67,24 @@ export const AdminPanel = () => {
   };
 
   return (
-    <Card className="w-full max-w-4xl mx-auto mt-8">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Database className="h-5 w-5" />
-          Admin Panel - Manutenzione Database
-        </CardTitle>
-        <CardDescription>
-          Strumenti per riparare e sincronizzare documenti
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <Tabs defaultValue="tools" className="w-full max-w-4xl mx-auto mt-8">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="tools">Strumenti</TabsTrigger>
+        <TabsTrigger value="logs">Log Real-time</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="tools">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Admin Panel - Manutenzione Database
+            </CardTitle>
+            <CardDescription>
+              Strumenti per riparare e sincronizzare documenti
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
         {/* Retry Failed Documents */}
         <div className="space-y-3">
           <div>
@@ -181,7 +190,13 @@ export const AdminPanel = () => {
             </AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="logs">
+        <ProcessingLogs />
+      </TabsContent>
+    </Tabs>
   );
 };
