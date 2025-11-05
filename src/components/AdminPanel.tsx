@@ -28,6 +28,27 @@ export const AdminPanel = () => {
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<ProcessingResult[] | null>(null);
   const [summary, setSummary] = useState<BatchSummary | null>(null);
+  const [stuckCount, setStuckCount] = useState<number | null>(null);
+  const [loadingCount, setLoadingCount] = useState(false);
+
+  const fetchStuckCount = async () => {
+    setLoadingCount(true);
+    try {
+      const { count, error } = await supabase
+        .from('knowledge_documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('validation_status', 'validated')
+        .eq('processing_status', 'downloaded');
+
+      if (error) throw error;
+      setStuckCount(count || 0);
+    } catch (error: any) {
+      console.error('Error fetching stuck count:', error);
+      toast.error('Errore nel recupero del conteggio documenti');
+    } finally {
+      setLoadingCount(false);
+    }
+  };
 
   const handleRetryFailedDocuments = async () => {
     setProcessing(true);
@@ -71,6 +92,9 @@ export const AdminPanel = () => {
         toast.success('🎉 Tutti i documenti sono stati processati!');
       }
 
+      // Update stuck count after processing
+      await fetchStuckCount();
+
     } catch (error: any) {
       console.error('❌ Error:', error);
       toast.error(`Errore: ${error.message || 'Operazione fallita'}`);
@@ -106,25 +130,48 @@ export const AdminPanel = () => {
               Processa fino a 5 documenti alla volta che sono validati ma bloccati in stato "downloaded". 
               Se ci sono più documenti da processare, clicca il pulsante più volte.
             </p>
+            {stuckCount !== null && (
+              <div className="mt-2 text-sm font-medium">
+                {stuckCount > 0 ? (
+                  <span className="text-yellow-600">📋 {stuckCount} documento/i in attesa di processing</span>
+                ) : (
+                  <span className="text-green-600">✅ Nessun documento in attesa</span>
+                )}
+              </div>
+            )}
           </div>
 
-          <Button 
-            onClick={handleRetryFailedDocuments} 
-            disabled={processing}
-            className="w-full sm:w-auto"
-          >
-            {processing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing Batch...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Processa Batch (5 documenti)
-              </>
-            )}
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              onClick={fetchStuckCount}
+              disabled={loadingCount || processing}
+              variant="outline"
+              size="sm"
+            >
+              {loadingCount ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+            <Button 
+              onClick={handleRetryFailedDocuments} 
+              disabled={processing || stuckCount === 0}
+              className="flex-1 sm:flex-none"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing Batch...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Processa Batch (max 5)
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
         {/* Summary */}
