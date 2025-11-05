@@ -232,108 +232,179 @@ async function executeWebSearch(topic: string, count: number = 10): Promise<Sear
 }
 
 async function executeEnhancedSearch(topic: string, count: number = 10, supabaseClient: any): Promise<SearchResult[]> {
-  console.log('🔍 [ENHANCED SEARCH] Starting two-phase search for:', topic);
+  console.log('🔍 [ENHANCED SEARCH] Direct PDF search for:', topic);
+  console.log(`📊 Requested count: ${count}`);
   
   try {
-    // FASE 1: Discover top books
-    console.log('📚 [PHASE 1] Book discovery...');
-    const { data: booksData, error: booksError } = await supabaseClient.functions.invoke(
-      'book-discovery',
-      {
-        body: {
-          topic,
-          maxBooks: Math.ceil(count / 2) // If count=10 → find 5 books → 2 PDFs per book
-        }
-      }
-    );
+    const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
+    const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
     
-    if (booksError || !booksData?.books || booksData.books.length === 0) {
-      console.error('❌ Book discovery failed:', booksError);
-      console.log('⚠️ Falling back to simple search');
+    if (!apiKey || !searchEngineId) {
+      console.error('❌ Missing Google Custom Search credentials');
       return await executeWebSearch(topic, count);
     }
     
-    const books = booksData.books;
-    console.log(`✅ [PHASE 1] Found ${books.length} books:`, books.map((b: any) => b.title));
+    // PHASE 1: Multi-domain direct PDF search
+    console.log('📚 [PHASE 1] Multi-domain PDF search...');
     
-    // FASE 2: Search & validate PDFs for each book
-    console.log('🔍 [PHASE 2] PDF search with validation...');
-    const { data: pdfsData, error: pdfsError } = await supabaseClient.functions.invoke(
-      'pdf-search-with-validation',
-      {
-        body: {
-          books,
-          maxResultsPerBook: 2,  // 2 PDF per book
-          maxUrlsToCheck: 15
+    // Create 3 search queries targeting different domains
+    const searchQueries = [
+      `${topic} filetype:pdf site:edu`,              // Academic institutions
+      `${topic} filetype:pdf (site:arxiv.org OR site:ieee.org OR site:acm.org OR site:springer.com)`, // Academic publishers
+      `${topic} filetype:pdf`                         // General PDF search
+    ];
+    
+    const allPdfResults: any[] = [];
+    const seenUrls = new Set<string>();
+    
+    // Execute searches in parallel for speed
+    const searchPromises = searchQueries.map(async (query, queryIndex) => {
+      console.log(`🔍 Query ${queryIndex + 1}/3: ${query.slice(0, 80)}...`);
+      
+      try {
+        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&num=10`;
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          console.error(`❌ Query ${queryIndex + 1} failed:`, response.status);
+          return [];
+        }
+        
+        const data = await response.json();
+        
+        if (!data.items || data.items.length === 0) {
+          console.log(`ℹ️ Query ${queryIndex + 1}: no results`);
+          return [];
+        }
+        
+        console.log(`✅ Query ${queryIndex + 1}: ${data.items.length} results`);
+        return data.items.map((item: any) => ({
+          title: item.title.replace(' [PDF]', '').trim(),
+          url: item.link,
+          snippet: item.snippet || '',
+          domain: new URL(item.link).hostname
+        }));
+      } catch (error) {
+        console.error(`❌ Query ${queryIndex + 1} error:`, error);
+        return [];
+      }
+    });
+    
+    const searchResults = await Promise.all(searchPromises);
+    
+    // Flatten and deduplicate
+    for (const results of searchResults) {
+      for (const result of results) {
+        if (!seenUrls.has(result.url)) {
+          seenUrls.add(result.url);
+          allPdfResults.push(result);
         }
       }
-    );
+    }
     
-    if (pdfsError || !pdfsData?.pdfs || pdfsData.pdfs.length === 0) {
-      console.error('❌ PDF search failed:', pdfsError);
-      console.log('⚠️ Falling back to simple search');
+    console.log(`✅ [PHASE 1] Found ${allPdfResults.length} unique PDFs`);
+    
+    if (allPdfResults.length === 0) {
+      console.log('⚠️ No PDFs found, falling back to simple search');
       return await executeWebSearch(topic, count);
     }
     
-    const verifiedPdfs = pdfsData.pdfs;
-    console.log(`✅ [PHASE 2] Found ${verifiedPdfs.length} verified PDFs`);
+    // Take top N based on count
+    const topResults = allPdfResults.slice(0, Math.min(count * 2, allPdfResults.length));
     
-    // FASE 3: Extract metadata
-    console.log('📊 [PHASE 3] Metadata extraction...');
-    const urls = verifiedPdfs.map((p: any) => p.pdfUrl);
-    const { data: metadataData, error: metadataError } = await supabaseClient.functions.invoke(
-      'metadata-extractor',
-      {
-        body: { urls }
+    // PHASE 2: Extract metadata for enrichment
+    console.log(`📊 [PHASE 2] Extracting metadata for ${topResults.length} PDFs...`);
+    
+    const urls = topResults.map(r => r.url);
+    let metadataList: any[] = [];
+    
+    try {
+      const { data: metadataData, error: metadataError } = await supabaseClient.functions.invoke(
+        'metadata-extractor',
+        { body: { urls } }
+      );
+      
+      if (metadataError) {
+        console.error('⚠️ Metadata extraction failed:', metadataError);
+      } else {
+        metadataList = metadataData?.metadata || [];
+        console.log(`✅ [PHASE 2] Extracted metadata for ${metadataList.length} PDFs`);
       }
-    );
-    
-    if (metadataError) {
-      console.error('⚠️ Metadata extraction failed:', metadataError);
+    } catch (error) {
+      console.error('⚠️ Metadata extraction error:', error);
     }
     
-    // FASE 4: Merge data
-    const enrichedResults: SearchResult[] = verifiedPdfs.map((pdf: any, index: number) => {
-      const metadata = metadataData?.metadata?.[index] || {};
+    // PHASE 3: Merge data and calculate credibility
+    console.log('🎯 [PHASE 3] Enriching results...');
+    
+    const enrichedResults: SearchResult[] = topResults.map((pdf: any, index: number) => {
+      const metadata = metadataList[index] || {};
+      
+      // Calculate credibility score based on domain
+      let credibilityScore = 3; // Default
+      const domain = pdf.domain.toLowerCase();
+      
+      if (domain.endsWith('.edu')) {
+        credibilityScore = 10;
+      } else if (domain.includes('arxiv')) {
+        credibilityScore = 9;
+      } else if (['springer.com', 'ieee.org', 'acm.org', 'nature.com', 'science.org'].some(d => domain.includes(d))) {
+        credibilityScore = 8;
+      } else if (['oreilly.com', 'manning.com', 'packtpub.com', 'wiley.com'].some(d => domain.includes(d))) {
+        credibilityScore = 6;
+      } else if (domain.includes('researchgate') || domain.includes('academia')) {
+        credibilityScore = 5;
+      }
+      
+      // Extract year from metadata or snippet
+      const year = metadata.year?.toString() || 
+                   pdf.snippet.match(/\b(19|20)\d{2}\b/)?.[0] || 
+                   null;
+      
+      // Extract authors from metadata or snippet
+      const authors = metadata.authors?.join(', ') || 
+                     pdf.snippet.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})/)?.[0] || 
+                     null;
       
       return {
         number: index + 1,
-        title: pdf.bookTitle,
-        authors: metadata.authors?.join(', ') || pdf.bookAuthors,
-        year: metadata.year?.toString() || null,
-        source: metadata.publisher || pdf.domain,
-        url: pdf.pdfUrl,
-        credibilityScore: pdf.credibilityScore,
+        title: pdf.title,
+        authors,
+        year,
+        source: pdf.domain,
+        url: pdf.url,
+        credibilityScore,
         source_type: metadata.source_type || 'web',
         verified: true,
-        file_size_bytes: pdf.fileSize
+        file_size_bytes: metadata.file_size_bytes || null
       };
     });
     
-    // FASE 5: Quality filtering & sorting
-    console.log('🎯 [PHASE 4] Quality filtering...');
+    // PHASE 4: Quality filtering & sorting
+    console.log('✨ [PHASE 4] Quality filtering...');
     
-    // Remove duplicates (same URL or same title)
-    const uniqueResults = enrichedResults.reduce((acc, current) => {
-      const duplicate = acc.find(r => 
-        r.url === current.url || 
-        r.title.toLowerCase() === current.title.toLowerCase()
-      );
-      if (!duplicate) acc.push(current);
-      return acc;
-    }, [] as SearchResult[]);
-    
-    // Sort by credibility score (descending)
-    uniqueResults.sort((a, b) => (b.credibilityScore || 0) - (a.credibilityScore || 0));
+    // Sort by credibility score (descending), then by year (descending)
+    enrichedResults.sort((a, b) => {
+      const scoreA = a.credibilityScore || 0;
+      const scoreB = b.credibilityScore || 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      
+      const yearA = parseInt(a.year || '0');
+      const yearB = parseInt(b.year || '0');
+      return yearB - yearA;
+    });
     
     // Take top N and renumber
-    const finalResults = uniqueResults.slice(0, count).map((r, idx) => ({
+    const finalResults = enrichedResults.slice(0, count).map((r, idx) => ({
       ...r,
       number: idx + 1
     }));
     
     console.log(`✅ [ENHANCED SEARCH] Completed: ${finalResults.length} results (requested: ${count})`);
-    console.log(`📊 Breakdown: ${finalResults.filter(r => (r.credibilityScore || 0) >= 8).length} high-quality, ${finalResults.filter(r => (r.credibilityScore || 0) < 8).length} standard`);
+    console.log(`📊 Quality breakdown:`);
+    console.log(`   - High (8-10): ${finalResults.filter(r => (r.credibilityScore || 0) >= 8).length}`);
+    console.log(`   - Medium (5-7): ${finalResults.filter(r => (r.credibilityScore || 0) >= 5 && (r.credibilityScore || 0) < 8).length}`);
+    console.log(`   - Standard (1-4): ${finalResults.filter(r => (r.credibilityScore || 0) < 5).length}`);
     
     return finalResults;
     
