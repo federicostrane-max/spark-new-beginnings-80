@@ -34,7 +34,7 @@ interface AgentsSidebarProps {
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: (agent: Agent) => void;
-  onAgentUpdate?: () => void;
+  agentUpdateTrigger?: number;
 }
 
 export const AgentsSidebar = ({ 
@@ -42,7 +42,7 @@ export const AgentsSidebar = ({
   onSelectAgent,
   onCreateAgent,
   onEditAgent,
-  onAgentUpdate
+  agentUpdateTrigger
 }: AgentsSidebarProps) => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -55,15 +55,17 @@ export const AgentsSidebar = ({
     loadAgents();
   }, []);
 
-  // Reload agents when onAgentUpdate is called
+  // Reload agents when agentUpdateTrigger changes
   useEffect(() => {
-    if (onAgentUpdate) {
+    if (agentUpdateTrigger !== undefined && agentUpdateTrigger > 0) {
       loadAgents();
     }
-  }, [onAgentUpdate]);
+  }, [agentUpdateTrigger]);
 
   const loadAgents = async () => {
-    setLoading(true);
+    // Add a small delay before showing loading state to prevent flashing
+    const loadingTimeout = setTimeout(() => setLoading(true), 300);
+    
     try {
       const { data, error } = await supabase
         .from("agents")
@@ -76,6 +78,7 @@ export const AgentsSidebar = ({
     } catch (error: any) {
       console.error("Error loading agents:", error);
     } finally {
+      clearTimeout(loadingTimeout);
       setLoading(false);
     }
   };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -146,7 +146,9 @@ export default function MultiAgentConsultant() {
     }
   }, [searchParams, session?.user?.id, currentAgent]);
 
-  const handleSelectAgent = async (agent: Agent) => {
+  const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
+
+  const handleSelectAgent = useCallback(async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
     setDrawerOpen(false);
@@ -170,18 +172,16 @@ export default function MultiAgentConsultant() {
     if (conversationId) {
       await loadConversation(conversationId);
     }
-  };
+  }, [session?.user?.id]);
 
-  const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
-
-  const handleAgentCreated = (newAgent: Agent) => {
+  const handleAgentCreated = useCallback((newAgent: Agent) => {
     // Auto-select the newly created agent
     handleSelectAgent(newAgent);
     console.log(`${newAgent.name} ${editingAgent ? 'updated' : 'created'} successfully`);
     setEditingAgent(null);
     // Trigger sidebar refresh
     setAgentUpdateTrigger(prev => prev + 1);
-  };
+  }, [handleSelectAgent, editingAgent]);
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
@@ -510,7 +510,7 @@ export default function MultiAgentConsultant() {
               setEditingAgent(agent);
               setShowCreateModal(true);
             }}
-            onAgentUpdate={() => setAgentUpdateTrigger(prev => prev + 1)}
+            agentUpdateTrigger={agentUpdateTrigger}
           />
         </div>
       )}
@@ -532,7 +532,7 @@ export default function MultiAgentConsultant() {
                 setShowCreateModal(true);
                 setDrawerOpen(false);
               }}
-              onAgentUpdate={() => setAgentUpdateTrigger(prev => prev + 1)}
+              agentUpdateTrigger={agentUpdateTrigger}
             />
           </SheetContent>
         </Sheet>
