@@ -205,20 +205,25 @@ serve(async (req) => {
       .eq('url', url)
       .eq('search_query', search_query || '');
 
-    // Trigger processing directly (process-document will extract text)
-    console.log('[download-pdf-tool] Triggering process-document...');
-    supabase.functions.invoke('process-document', {
+    // Trigger validation (which will extract text and then call process-document)
+    console.log('[download-pdf-tool] Triggering validate-document...');
+    supabase.functions.invoke('validate-document', {
       body: { 
-        documentId: document.id
+        documentId: document.id,
+        searchQuery: search_query,
+        expected_title: expected_title,
+        expected_author: expected_author,
+        // Note: extractedText not provided, validate-document will handle PDF extraction
+        fullText: '' // Will be extracted by validate-document if needed
       }
     }).then(result => {
       if (result.error) {
-        console.error('Processing error:', result.error);
+        console.error('Validation error:', result.error);
       } else {
-        console.log('✅ Processing started for:', document.id);
+        console.log('✅ Validation started for:', document.id);
       }
     }).catch(err => {
-      console.error('Processing invocation error:', err);
+      console.error('Validation invocation error:', err);
       console.error('Stack:', (err as Error).stack);
     });
 

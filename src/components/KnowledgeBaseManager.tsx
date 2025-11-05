@@ -161,8 +161,15 @@ export const KnowledgeBaseManager = ({ agentId, agentName }: KnowledgeBaseManage
 
       if (error) throw error;
 
+      // Sync each document to create chunks
+      for (const docId of selectedDocuments) {
+        supabase.functions.invoke('sync-pool-document', {
+          body: { documentId: docId, agentId }
+        });
+      }
+
       console.log('✅ ASSIGN SUCCESS - Assigned', selectedDocuments.size, 'documents');
-      toast.success(`${selectedDocuments.size} documento/i assegnato/i con successo`);
+      toast.success(`${selectedDocuments.size} documento/i assegnato/i con successo. Creazione chunks in corso...`);
       setShowAssignDialog(false);
       loadDocuments();
     } catch (error: any) {

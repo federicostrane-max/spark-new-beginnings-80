@@ -77,8 +77,27 @@ serve(async (req) => {
     let extractedText = requestBody.extractedText;
     let searchQuery = requestBody.searchQuery || doc.search_query || '';
 
-    // If no extracted text provided, skip AI validation and just mark as validated
-    if (!extractedText) {
+    // If no extracted text provided, extract it from storage
+    if (!extractedText || extractedText.trim().length < 10) {
+      console.log('[validate-document] No extracted text, calling extract-pdf-text function...');
+      
+      const { data: extractionResult, error: extractionError } = await supabase.functions.invoke('extract-pdf-text', {
+        body: { documentId }
+      });
+      
+      if (extractionError) {
+        console.error('[validate-document] Text extraction failed:', extractionError);
+        // Continue without extracted text - will be marked as validated but needs manual review
+      } else if (extractionResult?.text) {
+        extractedText = extractionResult.text;
+        console.log(`[validate-document] ✅ Text extracted: ${extractedText.length} chars`);
+      } else {
+        console.warn('[validate-document] No text extracted from PDF');
+      }
+    }
+
+    // If still no extracted text after extraction attempt, skip AI validation
+    if (!extractedText || extractedText.trim().length < 10) {
       console.log('[validate-document] No extracted text, marking as validated');
       
       await supabase
