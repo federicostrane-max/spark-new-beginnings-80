@@ -1498,6 +1498,50 @@ Deno.serve(async (req) => {
             }
           }
           
+          // ========================================
+          // SEMANTIC SEARCH: Retrieve relevant documents from knowledge base
+          // ========================================
+          console.log('🔍 [SEMANTIC SEARCH] Searching knowledge base for relevant documents...');
+          
+          let knowledgeContext = '';
+          try {
+            const { data: searchData, error: searchError } = await supabase.functions.invoke(
+              'semantic-search',
+              {
+                body: {
+                  query: message,
+                  agentId: agent.id,
+                  topK: 5
+                }
+              }
+            );
+
+            if (!searchError && searchData?.documents && searchData.documents.length > 0) {
+              console.log(`✅ [SEMANTIC SEARCH] Found ${searchData.documents.length} relevant documents`);
+              
+              knowledgeContext = '\n\n## KNOWLEDGE BASE CONTEXT\n\n';
+              knowledgeContext += 'Here are relevant documents from your knowledge base:\n\n';
+              
+              searchData.documents.forEach((doc: any, index: number) => {
+                knowledgeContext += `### Document ${index + 1}: ${doc.document_name}\n`;
+                knowledgeContext += `**Category**: ${doc.category || 'General'}\n`;
+                knowledgeContext += `**Summary**: ${doc.summary || 'No summary available'}\n`;
+                knowledgeContext += `**Content**:\n${doc.content}\n\n`;
+                knowledgeContext += `---\n\n`;
+              });
+              
+              knowledgeContext += 'Use the above documents to answer the user\'s question accurately.\n';
+            } else {
+              console.log('ℹ️ [SEMANTIC SEARCH] No relevant documents found or search failed');
+              if (searchError) {
+                console.error('⚠️ [SEMANTIC SEARCH] Error:', searchError);
+              }
+            }
+          } catch (searchErr) {
+            console.error('❌ [SEMANTIC SEARCH] Failed:', searchErr);
+            // Continue without knowledge context if search fails
+          }
+          
           const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
@@ -1508,7 +1552,7 @@ Deno.serve(async (req) => {
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
-${agent.system_prompt}`;
+${agent.system_prompt}${knowledgeContext}`;
 
           // Define tools for Knowledge Search Expert agent
           let toolCallCount = 0; // Track tool calls for validation
