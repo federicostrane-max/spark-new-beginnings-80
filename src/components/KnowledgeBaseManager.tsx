@@ -158,22 +158,46 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const handleResync = async (docId: string, fileName: string) => {
     console.log('🔄 Re-syncing document:', fileName, 'ID:', docId);
     try {
-      toast.info(`Sincronizzazione di ${fileName}...`);
+      toast.info(`Verifica sincronizzazione di ${fileName}...`);
       
-      // Force a fresh check before syncing
-      console.log('🔍 Checking current sync status before re-sync...');
-      const { data: checkData } = await supabase.functions.invoke('check-and-sync-all', {
-        body: { agentId, autoFix: false }
+      // First check if chunks already exist for this document
+      console.log('🔍 Checking if chunks exist for document...');
+      const { data: existingChunks, error: checkError } = await supabase
+        .from('agent_knowledge')
+        .select('id, source_type')
+        .eq('agent_id', agentId)
+        .eq('pool_document_id', docId);
+      
+      if (checkError) throw checkError;
+      
+      console.log('📊 Existing chunks found:', {
+        fileName,
+        chunkCount: existingChunks?.length || 0,
+        sourceTypes: existingChunks?.map(c => c.source_type)
       });
       
-      if (checkData) {
-        console.log('📊 Current sync status:', {
-          totalAssigned: checkData.totalAssigned,
-          totalSynced: checkData.totalSynced,
-          missingCount: checkData.missingCount,
-          documentStatus: checkData.statuses?.find((s: any) => s.documentId === docId)
-        });
+      if (existingChunks && existingChunks.length > 0) {
+        // Document is already synced! Just update UI
+        console.log('✅ Document already has', existingChunks.length, 'chunks - no sync needed');
+        toast.success(`${fileName} già sincronizzato (${existingChunks.length} chunks trovati)`);
+        
+        // Update the document status in state immediately
+        setDocuments(prev => prev.map(doc => 
+          doc.id === docId 
+            ? { ...doc, syncStatus: 'synced' as const, chunkCount: existingChunks.length }
+            : doc
+        ));
+        
+        // Notify parent to update badge
+        if (onDocsUpdated) {
+          onDocsUpdated();
+        }
+        return;
       }
+      
+      // No chunks found, perform actual sync
+      console.log('⚠️ No chunks found, performing full sync...');
+      toast.info(`Sincronizzazione completa di ${fileName}...`);
       
       const { data, error } = await supabase.functions.invoke('sync-pool-document', {
         body: { documentId: docId, agentId }
@@ -184,9 +208,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       console.log('✅ Sync response:', data);
       toast.success(`${fileName} sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
       
-      // Wait 3 seconds to ensure database commit is complete and indexes are updated
+      // Wait 2 seconds for database commit
       console.log('⏳ Waiting for database commit...');
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 2000));
       
       console.log('🔄 Reloading documents...');
       await loadDocuments();
@@ -305,7 +329,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         toast.error('Errore nella sincronizzazione dei documenti');
       }
 
-      setShowAssignDialog(false);
+      // Don't close the dialog automatically - let user verify sync status
       setSyncProgress(null);
       loadDocuments();
       
@@ -334,6 +358,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       console.log('✅ UNASSIGN SUCCESS - Document unassigned:', fileName);
       toast.success(`Documento "${fileName}" rimosso dalla knowledge base`);
+      
+      // Reload documents but don't close the dialog
       loadDocuments();
       
       // Notify parent to update badge
