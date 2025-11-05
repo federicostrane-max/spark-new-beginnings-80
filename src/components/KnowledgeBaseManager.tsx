@@ -99,9 +99,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       console.log('📄 LOAD ASSIGNED DOCUMENTS SUCCESS, found:', transformedData.length, 'documents');
       setDocuments(transformedData);
-      
-      // Reset quick sync flag when loading documents
-      setHasTriedQuickSync(false);
 
       // Check sync status for each document
       if (transformedData.length > 0) {
@@ -150,6 +147,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           return doc;
         });
         setDocuments(updatedDocs);
+        
+        // Reset quick sync flag only if all documents are synced
+        const allSynced = updatedDocs.every(doc => doc.syncStatus === 'synced');
+        if (allSynced) {
+          setHasTriedQuickSync(false);
+        }
         
         // Notify parent component about doc updates
         if (onDocsUpdated) {
@@ -348,6 +351,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
 
       toast.success(`${brokenDocs.length} documento/i rotti rimossi con successo`);
+      
+      // Reset quick sync flag when removing documents
+      setHasTriedQuickSync(false);
+      
       await loadDocuments();
       
       if (onDocsUpdated) {
@@ -492,6 +499,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       console.log('✅ UNASSIGN SUCCESS - Document unassigned:', fileName);
       toast.success(`Documento "${fileName}" rimosso dalla knowledge base`);
+      
+      // Reset quick sync flag when unassigning documents
+      setHasTriedQuickSync(false);
       
       // Reload documents but don't close the dialog
       loadDocuments();
