@@ -47,9 +47,8 @@ export const BulkAssignDocumentDialog = ({
   useEffect(() => {
     if (open) {
       loadAgents();
-      setSelectedAgentIds(new Set());
     }
-  }, [open]);
+  }, [open, documents]);
 
   const loadAgents = async () => {
     try {
@@ -62,6 +61,33 @@ export const BulkAssignDocumentDialog = ({
 
       if (error) throw error;
       setAgents(data || []);
+
+      // Load existing assignments for the selected documents
+      if (documents.length > 0) {
+        const { data: assignmentsData, error: assignmentsError } = await supabase
+          .from("agent_document_links")
+          .select("agent_id, document_id")
+          .in("document_id", documents.map(d => d.id));
+
+        if (assignmentsError) throw assignmentsError;
+
+        // Count how many documents each agent is assigned to
+        const agentCounts = new Map<string, number>();
+        assignmentsData?.forEach(link => {
+          agentCounts.set(link.agent_id, (agentCounts.get(link.agent_id) || 0) + 1);
+        });
+
+        // Pre-select only agents that are assigned to ALL selected documents
+        const commonlyAssignedIds = new Set(
+          Array.from(agentCounts.entries())
+            .filter(([_, count]) => count === documents.length)
+            .map(([agentId, _]) => agentId)
+        );
+
+        setSelectedAgentIds(commonlyAssignedIds);
+      } else {
+        setSelectedAgentIds(new Set());
+      }
     } catch (error: any) {
       console.error("Error loading agents:", error);
       toast.error("Errore nel caricamento degli agenti");
@@ -83,56 +109,93 @@ export const BulkAssignDocumentDialog = ({
   };
 
   const handleAssign = async () => {
-    if (selectedAgentIds.size === 0) {
-      toast.error("Seleziona almeno un agente");
-      return;
-    }
-
     try {
       setLoading(true);
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      // Create all assignments
-      const assignments = [];
-      for (const doc of documents) {
-        for (const agentId of selectedAgentIds) {
-          assignments.push({
-            document_id: doc.id,
-            agent_id: agentId,
-            assignment_type: 'manual',
-            assigned_by: user.id
-          });
-        }
-      }
-
-      // Batch upsert (ignores duplicates)
-      const { error: assignError } = await supabase
-        .from('agent_document_links')
-        .upsert(assignments, { onConflict: 'document_id,agent_id', ignoreDuplicates: true });
-
-      if (assignError) throw assignError;
-
-      // Trigger sync for each document-agent pair
       const syncPromises = [];
-      for (const doc of documents) {
-        for (const agentId of selectedAgentIds) {
-          syncPromises.push(
-            supabase.functions.invoke('sync-pool-document', {
-              body: {
-                documentId: doc.id,
-                agentId: agentId
-              }
-            })
-          );
+      let totalAdded = 0;
+      let totalRemoved = 0;
+
+      // Process each validated document
+      for (const doc of validatedDocs) {
+        // Get current assignments for this document
+        const { data: currentAssignments } = await supabase
+          .from("agent_document_links")
+          .select("agent_id")
+          .eq("document_id", doc.id);
+
+        const currentAgentIds = new Set(
+          currentAssignments?.map(a => a.agent_id) || []
+        );
+
+        // Determine who to add and who to remove
+        const toAdd = Array.from(selectedAgentIds).filter(
+          id => !currentAgentIds.has(id)
+        );
+        const toRemove = Array.from(currentAgentIds).filter(
+          id => !selectedAgentIds.has(id)
+        );
+
+        // Remove deselected agents
+        if (toRemove.length > 0) {
+          const { error: deleteError } = await supabase
+            .from("agent_document_links")
+            .delete()
+            .eq("document_id", doc.id)
+            .in("agent_id", toRemove);
+
+          if (deleteError) throw deleteError;
+          totalRemoved += toRemove.length;
+        }
+
+        // Add new agents
+        if (toAdd.length > 0) {
+          const { error: insertError } = await supabase
+            .from("agent_document_links")
+            .insert(
+              toAdd.map(agentId => ({
+                document_id: doc.id,
+                agent_id: agentId,
+                assignment_type: 'manual',
+                assigned_by: user.id
+              }))
+            );
+
+          if (insertError) throw insertError;
+          totalAdded += toAdd.length;
+
+          // Sync only newly added agents
+          for (const agentId of toAdd) {
+            syncPromises.push(
+              supabase.functions.invoke('sync-pool-document', {
+                body: {
+                  documentId: doc.id,
+                  agentId: agentId
+                }
+              })
+            );
+          }
         }
       }
 
       // Execute all syncs in parallel
-      await Promise.allSettled(syncPromises);
+      if (syncPromises.length > 0) {
+        await Promise.allSettled(syncPromises);
+      }
 
-      toast.success(`${documents.length} documenti assegnati a ${selectedAgentIds.size} agenti`);
+      // Show appropriate success message
+      if (selectedAgentIds.size === 0) {
+        toast.success(`Assegnazioni rimosse per ${validatedDocs.length} ${validatedDocs.length === 1 ? 'documento' : 'documenti'}`);
+      } else {
+        const parts = [];
+        if (totalAdded > 0) parts.push(`${totalAdded} aggiunte`);
+        if (totalRemoved > 0) parts.push(`${totalRemoved} rimosse`);
+        toast.success(`${validatedDocs.length} ${validatedDocs.length === 1 ? 'documento aggiornato' : 'documenti aggiornati'} (${parts.join(', ')})`);
+      }
+
       onAssigned();
       onOpenChange(false);
     } catch (error: any) {
@@ -214,9 +277,9 @@ export const BulkAssignDocumentDialog = ({
           </div>
 
           {/* Preview */}
-          {selectedAgentIds.size > 0 && (
-            <div className="p-3 rounded-md bg-muted space-y-2">
-              <div className="text-sm font-medium">Riepilogo:</div>
+          <div className="p-3 rounded-md bg-muted space-y-2">
+            <div className="text-sm font-medium">Riepilogo:</div>
+            {selectedAgentIds.size > 0 ? (
               <div className="text-sm text-muted-foreground">
                 Assegnerai <Badge variant="secondary">{validatedDocs.length}</Badge> {validatedDocs.length === 1 ? 'documento' : 'documenti'} a{" "}
                 <Badge variant="secondary">{selectedAgentIds.size}</Badge> {selectedAgentIds.size === 1 ? 'agente' : 'agenti'}
@@ -224,8 +287,12 @@ export const BulkAssignDocumentDialog = ({
                   Totale: <strong>{validatedDocs.length * selectedAgentIds.size}</strong> assegnazioni
                 </span>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="text-sm text-amber-600">
+                ⚠️ Rimuoverai tutte le assegnazioni per {validatedDocs.length === 1 ? 'questo documento' : 'questi documenti'}
+              </div>
+            )}
+          </div>
         </div>
 
         <DialogFooter>
@@ -234,9 +301,9 @@ export const BulkAssignDocumentDialog = ({
           </Button>
           <Button
             onClick={handleAssign}
-            disabled={loading || selectedAgentIds.size === 0 || validatedDocs.length === 0}
+            disabled={loading || validatedDocs.length === 0}
           >
-            {loading ? "Assegnazione..." : "Assegna Tutto"}
+            {loading ? "Salvando..." : "Salva Assegnazioni"}
           </Button>
         </DialogFooter>
       </DialogContent>
