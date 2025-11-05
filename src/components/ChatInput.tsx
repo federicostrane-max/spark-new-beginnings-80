@@ -4,6 +4,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Send, X } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 
 interface ChatInputProps {
   onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>) => void;
@@ -54,6 +56,72 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        
+        const file = item.getAsFile();
+        if (!file) continue;
+
+        // Validate file type
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+          toast({
+            title: "Formato non supportato",
+            description: "Solo immagini JPEG, PNG e WebP sono supportate.",
+            variant: "destructive"
+          });
+          continue;
+        }
+
+        // Validate file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          toast({
+            title: "File troppo grande",
+            description: "Le immagini devono essere inferiori a 10MB.",
+            variant: "destructive"
+          });
+          continue;
+        }
+
+        try {
+          const fileExt = file.type.split('/')[1];
+          const fileName = `${Date.now()}.${fileExt}`;
+          const filePath = `${fileName}`;
+
+          const { error: uploadError, data } = await supabase.storage
+            .from('agent-attachments')
+            .upload(filePath, file);
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('agent-attachments')
+            .getPublicUrl(filePath);
+
+          handleAttachment(publicUrl, fileName, file.type);
+          
+          toast({
+            title: "Immagine incollata",
+            description: "L'immagine è stata aggiunta agli allegati."
+          });
+        } catch (error) {
+          console.error('Error uploading pasted image:', error);
+          toast({
+            title: "Errore",
+            description: "Impossibile caricare l'immagine incollata.",
+            variant: "destructive"
+          });
+        }
+      }
+    }
+  };
+
   return (
     <div className="space-y-2">
       {/* Attachments Preview */}
@@ -95,6 +163,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={placeholder}
           disabled={disabled}
           className="min-h-[44px] max-h-[200px] resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent"
