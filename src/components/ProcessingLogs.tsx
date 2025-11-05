@@ -70,13 +70,15 @@ export const ProcessingLogs = () => {
   }, []);
 
   const fetchActiveDocuments = async () => {
+    // Fetch documents that are currently being processed (not completed and not errored out)
     const { data: cacheData } = await supabase
       .from('document_processing_cache')
       .select('*')
+      .is('processing_completed_at', null) // Not completed
       .order('updated_at', { ascending: false })
       .limit(10);
 
-    if (cacheData) {
+    if (cacheData && cacheData.length > 0) {
       // Fetch document names
       const docIds = cacheData.map(d => d.document_id);
       const { data: docs } = await supabase
@@ -97,6 +99,8 @@ export const ProcessingLogs = () => {
       }));
 
       setActiveDocuments(documents);
+    } else {
+      setActiveDocuments([]);
     }
   };
 
