@@ -380,12 +380,17 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         const poolDocIds = poolLinks.map(l => l.document_id);
         console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents...`);
         
-        const { data: poolKnowledge } = await supabase
+        const { data: poolKnowledge, error: poolKnowledgeError } = await supabase
           .from("agent_knowledge")
           .select("*")
           .eq("agent_id", editingAgent.id)
-          .or("source_type.eq.pool,source_type.eq.shared_pool")
+          .in("source_type", ["pool", "shared_pool"])
           .in("pool_document_id", poolDocIds);
+
+        if (poolKnowledgeError) {
+          console.error('❌ [CLONE] Error fetching pool knowledge:', poolKnowledgeError);
+          throw new Error(`Errore nel recupero della knowledge del pool: ${poolKnowledgeError.message}`);
+        }
 
         if (poolKnowledge && poolKnowledge.length > 0) {
           console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks`);
