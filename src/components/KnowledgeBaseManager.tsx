@@ -6,6 +6,7 @@ import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatDistanceToNow } from "date-fns";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Dialog,
   DialogContent,
@@ -50,6 +51,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const [assigning, setAssigning] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [syncStatuses, setSyncStatuses] = useState<Map<string, 'synced' | 'syncing' | 'error'>>(new Map());
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     loadDocuments();
@@ -437,75 +439,19 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           </p>
         </div>
       ) : (
-        <div className="w-full overflow-hidden border rounded-lg">
+        <div className="w-full space-y-3">
           <ScrollArea className="h-[300px]">
-            <Table className="table-fixed w-full">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[35%]">Nome Documento</TableHead>
-                  <TableHead className="w-[25%]">Stato Sync</TableHead>
-                  <TableHead className="w-[20%]">Assegnato</TableHead>
-                  <TableHead className="w-[20%] text-right">Azioni</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            {isMobile ? (
+              // Mobile: Card-based view
+              <div className="space-y-3 px-1">
                 {documents.map((doc) => (
-                  <TableRow key={doc.link_id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2 min-w-0 max-w-full">
-                        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <span className="truncate" title={doc.file_name}>
-                          {doc.file_name}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {doc.syncStatus === 'checking' && (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            <span className="text-sm text-muted-foreground">Verifica...</span>
-                          </>
-                        )}
-                        {doc.syncStatus === 'synced' && (
-                          <>
-                            <CheckCircle2 className="h-4 w-4 text-green-600" />
-                            <span className="text-sm text-green-600">
-                              Sincronizzato ({doc.chunkCount} chunks)
-                            </span>
-                          </>
-                        )}
-                        {doc.syncStatus === 'missing' && (
-                          <div className="flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4 text-destructive" />
-                            <div className="flex gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleResync(doc.id, doc.file_name)}
-                                className="h-7 px-2 text-xs"
-                              >
-                                <RefreshCw className="h-3 w-3 mr-1" />
-                                Verifica
-                              </Button>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleFullRedownload(doc.id, doc.file_name)}
-                                className="h-7 px-2 text-xs"
-                              >
-                                <Download className="h-3 w-3 mr-1" />
-                                Re-download
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                      {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: undefined })}
-                    </TableCell>
-                    <TableCell className="text-right">
+                  <div key={doc.link_id} className="border rounded-lg p-3 space-y-2 bg-card">
+                    {/* File name */}
+                    <div className="flex items-start gap-2">
+                      <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                      <span className="text-sm font-medium break-words flex-1" title={doc.file_name}>
+                        {doc.file_name}
+                      </span>
                       <Button 
                         variant="ghost" 
                         size="sm"
@@ -516,14 +462,155 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                         }}
                         type="button"
                         title="Rimuovi assegnazione"
+                        className="h-8 w-8 p-0 flex-shrink-0"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                    
+                    {/* Sync status */}
+                    <div className="flex items-center gap-2 text-sm">
+                      {doc.syncStatus === 'checking' && (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <span className="text-muted-foreground">Verifica...</span>
+                        </>
+                      )}
+                      {doc.syncStatus === 'synced' && (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          <span className="text-green-600">
+                            Sincronizzato ({doc.chunkCount} chunks)
+                          </span>
+                        </>
+                      )}
+                      {doc.syncStatus === 'missing' && (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
+                          <span className="text-destructive">Non sincronizzato</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Action buttons for missing sync */}
+                    {doc.syncStatus === 'missing' && (
+                      <div className="flex flex-col gap-2 pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleResync(doc.id, doc.file_name)}
+                          className="w-full justify-start"
+                        >
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Verifica sincronizzazione
+                        </Button>
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => handleFullRedownload(doc.id, doc.file_name)}
+                          className="w-full justify-start"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Re-download completo
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {/* Date */}
+                    <div className="text-xs text-muted-foreground">
+                      Assegnato {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true })}
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (
+              // Desktop: Table view
+              <Table className="table-fixed w-full">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[35%]">Nome Documento</TableHead>
+                    <TableHead className="w-[25%]">Stato Sync</TableHead>
+                    <TableHead className="w-[20%]">Assegnato</TableHead>
+                    <TableHead className="w-[20%] text-right">Azioni</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documents.map((doc) => (
+                    <TableRow key={doc.link_id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2 min-w-0 max-w-full">
+                          <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <span className="truncate" title={doc.file_name}>
+                            {doc.file_name}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {doc.syncStatus === 'checking' && (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              <span className="text-sm text-muted-foreground">Verifica...</span>
+                            </>
+                          )}
+                          {doc.syncStatus === 'synced' && (
+                            <>
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              <span className="text-sm text-green-600">
+                                Sincronizzato ({doc.chunkCount} chunks)
+                              </span>
+                            </>
+                          )}
+                          {doc.syncStatus === 'missing' && (
+                            <div className="flex items-center gap-2">
+                              <AlertCircle className="h-4 w-4 text-destructive" />
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleResync(doc.id, doc.file_name)}
+                                  className="h-7 px-2 text-xs"
+                                >
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Verifica
+                                </Button>
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  onClick={() => handleFullRedownload(doc.id, doc.file_name)}
+                                  className="h-7 px-2 text-xs"
+                                >
+                                  <Download className="h-3 w-3 mr-1" />
+                                  Re-download
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                        {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: undefined })}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleUnassignDocument(doc.link_id, doc.file_name);
+                          }}
+                          type="button"
+                          title="Rimuovi assegnazione"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </ScrollArea>
         </div>
       )}
