@@ -88,14 +88,29 @@ serve(async (req) => {
     // ========================================
     // STEP 3: Download and extract text from PDF
     // ========================================
-    console.log(`[sync-pool-document] Downloading PDF from: ${poolDoc.file_path}`);
+    console.log(`[sync-pool-document] Downloading PDF from bucket: knowledge-pdfs, path: ${poolDoc.file_path}`);
+    
+    // Remove bucket name if it's included in the path
+    let cleanPath = poolDoc.file_path;
+    if (cleanPath.startsWith('knowledge-pdfs/')) {
+      cleanPath = cleanPath.replace('knowledge-pdfs/', '');
+    }
+    
+    console.log(`[sync-pool-document] Clean path: ${cleanPath}`);
     
     const { data: fileData, error: downloadError } = await supabase
       .storage
       .from('knowledge-pdfs')
-      .download(poolDoc.file_path);
+      .download(cleanPath);
 
-    if (downloadError) throw downloadError;
+    if (downloadError) {
+      console.error('[sync-pool-document] Download error:', downloadError);
+      throw new Error(`Failed to download PDF: ${downloadError.message}`);
+    }
+
+    if (!fileData) {
+      throw new Error('No file data returned from storage');
+    }
 
     // Use Lovable AI OCR to extract text
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
