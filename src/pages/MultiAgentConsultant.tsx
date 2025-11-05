@@ -647,11 +647,13 @@ export default function MultiAgentConsultant() {
                               </Button>
                             </>
                           )}
-                            <ExportChatPDF
-                              conversationId={currentConversation.id}
-                              agentName={currentAgent.name}
-                              messages={messages as any}
-                            />
+                            {currentConversation && (
+                              <ExportChatPDF
+                                conversationId={currentConversation.id}
+                                agentName={currentAgent.name}
+                                messages={messages as any}
+                              />
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
