@@ -165,48 +165,25 @@ serve(async (req) => {
     
     console.log(`[sync-pool-document] Clean path: ${cleanPath}`);
     
-    // Verify file exists before attempting download
-    const { data: fileList, error: listError } = await supabase
-      .storage
-      .from('knowledge-pdfs')
-      .list(cleanPath.split('/').slice(0, -1).join('/') || '');
-
-    if (listError) {
-      console.error('[sync-pool-document] Error listing files:', listError);
-      throw new Error(`Cannot verify file existence: ${listError.message || 'Unknown error'}`);
-    }
-
-    const fileName = cleanPath.split('/').pop();
-    const fileExists = fileList?.some(file => file.name === fileName);
-
-    if (!fileExists) {
-      console.error(`[sync-pool-document] File not found in storage: ${cleanPath}`);
-      
-      // Mark document as having a missing file
-      await supabase
-        .from('knowledge_documents')
-        .update({ 
-          processing_status: 'error',
-          validation_status: 'rejected',
-          validation_reason: `File not found in storage: ${cleanPath}. The file may have been moved or deleted.`
-        })
-        .eq('id', documentId);
-      
-      throw new Error(`File not found in storage: ${poolDoc.file_name}. The file may have been moved or deleted.`);
-    }
-    
     const { data: fileData, error: downloadError } = await supabase
       .storage
       .from('knowledge-pdfs')
       .download(cleanPath);
 
-    if (downloadError) {
+    if (downloadError || !fileData) {
       console.error('[sync-pool-document] Download error:', downloadError);
-      throw new Error(`Failed to download PDF: ${downloadError.message || JSON.stringify(downloadError)}`);
-    }
-
-    if (!fileData) {
-      throw new Error('No file data returned from storage');
+      
+      // Mark document as having a missing/inaccessible file
+      await supabase
+        .from('knowledge_documents')
+        .update({ 
+          processing_status: 'error',
+          validation_status: 'rejected',
+          validation_reason: `Failed to download file: ${downloadError?.message || 'File not found'}. The file may have been moved or deleted.`
+        })
+        .eq('id', documentId);
+      
+      throw new Error(`Failed to download PDF: ${downloadError?.message || 'File not found'}`);
     }
 
     // Use extract-pdf-text edge function instead of OCR
