@@ -47,20 +47,51 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   const requestedCount = countMatch ? Math.min(parseInt(countMatch[1]), 100) : 10; // Default 10, max 100
   console.log('📊 [INTENT PARSER] Requested count:', requestedCount);
   
-  // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for..."
+  // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for...", Italian patterns
   const searchPatterns = [
+    // English patterns
     /find\s+(?:pdf|pdfs|papers?|documents?|articles?)\s+(?:on|about|regarding)/i,
     /search\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
     /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
-    /\d+\s+(?:pdf|pdfs|papers?|documents?)\s+(?:on|about|regarding)/i // "20 PDFs on..."
+    /\d+\s+(?:pdf|pdfs|papers?|documents?)\s+(?:on|about|regarding)/i, // "20 PDFs on..."
+    
+    // Italian patterns
+    /cerca\s+(?:pdf|articoli?|documenti?|paper)/i,
+    /trova\s+(?:pdf|articoli?|documenti?|paper)/i,
+    /dammi\s+(?:\d+\s+)?(?:pdf|articoli?|documenti?|paper)/i,
+    /ricerca\s+(?:pdf|articoli?|documenti?|paper)/i,
+    /voglio\s+(?:\d+\s+)?(?:pdf|articoli?|documenti?|paper)/i,
+    /mi\s+(?:servono?|occorrono?)\s+(?:\d+\s+)?(?:pdf|articoli?|paper)/i,
+    
+    // More flexible patterns
+    /(?:pdf|papers?|documents?|articoli?)\s+(?:su|on|about|riguardo|regarding)\s+/i,
+    /\d+\s+(?:pdf|paper|articoli?)\s+/i  // "5 PDF machine learning"
   ];
   
   for (const pattern of searchPatterns) {
     if (pattern.test(message)) {
-      const topic = message.replace(pattern, '').replace(/\b\d+\b/g, '').trim(); // Remove pattern and standalone numbers
+      let topic = message.replace(pattern, '').replace(/\b\d+\b/g, '').trim(); // Remove pattern and standalone numbers
+      
+      // Additional cleanup: remove common keywords
+      topic = topic.replace(/\b(pdf|pdfs|paper|papers|articolo|articoli|documento|documenti)\b/gi, '').trim();
+      
+      // Fallback: if topic is too short, take everything after first 3 words
+      if (!topic || topic.length < 3) {
+        const words = message.split(/\s+/);
+        topic = words.slice(3).join(' ').trim();
+      }
+      
       console.log('✅ [INTENT PARSER] Detected SEARCH_REQUEST for topic:', topic);
       return { type: 'SEARCH_REQUEST', topic, count: requestedCount };
     }
+  }
+  
+  // Check for vague search intent to provide feedback
+  const hasSearchIntent = /\b(cerca|trova|dammi|voglio|search|find|look for|mi servono|mi occorrono)\b/i.test(message);
+  const hasTopicWords = /\b(pdf|paper|articol|document)\b/i.test(message);
+  
+  if (hasSearchIntent && hasTopicWords) {
+    console.log('⚠️ [INTENT PARSER] Vague search intent detected, may need AI guidance');
   }
   
   // DOWNLOAD COMMAND: "Download #2, #5", "Get PDFs #1, #3, #7", "Download all"
@@ -1116,6 +1147,12 @@ Deno.serve(async (req) => {
             return;
           } else {
             console.log('🤖 [WORKFLOW] Workflow not handled, proceeding with AI call for semantic processing');
+            if (agent.slug === 'knowledge-search-expert') {
+              console.log('⚠️ [WORKFLOW] Message NOT handled by automated workflow for Knowledge Search Expert');
+              console.log(`   Intent detected: ${userIntent?.type || 'UNKNOWN'}`);
+              console.log(`   Message: ${message.slice(0, 200)}`);
+              console.log('   → Passing to AI for semantic analysis');
+            }
           }
           
           const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
