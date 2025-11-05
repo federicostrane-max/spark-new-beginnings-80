@@ -39,8 +39,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [originalPrompt, setOriginalPrompt] = useState("");
   const isEditingRef = useRef(false);
+  const previousPromptRef = useRef<string>("");
 
   // Load agent data when editing
   useEffect(() => {
@@ -50,19 +50,19 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
-      setOriginalPrompt(editingAgent.system_prompt); // Save original for comparison
       setLlmProvider(editingAgent.llm_provider || "anthropic");
       setCreatedAgentId(editingAgent.id);
+      previousPromptRef.current = editingAgent.system_prompt;
     } else if (!open) {
       // Reset quando il modale si chiude
       setName("");
       setDescription("");
       setSystemPrompt("");
-      setOriginalPrompt("");
       setLlmProvider("anthropic");
       setSelectedFiles([]);
       setCreatedAgentId(null);
       isEditingRef.current = false;
+      previousPromptRef.current = "";
     }
   }, [open]);
 
@@ -99,8 +99,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     try {
       if (editingAgent) {
         // Save to history if prompt changed
-        if (systemPrompt !== originalPrompt) {
-          await savePromptToHistory(editingAgent.id, originalPrompt);
+        if (systemPrompt !== previousPromptRef.current) {
+          await savePromptToHistory(editingAgent.id, previousPromptRef.current);
         }
 
         // Update existing agent
@@ -119,6 +119,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         if (error) throw error;
 
         console.log("Agent updated successfully");
+        previousPromptRef.current = systemPrompt; // Update ref after save
         onSuccess(data);
         onOpenChange(false);
       } else {
@@ -701,8 +702,6 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             open={showHistory}
             onOpenChange={setShowHistory}
             agentId={editingAgent.id}
-            agentName={editingAgent.name}
-            currentPrompt={systemPrompt}
             onRestore={handleRestorePrompt}
           />
         )}

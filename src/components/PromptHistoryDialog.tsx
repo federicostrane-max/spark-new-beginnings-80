@@ -3,13 +3,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { History, RotateCcw, Clock } from "lucide-react";
+import { Loader2, RotateCcw, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
 
-interface PromptVersion {
+interface PromptHistoryItem {
   id: string;
   system_prompt: string;
   created_at: string;
@@ -19,23 +18,14 @@ interface PromptVersion {
 interface PromptHistoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  agentId: string | null;
-  agentName: string;
-  currentPrompt: string;
+  agentId: string;
   onRestore: (prompt: string) => void;
 }
 
-export const PromptHistoryDialog = ({
-  open,
-  onOpenChange,
-  agentId,
-  agentName,
-  currentPrompt,
-  onRestore
-}: PromptHistoryDialogProps) => {
-  const [versions, setVersions] = useState<PromptVersion[]>([]);
+export const PromptHistoryDialog = ({ open, onOpenChange, agentId, onRestore }: PromptHistoryDialogProps) => {
+  const [history, setHistory] = useState<PromptHistoryItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && agentId) {
@@ -44,19 +34,17 @@ export const PromptHistoryDialog = ({
   }, [open, agentId]);
 
   const loadHistory = async () => {
-    if (!agentId) return;
-
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from("agent_prompt_history")
         .select("*")
         .eq("agent_id", agentId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(50);
 
       if (error) throw error;
-
-      setVersions(data || []);
+      setHistory(data || []);
     } catch (error) {
       console.error("Error loading prompt history:", error);
       toast.error("Errore nel caricamento della cronologia");
@@ -65,126 +53,91 @@ export const PromptHistoryDialog = ({
     }
   };
 
-  const handleRestore = (prompt: string) => {
-    onRestore(prompt);
-    toast.success("Prompt ripristinato! Ricorda di salvare le modifiche.");
-    onOpenChange(false);
-  };
-
-  const truncatePrompt = (prompt: string, maxLength: number = 150) => {
-    if (prompt.length <= maxLength) return prompt;
-    return prompt.substring(0, maxLength) + "...";
+  const handleRestore = async (item: PromptHistoryItem) => {
+    setRestoring(item.id);
+    try {
+      onRestore(item.system_prompt);
+      toast.success(`Prompt ripristinato (v${item.version_number})`);
+      onOpenChange(false);
+    } catch (error) {
+      console.error("Error restoring prompt:", error);
+      toast.error("Errore nel ripristino del prompt");
+    } finally {
+      setRestoring(null);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh]">
+      <DialogContent className="max-w-4xl max-h-[80vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <History className="w-5 h-5" />
-            Cronologia Prompt - {agentName}
+            <Clock className="h-5 w-5" />
+            Cronologia System Prompt
           </DialogTitle>
         </DialogHeader>
 
-        <ScrollArea className="h-[60vh] pr-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-          ) : versions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <History className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p>Nessuna versione precedente disponibile</p>
-              <p className="text-sm mt-1">
-                Le modifiche al prompt verranno salvate automaticamente qui
-              </p>
-            </div>
-          ) : (
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        ) : history.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Nessuna versione precedente trovata
+          </div>
+        ) : (
+          <ScrollArea className="h-[500px] pr-4">
             <div className="space-y-4">
-              {/* Current version card */}
-              <Card className="border-primary/50 bg-primary/5">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4" />
-                      <span>Versione Corrente</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground font-normal">
-                      In uso
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                    {truncatePrompt(currentPrompt)}
-                  </p>
-                  {selectedVersion === 'current' && (
-                    <div className="mt-3 p-3 bg-background rounded border">
-                      <p className="text-sm whitespace-pre-wrap">{currentPrompt}</p>
-                    </div>
-                  )}
-                  <div className="mt-3 flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedVersion(selectedVersion === 'current' ? null : 'current')}
-                    >
-                      {selectedVersion === 'current' ? 'Nascondi' : 'Visualizza completo'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Previous versions */}
-              {versions.map((version, index) => (
-                <Card key={version.id} className="hover:border-primary/50 transition-colors">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <History className="w-4 h-4" />
-                        <span>Versione #{versions.length - index}</span>
+              {history.map((item, index) => (
+                <div
+                  key={item.id}
+                  className="border rounded-lg p-4 space-y-3 hover:bg-accent/50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-semibold text-sm">
+                          Versione {item.version_number}
+                        </span>
+                        {index === 0 && (
+                          <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                            Corrente
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(item.created_at), {
+                            addSuffix: true,
+                            locale: it,
+                          })}
+                        </span>
                       </div>
-                      <span className="text-xs text-muted-foreground font-normal">
-                        {formatDistanceToNow(new Date(version.created_at), {
-                          addSuffix: true,
-                          locale: it
-                        })}
-                      </span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {truncatePrompt(version.system_prompt)}
-                    </p>
-                    {selectedVersion === version.id && (
-                      <div className="mt-3 p-3 bg-background rounded border">
-                        <p className="text-sm whitespace-pre-wrap">{version.system_prompt}</p>
+                      <div className="bg-muted/50 rounded p-3 text-sm font-mono whitespace-pre-wrap break-words max-h-32 overflow-y-auto">
+                        {item.system_prompt}
                       </div>
-                    )}
-                    <div className="mt-3 flex gap-2">
+                    </div>
+                    {index !== 0 && (
                       <Button
+                        size="sm"
                         variant="outline"
-                        size="sm"
-                        onClick={() => setSelectedVersion(selectedVersion === version.id ? null : version.id)}
+                        onClick={() => handleRestore(item)}
+                        disabled={restoring === item.id}
                       >
-                        {selectedVersion === version.id ? 'Nascondi' : 'Visualizza completo'}
+                        {restoring === item.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <RotateCcw className="h-4 w-4 mr-2" />
+                            Ripristina
+                          </>
+                        )}
                       </Button>
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleRestore(version.system_prompt)}
-                        className="gap-2"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        Ripristina
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
-          )}
-        </ScrollArea>
+          </ScrollArea>
+        )}
       </DialogContent>
     </Dialog>
   );
