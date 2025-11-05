@@ -93,7 +93,7 @@ serve(async (req) => {
     const { data: fileData, error: downloadError } = await supabase
       .storage
       .from('knowledge-pdfs')
-      .download(poolDoc.file_path.replace('knowledge-pdfs/', ''));
+      .download(poolDoc.file_path);
 
     if (downloadError) throw downloadError;
 
