@@ -432,7 +432,7 @@ async function extractCachedSearchResults(
   return null;
 }
 
-async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Promise<any[]> {
+async function executeDownloads(pdfs: SearchResult[], searchQuery: string, supabaseClient: any): Promise<any[]> {
   console.log(`⬇️ [DOWNLOAD] Starting download of ${pdfs.length} PDFs`);
   const results = [];
   
@@ -450,8 +450,13 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Prom
       continue;
     }
     
+    let downloadSuccess = false;
+    let lastError = '';
+    let fileName = '';
+    
+    // STRATEGY 1: Try the cached verified URL
+    console.log(`  🔗 [STRATEGY 1] Trying cached URL: ${pdf.url.slice(0, 60)}...`);
     try {
-      // Call download-pdf-tool edge function
       const downloadResult = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/download-pdf-tool', {
         method: 'POST',
         headers: {
@@ -460,29 +465,100 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string): Prom
         },
         body: JSON.stringify({
           url: pdf.url,
-          search_query: searchQuery
+          search_query: searchQuery,
+          expected_title: pdf.title,
+          expected_author: pdf.authors
         })
       });
       
       const data = await downloadResult.json();
-      console.log(`✅ [DOWNLOAD] PDF #${pdf.number} response:`, data.error ? 'ERROR' : 'SUCCESS');
       
-      results.push({
-        number: pdf.number,
-        title: pdf.title,
-        success: !data.error,
-        fileName: data.document?.file_name,
-        error: data.error
-      });
+      if (!data.error) {
+        console.log(`  ✅ [STRATEGY 1] SUCCESS`);
+        downloadSuccess = true;
+        fileName = data.document?.file_name;
+      } else {
+        console.log(`  ❌ [STRATEGY 1] Failed:`, data.error);
+        lastError = data.error;
+      }
     } catch (error) {
-      console.error(`❌ [DOWNLOAD] PDF #${pdf.number} exception:`, error);
-      results.push({
-        number: pdf.number,
-        title: pdf.title,
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`  ❌ [STRATEGY 1] Exception:`, errorMessage);
+      lastError = errorMessage;
     }
+    
+    // STRATEGY 2: If failed, search for alternative URLs
+    if (!downloadSuccess) {
+      console.log(`  🔄 [STRATEGY 2] Searching alternative URLs for: ${pdf.title}`);
+      
+      try {
+        const { data: altPdfs, error: altError } = await supabaseClient.functions.invoke(
+          'pdf-search-with-validation',
+          {
+            body: {
+              books: [{ title: pdf.title, authors: pdf.authors || '' }],
+              maxResultsPerBook: 3,  // Try up to 3 alternative URLs
+              maxUrlsToCheck: 10      // Reduced for speed
+            }
+          }
+        );
+        
+        if (!altError && altPdfs?.pdfs && altPdfs.pdfs.length > 0) {
+          console.log(`  ✅ [STRATEGY 2] Found ${altPdfs.pdfs.length} alternative URLs`);
+          
+          // Try each alternative URL until one succeeds
+          for (const altPdf of altPdfs.pdfs) {
+            if (downloadSuccess) break;
+            
+            console.log(`    🔗 Trying alternative: ${altPdf.pdfUrl.slice(0, 60)}...`);
+            
+            try {
+              const downloadResult = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/download-pdf-tool', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                },
+                body: JSON.stringify({
+                  url: altPdf.pdfUrl,
+                  search_query: searchQuery,
+                  expected_title: pdf.title,
+                  expected_author: pdf.authors
+                })
+              });
+              
+              const data = await downloadResult.json();
+              
+              if (!data.error) {
+                console.log(`    ✅ Alternative URL SUCCESS`);
+                downloadSuccess = true;
+                fileName = data.document?.file_name;
+              } else {
+                console.log(`    ❌ Alternative failed:`, data.error);
+                lastError = data.error;
+              }
+            } catch (error) {
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              console.error(`    ❌ Alternative exception:`, errorMessage);
+              lastError = errorMessage;
+            }
+          }
+        } else {
+          console.log(`  ⚠️ [STRATEGY 2] No alternatives found`);
+        }
+      } catch (searchError) {
+        console.error(`  ❌ [STRATEGY 2] Search failed:`, searchError);
+      }
+    }
+    
+    // Push final result
+    results.push({
+      number: pdf.number,
+      title: pdf.title,
+      success: downloadSuccess,
+      fileName: downloadSuccess ? fileName : undefined,
+      error: downloadSuccess ? undefined : (lastError || 'No alternative URL found')
+    });
   }
   
   console.log(`✅ [DOWNLOAD] Completed. Success: ${results.filter(r => r.success).length}/${results.length}`);
@@ -1223,8 +1299,8 @@ Deno.serve(async (req) => {
                       .map(num => cachedResults[num - 1])
                       .filter(Boolean);
                 
-                // Execute downloads
-                const downloadResults = await executeDownloads(selectedPdfs, message);
+                // Execute downloads WITH RETRY LOGIC
+                const downloadResults = await executeDownloads(selectedPdfs, message, supabase);
                 workflowResponse = formatDownloadResults(downloadResults);
                 
                 sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
