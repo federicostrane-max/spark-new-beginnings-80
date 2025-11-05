@@ -60,30 +60,33 @@ serve(async (req) => {
 
     console.log(`[extract-pdf-text] PDF downloaded, size: ${pdfBlob.size} bytes`);
 
-    // Use OCR function to extract text (works for both text PDFs and scanned PDFs)
-    console.log('[extract-pdf-text] Calling ocr-image for text extraction...');
+    // Create a temporary signed URL for the PDF (valid for 5 minutes)
+    console.log('[extract-pdf-text] Creating signed URL...');
+    const { data: signedUrlData, error: signedUrlError } = await supabase
+      .storage
+      .from('knowledge-pdfs')
+      .createSignedUrl(filePath, 300); // 300 seconds = 5 minutes
 
-    // Create FormData to send PDF
-    const formData = new FormData();
-    formData.append('file', pdfBlob, filePath.split('/').pop() || 'document.pdf');
-
-    // Call ocr-image function
-    const ocrResponse = await fetch(`${supabaseUrl}/functions/v1/ocr-image`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${supabaseKey}`,
-      },
-      body: formData,
-    });
-
-    if (!ocrResponse.ok) {
-      const errorText = await ocrResponse.text();
-      console.error('[extract-pdf-text] OCR failed:', ocrResponse.status, errorText);
-      throw new Error(`OCR extraction failed: ${ocrResponse.status} - ${errorText}`);
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      throw new Error(`Failed to create signed URL: ${signedUrlError?.message || 'Unknown error'}`);
     }
 
-    const ocrData = await ocrResponse.json();
-    const extractedText = ocrData.text || '';
+    console.log('[extract-pdf-text] Signed URL created, calling ocr-image...');
+
+    // Call ocr-image function with the signed URL
+    const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr-image', {
+      body: {
+        imageUrl: signedUrlData.signedUrl,
+        fileName: filePath.split('/').pop() || 'document.pdf'
+      }
+    });
+
+    if (ocrError) {
+      console.error('[extract-pdf-text] OCR failed:', ocrError);
+      throw new Error(`OCR extraction failed: ${ocrError.message}`);
+    }
+
+    const extractedText = ocrData?.text || '';
 
     if (!extractedText || extractedText.trim().length < 10) {
       throw new Error('Extracted text too short or empty. PDF might be corrupted or contain only images.');
