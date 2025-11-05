@@ -56,7 +56,7 @@ export default function MultiAgentConsultant() {
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -86,26 +86,26 @@ export default function MultiAgentConsultant() {
   };
 
   useEffect(() => {
-    if (isUserAtBottom && !isStreaming) {
+    if (isUserAtBottom && !streamingConversationId) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, isUserAtBottom, isStreaming]);
+  }, [messages, isUserAtBottom, streamingConversationId]);
 
   // Pre-generate audio for assistant messages when streaming stops
   useEffect(() => {
-    if (!isStreaming && messages.length > 0) {
+    if (!streamingConversationId && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === 'assistant' && lastMessage.content.trim()) {
         // Pre-generate audio in background
         preGenerateAudio(lastMessage.id, lastMessage.content);
       }
     }
-  }, [isStreaming, messages, preGenerateAudio]);
+  }, [streamingConversationId, messages, preGenerateAudio]);
 
   // Reload messages when returning to the app
   useEffect(() => {
     const reloadMessages = () => {
-      if (currentConversation?.id && !isStreaming) {
+      if (currentConversation?.id && !streamingConversationId) {
         loadConversation(currentConversation.id);
       }
     };
@@ -115,7 +115,7 @@ export default function MultiAgentConsultant() {
     
     // Also reload on visibility change (mobile)
     const handleVisibilityChange = () => {
-      if (!document.hidden && currentConversation?.id && !isStreaming) {
+      if (!document.hidden && currentConversation?.id && !streamingConversationId) {
         loadConversation(currentConversation.id);
       }
     };
@@ -125,7 +125,7 @@ export default function MultiAgentConsultant() {
       window.removeEventListener('focus', reloadMessages);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentConversation?.id, isStreaming]);
+  }, [currentConversation?.id, streamingConversationId]);
 
   // Auto-select agent from URL parameter when returning from presentation
   useEffect(() => {
@@ -270,7 +270,7 @@ export default function MultiAgentConsultant() {
     const assistantId = crypto.randomUUID();
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
     
-    setIsStreaming(true);
+    setStreamingConversationId(conversationId);
 
     try {
       // Create abort controller with 6 minute timeout (slightly longer than edge function)
@@ -405,7 +405,7 @@ export default function MultiAgentConsultant() {
       console.error("Error sending message:", error);
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
     } finally {
-      setIsStreaming(false);
+      setStreamingConversationId(null);
     }
   };
 
@@ -672,7 +672,7 @@ export default function MultiAgentConsultant() {
                         id={msg.id}
                         role={msg.role}
                         content={msg.content}
-                        isStreaming={isStreaming && msg.id === messages[messages.length - 1]?.id}
+                        isStreaming={streamingConversationId === currentConversation?.id && msg.id === messages[messages.length - 1]?.id}
                         selectionMode={selectionMode}
                         isSelected={selectedMessage === msg.id}
                         onToggleSelection={() => {}}
@@ -693,7 +693,8 @@ export default function MultiAgentConsultant() {
               <div className="max-w-4xl mx-auto px-4 md:px-6 py-4">
                 <ChatInput
                   onSend={handleSendMessage}
-                  disabled={isStreaming || loadingMessages}
+                  disabled={loadingMessages}
+                  sendDisabled={streamingConversationId === currentConversation?.id}
                   placeholder={`Message ${currentAgent.name}...`}
                 />
               </div>

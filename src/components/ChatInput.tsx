@@ -8,10 +8,11 @@ import { AttachmentUpload } from "./AttachmentUpload";
 interface ChatInputProps {
   onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>) => void;
   disabled?: boolean;
+  sendDisabled?: boolean;
   placeholder?: string;
 }
 
-export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..." }: ChatInputProps) => {
+export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type your message..." }: ChatInputProps) => {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Array<{ url: string; name: string; type: string }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -105,7 +106,7 @@ export const ChatInput = ({ onSend, disabled, placeholder = "Type your message..
         <Button
           type="button"
           onClick={() => handleSubmit()}
-          disabled={disabled || (!input.trim() && attachments.length === 0)}
+          disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
           size="icon"
           className="flex-shrink-0"
         >
