@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
+import { FixStuckDocuments } from "@/components/FixStuckDocuments";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -117,11 +118,14 @@ export default function DocumentPool() {
             Torna alla Chat
           </Button>
           
-          <div className="flex-1">
-            <h1 className="text-3xl font-bold">Pool Documenti Condivisi</h1>
-            <p className="text-muted-foreground mt-2">
-              Gestisci i documenti validati e assegnali ai tuoi agenti
-            </p>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold">Pool Documenti Condivisi</h1>
+              <p className="text-muted-foreground mt-2">
+                Gestisci i documenti validati e assegnali ai tuoi agenti
+              </p>
+            </div>
+            <FixStuckDocuments />
           </div>
 
           {!checkingMigration && needsMigration && (
