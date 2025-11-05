@@ -22,16 +22,76 @@ serve(async (req) => {
       throw new Error('URL is required');
     }
 
+    // Initialize Supabase early for duplicate check
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // STEP 1: Check for duplicates BEFORE downloading
+    console.log('🔍 Checking for duplicate PDF...');
+    const { data: existingDoc, error: checkError } = await supabase
+      .from('knowledge_documents')
+      .select('id, file_name')
+      .eq('source_url', url)
+      .maybeSingle();
+
+    if (checkError) {
+      console.warn('⚠️ Error checking for duplicates:', checkError);
+    }
+
+    if (existingDoc) {
+      console.log(`✅ PDF already exists in knowledge base: ${existingDoc.file_name}`);
+      
+      // Update queue entry
+      await supabase
+        .from('pdf_download_queue')
+        .update({
+          status: 'completed',
+          document_id: existingDoc.id,
+          downloaded_file_name: existingDoc.file_name,
+          completed_at: new Date().toISOString()
+        })
+        .eq('url', url)
+        .eq('search_query', search_query || '');
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          document: {
+            id: existingDoc.id,
+            file_name: existingDoc.file_name,
+            status: 'already_exists'
+          },
+          message: `PDF "${existingDoc.file_name}" is already in your knowledge base (skipped duplicate download)`
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     console.log('📥 Downloading PDF from:', url);
 
-    // Retry logic for unreliable PDFs
+    // User-Agent rotation to bypass 403 errors
+    const userAgents = [
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    ];
+
+    // Retry logic with User-Agent rotation
     let pdfResponse: Response | null = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`📥 Download attempt ${attempt}/3...`);
+        const userAgent = userAgents[attempt - 1] || userAgents[0];
+        console.log(`📥 Download attempt ${attempt}/3 with User-Agent: ${userAgent.slice(0, 50)}...`);
+        
         pdfResponse = await fetch(url, {
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; PDFBot/1.0)'
+            'User-Agent': userAgent,
+            'Accept': 'application/pdf,application/octet-stream,*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': new URL(url).origin
           }
         });
         
@@ -57,7 +117,20 @@ serve(async (req) => {
     }
 
     if (!pdfResponse || !pdfResponse.ok) {
-      throw new Error(`Failed to download PDF after 3 attempts: ${pdfResponse?.status}`);
+      const status = pdfResponse?.status;
+      let errorMsg = `Failed to download PDF after 3 attempts`;
+      
+      if (status === 403) {
+        errorMsg = `PDF requires authentication or blocks automated access (HTTP 403). The source website is preventing downloads.`;
+      } else if (status === 404) {
+        errorMsg = `PDF not found at this URL (HTTP 404). The link may be broken or expired.`;
+      } else if (status === 401) {
+        errorMsg = `PDF requires login credentials (HTTP 401). Cannot download protected content.`;
+      } else if (status) {
+        errorMsg = `${errorMsg} (HTTP ${status})`;
+      }
+      
+      throw new Error(errorMsg);
     }
 
     // Validate Content-Type
@@ -78,12 +151,7 @@ serve(async (req) => {
 
     console.log('📄 File size:', pdfArrayBuffer.byteLength, 'bytes');
 
-    // Initialize Supabase
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Upload to storage
+    // Upload to storage (Supabase client already initialized at top)
     const { error: uploadError } = await supabase.storage
       .from('knowledge-pdfs')
       .upload(filePath, pdfArrayBuffer, {
@@ -115,6 +183,12 @@ serve(async (req) => {
 
     if (docError) {
       console.error('Document insert error:', docError);
+      
+      // Provide user-friendly error for duplicate filename
+      if (docError.code === '23505' && docError.message.includes('unique_file_name')) {
+        throw new Error(`A PDF with filename "${fileName}" already exists in your knowledge base. This PDF was downloaded from a different URL but has the same filename.`);
+      }
+      
       throw new Error(`Failed to create document record: ${docError.message}`);
     }
 
