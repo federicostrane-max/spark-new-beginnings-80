@@ -86,7 +86,63 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 3: Download and extract text from PDF
+    // STEP 3: Copy existing chunks from shared pool
+    // ========================================
+    console.log('[sync-pool-document] Looking for existing chunks in shared pool...');
+    
+    const { data: poolChunks, error: poolChunksError } = await supabase
+      .from('agent_knowledge')
+      .select('*')
+      .eq('pool_document_id', documentId)
+      .is('agent_id', null)
+      .eq('source_type', 'shared_pool');
+
+    if (poolChunksError) {
+      console.error('[sync-pool-document] Error fetching pool chunks:', poolChunksError);
+      throw poolChunksError;
+    }
+
+    if (poolChunks && poolChunks.length > 0) {
+      console.log(`[sync-pool-document] Found ${poolChunks.length} existing chunks in shared pool`);
+      console.log('[sync-pool-document] Copying chunks to agent...');
+
+      // Copy chunks and assign to agent
+      const chunksToInsert = poolChunks.map(chunk => ({
+        agent_id: agentId,
+        document_name: chunk.document_name,
+        content: chunk.content,
+        category: chunk.category || 'General',
+        summary: chunk.summary || `Part of ${poolDoc.file_name}`,
+        embedding: chunk.embedding,
+        source_type: 'shared_pool',
+        pool_document_id: documentId,
+      }));
+
+      const { error: insertError } = await supabase
+        .from('agent_knowledge')
+        .insert(chunksToInsert);
+
+      if (insertError) {
+        console.error('[sync-pool-document] Error copying chunks:', insertError);
+        throw insertError;
+      }
+
+      console.log(`[sync-pool-document] ✓ Successfully copied ${poolChunks.length} chunks to agent`);
+
+      return new Response(JSON.stringify({ 
+        success: true,
+        chunksCount: poolChunks.length,
+        totalChunks: poolChunks.length,
+        method: 'copied_from_pool'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log('[sync-pool-document] No existing chunks found, falling back to PDF processing...');
+
+    // ========================================
+    // STEP 4: FALLBACK - Download and extract text from PDF
     // ========================================
     console.log(`[sync-pool-document] Downloading PDF from bucket: knowledge-pdfs, path: ${poolDoc.file_path}`);
     
@@ -145,13 +201,13 @@ serve(async (req) => {
     console.log(`[sync-pool-document] Extracted ${fullText.length} characters`);
 
     // ========================================
-    // STEP 4: Chunk the text
+    // STEP 5: Chunk the text
     // ========================================
     const chunks = chunkText(fullText, 1000, 200);
     console.log(`[sync-pool-document] Created ${chunks.length} chunks`);
 
     // ========================================
-    // STEP 5: Generate embeddings and insert chunks
+    // STEP 6: Generate embeddings and insert chunks
     // ========================================
     const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
     if (!openAIApiKey) {
@@ -212,7 +268,8 @@ serve(async (req) => {
     return new Response(JSON.stringify({ 
       success: true,
       chunksCount: insertedCount,
-      totalChunks: chunks.length
+      totalChunks: chunks.length,
+      method: 'processed_pdf'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
