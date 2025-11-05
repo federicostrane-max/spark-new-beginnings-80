@@ -6,9 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Copy } from "lucide-react";
+import { Loader2, Copy, History } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
+import { PromptHistoryDialog } from "@/components/PromptHistoryDialog";
 import { toast } from "sonner";
 
 interface Agent {
@@ -37,6 +38,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [loading, setLoading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [originalPrompt, setOriginalPrompt] = useState("");
   const isEditingRef = useRef(false);
 
   // Load agent data when editing
@@ -47,6 +50,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
+      setOriginalPrompt(editingAgent.system_prompt); // Save original for comparison
       setLlmProvider(editingAgent.llm_provider || "anthropic");
       setCreatedAgentId(editingAgent.id);
     } else if (!open) {
@@ -54,6 +58,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName("");
       setDescription("");
       setSystemPrompt("");
+      setOriginalPrompt("");
       setLlmProvider("anthropic");
       setSelectedFiles([]);
       setCreatedAgentId(null);
@@ -93,6 +98,11 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     setLoading(true);
     try {
       if (editingAgent) {
+        // Save to history if prompt changed
+        if (systemPrompt !== originalPrompt) {
+          await savePromptToHistory(editingAgent.id, originalPrompt);
+        }
+
         // Update existing agent
         const { data, error } = await supabase
           .from("agents")
@@ -174,6 +184,45 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     } finally {
       setLoading(false);
     }
+  };
+
+  const savePromptToHistory = async (agentId: string, prompt: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Get the current max version number
+      const { data: maxVersion } = await supabase
+        .from("agent_prompt_history")
+        .select("version_number")
+        .eq("agent_id", agentId)
+        .order("version_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const nextVersion = (maxVersion?.version_number || 0) + 1;
+
+      const { error } = await supabase
+        .from("agent_prompt_history")
+        .insert({
+          agent_id: agentId,
+          system_prompt: prompt,
+          created_by: user?.id || null,
+          version_number: nextVersion
+        });
+
+      if (error) {
+        console.error("Error saving prompt to history:", error);
+      } else {
+        console.log(`Prompt version ${nextVersion} saved to history`);
+      }
+    } catch (error) {
+      console.error("Error in savePromptToHistory:", error);
+    }
+  };
+
+  const handleRestorePrompt = (prompt: string) => {
+    setSystemPrompt(prompt);
+    toast.info("Prompt ripristinato. Salva l'agente per applicare le modifiche.");
   };
 
   const handleClone = async () => {
@@ -502,7 +551,22 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
           {/* System Prompt */}
           <div>
-            <Label htmlFor="systemPrompt">System Prompt *</Label>
+            <div className="flex items-center justify-between mb-2">
+              <Label htmlFor="systemPrompt">System Prompt *</Label>
+              {editingAgent && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowHistory(true)}
+                  className="gap-2"
+                  disabled={loading}
+                >
+                  <History className="w-4 h-4" />
+                  Cronologia
+                </Button>
+              )}
+            </div>
             <Textarea 
               id="systemPrompt"
               value={systemPrompt}
@@ -630,6 +694,18 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </Button>
           </div>
         </form>
+
+        {/* Prompt History Dialog */}
+        {editingAgent && (
+          <PromptHistoryDialog
+            open={showHistory}
+            onOpenChange={setShowHistory}
+            agentId={editingAgent.id}
+            agentName={editingAgent.name}
+            currentPrompt={systemPrompt}
+            onRestore={handleRestorePrompt}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
