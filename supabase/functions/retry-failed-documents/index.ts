@@ -48,6 +48,7 @@ serve(async (req) => {
     }
 
     const results = [];
+    const DELAY_MS = 3000; // 3 seconds delay between documents to avoid rate limits
 
     for (const doc of stuckDocuments) {
       console.log(`\n[retry-failed-documents] Processing: ${doc.file_name} (${doc.id})`);
@@ -96,6 +97,12 @@ serve(async (req) => {
           status: 'error',
           error: docError instanceof Error ? docError.message : 'Unknown error'
         });
+      }
+      
+      // Add delay between documents to avoid hitting Google Vision API rate limits
+      if (stuckDocuments.indexOf(doc) < stuckDocuments.length - 1) {
+        console.log(`  ⏸️  Waiting ${DELAY_MS/1000}s before next document...`);
+        await new Promise(resolve => setTimeout(resolve, DELAY_MS));
       }
     }
 
