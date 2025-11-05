@@ -31,10 +31,13 @@ import {
   Trash2,
   Info,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
 import { DocumentDetailsDialog } from "./DocumentDetailsDialog";
+import { BulkAssignDocumentDialog } from "./BulkAssignDocumentDialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
   TooltipContent,
@@ -83,6 +86,11 @@ export const DocumentPoolTable = () => {
   const [docToDelete, setDocToDelete] = useState<KnowledgeDocument | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [docToView, setDocToView] = useState<KnowledgeDocument | null>(null);
+  
+  // Bulk actions state
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   useEffect(() => {
     loadDocuments();
@@ -248,6 +256,50 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleToggleSelection = (docId: string) => {
+    setSelectedDocIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(docId)) {
+        newSet.delete(docId);
+      } else {
+        newSet.add(docId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleToggleAll = () => {
+    if (selectedDocIds.size === filteredDocuments.length && filteredDocuments.length > 0) {
+      setSelectedDocIds(new Set());
+    } else {
+      setSelectedDocIds(new Set(filteredDocuments.map((d) => d.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const selectedDocs = documents.filter((d) => selectedDocIds.has(d.id));
+    
+    const results = await Promise.allSettled(
+      selectedDocs.map((doc) => handleDelete(doc))
+    );
+
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+
+    if (failed > 0) {
+      toast.error(`${succeeded} eliminati, ${failed} errori`);
+    } else {
+      toast.success(`${succeeded} documenti eliminati`);
+    }
+
+    setSelectedDocIds(new Set());
+    setBulkDeleteDialogOpen(false);
+    loadDocuments();
+  };
+
+  const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
+  const validatedSelectedDocs = selectedDocuments.filter((d) => d.validation_status === "validated");
+
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
       searchQuery === "" ||
@@ -365,7 +417,14 @@ export const DocumentPoolTable = () => {
               <Table key={`table-${documents.length}-${Date.now()}`}>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[35%]">File</TableHead>
+                  <TableHead className="w-[50px]">
+                    <Checkbox
+                      checked={selectedDocIds.size === filteredDocuments.length && filteredDocuments.length > 0}
+                      onCheckedChange={handleToggleAll}
+                      aria-label="Seleziona tutti"
+                    />
+                  </TableHead>
+                  <TableHead className="w-[30%]">File</TableHead>
                   <TableHead className="w-[15%]">Status</TableHead>
                   <TableHead className="w-[20%]">Agenti Assegnati</TableHead>
                   <TableHead className="w-[15%]">Creato</TableHead>
@@ -374,7 +433,17 @@ export const DocumentPoolTable = () => {
               </TableHeader>
               <TableBody>
                 {filteredDocuments.map((doc) => (
-                  <TableRow key={doc.id}>
+                  <TableRow 
+                    key={doc.id}
+                    className={selectedDocIds.has(doc.id) ? "bg-muted/50" : ""}
+                  >
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedDocIds.has(doc.id)}
+                        onCheckedChange={() => handleToggleSelection(doc.id)}
+                        aria-label={`Seleziona ${doc.file_name}`}
+                      />
+                    </TableCell>
                     <TableCell className="max-w-0">
                       <div className="space-y-1">
                         <div className="font-medium truncate text-sm" title={doc.file_name}>
@@ -478,17 +547,24 @@ export const DocumentPoolTable = () => {
               {/* Mobile Cards */}
               <div className="md:hidden space-y-4">
                 {filteredDocuments.map((doc) => (
-                  <Card key={doc.id}>
+                  <Card key={doc.id} className={selectedDocIds.has(doc.id) ? "ring-2 ring-primary" : ""}>
                     <CardContent className="pt-6 space-y-3">
-                      <div>
-                        <div className="font-medium break-words text-sm mb-1">
-                          {doc.file_name}
-                        </div>
-                        {doc.ai_summary && (
-                          <div className="text-xs text-muted-foreground line-clamp-2">
-                            {doc.ai_summary}
+                      <div className="flex items-start justify-between gap-2">
+                        <Checkbox
+                          checked={selectedDocIds.has(doc.id)}
+                          onCheckedChange={() => handleToggleSelection(doc.id)}
+                          aria-label={`Seleziona ${doc.file_name}`}
+                        />
+                      <div className="flex-1">
+                          <div className="font-medium break-words text-sm mb-1">
+                            {doc.file_name}
                           </div>
-                        )}
+                          {doc.ai_summary && (
+                            <div className="text-xs text-muted-foreground line-clamp-2">
+                              {doc.ai_summary}
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 text-sm">
@@ -566,6 +642,53 @@ export const DocumentPoolTable = () => {
         </CardContent>
       </Card>
 
+      {/* Floating Action Bar */}
+      {selectedDocIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-lg">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-sm">
+                  {selectedDocIds.size} {selectedDocIds.size === 1 ? 'selezionato' : 'selezionati'}
+                </Badge>
+                {validatedSelectedDocs.length < selectedDocIds.size && (
+                  <span className="text-xs text-muted-foreground">
+                    ({selectedDocIds.size - validatedSelectedDocs.length} non validati)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkAssignDialogOpen(true)}
+                  disabled={validatedSelectedDocs.length === 0}
+                >
+                  <LinkIcon className="h-4 w-4 mr-2" />
+                  Assegna
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBulkDeleteDialogOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Elimina
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedDocIds(new Set())}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Deseleziona
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Details Dialog */}
       <DocumentDetailsDialog
         document={docToView}
@@ -582,6 +705,17 @@ export const DocumentPoolTable = () => {
           onAssigned={loadDocuments}
         />
       )}
+
+      {/* Bulk Assign Dialog */}
+      <BulkAssignDocumentDialog
+        documents={validatedSelectedDocs}
+        open={bulkAssignDialogOpen}
+        onOpenChange={setBulkAssignDialogOpen}
+        onAssigned={() => {
+          setSelectedDocIds(new Set());
+          loadDocuments();
+        }}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -610,6 +744,61 @@ export const DocumentPoolTable = () => {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Elimina
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conferma Eliminazione Multipla</AlertDialogTitle>
+            <AlertDialogDescription>
+              Sei sicuro di voler eliminare <strong>{selectedDocIds.size}</strong> {selectedDocIds.size === 1 ? 'documento' : 'documenti'}?
+              <br />
+              <br />
+              {selectedDocuments.length <= 5 ? (
+                <div className="space-y-1">
+                  <div className="font-medium">Documenti da eliminare:</div>
+                  <ul className="list-disc list-inside text-sm">
+                    {selectedDocuments.map((doc) => (
+                      <li key={doc.id}>{doc.file_name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="font-medium">Documenti da eliminare:</div>
+                  <ul className="list-disc list-inside text-sm">
+                    {selectedDocuments.slice(0, 5).map((doc) => (
+                      <li key={doc.id}>{doc.file_name}</li>
+                    ))}
+                    <li>... e altri {selectedDocuments.length - 5}</li>
+                  </ul>
+                </div>
+              )}
+              <br />
+              <div className="space-y-1">
+                <div className="font-medium">Questa azione eliminerà:</div>
+                <ul className="list-disc list-inside text-sm">
+                  <li>I documenti dal pool condiviso</li>
+                  <li>Tutte le assegnazioni agli agenti</li>
+                  <li>Tutti i chunks e embeddings associati</li>
+                  <li>I file PDF dallo storage</li>
+                </ul>
+              </div>
+              <br />
+              <strong>Questa azione non può essere annullata.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Elimina Tutto
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
