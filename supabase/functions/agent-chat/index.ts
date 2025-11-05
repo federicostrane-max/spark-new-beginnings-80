@@ -354,10 +354,36 @@ function formatSearchResults(results: SearchResult[], topic: string, requestedCo
   header += ':\n\n';
   
   const formattedResults = results.map(r => {
-    const authors = r.authors ? ` | ${r.authors}` : '';
-    const year = r.year ? ` | ${r.year}` : '';
-    const source = r.source ? ` | ${r.source}` : '';
-    return `#${r.number}. **${r.title}**${authors}${year}${source}`;
+    // Multi-line format with all metadata
+    let formatted = `#${r.number}. **${r.title}**\n`;
+    
+    // Authors line
+    if (r.authors) {
+      formatted += `    Authors: ${r.authors}\n`;
+    }
+    
+    // Year line
+    if (r.year) {
+      formatted += `    Year: ${r.year}\n`;
+    }
+    
+    // Credibility Score line
+    if (r.credibilityScore !== undefined && r.credibilityScore !== null) {
+      formatted += `    Credibility: ${r.credibilityScore}/10\n`;
+    }
+    
+    // File Size line (convert bytes to MB)
+    if (r.file_size_bytes) {
+      const fileSizeMB = (r.file_size_bytes / (1024 * 1024)).toFixed(2);
+      formatted += `    File Size: ${fileSizeMB} MB\n`;
+    }
+    
+    // Source domain line
+    if (r.source) {
+      formatted += `    Source: ${r.source}\n`;
+    }
+    
+    return formatted.trimEnd();
   }).join('\n\n');
   
   const footer = `\n\nYou can now:\n- Ask me to filter these results (e.g., "only last 3 years", "most authoritative only")\n- Ask questions about specific PDFs\n- Tell me which ones to download (e.g., "Download #1, #3, and #5")`;

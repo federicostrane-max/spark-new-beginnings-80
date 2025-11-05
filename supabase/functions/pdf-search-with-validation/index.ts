@@ -117,7 +117,11 @@ serve(async (req) => {
     const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
     
     if (!apiKey || !searchEngineId) {
-      throw new Error('Missing Google Custom Search credentials');
+      console.error('❌ [PDF VALIDATION] Missing Google Custom Search credentials');
+      return new Response(
+        JSON.stringify({ pdfs: [], error: 'Missing API credentials' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
     
     const allVerifiedPdfs: VerifiedPDF[] = [];
@@ -139,52 +143,60 @@ serve(async (req) => {
         
         console.log(`  🔍 Query: ${query}`);
         
-        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&num=10`;
-        
-        const response = await fetch(url);
-        
-        if (!response.ok) {
-          console.error(`  ❌ Query failed: ${response.status}`);
-          continue;
-        }
-        
-        const data = await response.json();
-        
-        if (!data.items) continue;
-        
-        // Check up to maxUrlsToCheck URLs
-        const urlsToCheck = Math.min(data.items.length, maxUrlsToCheck);
-        
-        for (let i = 0; i < urlsToCheck; i++) {
-          if (foundForBook) break;
+        try {
+          const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&num=10`;
           
-          const item = data.items[i];
-          const pdfUrl = item.link;
+          const response = await fetch(url);
           
-          console.log(`    🔗 Checking URL ${i + 1}/${urlsToCheck}: ${pdfUrl.slice(0, 60)}...`);
-          
-          const verification = await verifyPdfUrl(pdfUrl);
-          
-          if (verification.success && verification.metadata) {
-            console.log(`    ✅ VERIFIED: ${pdfUrl}`);
-            
-            allVerifiedPdfs.push({
-              bookTitle: book.title,
-              bookAuthors: book.authors,
-              pdfUrl,
-              verificationStatus: 'verified',
-              contentType: verification.metadata.contentType,
-              fileSize: verification.metadata.fileSize,
-              domain: verification.metadata.domain,
-              credibilityScore: verification.metadata.credibilityScore,
-              foundViaQuery: query
-            });
-            
-            foundForBook = true;
-            break;
-          } else {
-            console.log(`    ❌ Failed verification`);
+          if (!response.ok) {
+            console.error(`  ❌ Query failed: ${response.status}`);
+            continue;
           }
+          
+          const data = await response.json();
+          
+          if (!data.items || data.items.length === 0) {
+            console.log(`  ℹ️ No results for query`);
+            continue;
+          }
+          
+          // Check up to maxUrlsToCheck URLs
+          const urlsToCheck = Math.min(data.items.length, maxUrlsToCheck);
+          
+          for (let i = 0; i < urlsToCheck; i++) {
+            if (foundForBook) break;
+            
+            const item = data.items[i];
+            const pdfUrl = item.link;
+            
+            console.log(`    🔗 Checking URL ${i + 1}/${urlsToCheck}: ${pdfUrl.slice(0, 60)}...`);
+            
+            const verification = await verifyPdfUrl(pdfUrl);
+            
+            if (verification.success && verification.metadata) {
+              console.log(`    ✅ VERIFIED: ${pdfUrl}`);
+              
+              allVerifiedPdfs.push({
+                bookTitle: book.title,
+                bookAuthors: book.authors,
+                pdfUrl,
+                verificationStatus: 'verified',
+                contentType: verification.metadata.contentType,
+                fileSize: verification.metadata.fileSize,
+                domain: verification.metadata.domain,
+                credibilityScore: verification.metadata.credibilityScore,
+                foundViaQuery: query
+              });
+              
+              foundForBook = true;
+              break;
+            } else {
+              console.log(`    ❌ Failed verification`);
+            }
+          }
+        } catch (queryError) {
+          console.error(`  ❌ Error processing query "${query}":`, queryError instanceof Error ? queryError.message : 'Unknown error');
+          continue;
         }
         
         // Rate limiting between variations
@@ -203,17 +215,19 @@ serve(async (req) => {
     
     console.log(`✅ [PDF VALIDATION] Completed: ${allVerifiedPdfs.length}/${books.length} books verified`);
     
+    // ALWAYS return { pdfs: [] } even if empty, never null
     return new Response(
       JSON.stringify({ pdfs: allVerifiedPdfs }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
     
   } catch (error) {
-    console.error('❌ [PDF VALIDATION] Error:', error);
+    console.error('❌ [PDF VALIDATION] Fatal error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // CRITICAL: Return { pdfs: [] } not null on error
     return new Response(
-      JSON.stringify({ error: errorMessage, pdfs: [] }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ pdfs: [], error: errorMessage }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
