@@ -159,6 +159,13 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
   const handleFullRedownload = async (docId: string, fileName: string) => {
     console.log('🔄 FULL RE-DOWNLOAD for document:', fileName, 'ID:', docId);
+    
+    // Previeni chiusura modale durante l'operazione
+    const preventClose = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    
     try {
       toast.info(`Rimozione chunks esistenti per ${fileName}...`);
       
@@ -187,7 +194,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         body: { documentId: docId, agentId }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Sync error:', error);
+        throw new Error(error.message || 'Errore sincronizzazione');
+      }
+      
+      if (!data) {
+        throw new Error('Nessun dato ricevuto dalla sincronizzazione');
+      }
       
       console.log('✅ Fresh sync response:', data);
       toast.success(`${fileName} ri-sincronizzato con successo (${data?.chunksCount || 0} chunks)`);
@@ -206,8 +220,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
     } catch (error: any) {
       console.error('❌ Full re-download error:', error);
-      toast.error(`Errore re-download ${fileName}: ${error.message || 'Errore sconosciuto'}`);
-      // NON chiudere il modale, rimani sulla pagina
+      const errorMessage = error?.message || error?.error_description || 'Errore sconosciuto';
+      toast.error(`Errore re-download ${fileName}: ${errorMessage}`, {
+        duration: 5000,
+      });
+      // NON chiudere il modale - rimani sulla pagina
     }
   };
 
@@ -224,7 +241,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         .eq('agent_id', agentId)
         .eq('pool_document_id', docId);
       
-      if (checkError) throw checkError;
+      if (checkError) {
+        console.error('❌ Check error:', checkError);
+        throw checkError;
+      }
       
       console.log('📊 Existing chunks found:', {
         fileName,
@@ -253,11 +273,16 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       
       // No chunks found - suggest full re-download instead
       console.log('⚠️ No chunks found - suggesting full re-download');
-      toast.error(`${fileName} non ha chunks. Usa "Re-download" per risolvere.`);
+      toast.error(`${fileName} non ha chunks. Usa "Re-download" per risolvere.`, {
+        duration: 5000,
+      });
     } catch (error: any) {
       console.error('❌ Sync check error:', error);
-      toast.error(`Errore verifica ${fileName}: ${error.message || 'Errore sconosciuto'}`);
-      // NON chiudere il modale, rimani sulla pagina
+      const errorMessage = error?.message || error?.error_description || 'Errore sconosciuto';
+      toast.error(`Errore verifica ${fileName}: ${errorMessage}`, {
+        duration: 5000,
+      });
+      // NON chiudere il modale - rimani sulla pagina
     }
   };
 
@@ -498,18 +523,28 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                     {doc.syncStatus === 'missing' && (
                       <div className="flex flex-col gap-2 pt-1">
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => handleResync(doc.id, doc.file_name)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleResync(doc.id, doc.file_name);
+                          }}
                           className="w-full justify-start"
                         >
                           <RefreshCw className="h-4 w-4 mr-2" />
                           Verifica sincronizzazione
                         </Button>
                         <Button
+                          type="button"
                           variant="default"
                           size="sm"
-                          onClick={() => handleFullRedownload(doc.id, doc.file_name)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleFullRedownload(doc.id, doc.file_name);
+                          }}
                           className="w-full justify-start"
                         >
                           <Download className="h-4 w-4 mr-2" />
@@ -568,18 +603,28 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                               <AlertCircle className="h-4 w-4 text-destructive" />
                               <div className="flex gap-1">
                                 <Button
+                                  type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleResync(doc.id, doc.file_name)}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleResync(doc.id, doc.file_name);
+                                  }}
                                   className="h-7 px-2 text-xs"
                                 >
                                   <RefreshCw className="h-3 w-3 mr-1" />
                                   Verifica
                                 </Button>
                                 <Button
+                                  type="button"
                                   variant="default"
                                   size="sm"
-                                  onClick={() => handleFullRedownload(doc.id, doc.file_name)}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleFullRedownload(doc.id, doc.file_name);
+                                  }}
                                   className="h-7 px-2 text-xs"
                                 >
                                   <Download className="h-3 w-3 mr-1" />
