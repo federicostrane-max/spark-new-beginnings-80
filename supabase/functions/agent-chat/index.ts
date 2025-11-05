@@ -2293,11 +2293,14 @@ Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address 
 
 ${agent.system_prompt}${knowledgeContext}`;
 
-          // Define tools for Knowledge Search Expert agent
+          // Define tools for all agents
           let toolCallCount = 0; // Track tool calls for validation
           
-          const tools = agent.slug === 'knowledge-search-expert' ? [
-            {
+          const tools = [];
+          
+          // Add download_pdf tool only for knowledge-search-expert agents
+          if (agent.slug === 'knowledge-search-expert') {
+            tools.push({
               name: 'download_pdf',
               description: 'Downloads a PDF document from a URL and adds it to the document pool. Use this when you find relevant PDF documents that should be saved for later use.',
               input_schema: {
@@ -2314,8 +2317,59 @@ ${agent.system_prompt}${knowledgeContext}`;
                 },
                 required: ['url']
               }
+            });
+          }
+          
+          // Add collaboration tools for all agents
+          tools.push({
+            name: 'get_agent_prompt',
+            description: 'Get the system prompt of another agent. Use this when the user asks about what another agent does or what instructions it follows.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent whose prompt you want to retrieve'
+                }
+              },
+              required: ['agent_name']
             }
-          ] : undefined;
+          });
+          
+          tools.push({
+            name: 'get_agent_knowledge',
+            description: 'Get a list of documents in another agent\'s knowledge base. Use this when the user asks what documents an agent has access to.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent whose knowledge base you want to view'
+                }
+              },
+              required: ['agent_name']
+            }
+          });
+          
+          tools.push({
+            name: 'get_agent_chat_history',
+            description: 'Get the chat history of another agent with the current user. Use this when the user asks what they discussed with another agent.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent whose chat history you want to view'
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum number of messages to retrieve (default 50)',
+                  default: 50
+                }
+              },
+              required: ['agent_name']
+            }
+          });
           
           // Log tool availability
           if (tools) {
@@ -2583,6 +2637,138 @@ ${agent.system_prompt}${knowledgeContext}`;
                         } else {
                           console.log('✅ Download successful:', downloadData);
                           toolResult = downloadData;
+                        }
+                      }
+                      
+                      if (toolUseName === 'get_agent_prompt') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_prompt`);
+                        console.log('   Agent name:', toolInput.agent_name);
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug, system_prompt')
+                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                        } else {
+                          console.log('✅ Retrieved prompt for agent:', targetAgent.name);
+                          toolResult = {
+                            success: true,
+                            agent_name: targetAgent.name,
+                            agent_slug: targetAgent.slug,
+                            system_prompt: targetAgent.system_prompt
+                          };
+                        }
+                      }
+                      
+                      if (toolUseName === 'get_agent_knowledge') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_knowledge`);
+                        console.log('   Agent name:', toolInput.agent_name);
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug')
+                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                        } else {
+                          const { data: documents, error: docsError } = await supabase
+                            .from('agent_knowledge')
+                            .select('document_name, category, summary, created_at, source_type')
+                            .eq('agent_id', targetAgent.id)
+                            .order('created_at', { ascending: false });
+                          
+                          if (docsError) {
+                            console.error('❌ Error retrieving documents:', docsError);
+                            toolResult = { success: false, error: 'Failed to retrieve documents' };
+                          } else {
+                            console.log(`✅ Retrieved ${documents.length} documents for agent:`, targetAgent.name);
+                            
+                            // Group by document_name to avoid duplicates
+                            const uniqueDocs = new Map();
+                            documents.forEach(doc => {
+                              if (!uniqueDocs.has(doc.document_name)) {
+                                uniqueDocs.set(doc.document_name, doc);
+                              }
+                            });
+                            
+                            toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              agent_slug: targetAgent.slug,
+                              document_count: uniqueDocs.size,
+                              documents: Array.from(uniqueDocs.values())
+                            };
+                          }
+                        }
+                      }
+                      
+                      if (toolUseName === 'get_agent_chat_history') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_chat_history`);
+                        console.log('   Agent name:', toolInput.agent_name);
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug')
+                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                        } else {
+                          // Get conversation for this agent and user
+                          const { data: targetConv, error: convError } = await supabase
+                            .from('agent_conversations')
+                            .select('id')
+                            .eq('agent_id', targetAgent.id)
+                            .eq('user_id', user.id)
+                            .single();
+                          
+                          if (convError || !targetConv) {
+                            console.log('ℹ️ No conversation found for this agent and user');
+                            toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              agent_slug: targetAgent.slug,
+                              message_count: 0,
+                              messages: []
+                            };
+                          } else {
+                            const limit = toolInput.limit || 50;
+                            const { data: messages, error: msgsError } = await supabase
+                              .from('agent_messages')
+                              .select('role, content, created_at')
+                              .eq('conversation_id', targetConv.id)
+                              .order('created_at', { ascending: false })
+                              .limit(limit);
+                            
+                            if (msgsError) {
+                              console.error('❌ Error retrieving messages:', msgsError);
+                              toolResult = { success: false, error: 'Failed to retrieve messages' };
+                            } else {
+                              console.log(`✅ Retrieved ${messages.length} messages for agent:`, targetAgent.name);
+                              toolResult = {
+                                success: true,
+                                agent_name: targetAgent.name,
+                                agent_slug: targetAgent.slug,
+                                message_count: messages.length,
+                                messages: messages.reverse() // Return in chronological order
+                              };
+                            }
+                          }
                         }
                       }
                       
