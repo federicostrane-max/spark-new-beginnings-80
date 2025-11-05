@@ -65,12 +65,13 @@ serve(async (req) => {
     // ========================================
     // STEP 2: Get chunk counts grouped by document from agent_knowledge
     // ========================================
-    // Use a higher limit to ensure we get all chunks
+    // IMPORTANTE: Prendiamo TUTTI i chunks che hanno pool_document_id non null,
+    // indipendentemente dal source_type perché durante la clonazione potrebbero
+    // avere source_type diversi ma essere comunque chunks validi del pool
     const { data: chunkCounts, error: chunksError } = await supabase
       .from('agent_knowledge')
       .select('pool_document_id')
       .eq('agent_id', agentId)
-      .or('source_type.eq.shared_pool,source_type.eq.pool')
       .not('pool_document_id', 'is', null)
       .limit(100000); // High limit to get all chunks
 

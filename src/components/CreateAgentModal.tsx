@@ -397,10 +397,11 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             console.log('✅ [CLONE] Pool links cloned successfully');
           }
 
-          // Clone pool knowledge chunks
+          // Clone pool knowledge chunks - COPIAMO I CHUNKS GIÀ ESISTENTI
           const poolDocIds = validLinks.map((l: any) => l.document_id);
-          console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents...`);
+          console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents from ORIGINAL agent...`);
         
+          // IMPORTANTE: Prendiamo i chunks dall'agente ORIGINALE che sappiamo già funzionano
           const { data: poolKnowledge, error: poolKnowledgeError } = await supabase
             .from("agent_knowledge")
             .select("*")
@@ -414,7 +415,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           }
 
           if (poolKnowledge && poolKnowledge.length > 0) {
-            console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks`);
+            console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks from original agent - CLONING DIRECTLY`);
             
             const clonedPoolKnowledge = poolKnowledge.map(item => ({
               agent_id: clonedAgent.id,
