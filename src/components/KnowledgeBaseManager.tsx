@@ -275,7 +275,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           });
 
           if (error) {
-            throw new Error(error.message || 'Sync failed');
+            const errorMsg = error.message || JSON.stringify(error);
+            const isFileMissing = errorMsg.includes('File not found in storage') || errorMsg.includes('not found in storage');
+            
+            if (isFileMissing) {
+              logger.error('document-sync', `File missing in storage: ${doc.file_name}`, 
+                { error: errorMsg, documentId: doc.id }, 
+                { agentId, documentId: doc.id }
+              );
+            }
+            
+            throw new Error(errorMsg);
           }
 
           logger.success('document-sync', `Document synced successfully: ${doc.file_name}`, 

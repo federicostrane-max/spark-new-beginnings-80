@@ -181,6 +181,17 @@ serve(async (req) => {
 
     if (!fileExists) {
       console.error(`[sync-pool-document] File not found in storage: ${cleanPath}`);
+      
+      // Mark document as having a missing file
+      await supabase
+        .from('knowledge_documents')
+        .update({ 
+          processing_status: 'error',
+          validation_status: 'rejected',
+          validation_reason: `File not found in storage: ${cleanPath}. The file may have been moved or deleted.`
+        })
+        .eq('id', documentId);
+      
       throw new Error(`File not found in storage: ${poolDoc.file_name}. The file may have been moved or deleted.`);
     }
     

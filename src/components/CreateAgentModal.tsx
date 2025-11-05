@@ -352,71 +352,93 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       console.log('🔗 [CLONE] Fetching pool document links...');
       const { data: poolLinks, error: poolLinksError } = await supabase
         .from("agent_document_links")
-        .select("*")
+        .select(`
+          *,
+          knowledge_documents!inner(
+            id,
+            validation_status,
+            processing_status
+          )
+        `)
         .eq("agent_id", editingAgent.id);
 
       if (!poolLinksError && poolLinks && poolLinks.length > 0) {
-        console.log(`🔗 [CLONE] Found ${poolLinks.length} pool document links`);
+        // Filter out documents with rejected validation or error processing
+        const validLinks = poolLinks.filter((link: any) => 
+          link.knowledge_documents?.validation_status === 'validated' &&
+          link.knowledge_documents?.processing_status !== 'error'
+        );
         
-        const clonedLinks = poolLinks.map(link => ({
-          agent_id: clonedAgent.id,
-          document_id: link.document_id,
-          assignment_type: link.assignment_type,
-          assigned_by: user.id,
-          confidence_score: link.confidence_score
-        }));
-
-        const { error: insertLinksError } = await supabase
-          .from("agent_document_links")
-          .insert(clonedLinks);
-
-        if (insertLinksError) {
-          console.error('❌ [CLONE] Error cloning pool links:', insertLinksError);
+        const skippedCount = poolLinks.length - validLinks.length;
+        if (skippedCount > 0) {
+          console.log(`⚠️ [CLONE] Skipping ${skippedCount} document(s) with validation/processing issues`);
+        }
+        
+        if (validLinks.length === 0) {
+          console.log('⚠️ [CLONE] No valid pool documents to clone');
         } else {
-          console.log('✅ [CLONE] Pool links cloned successfully');
-        }
-
-        // Clone pool knowledge chunks
-        const poolDocIds = poolLinks.map(l => l.document_id);
-        console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents...`);
+          console.log(`🔗 [CLONE] Found ${validLinks.length} valid pool document links (skipped ${skippedCount})`);
         
-        const { data: poolKnowledge, error: poolKnowledgeError } = await supabase
-          .from("agent_knowledge")
-          .select("*")
-          .eq("agent_id", editingAgent.id)
-          .in("source_type", ["pool", "shared_pool"])
-          .in("pool_document_id", poolDocIds);
-
-        if (poolKnowledgeError) {
-          console.error('❌ [CLONE] Error fetching pool knowledge:', poolKnowledgeError);
-          throw new Error(`Errore nel recupero della knowledge del pool: ${poolKnowledgeError.message}`);
-        }
-
-        if (poolKnowledge && poolKnowledge.length > 0) {
-          console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks`);
-          
-          const clonedPoolKnowledge = poolKnowledge.map(item => ({
+          const clonedLinks = validLinks.map((link: any) => ({
             agent_id: clonedAgent.id,
-            document_name: item.document_name,
-            content: item.content,
-            category: item.category,
-            summary: item.summary,
-            embedding: item.embedding,
-            source_type: item.source_type, // Mantieni il source_type originale (pool o shared_pool)
-            pool_document_id: item.pool_document_id
+            document_id: link.document_id,
+            assignment_type: link.assignment_type,
+            assigned_by: user.id,
+            confidence_score: link.confidence_score
           }));
 
-          const { error: insertPoolKnowledgeError } = await supabase
-            .from("agent_knowledge")
-            .insert(clonedPoolKnowledge);
+          const { error: insertLinksError } = await supabase
+            .from("agent_document_links")
+            .insert(clonedLinks);
 
-          if (insertPoolKnowledgeError) {
-            console.error('❌ [CLONE] Error cloning pool knowledge:', insertPoolKnowledgeError);
+          if (insertLinksError) {
+            console.error('❌ [CLONE] Error cloning pool links:', insertLinksError);
           } else {
-            console.log('✅ [CLONE] Pool knowledge cloned successfully');
+            console.log('✅ [CLONE] Pool links cloned successfully');
           }
-        } else {
-          console.log('ℹ️ [CLONE] No pool knowledge to clone');
+
+          // Clone pool knowledge chunks
+          const poolDocIds = validLinks.map((l: any) => l.document_id);
+          console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents...`);
+        
+          const { data: poolKnowledge, error: poolKnowledgeError } = await supabase
+            .from("agent_knowledge")
+            .select("*")
+            .eq("agent_id", editingAgent.id)
+            .in("source_type", ["pool", "shared_pool"])
+            .in("pool_document_id", poolDocIds);
+
+          if (poolKnowledgeError) {
+            console.error('❌ [CLONE] Error fetching pool knowledge:', poolKnowledgeError);
+            throw new Error(`Errore nel recupero della knowledge del pool: ${poolKnowledgeError.message}`);
+          }
+
+          if (poolKnowledge && poolKnowledge.length > 0) {
+            console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks`);
+            
+            const clonedPoolKnowledge = poolKnowledge.map(item => ({
+              agent_id: clonedAgent.id,
+              document_name: item.document_name,
+              content: item.content,
+              category: item.category,
+              summary: item.summary,
+              embedding: item.embedding,
+              source_type: item.source_type, // Mantieni il source_type originale (pool o shared_pool)
+              pool_document_id: item.pool_document_id
+            }));
+
+            const { error: insertPoolKnowledgeError } = await supabase
+              .from("agent_knowledge")
+              .insert(clonedPoolKnowledge);
+
+            if (insertPoolKnowledgeError) {
+              console.error('❌ [CLONE] Error cloning pool knowledge:', insertPoolKnowledgeError);
+            } else {
+              console.log('✅ [CLONE] Pool knowledge cloned successfully');
+            }
+          } else {
+            console.log('ℹ️ [CLONE] No pool knowledge to clone');
+          }
         }
       } else {
         console.log('ℹ️ [CLONE] No pool document links to clone');
