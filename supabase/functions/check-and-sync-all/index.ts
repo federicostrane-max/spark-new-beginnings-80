@@ -63,32 +63,27 @@ serve(async (req) => {
     console.log(`[check-and-sync-all] Found ${assignedDocIds.size} assigned documents`);
 
     // ========================================
-    // STEP 2: Get all synced chunks from agent_knowledge
+    // STEP 2: Get chunk counts grouped by document from agent_knowledge
     // ========================================
-    const { data: syncedChunks, error: chunksError } = await supabase
+    // Use a higher limit to ensure we get all chunks
+    const { data: chunkCounts, error: chunksError } = await supabase
       .from('agent_knowledge')
-      .select('pool_document_id, document_name, id, source_type')
+      .select('pool_document_id')
       .eq('agent_id', agentId)
       .or('source_type.eq.shared_pool,source_type.eq.pool')
-      .not('pool_document_id', 'is', null);
+      .not('pool_document_id', 'is', null)
+      .limit(100000); // High limit to get all chunks
 
     if (chunksError) {
       console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
       throw chunksError;
     }
 
-    console.log(`[check-and-sync-all] Raw chunks data:`, {
-      totalChunks: syncedChunks?.length || 0,
-      sampleChunks: syncedChunks?.slice(0, 3).map(c => ({
-        pool_document_id: c.pool_document_id,
-        source_type: c.source_type,
-        document_name: c.document_name
-      }))
-    });
+    console.log(`[check-and-sync-all] Total chunk records fetched: ${chunkCounts?.length || 0}`);
 
-    // Group chunks by document
+    // Group chunks by document manually
     const syncedDocMap = new Map<string, number>();
-    syncedChunks?.forEach(chunk => {
+    chunkCounts?.forEach(chunk => {
       if (chunk.pool_document_id) {
         const count = syncedDocMap.get(chunk.pool_document_id) || 0;
         syncedDocMap.set(chunk.pool_document_id, count + 1);
