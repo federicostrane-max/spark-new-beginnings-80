@@ -580,6 +580,333 @@ async function executeEnhancedSearch(topic: string, count: number = 10, supabase
   }
 }
 
+// ============================================
+// REPOSITORY API INTEGRATION
+// ============================================
+
+// Helper: Detect if topic is Computer Science related
+function isComputerScienceTopic(topic: string): boolean {
+  const csKeywords = [
+    'machine learning', 'deep learning', 'neural network', 'artificial intelligence', 'ai',
+    'computer science', 'algorithm', 'data structure', 'programming', 'software',
+    'database', 'network', 'security', 'cryptography', 'compiler', 'operating system',
+    'distributed system', 'cloud computing', 'blockchain', 'quantum computing'
+  ];
+  
+  const lowerTopic = topic.toLowerCase();
+  return csKeywords.some(keyword => lowerTopic.includes(keyword));
+}
+
+// Helper: Detect if topic is Medical/Biological
+function isMedicalBioTopic(topic: string): boolean {
+  const medBioKeywords = [
+    'medicine', 'medical', 'biology', 'biomedical', 'health', 'disease',
+    'cancer', 'therapy', 'clinical', 'patient', 'drug', 'pharmaceutical',
+    'gene', 'protein', 'cell', 'molecular', 'biochemistry', 'genetics',
+    'neuroscience', 'immunology', 'epidemiology', 'pathology'
+  ];
+  
+  const lowerTopic = topic.toLowerCase();
+  return medBioKeywords.some(keyword => lowerTopic.includes(keyword));
+}
+
+// arXiv API Query
+async function queryArxivAPI(topic: string, maxResults: number = 10): Promise<SearchResult[]> {
+  console.log(`📚 [arXiv API] Searching for: ${topic}`);
+  
+  try {
+    // arXiv API endpoint
+    const url = `http://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(topic)}&start=0&max_results=${maxResults}&sortBy=relevance&sortOrder=descending`;
+    
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ResearchBot/1.0)' }
+    });
+    
+    if (!response.ok) {
+      console.error(`❌ [arXiv API] HTTP ${response.status}`);
+      return [];
+    }
+    
+    const xmlText = await response.text();
+    
+    // Parse XML (simple regex-based parsing for key fields)
+    const entries = xmlText.match(/<entry>[\s\S]*?<\/entry>/g) || [];
+    
+    const results: SearchResult[] = entries.map((entry, index) => {
+      const titleMatch = entry.match(/<title>(.*?)<\/title>/s);
+      const summaryMatch = entry.match(/<summary>(.*?)<\/summary>/s);
+      const publishedMatch = entry.match(/<published>(.*?)<\/published>/);
+      const authorsMatch = entry.match(/<author>[\s\S]*?<name>(.*?)<\/name>[\s\S]*?<\/author>/g);
+      const idMatch = entry.match(/<id>(.*?)<\/id>/);
+      
+      const title = titleMatch?.[1]?.replace(/\s+/g, ' ').trim() || 'Untitled';
+      const year = publishedMatch?.[1]?.match(/\d{4}/)?.[0] || undefined;
+      const authors = authorsMatch?.map(a => a.match(/<name>(.*?)<\/name>/)?.[1]).filter(Boolean).join(', ') || undefined;
+      const arxivId = idMatch?.[1]?.match(/(\d+\.\d+)/)?.[1];
+      const pdfUrl = arxivId ? `https://arxiv.org/pdf/${arxivId}.pdf` : null;
+      
+      return {
+        number: index + 1,
+        title,
+        authors,
+        year,
+        source: 'arxiv.org',
+        url: pdfUrl || idMatch?.[1] || '',
+        credibilityScore: 9,
+        source_type: 'arxiv_api',
+        verified: true,
+        file_size_bytes: undefined
+      };
+    }).filter(r => r.url);
+    
+    console.log(`✅ [arXiv API] Found ${results.length} results`);
+    return results;
+    
+  } catch (error) {
+    console.error(`❌ [arXiv API] Error:`, error);
+    return [];
+  }
+}
+
+// PubMed Central API Query
+async function queryPubMedAPI(topic: string, maxResults: number = 10): Promise<SearchResult[]> {
+  console.log(`🏥 [PubMed API] Searching for: ${topic}`);
+  
+  try {
+    // Step 1: Search for PMC IDs
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${encodeURIComponent(topic)}&retmax=${maxResults}&retmode=json&sort=relevance`;
+    
+    const searchResponse = await fetch(searchUrl);
+    if (!searchResponse.ok) {
+      console.error(`❌ [PubMed API] Search HTTP ${searchResponse.status}`);
+      return [];
+    }
+    
+    const searchData = await searchResponse.json();
+    const pmcIds = searchData.esearchresult?.idlist || [];
+    
+    if (pmcIds.length === 0) {
+      console.log(`ℹ️ [PubMed API] No results found`);
+      return [];
+    }
+    
+    console.log(`📊 [PubMed API] Found ${pmcIds.length} PMC IDs`);
+    
+    // Step 2: Fetch details for each PMC ID
+    const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${pmcIds.join(',')}&retmode=json`;
+    
+    const summaryResponse = await fetch(summaryUrl);
+    if (!summaryResponse.ok) {
+      console.error(`❌ [PubMed API] Summary HTTP ${summaryResponse.status}`);
+      return [];
+    }
+    
+    const summaryData = await summaryResponse.json();
+    const articles = summaryData.result;
+    
+    const results = pmcIds.map((pmcId: string, index: number): SearchResult | null => {
+      const article = articles[pmcId];
+      if (!article) return null;
+      
+      const title = article.title || 'Untitled';
+      const authors = article.authors?.map((a: any) => a.name).join(', ') || undefined;
+      const year = article.pubdate?.match(/\d{4}/)?.[0] || undefined;
+      const pdfUrl = `https://www.ncbi.nlm.nih.gov/pmc/articles/PMC${pmcId}/pdf/`;
+      
+      return {
+        number: index + 1,
+        title,
+        authors,
+        year,
+        source: 'pubmed.ncbi.nlm.nih.gov',
+        url: pdfUrl,
+        credibilityScore: 9,
+        source_type: 'pubmed_api',
+        verified: true,
+        file_size_bytes: undefined
+      };
+    }).filter((r: SearchResult | null): r is SearchResult => r !== null);
+    
+    console.log(`✅ [PubMed API] Found ${results.length} results with PDF links`);
+    return results;
+    
+  } catch (error) {
+    console.error(`❌ [PubMed API] Error:`, error);
+    return [];
+  }
+}
+
+// CORE API Query
+async function queryCoreAPI(topic: string, maxResults: number = 10): Promise<SearchResult[]> {
+  console.log(`📖 [CORE API] Searching for: ${topic}`);
+  
+  try {
+    // CORE API v3 endpoint (free tier, no API key needed for basic search)
+    const url = `https://api.core.ac.uk/v3/search/works?q=${encodeURIComponent(topic)}&limit=${maxResults}`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; ResearchBot/1.0)'
+      }
+    });
+    
+    if (!response.ok) {
+      console.error(`❌ [CORE API] HTTP ${response.status}`);
+      return [];
+    }
+    
+    const data = await response.json();
+    const works = data.results || [];
+    
+    if (works.length === 0) {
+      console.log(`ℹ️ [CORE API] No results found`);
+      return [];
+    }
+    
+    const results = works.map((work: any, index: number): SearchResult | null => {
+      const title = work.title || 'Untitled';
+      const authors = work.authors?.map((a: any) => a.name).join(', ') || undefined;
+      const year = work.yearPublished?.toString() || work.publishedDate?.match(/\d{4}/)?.[0] || undefined;
+      
+      // Try to find PDF link
+      let pdfUrl = work.downloadUrl;
+      if (!pdfUrl && work.links) {
+        const pdfLink = work.links.find((link: any) => 
+          link.type === 'download' || link.url?.endsWith('.pdf')
+        );
+        pdfUrl = pdfLink?.url;
+      }
+      
+      if (!pdfUrl) return null;
+      
+      return {
+        number: index + 1,
+        title,
+        authors,
+        year,
+        source: new URL(pdfUrl).hostname,
+        url: pdfUrl,
+        credibilityScore: 7,
+        source_type: 'core_api',
+        verified: true,
+        file_size_bytes: undefined
+      };
+    }).filter((r: SearchResult | null): r is SearchResult => r !== null);
+    
+    console.log(`✅ [CORE API] Found ${results.length} results with PDF links`);
+    return results;
+    
+  } catch (error) {
+    console.error(`❌ [CORE API] Error:`, error);
+    return [];
+  }
+}
+
+// Main enrichment function
+async function enrichWithRepositoryAPIs(
+  googleResults: SearchResult[], 
+  topic: string
+): Promise<SearchResult[]> {
+  console.log(`\n🔌 [API ENRICHMENT] Starting repository API enrichment for: "${topic}"`);
+  console.log(`📊 [API ENRICHMENT] Google results: ${googleResults.length}`);
+  
+  const apiResults: SearchResult[] = [];
+  
+  // Determine which APIs to query based on topic
+  const isCS = isComputerScienceTopic(topic);
+  const isMedBio = isMedicalBioTopic(topic);
+  
+  console.log(`🏷️ [API ENRICHMENT] Topic classification: CS=${isCS}, MedBio=${isMedBio}`);
+  
+  // Query relevant APIs in parallel
+  const apiPromises: Promise<SearchResult[]>[] = [];
+  
+  if (isCS) {
+    console.log(`📚 [API ENRICHMENT] Querying arXiv (CS topic detected)...`);
+    apiPromises.push(queryArxivAPI(topic, 5));
+  }
+  
+  if (isMedBio) {
+    console.log(`🏥 [API ENRICHMENT] Querying PubMed (Medical/Bio topic detected)...`);
+    apiPromises.push(queryPubMedAPI(topic, 5));
+  }
+  
+  // Always query CORE (general academic)
+  console.log(`📖 [API ENRICHMENT] Querying CORE (general academic)...`);
+  apiPromises.push(queryCoreAPI(topic, 5));
+  
+  // Wait for all API queries
+  const apiResultsArrays = await Promise.all(apiPromises);
+  
+  // Flatten results
+  for (const results of apiResultsArrays) {
+    apiResults.push(...results);
+  }
+  
+  console.log(`✅ [API ENRICHMENT] APIs returned ${apiResults.length} total results`);
+  
+  // Merge with Google results
+  const allResults = [...googleResults, ...apiResults];
+  console.log(`📊 [API ENRICHMENT] Total before deduplication: ${allResults.length}`);
+  
+  // Deduplicate by title similarity
+  const deduplicated = deduplicateResults(allResults);
+  console.log(`✅ [API ENRICHMENT] After deduplication: ${deduplicated.length}`);
+  
+  // Re-sort by credibility score
+  deduplicated.sort((a, b) => {
+    const scoreB = b.credibilityScore || 0;
+    const scoreA = a.credibilityScore || 0;
+    return scoreB - scoreA;
+  });
+  
+  // Renumber
+  const final = deduplicated.map((r, idx) => ({ ...r, number: idx + 1 }));
+  
+  console.log(`🎯 [API ENRICHMENT] Final enriched results: ${final.length}\n`);
+  
+  return final;
+}
+
+// Deduplication by title similarity
+function deduplicateResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const unique: SearchResult[] = [];
+  
+  for (const result of results) {
+    // Normalize title for comparison
+    const normalizedTitle = result.title
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // Check for exact or very similar title
+    let isDuplicate = false;
+    for (const seenTitle of seen) {
+      // Calculate similarity (simple approach: check if 80% of words overlap)
+      const words1 = normalizedTitle.split(' ');
+      const words2 = seenTitle.split(' ');
+      const intersection = words1.filter(w => words2.includes(w));
+      const similarity = intersection.length / Math.max(words1.length, words2.length);
+      
+      if (similarity > 0.8) {
+        isDuplicate = true;
+        console.log(`🔄 [DEDUP] Skipping duplicate: "${result.title.slice(0, 60)}..."`);
+        break;
+      }
+    }
+    
+    if (!isDuplicate) {
+      seen.add(normalizedTitle);
+      unique.push(result);
+    }
+  }
+  
+  return unique;
+}
+
 function formatSearchResults(results: SearchResult[], topic: string, requestedCount?: number): string {
   console.log(`📝 [FORMATTER] Formatting ${results.length} results for topic:`, topic);
   
@@ -1494,7 +1821,12 @@ Deno.serve(async (req) => {
               
               // Execute ENHANCED search with full metadata extraction
               try {
-                const searchResults = await executeEnhancedSearch(userIntent.topic, userIntent.count || 10, supabase);
+                const googleResults = await executeEnhancedSearch(userIntent.topic, userIntent.count || 10, supabase);
+                
+                // PHASE 1.5: Enrich with Repository APIs (arXiv, PubMed, CORE)
+                console.log('🔌 [WORKFLOW] Enriching with repository APIs...');
+                const searchResults = await enrichWithRepositoryAPIs(googleResults, userIntent.topic);
+                console.log(`✅ [WORKFLOW] Enrichment complete: ${searchResults.length} results (was ${googleResults.length})`);
                 
                 // Save results to database cache (INCLUDING NEW FIELDS)
                 console.log(`💾 [CACHE] Saving ${searchResults.length} results to database`);
