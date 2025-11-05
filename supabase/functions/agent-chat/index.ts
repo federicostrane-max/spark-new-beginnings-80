@@ -1499,47 +1499,98 @@ Deno.serve(async (req) => {
           }
           
           // ========================================
-          // SEMANTIC SEARCH: Retrieve relevant documents from knowledge base
+          // KNOWLEDGE BASE: Retrieve relevant context
           // ========================================
-          console.log('🔍 [SEMANTIC SEARCH] Searching knowledge base for relevant documents...');
+          console.log('🔍 [KNOWLEDGE] Processing user query for knowledge base...');
           
           let knowledgeContext = '';
           try {
-            const { data: searchData, error: searchError } = await supabase.functions.invoke(
-              'semantic-search',
-              {
-                body: {
-                  query: message,
-                  agentId: agent.id,
-                  topK: 5
+            // Check if user is asking for list of documents
+            const listQueryPatterns = [
+              /quali (pdf|documenti|libri|file)/i,
+              /what (pdfs?|documents?|books?|files?)/i,
+              /list (of )?(pdfs?|documents?|books?|files?)/i,
+              /show (me )?(all )?(pdfs?|documents?|books?|files?)/i,
+              /elenco (dei )?(pdf|documenti|libri)/i,
+              /do you have any (pdfs?|documents?|books?)/i,
+              /hai (dei )?(pdf|documenti|libri)/i
+            ];
+            
+            const isListQuery = listQueryPatterns.some(pattern => pattern.test(message));
+            
+            if (isListQuery) {
+              console.log('📋 [KNOWLEDGE] User is asking for document list - querying unique documents');
+              
+              // Query for distinct documents assigned to this agent
+              const { data: distinctDocs, error: docsError } = await supabase
+                .from('agent_knowledge')
+                .select('document_name, category, summary, pool_document_id')
+                .eq('agent_id', agent.id)
+                .not('embedding', 'is', null);
+              
+              if (!docsError && distinctDocs && distinctDocs.length > 0) {
+                // Get unique documents by document_name
+                const uniqueDocs = Array.from(
+                  new Map(distinctDocs.map(doc => [doc.document_name, doc])).values()
+                );
+                
+                console.log(`✅ [KNOWLEDGE] Found ${uniqueDocs.length} unique documents in knowledge base`);
+                
+                knowledgeContext = '\n\n## YOUR KNOWLEDGE BASE DOCUMENTS\n\n';
+                knowledgeContext += `You have access to ${uniqueDocs.length} document(s) in your knowledge base:\n\n`;
+                
+                uniqueDocs.forEach((doc: any, index: number) => {
+                  knowledgeContext += `${index + 1}. **${doc.document_name}**\n`;
+                  if (doc.category) knowledgeContext += `   - Category: ${doc.category}\n`;
+                  if (doc.summary) knowledgeContext += `   - Summary: ${doc.summary}\n`;
+                  knowledgeContext += '\n';
+                });
+                
+                knowledgeContext += '\nIMPORTANT: List ALL documents above when the user asks what documents you have. Do not say you only have one document when you actually have multiple.\n';
+              } else {
+                console.log('ℹ️ [KNOWLEDGE] No documents found in knowledge base');
+                knowledgeContext = '\n\n## YOUR KNOWLEDGE BASE\n\nYou currently have no documents in your knowledge base.\n';
+              }
+            } else {
+              // Regular semantic search for content queries
+              console.log('🔍 [SEMANTIC SEARCH] Searching knowledge base for relevant content...');
+              
+              const { data: searchData, error: searchError } = await supabase.functions.invoke(
+                'semantic-search',
+                {
+                  body: {
+                    query: message,
+                    agentId: agent.id,
+                    topK: 5
+                  }
+                }
+              );
+
+              if (!searchError && searchData?.documents && searchData.documents.length > 0) {
+                console.log(`✅ [SEMANTIC SEARCH] Found ${searchData.documents.length} relevant chunks`);
+                
+                knowledgeContext = '\n\n## KNOWLEDGE BASE CONTEXT\n\n';
+                knowledgeContext += 'Here are relevant excerpts from your knowledge base:\n\n';
+                
+                searchData.documents.forEach((doc: any, index: number) => {
+                  knowledgeContext += `### Excerpt ${index + 1} from: ${doc.document_name}\n`;
+                  knowledgeContext += `**Category**: ${doc.category || 'General'}\n`;
+                  if (doc.summary) knowledgeContext += `**Document Summary**: ${doc.summary}\n`;
+                  knowledgeContext += `**Content**:\n${doc.content}\n\n`;
+                  knowledgeContext += `---\n\n`;
+                });
+                
+                knowledgeContext += 'Use the above excerpts to answer the user\'s question accurately.\n';
+              } else {
+                console.log('ℹ️ [SEMANTIC SEARCH] No relevant content found');
+                if (searchError) {
+                  console.error('⚠️ [SEMANTIC SEARCH] Error:', searchError);
                 }
               }
-            );
-
-            if (!searchError && searchData?.documents && searchData.documents.length > 0) {
-              console.log(`✅ [SEMANTIC SEARCH] Found ${searchData.documents.length} relevant documents`);
-              
-              knowledgeContext = '\n\n## KNOWLEDGE BASE CONTEXT\n\n';
-              knowledgeContext += 'Here are relevant documents from your knowledge base:\n\n';
-              
-              searchData.documents.forEach((doc: any, index: number) => {
-                knowledgeContext += `### Document ${index + 1}: ${doc.document_name}\n`;
-                knowledgeContext += `**Category**: ${doc.category || 'General'}\n`;
-                knowledgeContext += `**Summary**: ${doc.summary || 'No summary available'}\n`;
-                knowledgeContext += `**Content**:\n${doc.content}\n\n`;
-                knowledgeContext += `---\n\n`;
-              });
-              
-              knowledgeContext += 'Use the above documents to answer the user\'s question accurately.\n';
-            } else {
-              console.log('ℹ️ [SEMANTIC SEARCH] No relevant documents found or search failed');
-              if (searchError) {
-                console.error('⚠️ [SEMANTIC SEARCH] Error:', searchError);
-              }
             }
-          } catch (searchErr) {
-            console.error('❌ [SEMANTIC SEARCH] Failed:', searchErr);
-            // Continue without knowledge context if search fails
+          } catch (err) {
+            console.error('❌ [KNOWLEDGE] Failed:', err);
+            // Continue without knowledge context if query fails
           }
           
           const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
