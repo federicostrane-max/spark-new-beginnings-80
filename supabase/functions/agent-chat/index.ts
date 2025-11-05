@@ -1158,37 +1158,78 @@ async function executeDownloads(pdfs: SearchResult[], searchQuery: string, supab
     let lastError = '';
     let fileName = '';
     
-    // STRATEGY 1: Try the cached verified URL
-    console.log(`  🔗 [STRATEGY 1] Trying cached URL: ${pdf.url.slice(0, 60)}...`);
+    // STRATEGY 0: Quick URL pre-validation to avoid timeouts on dead links
+    console.log(`  🔍 [STRATEGY 0] Pre-validating URL...`);
+    let urlIsValid = false;
     try {
-      const downloadResult = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/download-pdf-tool', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-        },
-        body: JSON.stringify({
-          url: pdf.url,
-          search_query: searchQuery,
-          expected_title: pdf.title,
-          expected_author: pdf.authors
-        })
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(pdf.url, {
+        method: 'HEAD',
+        signal: controller.signal,
+        redirect: 'follow'
       });
       
-      const data = await downloadResult.json();
+      clearTimeout(timeoutId);
       
-      if (!data.error) {
-        console.log(`  ✅ [STRATEGY 1] SUCCESS`);
-        downloadSuccess = true;
-        fileName = data.document?.file_name;
+      const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+      urlIsValid = response.ok && 
+        (contentType.includes('application/pdf') || 
+         contentType.includes('pdf') ||
+         pdf.url.toLowerCase().endsWith('.pdf'));
+      
+      if (urlIsValid) {
+        console.log(`  ✅ [STRATEGY 0] URL validated (${response.status})`);
       } else {
-        console.log(`  ❌ [STRATEGY 1] Failed:`, data.error);
-        lastError = data.error;
+        console.log(`  ❌ [STRATEGY 0] Invalid URL (${response.status}, ${contentType})`);
+        lastError = `Invalid URL: HTTP ${response.status}`;
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`  ❌ [STRATEGY 1] Exception:`, errorMessage);
-      lastError = errorMessage;
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log(`  ⏱️ [STRATEGY 0] Timeout - URL unreachable`);
+      } else {
+        console.log(`  ❌ [STRATEGY 0] Validation failed: ${error.message}`);
+      }
+      lastError = 'URL unreachable or invalid';
+      urlIsValid = false;
+    }
+    
+    // STRATEGY 1: Try the cached verified URL (only if pre-validation passed)
+    if (urlIsValid) {
+      console.log(`  🔗 [STRATEGY 1] Trying cached URL: ${pdf.url.slice(0, 60)}...`);
+      try {
+        const downloadResult = await fetch(Deno.env.get('SUPABASE_URL') + '/functions/v1/download-pdf-tool', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+          },
+          body: JSON.stringify({
+            url: pdf.url,
+            search_query: searchQuery,
+            expected_title: pdf.title,
+            expected_author: pdf.authors
+          })
+        });
+        
+        const data = await downloadResult.json();
+        
+        if (!data.error) {
+          console.log(`  ✅ [STRATEGY 1] SUCCESS`);
+          downloadSuccess = true;
+          fileName = data.document?.file_name;
+        } else {
+          console.log(`  ❌ [STRATEGY 1] Failed:`, data.error);
+          lastError = data.error;
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`  ❌ [STRATEGY 1] Exception:`, errorMessage);
+        lastError = errorMessage;
+      }
+    } else {
+      console.log(`  ⏩ [STRATEGY 1] Skipped due to failed pre-validation`);
     }
     
     // STRATEGY 2: If failed, search for alternative URLs
