@@ -615,33 +615,45 @@ export type Database = {
           authors: string | null
           conversation_id: string
           created_at: string | null
+          credibility_score: number | null
+          file_size_bytes: number | null
           id: string
           result_number: number
           source: string | null
+          source_type: string | null
           title: string
           url: string
+          verified: boolean | null
           year: string | null
         }
         Insert: {
           authors?: string | null
           conversation_id: string
           created_at?: string | null
+          credibility_score?: number | null
+          file_size_bytes?: number | null
           id?: string
           result_number: number
           source?: string | null
+          source_type?: string | null
           title: string
           url: string
+          verified?: boolean | null
           year?: string | null
         }
         Update: {
           authors?: string | null
           conversation_id?: string
           created_at?: string | null
+          credibility_score?: number | null
+          file_size_bytes?: number | null
           id?: string
           result_number?: number
           source?: string | null
+          source_type?: string | null
           title?: string
           url?: string
+          verified?: boolean | null
           year?: string | null
         }
         Relationships: [

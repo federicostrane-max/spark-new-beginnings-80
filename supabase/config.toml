@@ -51,3 +51,12 @@ verify_jwt = false
 
 [functions.upload-pdf-to-shared-pool]
 verify_jwt = true
+
+[functions.book-discovery]
+verify_jwt = false
+
+[functions.pdf-search-with-validation]
+verify_jwt = false
+
+[functions.metadata-extractor]
+verify_jwt = false

@@ -32,6 +32,10 @@ interface SearchResult {
   year?: string;
   source?: string;
   url: string;
+  credibilityScore?: number;
+  source_type?: string;
+  verified?: boolean;
+  file_size_bytes?: number;
 }
 
 // ============================================
@@ -224,6 +228,119 @@ async function executeWebSearch(topic: string, count: number = 10): Promise<Sear
   } catch (error) {
     console.error('❌ [WEB SEARCH] Error:', error);
     throw error;
+  }
+}
+
+async function executeEnhancedSearch(topic: string, count: number = 10, supabaseClient: any): Promise<SearchResult[]> {
+  console.log('🔍 [ENHANCED SEARCH] Starting two-phase search for:', topic);
+  
+  try {
+    // FASE 1: Discover top books
+    console.log('📚 [PHASE 1] Book discovery...');
+    const { data: booksData, error: booksError } = await supabaseClient.functions.invoke(
+      'book-discovery',
+      {
+        body: {
+          topic,
+          maxBooks: Math.ceil(count / 2) // If count=10 → find 5 books → 2 PDFs per book
+        }
+      }
+    );
+    
+    if (booksError || !booksData?.books || booksData.books.length === 0) {
+      console.error('❌ Book discovery failed:', booksError);
+      console.log('⚠️ Falling back to simple search');
+      return await executeWebSearch(topic, count);
+    }
+    
+    const books = booksData.books;
+    console.log(`✅ [PHASE 1] Found ${books.length} books:`, books.map((b: any) => b.title));
+    
+    // FASE 2: Search & validate PDFs for each book
+    console.log('🔍 [PHASE 2] PDF search with validation...');
+    const { data: pdfsData, error: pdfsError } = await supabaseClient.functions.invoke(
+      'pdf-search-with-validation',
+      {
+        body: {
+          books,
+          maxResultsPerBook: 2,  // 2 PDF per book
+          maxUrlsToCheck: 15
+        }
+      }
+    );
+    
+    if (pdfsError || !pdfsData?.pdfs || pdfsData.pdfs.length === 0) {
+      console.error('❌ PDF search failed:', pdfsError);
+      console.log('⚠️ Falling back to simple search');
+      return await executeWebSearch(topic, count);
+    }
+    
+    const verifiedPdfs = pdfsData.pdfs;
+    console.log(`✅ [PHASE 2] Found ${verifiedPdfs.length} verified PDFs`);
+    
+    // FASE 3: Extract metadata
+    console.log('📊 [PHASE 3] Metadata extraction...');
+    const urls = verifiedPdfs.map((p: any) => p.pdfUrl);
+    const { data: metadataData, error: metadataError } = await supabaseClient.functions.invoke(
+      'metadata-extractor',
+      {
+        body: { urls }
+      }
+    );
+    
+    if (metadataError) {
+      console.error('⚠️ Metadata extraction failed:', metadataError);
+    }
+    
+    // FASE 4: Merge data
+    const enrichedResults: SearchResult[] = verifiedPdfs.map((pdf: any, index: number) => {
+      const metadata = metadataData?.metadata?.[index] || {};
+      
+      return {
+        number: index + 1,
+        title: pdf.bookTitle,
+        authors: metadata.authors?.join(', ') || pdf.bookAuthors,
+        year: metadata.year?.toString() || null,
+        source: metadata.publisher || pdf.domain,
+        url: pdf.pdfUrl,
+        credibilityScore: pdf.credibilityScore,
+        source_type: metadata.source_type || 'web',
+        verified: true,
+        file_size_bytes: pdf.fileSize
+      };
+    });
+    
+    // FASE 5: Quality filtering & sorting
+    console.log('🎯 [PHASE 4] Quality filtering...');
+    
+    // Remove duplicates (same URL or same title)
+    const uniqueResults = enrichedResults.reduce((acc, current) => {
+      const duplicate = acc.find(r => 
+        r.url === current.url || 
+        r.title.toLowerCase() === current.title.toLowerCase()
+      );
+      if (!duplicate) acc.push(current);
+      return acc;
+    }, [] as SearchResult[]);
+    
+    // Sort by credibility score (descending)
+    uniqueResults.sort((a, b) => (b.credibilityScore || 0) - (a.credibilityScore || 0));
+    
+    // Take top N and renumber
+    const finalResults = uniqueResults.slice(0, count).map((r, idx) => ({
+      ...r,
+      number: idx + 1
+    }));
+    
+    console.log(`✅ [ENHANCED SEARCH] Completed: ${finalResults.length} results (requested: ${count})`);
+    console.log(`📊 Breakdown: ${finalResults.filter(r => (r.credibilityScore || 0) >= 8).length} high-quality, ${finalResults.filter(r => (r.credibilityScore || 0) < 8).length} standard`);
+    
+    return finalResults;
+    
+  } catch (error) {
+    console.error('❌ [ENHANCED SEARCH] Error:', error);
+    console.log('⚠️ Falling back to simple search');
+    return await executeWebSearch(topic, count);
   }
 }
 
@@ -1029,11 +1146,11 @@ Deno.serve(async (req) => {
               console.log('📊 [WORKFLOW] Requested count:', userIntent.count);
               workflowHandled = true;
               
-              // Execute web search immediately with requested count
+              // Execute ENHANCED search with full metadata extraction
               try {
-                const searchResults = await executeWebSearch(userIntent.topic, userIntent.count || 10);
+                const searchResults = await executeEnhancedSearch(userIntent.topic, userIntent.count || 10, supabase);
                 
-                // Save results to database cache
+                // Save results to database cache (INCLUDING NEW FIELDS)
                 console.log(`💾 [CACHE] Saving ${searchResults.length} results to database`);
                 const cacheInserts = searchResults.map(r => ({
                   conversation_id: conversation.id,
@@ -1042,7 +1159,11 @@ Deno.serve(async (req) => {
                   authors: r.authors,
                   year: r.year,
                   source: r.source,
-                  url: r.url
+                  url: r.url,
+                  source_type: r.source_type,
+                  credibility_score: r.credibilityScore,
+                  verified: r.verified,
+                  file_size_bytes: r.file_size_bytes
                 }));
                 
                 // Delete old cache for this conversation first
