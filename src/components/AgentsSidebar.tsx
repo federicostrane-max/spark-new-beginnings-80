@@ -57,6 +57,7 @@ export const AgentsSidebar = ({
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [syncingAgents, setSyncingAgents] = useState<Set<string>>(new Set());
   
   // Health monitoring
   const agentIds = agents.map(a => a.id);
@@ -138,10 +139,10 @@ export const AgentsSidebar = ({
     }
   };
 
-  const handleSyncAgent = async (agentId: string, agentName: string) => {
+  const handleSyncAgent = async (agentId: string) => {
+    setSyncingAgents(prev => new Set(prev).add(agentId));
+    
     try {
-      toast.info(`Sincronizzazione di ${agentName} in corso...`);
-      
       const session = await supabase.auth.getSession();
       if (!session.data.session) {
         throw new Error('Sessione non valida');
@@ -161,24 +162,27 @@ export const AgentsSidebar = ({
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
       const data = await response.json();
+      const syncedCount = data?.statuses?.filter((s: any) => s.status === 'missing').length || 0;
 
-      if (data?.fixedCount > 0) {
-        toast.success(`${agentName}: ${data.fixedCount} documenti sincronizzati`);
+      if (syncedCount > 0) {
+        toast.success(`${syncedCount} ${syncedCount === 1 ? 'documento sincronizzato' : 'documenti sincronizzati'}`);
+        setTimeout(() => window.location.reload(), 1000);
       } else {
-        toast.info(`${agentName}: nessun documento da sincronizzare`);
+        toast.info("Tutti i documenti sono già sincronizzati");
       }
-      
-      // Refresh health status after sync
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
     } catch (error: any) {
       console.error("Error syncing agent:", error);
-      toast.error(`Errore nella sincronizzazione: ${error.message}`);
+      toast.error(`Errore: ${error.message}`);
+    } finally {
+      setSyncingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(agentId);
+        return newSet;
+      });
     }
   };
 
@@ -246,58 +250,50 @@ export const AgentsSidebar = ({
               
               return (
                 <TooltipProvider key={agent.id}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => onSelectAgent(agent)}
-                        className={cn(
-                          "flex items-center gap-2 w-full rounded-lg p-3 transition-colors text-left relative",
-                          agent.id === currentAgentId
-                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                            : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
-                        )}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
-                          <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
-                        </div>
-                        {showHealthBadge && (
-                          <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    {showHealthBadge && (
-                      <TooltipContent side="right" className="max-w-xs">
-                        <div className="space-y-2">
-                          <p className="font-semibold">Problemi rilevati:</p>
-                          
-                          {/* Mostra documenti non sincronizzati */}
-                          {agentHealth.unsyncedCount > 0 && (
-                            <div className="space-y-2">
-                              <p className="text-sm">• {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}</p>
-                              <Button 
-                                size="sm" 
-                                variant="outline"
-                                className="w-full"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSyncAgent(agent.id, agent.name);
-                                }}
-                              >
-                                <RefreshCw className="h-3 w-3 mr-2" />
-                                Sincronizza Documenti
-                              </Button>
-                            </div>
-                          )}
-                          
-                          {/* Mostra errori */}
-                          {agentHealth.errorCount > 0 && (
-                            <p className="text-sm text-destructive">• {agentHealth.errorCount} {agentHealth.errorCount === 1 ? 'errore recente' : 'errori recenti'}</p>
-                          )}
-                        </div>
-                      </TooltipContent>
+                  <div
+                    className={cn(
+                      "group flex items-center gap-2 w-full rounded-lg p-3 transition-colors text-left relative cursor-pointer",
+                      agent.id === currentAgentId
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                     )}
-                  </Tooltip>
+                    onClick={() => onSelectAgent(agent)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
+                      <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {showHealthBadge && (
+                        <>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+                                {agentHealth.unsyncedCount}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">
+                              <p className="text-xs">
+                                {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSyncAgent(agent.id);
+                            }}
+                            disabled={syncingAgents.has(agent.id)}
+                          >
+                            <RefreshCw className={`h-3 w-3 ${syncingAgents.has(agent.id) ? 'animate-spin' : ''}`} />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </TooltipProvider>
               );
             })

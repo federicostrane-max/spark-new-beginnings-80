@@ -118,13 +118,26 @@ export const useAgentHealth = (agentIds: string[]) => {
     );
   };
 
+  const getDetailedIssues = () => {
+    const problematicAgents = Array.from(healthStatus.values()).filter(status => status.hasIssues);
+    const totalAgentsWithIssues = problematicAgents.length;
+    const totalUnsyncedDocs = problematicAgents.reduce((sum, status) => sum + status.unsyncedCount, 0);
+    
+    return {
+      totalAgentsWithIssues,
+      totalUnsyncedDocs,
+      problematicAgents
+    };
+  };
+
   return {
     healthStatus: healthStatus,
     isLoading,
     refreshHealth,
     getAgentStatus,
     hasAnyIssues,
-    getTotalIssueCount
+    getTotalIssueCount,
+    getDetailedIssues
   };
 };
 

@@ -33,13 +33,13 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
         return;
       }
 
-      toast.info(`Avvio sincronizzazione di ${agents.length} agenti in parallelo...`);
+      toast.info(`Avvio sincronizzazione di ${agents.length} agenti...`);
 
       // Helper function to sync a single agent with timeout
       const syncAgentWithTimeout = async (agent: { id: string; name: string }, index: number) => {
         const TIMEOUT_MS = 120000; // 2 minutes timeout per agent
         
-        toast.info(`Sincronizzando ${agent.name} (${index + 1}/${agents.length})...`);
+        console.log(`Sincronizzando ${agent.name} (${index + 1}/${agents.length})...`);
         
         const timeoutPromise = new Promise<never>((_, reject) => 
           setTimeout(() => reject(new Error('Timeout - operazione troppo lenta')), TIMEOUT_MS)
@@ -61,7 +61,9 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
           }
         ).then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return { data: await res.json(), error: null };
+          const data = await res.json();
+          console.log(`✓ ${agent.name} sincronizzato:`, data);
+          return { data, error: null };
         });
         
         return Promise.race([syncPromise, timeoutPromise]);
@@ -73,7 +75,7 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
       );
 
       // Process results
-      let totalFixed = 0;
+      let totalDocsSynced = 0;
       const errors: string[] = [];
       const successful: string[] = [];
 
@@ -85,9 +87,13 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
           
           if (error) {
             errors.push(`${agent.name}: ${error.message}`);
-          } else if (data?.fixedCount > 0) {
-            totalFixed += data.fixedCount;
-            successful.push(agent.name);
+          } else {
+            // Conta documenti sincronizzati (missing prima del fix)
+            const syncedCount = data?.statuses?.filter((s: any) => s.status === 'missing').length || 0;
+            if (syncedCount > 0) {
+              totalDocsSynced += syncedCount;
+              successful.push(`${agent.name} (${syncedCount})`);
+            }
           }
         } else {
           errors.push(`${agent.name}: ${result.reason?.message || 'Errore sconosciuto'}`);
@@ -96,11 +102,9 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
 
       // Show results
       if (errors.length > 0 && successful.length === 0) {
-        toast.error(`Sincronizzazione fallita per tutti gli agenti: ${errors.join(', ')}`);
-      } else if (errors.length > 0) {
-        toast.warning(`Sincronizzati ${successful.length}/${agents.length} agenti. Errori: ${errors.join(', ')}`);
-      } else if (totalFixed > 0) {
-        toast.success(`✅ Sincronizzazione completata: ${totalFixed} documenti sincronizzati su ${agents.length} agenti`);
+        toast.error(`Sincronizzazione fallita: ${errors.slice(0, 2).join(', ')}${errors.length > 2 ? `... +${errors.length - 2}` : ''}`);
+      } else if (totalDocsSynced > 0) {
+        toast.success(`✅ Sincronizzati ${totalDocsSynced} documenti su ${successful.length} agenti`);
       } else {
         toast.info("✓ Tutti gli agenti sono già sincronizzati");
       }
@@ -122,15 +126,17 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
     return null;
   }
 
-  const issueDetails = [
-    poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} documenti pool bloccati`,
-    poolHealth.errorCount > 0 && `${poolHealth.errorCount} documenti pool con errori`,
-    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} documenti pool in validazione da troppo tempo`,
-    hasAgentIssues && 'Agenti con problemi di sincronizzazione'
-  ].filter(Boolean).join(' • ');
+  const issueDetails = [];
+  
+  // Pool issues
+  if (poolHealth.errorCount > 0) {
+    issueDetails.push(`${poolHealth.errorCount} documenti pool con errori`);
+  }
+  if (poolHealth.validatingCount > 0) {
+    issueDetails.push(`${poolHealth.validatingCount} documenti pool in validazione da troppo tempo`);
+  }
 
-  const totalIssueCount = poolHealth.issueCount + (hasAgentIssues ? 1 : 0);
-  const issueLabel = poolHealth.hasIssues ? 'pool documenti' : 'agenti';
+  const totalIssueCount = poolHealth.issueCount;
 
   return (
     <Alert variant="destructive" className="mx-4 mt-4 border-2">
@@ -138,10 +144,10 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
       <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <span className="font-semibold">
-            {totalIssueCount} {totalIssueCount === 1 ? 'problema' : 'problemi'} {issueLabel}
+            {totalIssueCount} {totalIssueCount === 1 ? 'problema' : 'problemi'} nel pool documenti
           </span>
           <p className="text-sm mt-1 opacity-90">
-            {issueDetails}
+            {issueDetails.join(' • ')}
           </p>
         </div>
         <div className="flex gap-2 flex-shrink-0">
