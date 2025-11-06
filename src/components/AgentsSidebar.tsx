@@ -193,9 +193,6 @@ export const AgentsSidebar = ({
                       >
                         <div className="relative text-2xl flex-shrink-0">
                           {agent.avatar || "🤖"}
-                          {showHealthBadge && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-destructive rounded-full border-2 border-sidebar" />
-                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
