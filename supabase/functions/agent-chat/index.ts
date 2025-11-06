@@ -53,11 +53,15 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
   
   // SEARCH REQUEST: "Find PDFs on...", "Search for...", "Look for...", Italian patterns
   const searchPatterns = [
-    // English patterns
+    // English patterns - STRICT (with "on/about/regarding")
     /find\s+(?:pdf|pdfs|papers?|documents?|articles?)\s+(?:on|about|regarding)/i,
-    /search\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
-    /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)/i,
+    /search\s+(?:for\s+)?(?:pdf|pdfs|papers?)\s+(?:on|about|regarding)/i,
+    /look\s+(?:for\s+)?(?:pdf|pdfs|papers?)\s+(?:on|about|regarding)/i,
     /\d+\s+(?:pdf|pdfs|papers?|documents?)\s+(?:on|about|regarding)/i, // "20 PDFs on..."
+    
+    // English patterns - FLEXIBLE (topic before pdf)
+    /(?:find|search|look\s+for|get)\s+.{3,80}\s+(?:pdf|pdfs|papers?|documents?|articles?)$/i,  // "Find [topic] pdf"
+    /(?:find|search|look\s+for|get)\s+(?:\d+\s+)?.{3,80}\s+(?:pdf|pdfs|papers?|documents?|articles?)$/i,  // "Find 5 [topic] pdf"
     
     // Italian patterns
     /cerca\s+(?:pdf|articoli?|documenti?|paper)/i,
