@@ -41,6 +41,7 @@ export const ChatMessage = ({
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
+  const justEnteredSelectionMode = useRef(false);
   const navigate = useNavigate();
 
   // Get LLM provider badge info
@@ -64,6 +65,13 @@ export const ChatMessage = ({
       setIsCollapsed(!forceExpanded);
     }
   }, [forceExpanded]);
+
+  // Reset justEnteredSelectionMode when exiting selection mode
+  useEffect(() => {
+    if (!selectionMode) {
+      justEnteredSelectionMode.current = false;
+    }
+  }, [selectionMode]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -90,6 +98,13 @@ export const ChatMessage = ({
     if (selectionMode && onToggleSelection) {
       e.preventDefault();
       e.stopPropagation();
+      
+      // Ignore first click/touch after entering selection mode
+      if (justEnteredSelectionMode.current) {
+        justEnteredSelectionMode.current = false;
+        return;
+      }
+      
       onToggleSelection();
     }
   };
@@ -111,6 +126,7 @@ export const ChatMessage = ({
       // Only trigger long press if user hasn't scrolled
       if (!hasMoved.current && onLongPress) {
         onLongPress();
+        justEnteredSelectionMode.current = true; // Set flag to prevent immediate deselection
         // Vibrazione per feedback tattile (se disponibile)
         if (navigator.vibrate) {
           navigator.vibrate(50);
@@ -154,6 +170,9 @@ export const ChatMessage = ({
       onTouchStart={!selectionMode ? handleLongPressStart : undefined}
       onTouchMove={!selectionMode ? handleTouchMove : undefined}
       onTouchCancel={handleLongPressEnd}
+      onMouseDown={!selectionMode ? handleLongPressStart : undefined}
+      onMouseUp={handleLongPressEnd}
+      onMouseLeave={handleLongPressEnd}
     >
       {selectionMode && (
         <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
