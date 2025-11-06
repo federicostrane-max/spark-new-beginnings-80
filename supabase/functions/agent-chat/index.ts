@@ -2323,6 +2323,16 @@ ${agent.system_prompt}${knowledgeContext}`;
           
           // Add collaboration tools for all agents
           tools.push({
+            name: 'list_other_agents',
+            description: 'Get a list of all available agents in the system. Use this when the user asks about other agents or when you need to know what agents are available for consultation.',
+            input_schema: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          });
+          
+          tools.push({
             name: 'get_agent_prompt',
             description: 'Get the system prompt of another agent. Use this when the user asks about what another agent does or what instructions it follows.',
             input_schema: {
@@ -2705,6 +2715,45 @@ ${agent.system_prompt}${knowledgeContext}`;
                         } else {
                           console.log('✅ Download successful:', downloadData);
                           toolResult = downloadData;
+                        }
+                      }
+                      
+                      if (toolUseName === 'list_other_agents') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: list_other_agents`);
+                        
+                        const { data: allAgents, error: agentsError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug, description')
+                          .eq('active', true)
+                          .neq('id', agent.id) // Exclude current agent
+                          .order('name', { ascending: true });
+                        
+                        if (agentsError) {
+                          console.error('❌ Error retrieving agents:', agentsError);
+                          toolResult = { success: false, error: 'Failed to retrieve agents list' };
+                          
+                          const errorText = `\n\n❌ Errore nel recuperare la lista degli agenti.\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        } else {
+                          console.log(`✅ Retrieved ${allAgents.length} agents`);
+                          toolResult = {
+                            success: true,
+                            agent_count: allAgents.length,
+                            agents: allAgents
+                          };
+                          
+                          // Aggiungi lista agenti nella risposta
+                          let agentsText = `\n\n✅ **Agenti disponibili nel sistema** (${allAgents.length}):\n\n`;
+                          allAgents.forEach((ag: any, idx: number) => {
+                            agentsText += `${idx + 1}. **${ag.name}** (slug: \`${ag.slug}\`)\n`;
+                            if (ag.description) agentsText += `   - ${ag.description}\n`;
+                            agentsText += `\n`;
+                          });
+                          agentsText += `\nPosso consultare ciascuno di questi agenti per vedere il loro prompt, documenti, o cronologia conversazioni.\n\n`;
+                          fullResponse += agentsText;
+                          sendSSE(JSON.stringify({ type: 'content', text: agentsText }));
                         }
                       }
                       
