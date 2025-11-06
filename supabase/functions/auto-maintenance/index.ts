@@ -131,20 +131,48 @@ serve(async (req) => {
                   error_message: invokeError.message
                 });
             } else {
-              console.log(`[auto-maintenance] ✅ Successfully triggered validation for ${doc.file_name}`);
+              // ✅ POST-OPERATION VERIFICATION
+              console.log(`[auto-maintenance] ⏳ Waiting 3 seconds to verify document status...`);
+              await new Promise(resolve => setTimeout(resolve, 3000));
               
-              await supabase
-                .from('maintenance_operation_details')
-                .insert({
-                  execution_log_id: execLogId,
-                  operation_type: 'fix_stuck_document',
-                  target_id: doc.id,
-                  target_name: doc.file_name,
-                  status: 'success',
-                  attempt_number: attemptNumber
-                });
+              const { data: verifiedDoc } = await supabase
+                .from('knowledge_documents')
+                .select('validation_status')
+                .eq('id', doc.id)
+                .single();
+              
+              const isActuallyFixed = verifiedDoc?.validation_status !== 'validating';
+              
+              if (isActuallyFixed) {
+                console.log(`[auto-maintenance] ✅ VERIFIED: Document ${doc.file_name} successfully fixed`);
+                
+                await supabase
+                  .from('maintenance_operation_details')
+                  .insert({
+                    execution_log_id: execLogId,
+                    operation_type: 'fix_stuck_document',
+                    target_id: doc.id,
+                    target_name: doc.file_name,
+                    status: 'success',
+                    attempt_number: attemptNumber
+                  });
 
-              documentsFixed++;
+                documentsFixed++;
+              } else {
+                console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Document ${doc.file_name} still stuck`);
+                
+                await supabase
+                  .from('maintenance_operation_details')
+                  .insert({
+                    execution_log_id: execLogId,
+                    operation_type: 'fix_stuck_document',
+                    target_id: doc.id,
+                    target_name: doc.file_name,
+                    status: 'retry_needed',
+                    attempt_number: attemptNumber,
+                    error_message: 'Post-verification failed: document still in validating status'
+                  });
+              }
             }
           } catch (err) {
             console.error(`[auto-maintenance] ❌ Exception during retry:`, err);
@@ -245,7 +273,7 @@ serve(async (req) => {
           });
 
           if (validateError) {
-            console.error(`[auto-maintenance] ❌ Failed to regenerate summary for ${doc.file_name}:`, validateError);
+            console.error(`[auto-maintenance] ❌ Failed to invoke validate-document for ${doc.file_name}:`, validateError);
             summariesFailed++;
             
             await supabase
@@ -260,19 +288,51 @@ serve(async (req) => {
                 error_message: validateError.message
               });
           } else {
-            console.log(`[auto-maintenance] ✅ Successfully regenerated summary for ${doc.file_name}`);
-            summariesGenerated++;
+            // ✅ POST-OPERATION VERIFICATION
+            console.log(`[auto-maintenance] ⏳ Waiting 3 seconds for summary generation...`);
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for processing
             
-            await supabase
-              .from('maintenance_operation_details')
-              .insert({
-                execution_log_id: execLogId,
-                operation_type: 'regenerate_summary',
-                target_id: doc.id,
-                target_name: doc.file_name,
-                status: 'success',
-                attempt_number: 1
-              });
+            // Verify actual result in database
+            const { data: verifiedDoc } = await supabase
+              .from('knowledge_documents')
+              .select('ai_summary')
+              .eq('id', doc.id)
+              .single();
+            
+            const isActuallyGenerated = verifiedDoc?.ai_summary && 
+                                       verifiedDoc.ai_summary.trim() !== '' &&
+                                       verifiedDoc.ai_summary !== 'Documento migrato dal knowledge base degli agenti';
+            
+            if (isActuallyGenerated) {
+              console.log(`[auto-maintenance] ✅ VERIFIED: Summary successfully generated for ${doc.file_name}`);
+              summariesGenerated++;
+              
+              await supabase
+                .from('maintenance_operation_details')
+                .insert({
+                  execution_log_id: execLogId,
+                  operation_type: 'regenerate_summary',
+                  target_id: doc.id,
+                  target_name: doc.file_name,
+                  status: 'success',
+                  attempt_number: 1
+                });
+            } else {
+              console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Summary not generated for ${doc.file_name}`);
+              summariesFailed++;
+              
+              await supabase
+                .from('maintenance_operation_details')
+                .insert({
+                  execution_log_id: execLogId,
+                  operation_type: 'regenerate_summary',
+                  target_id: doc.id,
+                  target_name: doc.file_name,
+                  status: 'failed',
+                  attempt_number: 1,
+                  error_message: 'Post-verification failed: summary not updated in database'
+                });
+            }
           }
         } catch (err) {
           console.error(`[auto-maintenance] ❌ Exception regenerating summary for ${doc.file_name}:`, err);
@@ -366,20 +426,47 @@ serve(async (req) => {
                     error_message: syncError.message
                   });
               } else {
-                console.log(`[auto-maintenance] ✅ Successfully synced agent ${agent.name}`);
+                // ✅ POST-OPERATION VERIFICATION
+                console.log(`[auto-maintenance] ⏳ Waiting 2 seconds to verify sync status...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                await supabase
-                  .from('maintenance_operation_details')
-                  .insert({
-                    execution_log_id: execLogId,
-                    operation_type: 'sync_agent',
-                    target_id: agent.id,
-                    target_name: agent.name,
-                    status: 'success',
-                    attempt_number: attemptNumber
-                  });
+                const { data: verifyData, error: verifyError } = await supabase.functions.invoke('check-and-sync-all', {
+                  body: { agentId: agent.id, autoFix: false }
+                });
+                
+                const verifyStatuses = verifyData?.statuses || [];
+                const isActuallySynced = !verifyStatuses.some((s: any) => s.status !== 'synced');
+                
+                if (isActuallySynced) {
+                  console.log(`[auto-maintenance] ✅ VERIFIED: Agent ${agent.name} successfully synced`);
+                  
+                  await supabase
+                    .from('maintenance_operation_details')
+                    .insert({
+                      execution_log_id: execLogId,
+                      operation_type: 'sync_agent',
+                      target_id: agent.id,
+                      target_name: agent.name,
+                      status: 'success',
+                      attempt_number: attemptNumber
+                    });
 
-                agentsSynced++;
+                  agentsSynced++;
+                } else {
+                  console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Agent ${agent.name} still has sync issues`);
+                  
+                  await supabase
+                    .from('maintenance_operation_details')
+                    .insert({
+                      execution_log_id: execLogId,
+                      operation_type: 'sync_agent',
+                      target_id: agent.id,
+                      target_name: agent.name,
+                      status: 'retry_needed',
+                      attempt_number: attemptNumber,
+                      error_message: 'Post-verification failed: agent still has sync issues'
+                    });
+                }
               }
             }
           }
