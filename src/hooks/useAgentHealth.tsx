@@ -53,6 +53,20 @@ export const useAgentHealth = (agentIds: string[]) => {
       // Conta errori e warning recenti dal logger
       const issues = logger.getAgentIssueCount(agentId, 30);
 
+      // Log dettagliato per capire da dove vengono i warning
+      if (issues.warnings > 0) {
+        logger.info('agent-operation', `Agent ${agentId} has ${issues.warnings} warnings`, {
+          unsyncedCount,
+          errorCount: issues.errors,
+          warningCount: issues.warnings,
+          statuses: statuses.map((s: any) => ({
+            fileName: s.fileName,
+            status: s.status,
+            chunkCount: s.chunkCount
+          }))
+        }, { agentId });
+      }
+
       const healthStatus: AgentHealthStatus = {
         agentId,
         hasIssues: unsyncedCount > 0 || issues.errors > 0 || issues.warnings > 0,
@@ -113,8 +127,8 @@ export const useAgentHealth = (agentIds: string[]) => {
   useEffect(() => {
     refreshHealth();
 
-    // Refresh ogni 30 secondi
-    const interval = setInterval(refreshHealth, 30000);
+    // Refresh ogni 2 minuti per maggiore stabilità
+    const interval = setInterval(refreshHealth, 120000);
     return () => clearInterval(interval);
   }, [agentIds.join(',')]);
 
@@ -224,8 +238,8 @@ export const usePoolDocumentsHealth = () => {
   useEffect(() => {
     checkPoolHealth();
 
-    // Refresh ogni 30 secondi
-    const interval = setInterval(checkPoolHealth, 30000);
+    // Refresh ogni 2 minuti per maggiore stabilità
+    const interval = setInterval(checkPoolHealth, 120000);
     return () => clearInterval(interval);
   }, []);
 

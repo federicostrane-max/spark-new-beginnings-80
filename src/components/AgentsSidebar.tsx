@@ -234,6 +234,8 @@ export const AgentsSidebar = ({
                       <TooltipContent side="right" className="max-w-xs">
                         <div className="space-y-2">
                           <p className="font-semibold">Problemi rilevati:</p>
+                          
+                          {/* Mostra documenti non sincronizzati */}
                           {agentHealth.unsyncedCount > 0 && (
                             <div className="space-y-2">
                               <p className="text-sm">• {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}</p>
@@ -247,12 +249,26 @@ export const AgentsSidebar = ({
                                 }}
                               >
                                 <RefreshCw className="h-3 w-3 mr-2" />
-                                Sincronizza
+                                Sincronizza Documenti
                               </Button>
                             </div>
                           )}
+                          
+                          {/* Mostra errori */}
                           {agentHealth.errorCount > 0 && (
-                            <p className="text-sm">• {agentHealth.errorCount === 1 ? 'Errore recente rilevato' : `${agentHealth.errorCount} errori recenti rilevati`}</p>
+                            <p className="text-sm text-destructive">• {agentHealth.errorCount} {agentHealth.errorCount === 1 ? 'errore recente' : 'errori recenti'}</p>
+                          )}
+                          
+                          {/* Mostra warning anche se non ci sono documenti non sincronizzati */}
+                          {agentHealth.warningCount > 0 && (
+                            <p className="text-sm text-yellow-600">• {agentHealth.warningCount} {agentHealth.warningCount === 1 ? 'avviso' : 'avvisi'} dal sistema</p>
+                          )}
+                          
+                          {/* Se ci sono solo warning, mostra un messaggio esplicativo */}
+                          {agentHealth.unsyncedCount === 0 && agentHealth.errorCount === 0 && agentHealth.warningCount > 0 && (
+                            <p className="text-xs opacity-80 mt-2 border-t pt-2">
+                              ℹ️ Questi avvisi sono generati dal sistema di monitoraggio. L'agente funziona correttamente.
+                            </p>
                           )}
                         </div>
                       </TooltipContent>

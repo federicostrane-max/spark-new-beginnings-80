@@ -108,10 +108,10 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
   }
 
   const issueDetails = [
-    poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`,
-    poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`,
-    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`,
-    hasAgentIssues && 'Documenti agenti non sincronizzati'
+    poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} documenti pool bloccati`,
+    poolHealth.errorCount > 0 && `${poolHealth.errorCount} documenti pool con errori`,
+    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} documenti pool in validazione da troppo tempo`,
+    hasAgentIssues && 'Agenti con problemi di sincronizzazione'
   ].filter(Boolean).join(' • ');
 
   const totalIssueCount = poolHealth.issueCount + (hasAgentIssues ? 1 : 0);
