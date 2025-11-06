@@ -2164,6 +2164,37 @@ Deno.serve(async (req) => {
             }
           }
           
+          // ========================================
+          // DETECT @AGENT MENTIONS FOR INTER-AGENT COMMUNICATION
+          // ========================================
+          const agentMentionRegex = /@([a-zA-Z0-9\-_]+)/g;
+          const mentions: string[] = [];
+          let match;
+          let mentionInstruction = '';
+          
+          while ((match = agentMentionRegex.exec(message)) !== null) {
+            mentions.push(match[1]); // Extract agent slug/name
+          }
+          
+          console.log(`📧 [MENTIONS] Detected ${mentions.length} agent mention(s):`, mentions);
+          
+          // If there are @mentions, automatically trigger inter-agent communication
+          if (mentions.length > 0) {
+            console.log('🤝 [AUTO-CONSULT] Processing agent mentions...');
+            
+            // Remove the @mentions from the message to clean it up
+            const cleanedMessage = message.replace(agentMentionRegex, '').trim();
+            
+            // Prepare system instruction to use the ask_agent_to_perform_task tool
+            mentionInstruction = `\n\n## CRITICAL INTER-AGENT INSTRUCTION\n\nThe user has explicitly mentioned the following agent(s) using @ tags: ${mentions.join(', ')}\n\nYou MUST use the 'ask_agent_to_perform_task' tool to consult with each mentioned agent. The user's request (after removing @ tags) is:\n\n"${cleanedMessage}"\n\nFor each mentioned agent:\n1. Use 'ask_agent_to_perform_task' with the agent's name\n2. Pass the user's cleaned request as the task_description\n3. Include relevant context from your conversation in context_information\n4. Wait for their response before continuing\n\nThis is a MANDATORY action when @ tags are present.`;
+            
+            // We'll inject this instruction into the enhanced system prompt below
+            console.log('✅ [AUTO-CONSULT] Inter-agent instruction prepared');
+          } else {
+            console.log('ℹ️ [MENTIONS] No @ mentions detected, proceeding normally');
+          }
+          
+          
           // If workflow didn't handle it, proceed with normal AI call
           if (workflowHandled) {
             console.log('✅ [WORKFLOW] Request handled deterministically, AI call skipped');
@@ -2282,7 +2313,7 @@ Deno.serve(async (req) => {
             // Continue without knowledge context if query fails
           }
           
-          const enhancedSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
+          const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
 - All relevant background information and nuances
@@ -2293,6 +2324,11 @@ Deno.serve(async (req) => {
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
 ${agent.system_prompt}${knowledgeContext}`;
+
+          // Add mention instruction if @agent tags were detected
+          const enhancedSystemPrompt = mentions.length > 0 
+            ? baseSystemPrompt + mentionInstruction
+            : baseSystemPrompt;
 
           // Define tools for all agents
           let toolCallCount = 0; // Track tool calls for validation
