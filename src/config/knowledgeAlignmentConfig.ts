@@ -16,7 +16,7 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
   // Trigger settings
   triggers: {
     on_prompt_change: true,
-    min_time_between_analyses: 3600000, // 1 hour in ms
+    min_time_between_analyses: 300000, // 5 minutes in ms (reduced for testing)
   },
   
   // Scoring weights (to calculate final_relevance_score)

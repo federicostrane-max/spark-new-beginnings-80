@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
@@ -54,7 +54,16 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     conceptCoverage: 0,
   });
 
-  const { isAnalyzing, lastAnalysis, triggerManualAnalysis } = useKnowledgeAlignment({
+  const { 
+    isAnalyzing, 
+    lastAnalysis,
+    lastAnalysisStatus,
+    cooldownActive,
+    cooldownMinutes,
+    canAnalyze,
+    triggerManualAnalysis,
+    forceAnalysis,
+  } = useKnowledgeAlignment({
     agentId,
     enabled: true,
   });
@@ -224,7 +233,42 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   return (
     <TooltipProvider>
       <div className="space-y-6">
-        {/* Prominent Alert */}
+        {/* Alert cooldown */}
+        {cooldownActive && lastAnalysisStatus === 'completed' && !isAnalyzing && (
+          <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
+            <Clock className="h-5 w-5 text-yellow-600" />
+            <AlertTitle className="text-yellow-900 dark:text-yellow-100">
+              Cooldown Attivo
+            </AlertTitle>
+            <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+              Prossima analisi disponibile tra {cooldownMinutes} minuti. Questo previene sovraccarichi del sistema.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Alert analisi incompleta */}
+        {lastAnalysisStatus === 'incomplete' && !isAnalyzing && (
+          <Alert className="border-red-500 bg-red-50 dark:bg-red-950">
+            <XCircle className="h-5 w-5 text-red-600" />
+            <AlertTitle className="text-red-900 dark:text-red-100">
+              Analisi Incompleta
+            </AlertTitle>
+            <AlertDescription className="flex items-center justify-between text-red-800 dark:text-red-200">
+              <span>L'ultima analisi non è stata completata. Puoi riprovare ora.</span>
+              <Button 
+                onClick={forceAnalysis}
+                size="sm"
+                variant="destructive"
+                className="ml-4"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Riavvia Analisi
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Alert analisi in corso */}
         {analysisStatus === 'running' && (
           <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
             <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
@@ -270,14 +314,25 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                   Sistema autonomo di ottimizzazione della conoscenza
                 </CardDescription>
               </div>
-              <Button 
-                onClick={triggerManualAnalysis} 
-                disabled={isAnalyzing}
-                size="sm"
-              >
-                <Play className="mr-2 h-4 w-4" />
-                {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button 
+                      onClick={triggerManualAnalysis} 
+                      disabled={isAnalyzing || !canAnalyze}
+                      size="sm"
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!canAnalyze && cooldownActive && (
+                  <TooltipContent>
+                    <p>Prossima analisi disponibile tra {cooldownMinutes} minuti</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">

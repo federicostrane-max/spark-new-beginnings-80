@@ -11,17 +11,20 @@ interface UseKnowledgeAlignmentProps {
 export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeAlignmentProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalysis, setLastAnalysis] = useState<Date | null>(null);
+  const [lastAnalysisStatus, setLastAnalysisStatus] = useState<'completed' | 'incomplete' | null>(null);
+  const [cooldownActive, setCooldownActive] = useState(false);
+  const [cooldownMinutes, setCooldownMinutes] = useState(0);
 
   useEffect(() => {
     if (!enabled || !agentId) return;
 
     console.log('[useKnowledgeAlignment] Setting up listener for agent:', agentId);
 
-    // Fetch last analysis timestamp
+    // Fetch last analysis timestamp and status
     const fetchLastAnalysis = async () => {
       const { data } = await supabase
         .from('alignment_analysis_log')
-        .select('started_at')
+        .select('started_at, completed_at')
         .eq('agent_id', agentId)
         .order('started_at', { ascending: false })
         .limit(1)
@@ -29,6 +32,18 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       if (data) {
         setLastAnalysis(new Date(data.started_at));
+        setLastAnalysisStatus(data.completed_at ? 'completed' : 'incomplete');
+        
+        // Check cooldown
+        const timeSinceLastAnalysis = Date.now() - new Date(data.started_at).getTime();
+        const cooldownMs = KNOWLEDGE_ALIGNMENT_CONFIG.triggers.min_time_between_analyses;
+        const isInCooldown = timeSinceLastAnalysis < cooldownMs;
+        
+        setCooldownActive(isInCooldown);
+        if (isInCooldown) {
+          const minutesRemaining = Math.ceil((cooldownMs - timeSinceLastAnalysis) / 60000);
+          setCooldownMinutes(minutesRemaining);
+        }
       }
     };
 
@@ -66,17 +81,24 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     };
   }, [agentId, enabled]);
 
-  const handlePromptChange = async () => {
-    // Check cooldown
-    if (lastAnalysis) {
+  const handlePromptChange = async (forceAnalysis = false) => {
+    // Check cooldown (can bypass if last analysis is incomplete or forced)
+    if (lastAnalysis && !forceAnalysis) {
       const timeSinceLastAnalysis = Date.now() - lastAnalysis.getTime();
       const cooldownMs = KNOWLEDGE_ALIGNMENT_CONFIG.triggers.min_time_between_analyses;
 
-      if (timeSinceLastAnalysis < cooldownMs) {
+      if (timeSinceLastAnalysis < cooldownMs && lastAnalysisStatus === 'completed') {
         console.log('[useKnowledgeAlignment] Cooldown active, skipping analysis');
         const minutesRemaining = Math.ceil((cooldownMs - timeSinceLastAnalysis) / 60000);
+        setCooldownActive(true);
+        setCooldownMinutes(minutesRemaining);
         toast.info(`Analisi in pausa. Prossima disponibile tra ${minutesRemaining} minuti.`);
         return;
+      }
+      
+      // Allow analysis if last one was incomplete
+      if (lastAnalysisStatus === 'incomplete') {
+        console.log('[useKnowledgeAlignment] Last analysis incomplete, allowing retry');
       }
     }
 
@@ -107,6 +129,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
       console.log('[useKnowledgeAlignment] Analysis complete:', analysisData);
 
       setLastAnalysis(new Date());
+      setCooldownActive(false);
 
       // Start polling for completion if analysis is incomplete
       if (!analysisData.completed_at) {
@@ -168,6 +191,11 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
   return {
     isAnalyzing,
     lastAnalysis,
-    triggerManualAnalysis,
+    lastAnalysisStatus,
+    cooldownActive,
+    cooldownMinutes,
+    canAnalyze: !cooldownActive || lastAnalysisStatus === 'incomplete',
+    triggerManualAnalysis: () => handlePromptChange(false),
+    forceAnalysis: () => handlePromptChange(true),
   };
 };
