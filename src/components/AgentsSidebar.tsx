@@ -213,9 +213,6 @@ export const AgentsSidebar = ({
                           {agentHealth.errorCount > 0 && (
                             <p className="text-sm">• {agentHealth.errorCount === 1 ? 'Errore recente rilevato' : `${agentHealth.errorCount} errori recenti rilevati`}</p>
                           )}
-                          {agentHealth.warningCount > 0 && (
-                            <p className="text-sm">• {agentHealth.warningCount === 1 ? 'Avviso di sistema' : `${agentHealth.warningCount} avvisi di sistema`}</p>
-                          )}
                         </div>
                       </TooltipContent>
                     )}
