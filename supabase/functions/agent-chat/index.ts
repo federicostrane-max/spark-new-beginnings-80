@@ -3601,7 +3601,9 @@ ${agent.system_prompt}${knowledgeContext}`;
                                   max_tokens: 64000,
                                   temperature: 0.7,
                                   system: targetAgent.system_prompt,
-                                  messages: messages.map(m => ({ role: m.role, content: m.content }))
+                                  messages: messages
+                                    .filter(m => m.role !== 'system' && m.content && m.content.trim().length > 0)
+                                    .map(m => ({ role: m.role, content: m.content }))
                                 })
                               });
                               
