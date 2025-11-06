@@ -6,7 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield } from 'lucide-react';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
@@ -191,91 +193,210 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     setSelectedChunks(newSelection);
   };
 
+  // Determine analysis status
+  const getAnalysisStatus = () => {
+    if (isAnalyzing) return 'running';
+    if (analysisLogs.length === 0) return 'idle';
+    
+    const latest = analysisLogs[0];
+    if (!latest.completed_at) return 'incomplete';
+    if (stats.conceptCoverage < 30) return 'low_coverage';
+    return 'completed';
+  };
+
+  const analysisStatus = getAnalysisStatus();
+
+  // Calculate progress percentage
+  const progressPercentage = analysisLogs.length > 0 && analysisLogs[0].total_chunks_analyzed > 0
+    ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100
+    : 0;
+
+  // Get coverage badge variant
+  const getCoverageBadge = (coverage: number) => {
+    if (coverage >= 80) return { variant: 'default' as const, label: 'Ottima', icon: TrendingUp, color: 'text-green-600' };
+    if (coverage >= 60) return { variant: 'default' as const, label: 'Buona', icon: TrendingUp, color: 'text-blue-600' };
+    if (coverage >= 30) return { variant: 'secondary' as const, label: 'Bassa', icon: TrendingDown, color: 'text-yellow-600' };
+    return { variant: 'destructive' as const, label: 'Critica', icon: AlertTriangle, color: 'text-red-600' };
+  };
+
+  const coverageBadge = getCoverageBadge(stats.conceptCoverage);
+
   return (
-    <div className="space-y-6">
-      {/* Status Overview */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Allineamento AI della Knowledge Base</CardTitle>
-              <CardDescription>
-                Sistema autonomo di ottimizzazione della conoscenza
-              </CardDescription>
+    <TooltipProvider>
+      <div className="space-y-6">
+        {/* Prominent Alert */}
+        {analysisStatus === 'running' && (
+          <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+            <AlertTitle className="text-blue-900 dark:text-blue-100">Analisi Knowledge Base in Corso</AlertTitle>
+            <AlertDescription className="text-blue-800 dark:text-blue-200">
+              Sto analizzando {analysisLogs[0]?.progress_chunks_analyzed || 0} di {stats.totalChunks} chunk ({progressPercentage.toFixed(1)}%)
+              <Progress value={progressPercentage} className="mt-2 h-2" />
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {analysisStatus === 'low_coverage' && (
+          <Alert variant="destructive" className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
+            <AlertTriangle className="h-5 w-5 text-yellow-600" />
+            <AlertTitle className="text-yellow-900 dark:text-yellow-100">Coverage Bassa Rilevata</AlertTitle>
+            <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+              Solo il {stats.conceptCoverage.toFixed(0)}% dei concetti sono coperti. Considera di aggiungere più documenti pertinenti ai Task Requirements.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {analysisStatus === 'incomplete' && (
+          <Alert variant="destructive">
+            <XCircle className="h-5 w-5" />
+            <AlertTitle>Analisi Incompleta</AlertTitle>
+            <AlertDescription className="flex items-center justify-between">
+              <span>L'analisi si è fermata a {analysisLogs[0]?.progress_chunks_analyzed || 0}/{stats.totalChunks} chunk. Click per riavviare.</span>
+              <Button onClick={triggerManualAnalysis} size="sm" variant="outline" className="ml-4">
+                <Play className="mr-2 h-4 w-4" />
+                Riavvia Analisi
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Status Overview */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Allineamento AI della Knowledge Base</CardTitle>
+                <CardDescription>
+                  Sistema autonomo di ottimizzazione della conoscenza
+                </CardDescription>
+              </div>
+              <Button 
+                onClick={triggerManualAnalysis} 
+                disabled={isAnalyzing}
+                size="sm"
+              >
+                <Play className="mr-2 h-4 w-4" />
+                {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
+              </Button>
             </div>
-            <Button 
-              onClick={triggerManualAnalysis} 
-              disabled={isAnalyzing}
-              size="sm"
-            >
-              <Play className="mr-2 h-4 w-4" />
-              {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            {safeModeActive ? (
-              <>
-                <Badge variant="secondary" className="gap-1">
-                  <Shield className="h-3 w-3" />
-                  Safe Mode Attivo
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Safe Mode Badge */}
+            <div className="flex items-center gap-2">
+              {safeModeActive ? (
+                <>
+                  <Badge variant="secondary" className="gap-1">
+                    <Shield className="h-3 w-3" />
+                    Safe Mode Attivo
+                  </Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {daysRemaining !== null && `${daysRemaining} giorni rimanenti`}
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-4 w-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="max-w-xs">Durante i primi 7 giorni, i chunk vengono solo identificati ma non rimossi automaticamente</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </>
+              ) : (
+                <Badge variant="default" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Auto-Ottimizzazione Attiva
                 </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {daysRemaining !== null && `${daysRemaining} giorni rimanenti`}
-                </span>
-              </>
-            ) : (
-              <Badge variant="default" className="gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                Auto-Ottimizzazione Attiva
-              </Badge>
+              )}
+            </div>
+
+            {/* Progress Section - Only show when analyzing */}
+            {isAnalyzing && analysisLogs.length > 0 && (
+              <div className="p-4 border rounded-lg bg-muted/50 space-y-3 animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    <span className="font-semibold">Analisi in Corso</span>
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {progressPercentage.toFixed(1)}% completato
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <Progress value={progressPercentage} className="h-4" />
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-bold text-3xl">{analysisLogs[0].progress_chunks_analyzed || 0}</span>
+                    <span className="text-muted-foreground">/ {stats.totalChunks} chunk</span>
+                  </div>
+                </div>
+              </div>
             )}
-          </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Chunk Attivi</div>
-              <div className="text-2xl font-bold">{stats.totalChunks}</div>
-            </div>
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Chunk Rimossi</div>
-              <div className="text-2xl font-bold">{stats.removedChunks}</div>
-            </div>
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Copertura Concetti</div>
-              <div className="space-y-1">
-                <div className="text-2xl font-bold">{stats.conceptCoverage.toFixed(0)}%</div>
-                <Progress value={stats.conceptCoverage} className="h-2" />
+            {/* Statistics Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2 p-4 border rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Chunk Attivi</span>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-3 w-3" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Numero totale di chunk nella knowledge base dell'agente</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-3xl font-bold">{stats.totalChunks}</div>
+                  <Badge variant="secondary" className="text-xs">attivi</Badge>
+                </div>
+              </div>
+
+              <div className="space-y-2 p-4 border rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Chunk Rimossi</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-3xl font-bold">{stats.removedChunks}</div>
+                  {stats.removedChunks > 0 && (
+                    <Badge variant="outline" className="text-xs text-orange-600">rimossi</Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2 p-4 border rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>Copertura Concetti</span>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <Info className="h-3 w-3" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="max-w-xs">Percentuale dei concetti delle Task Requirements coperti dalla knowledge base</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`text-3xl font-bold ${coverageBadge.color}`}>
+                      {stats.conceptCoverage.toFixed(0)}%
+                    </div>
+                    <Badge variant={coverageBadge.variant} className="gap-1">
+                      <coverageBadge.icon className="h-3 w-3" />
+                      {coverageBadge.label}
+                    </Badge>
+                  </div>
+                  <Progress value={stats.conceptCoverage} className="h-3" />
+                </div>
               </div>
             </div>
-          </div>
 
-          {isAnalyzing && analysisLogs.length > 0 && analysisLogs[0].completed_at === null && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Analisi in corso...</span>
-                <span className="font-medium">
-                  {analysisLogs[0].progress_chunks_analyzed || 0}/{analysisLogs[0].total_chunks_analyzed}
-                </span>
+            {lastAnalysis && !isAnalyzing && (
+              <div className="text-sm text-muted-foreground">
+                Ultima analisi: {new Date(lastAnalysis).toLocaleString('it-IT')}
               </div>
-              <Progress 
-                value={analysisLogs[0].total_chunks_analyzed > 0 
-                  ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100 
-                  : 0
-                } 
-                className="h-2" 
-              />
-            </div>
-          )}
-
-          {lastAnalysis && !isAnalyzing && (
-            <div className="text-sm text-muted-foreground">
-              Ultima analisi: {new Date(lastAnalysis).toLocaleString('it-IT')}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
 
       {/* Tabs */}
       <Tabs defaultValue="removed" className="w-full">
@@ -423,5 +544,6 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         </TabsContent>
       </Tabs>
     </div>
+    </TooltipProvider>
   );
 };
