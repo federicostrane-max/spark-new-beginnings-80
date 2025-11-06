@@ -151,6 +151,7 @@ export const usePoolDocumentsHealth = () => {
   const [issueCount, setIssueCount] = useState(0);
   const [stuckCount, setStuckCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
+  const [validatingCount, setValidatingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkPoolHealth = async () => {
@@ -179,19 +180,35 @@ export const usePoolDocumentsHealth = () => {
         throw errorCheckError;
       }
 
+      // Documenti bloccati in validazione (più di 1 ora)
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { count: validatingDocCount, error: validatingError } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('validation_status', 'validating')
+        .lt('created_at', oneHourAgo);
+
+      if (validatingError) {
+        logger.error('pool-documents', 'Failed to check validating documents', validatingError);
+        throw validatingError;
+      }
+
       const stuck = stuckDocCount || 0;
       const errors = errorDocCount || 0;
-      const totalIssues = stuck + errors;
+      const validating = validatingDocCount || 0;
+      const totalIssues = stuck + errors + validating;
       
       setStuckCount(stuck);
       setErrorCount(errors);
+      setValidatingCount(validating);
       setIssueCount(totalIssues);
       setHasIssues(totalIssues > 0);
 
       if (totalIssues > 0) {
         logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
           stuckCount: stuck,
-          errorCount: errors
+          errorCount: errors,
+          validatingCount: validating
         });
       }
     } catch (error) {
@@ -200,6 +217,7 @@ export const usePoolDocumentsHealth = () => {
       setIssueCount(1);
       setStuckCount(0);
       setErrorCount(0);
+      setValidatingCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -218,6 +236,7 @@ export const usePoolDocumentsHealth = () => {
     issueCount,
     stuckCount,
     errorCount,
+    validatingCount,
     isLoading,
     refresh: checkPoolHealth
   };

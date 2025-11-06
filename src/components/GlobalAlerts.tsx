@@ -22,8 +22,10 @@ export const GlobalAlerts = () => {
           </span>
           <p className="text-sm mt-1 opacity-90">
             {poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`}
-            {poolHealth.stuckCount > 0 && poolHealth.errorCount > 0 && ' • '}
+            {poolHealth.stuckCount > 0 && (poolHealth.errorCount > 0 || poolHealth.validatingCount > 0) && ' • '}
             {poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`}
+            {poolHealth.errorCount > 0 && poolHealth.validatingCount > 0 && ' • '}
+            {poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`}
           </p>
         </div>
         <Button 

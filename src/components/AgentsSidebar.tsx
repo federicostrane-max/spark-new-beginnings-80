@@ -255,6 +255,9 @@ export const AgentsSidebar = ({
                     {poolHealth.errorCount > 0 && (
                       <p>• <strong>{poolHealth.errorCount}</strong> {poolHealth.errorCount === 1 ? 'documento con errore' : 'documenti con errori'} di elaborazione</p>
                     )}
+                    {poolHealth.validatingCount > 0 && (
+                      <p>• <strong>{poolHealth.validatingCount}</strong> {poolHealth.validatingCount === 1 ? 'documento bloccato' : 'documenti bloccati'} in validazione da oltre 1 ora</p>
+                    )}
                   </div>
                   <p className="text-xs opacity-80 mt-2 border-t pt-2">
                     Questi documenti non possono essere utilizzati dagli agenti fino a quando i problemi non vengono risolti.
