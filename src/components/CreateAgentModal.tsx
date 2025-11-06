@@ -10,6 +10,7 @@ import { Loader2, Copy, History, Trash2 } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { PromptHistoryDialog } from "@/components/PromptHistoryDialog";
+import { AgentTaskRequirementsView } from "@/components/AgentTaskRequirementsView";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -602,6 +603,16 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               Define the agent's personality, expertise, and behavior
             </p>
           </div>
+
+          {/* Task Requirements - Durante l'editing */}
+          {editingAgent && (
+            <div className="space-y-4">
+              <AgentTaskRequirementsView 
+                agentId={editingAgent.id}
+                systemPrompt={systemPrompt}
+              />
+            </div>
+          )}
 
           {/* Knowledge Base Manager - Durante l'editing */}
           {editingAgent && (

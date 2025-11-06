@@ -72,3 +72,6 @@ verify_jwt = false
 
 [functions.restore-removed-chunks]
 verify_jwt = false
+
+[functions.update-task-requirements]
+verify_jwt = false
