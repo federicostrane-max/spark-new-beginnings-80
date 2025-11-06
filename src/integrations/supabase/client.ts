@@ -15,3 +15,14 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     autoRefreshToken: true,
   }
 });
+
+// Helper function for Prompt Expert to update agent prompts
+export async function updateAgentPrompt(agentSlugOrId: string, newSystemPrompt: string, updatedBy?: string) {
+  return supabase.functions.invoke('update-agent-prompt', {
+    body: { 
+      agentSlugOrId, 
+      newSystemPrompt,
+      updatedBy 
+    }
+  });
+}
