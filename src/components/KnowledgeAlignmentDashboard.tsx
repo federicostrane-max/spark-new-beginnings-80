@@ -18,7 +18,9 @@ interface KnowledgeAlignmentDashboardProps {
 interface AnalysisLog {
   id: string;
   started_at: string;
+  completed_at: string | null;
   total_chunks_analyzed: number;
+  progress_chunks_analyzed: number;
   chunks_flagged_for_removal: number;
   chunks_auto_removed: number;
   concept_coverage_percentage: number;
@@ -59,6 +61,17 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     fetchData();
   }, [agentId]);
 
+  // Poll for updates when analyzing
+  useEffect(() => {
+    if (!isAnalyzing) return;
+
+    const interval = setInterval(() => {
+      fetchData();
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [isAnalyzing]);
+
   const fetchData = async () => {
     // Fetch agent safe mode status
     const { data: agent } = await supabase
@@ -95,10 +108,21 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       
       if (logs.length > 0) {
         const latest = logs[0];
+        
+        // Calculate real coverage from scores
+        const { data: scores } = await supabase
+          .from('knowledge_relevance_scores')
+          .select('concept_coverage')
+          .eq('agent_id', agentId);
+        
+        const realCoverage = scores && scores.length > 0
+          ? (scores.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / scores.length) * 100
+          : latest.concept_coverage_percentage || 0;
+
         setStats({
           totalChunks: latest.total_chunks_analyzed,
           removedChunks: latest.chunks_auto_removed,
-          conceptCoverage: latest.concept_coverage_percentage || 0,
+          conceptCoverage: realCoverage,
         });
       }
     }
@@ -227,7 +251,25 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             </div>
           </div>
 
-          {lastAnalysis && (
+          {isAnalyzing && analysisLogs.length > 0 && analysisLogs[0].completed_at === null && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Analisi in corso...</span>
+                <span className="font-medium">
+                  {analysisLogs[0].progress_chunks_analyzed || 0}/{analysisLogs[0].total_chunks_analyzed}
+                </span>
+              </div>
+              <Progress 
+                value={analysisLogs[0].total_chunks_analyzed > 0 
+                  ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100 
+                  : 0
+                } 
+                className="h-2" 
+              />
+            </div>
+          )}
+
+          {lastAnalysis && !isAnalyzing && (
             <div className="text-sm text-muted-foreground">
               Ultima analisi: {new Date(lastAnalysis).toLocaleString('it-IT')}
             </div>

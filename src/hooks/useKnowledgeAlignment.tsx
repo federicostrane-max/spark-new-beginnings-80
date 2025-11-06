@@ -108,6 +108,11 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       setLastAnalysis(new Date());
 
+      // Start polling for completion if analysis is incomplete
+      if (!analysisData.completed_at) {
+        pollAnalysisCompletion(analysisData.analysis_id);
+      }
+
       if (analysisData.safe_mode_active) {
         toast.success(
           `Analisi completata. ${analysisData.chunks_flagged_for_removal} chunk saranno rimossi automaticamente tra ${KNOWLEDGE_ALIGNMENT_CONFIG.safe_mode.duration_days} giorni.`,
@@ -128,6 +133,32 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const pollAnalysisCompletion = async (analysisId: string) => {
+    const maxPolls = 60; // 3 minutes max
+    let pollCount = 0;
+
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+
+      const { data: log } = await supabase
+        .from('alignment_analysis_log')
+        .select('completed_at, progress_chunks_analyzed, total_chunks_analyzed')
+        .eq('id', analysisId)
+        .single();
+
+      if (log?.completed_at || pollCount >= maxPolls) {
+        clearInterval(pollInterval);
+        setIsAnalyzing(false);
+        
+        if (log?.completed_at) {
+          toast.success('Analisi completata con successo');
+        } else {
+          toast.warning('Analisi in corso. Completamento in background...');
+        }
+      }
+    }, 3000); // Poll every 3 seconds
   };
 
   const triggerManualAnalysis = async () => {

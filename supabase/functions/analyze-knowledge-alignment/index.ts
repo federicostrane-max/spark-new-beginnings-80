@@ -141,13 +141,24 @@ serve(async (req) => {
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
     const chunkScores: Array<{ chunk_id: string; final_score: number }> = [];
-    let analysisConcurrent = 0;
-    const maxConcurrent = 5;
+    const maxConcurrent = 15; // Increased from 5 to 15
+
+    // Resume logic: Check which chunks already have scores
+    const { data: existingScores } = await supabase
+      .from('knowledge_relevance_scores')
+      .select('chunk_id')
+      .eq('requirement_id', requirements.id);
+
+    const analyzedChunkIds = new Set(existingScores?.map(s => s.chunk_id) || []);
+    const chunksToAnalyze = chunks?.filter(c => !analyzedChunkIds.has(c.id)) || [];
+
+    console.log('[analyze-alignment] Already analyzed:', analyzedChunkIds.size, 'chunks');
+    console.log('[analyze-alignment] Need to analyze:', chunksToAnalyze.length, 'chunks');
 
     // Analyze chunks in batches
-    if (chunks && chunks.length > 0) {
-      for (let i = 0; i < chunks.length; i += maxConcurrent) {
-        const batch = chunks.slice(i, i + maxConcurrent);
+    if (chunksToAnalyze.length > 0) {
+      for (let i = 0; i < chunksToAnalyze.length; i += maxConcurrent) {
+        const batch = chunksToAnalyze.slice(i, i + maxConcurrent);
         
         await Promise.all(batch.map(async (chunk) => {
           try {
@@ -245,7 +256,14 @@ Return ONLY valid JSON:
           }
         }));
 
-        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between batches
+        // Update progress
+        const totalAnalyzed = analyzedChunkIds.size + Math.min(i + maxConcurrent, chunksToAnalyze.length);
+        await supabase
+          .from('alignment_analysis_log')
+          .update({ progress_chunks_analyzed: totalAnalyzed })
+          .eq('id', analysisLog.id);
+
+        await new Promise(resolve => setTimeout(resolve, 50)); // Reduced from 100ms to 50ms
       }
     }
 
@@ -314,10 +332,42 @@ Return ONLY valid JSON:
         .eq('id', agentId);
     }
 
-    // Calculate coverage metrics
-    const conceptCoverage = 75; // Placeholder - would need more sophisticated calculation
-    const gaps: any[] = []; // Placeholder
-    const surplus: any[] = []; // Placeholder
+    // Calculate real coverage metrics
+    const { data: allScores } = await supabase
+      .from('knowledge_relevance_scores')
+      .select('concept_coverage, semantic_relevance, chunk_id')
+      .eq('requirement_id', requirements.id);
+
+    const totalScored = allScores?.length || 0;
+    const avgConceptCoverage = totalScored > 0
+      ? (allScores!.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / totalScored) * 100
+      : 0;
+
+    // Identify gaps (core concepts with low coverage)
+    const coreConcepts = requirements.core_concepts || [];
+    const gaps = coreConcepts.filter((concept: any) => {
+      const conceptScores = allScores?.filter(s => s.concept_coverage < 0.5) || [];
+      return conceptScores.length > totalScored * 0.3; // More than 30% of chunks have low coverage
+    }).slice(0, 5); // Top 5 gaps
+
+    // Identify surplus (categories with many low-scoring chunks)
+    const categoryScores = new Map<string, number[]>();
+    chunks?.forEach(chunk => {
+      const score = allScores?.find(s => s.chunk_id === chunk.id);
+      if (score) {
+        const scores = categoryScores.get(chunk.category) || [];
+        scores.push(score.semantic_relevance);
+        categoryScores.set(chunk.category, scores);
+      }
+    });
+
+    const surplus = Array.from(categoryScores.entries())
+      .filter(([_, scores]) => {
+        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+        return avgScore < 0.3 && scores.length > 3;
+      })
+      .map(([category, _]) => category)
+      .slice(0, 5);
 
     // Update analysis log
     await supabase
@@ -325,9 +375,10 @@ Return ONLY valid JSON:
       .update({
         chunks_flagged_for_removal: chunksToRemove.length,
         chunks_auto_removed: chunksAutoRemoved,
-        concept_coverage_percentage: conceptCoverage,
+        concept_coverage_percentage: avgConceptCoverage,
         identified_gaps: gaps,
         surplus_categories: surplus,
+        progress_chunks_analyzed: chunks?.length || 0,
         completed_at: new Date().toISOString(),
         duration_ms: Date.now() - new Date(analysisLog.started_at).getTime(),
       })
@@ -344,7 +395,7 @@ Return ONLY valid JSON:
         chunks_flagged_for_removal: chunksToRemove.length,
         chunks_auto_removed: chunksAutoRemoved,
         requires_manual_approval: requiresManualApproval,
-        concept_coverage_percentage: conceptCoverage,
+        concept_coverage_percentage: avgConceptCoverage,
         identified_gaps: gaps,
         surplus_categories: surplus,
       }),

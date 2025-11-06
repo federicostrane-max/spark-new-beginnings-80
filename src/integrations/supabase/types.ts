@@ -559,6 +559,7 @@ export type Database = {
           error_message: string | null
           id: string
           identified_gaps: Json | null
+          progress_chunks_analyzed: number | null
           safe_mode_active: boolean
           started_at: string
           surplus_categories: Json | null
@@ -576,6 +577,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           identified_gaps?: Json | null
+          progress_chunks_analyzed?: number | null
           safe_mode_active?: boolean
           started_at?: string
           surplus_categories?: Json | null
@@ -593,6 +595,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           identified_gaps?: Json | null
+          progress_chunks_analyzed?: number | null
           safe_mode_active?: boolean
           started_at?: string
           surplus_categories?: Json | null
