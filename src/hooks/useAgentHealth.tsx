@@ -35,24 +35,31 @@ export const useAgentHealth = (agentIds: string[]) => {
       const statuses = data?.statuses || [];
       const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
 
-      // Conta SOLO errori reali, non warning generici
-      const issues = logger.getAgentIssueCount(agentId, 30);
+      // Conta SOLO errori PERMANENTI (falliti dopo 3 retry automatici)
+      const { count: permanentFailures } = await supabase
+        .from('maintenance_operation_details')
+        .select('*', { count: 'exact', head: true })
+        .eq('target_id', agentId)
+        .eq('operation_type', 'sync_agent')
+        .eq('status', 'failed')
+        .gte('attempt_number', 3);
+
+      const errorCount = permanentFailures || 0;
 
       const healthStatus: AgentHealthStatus = {
         agentId,
-        hasIssues: unsyncedCount > 0, // SOLO unsyncedCount determina il badge rosso
+        hasIssues: errorCount > 0, // ✅ Badge rosso SOLO per errori permanenti
         unsyncedCount,
-        errorCount: issues.errors,
-        warningCount: issues.warnings,
+        errorCount,
+        warningCount: 0,
         lastChecked: new Date()
       };
 
-      // Log SOLO se ci sono documenti non sincronizzati
-      if (unsyncedCount > 0) {
-        logger.warning('agent-operation', `Agent ${agentId} has issues`, {
-          unsyncedCount,
-          errorCount: issues.errors,
-          warningCount: issues.warnings
+      // Log SOLO se ci sono errori permanenti
+      if (errorCount > 0) {
+        logger.error('agent-operation', `Agent ${agentId} has permanent sync failures`, {
+          permanentFailures: errorCount,
+          unsyncedCount
         }, { agentId });
       }
 

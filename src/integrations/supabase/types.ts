@@ -489,6 +489,95 @@ export type Database = {
         }
         Relationships: []
       }
+      maintenance_execution_logs: {
+        Row: {
+          agents_sync_failed: number | null
+          agents_synced: number | null
+          chunks_cleaned: number | null
+          created_at: string | null
+          details: Json | null
+          documents_failed: number | null
+          documents_fixed: number | null
+          error_message: string | null
+          execution_completed_at: string | null
+          execution_started_at: string
+          execution_status: string
+          id: string
+        }
+        Insert: {
+          agents_sync_failed?: number | null
+          agents_synced?: number | null
+          chunks_cleaned?: number | null
+          created_at?: string | null
+          details?: Json | null
+          documents_failed?: number | null
+          documents_fixed?: number | null
+          error_message?: string | null
+          execution_completed_at?: string | null
+          execution_started_at?: string
+          execution_status?: string
+          id?: string
+        }
+        Update: {
+          agents_sync_failed?: number | null
+          agents_synced?: number | null
+          chunks_cleaned?: number | null
+          created_at?: string | null
+          details?: Json | null
+          documents_failed?: number | null
+          documents_fixed?: number | null
+          error_message?: string | null
+          execution_completed_at?: string | null
+          execution_started_at?: string
+          execution_status?: string
+          id?: string
+        }
+        Relationships: []
+      }
+      maintenance_operation_details: {
+        Row: {
+          attempt_number: number | null
+          created_at: string | null
+          error_message: string | null
+          execution_log_id: string
+          id: string
+          operation_type: string
+          status: string
+          target_id: string
+          target_name: string
+        }
+        Insert: {
+          attempt_number?: number | null
+          created_at?: string | null
+          error_message?: string | null
+          execution_log_id: string
+          id?: string
+          operation_type: string
+          status: string
+          target_id: string
+          target_name: string
+        }
+        Update: {
+          attempt_number?: number | null
+          created_at?: string | null
+          error_message?: string | null
+          execution_log_id?: string
+          id?: string
+          operation_type?: string
+          status?: string
+          target_id?: string
+          target_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_operation_details_execution_log_id_fkey"
+            columns: ["execution_log_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_execution_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pdf_download_queue: {
         Row: {
           agent_id: string

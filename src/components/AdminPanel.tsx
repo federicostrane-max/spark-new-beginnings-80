@@ -7,6 +7,7 @@ import { Loader2, RefreshCw, Database, CheckCircle, XCircle } from "lucide-react
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProcessingLogs } from "./ProcessingLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MaintenanceMonitor } from "./MaintenanceMonitor";
 
 interface ProcessingResult {
   id: string;
@@ -105,9 +106,10 @@ export const AdminPanel = () => {
 
   return (
     <Tabs defaultValue="tools" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-2">
+      <TabsList className="grid w-full grid-cols-3">
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
-        <TabsTrigger value="logs">Log Real-time</TabsTrigger>
+        <TabsTrigger value="logs">Log Processing</TabsTrigger>
+        <TabsTrigger value="maintenance">Manutenzione Auto</TabsTrigger>
       </TabsList>
 
       <TabsContent value="tools">
@@ -281,6 +283,10 @@ export const AdminPanel = () => {
 
       <TabsContent value="logs">
         <ProcessingLogs />
+      </TabsContent>
+
+      <TabsContent value="maintenance">
+        <MaintenanceMonitor />
       </TabsContent>
     </Tabs>
   );

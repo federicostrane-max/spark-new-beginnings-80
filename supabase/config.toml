@@ -60,3 +60,6 @@ verify_jwt = false
 
 [functions.metadata-extractor]
 verify_jwt = false
+
+[functions.auto-maintenance]
+verify_jwt = false
