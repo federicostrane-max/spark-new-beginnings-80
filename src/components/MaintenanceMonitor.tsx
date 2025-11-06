@@ -535,12 +535,33 @@ export const MaintenanceMonitor = () => {
                               )}
 
                               {(execution.documents_failed > 0 || execution.agents_sync_failed > 0) && (
-                                <div className="text-xs text-muted-foreground space-y-1 mt-2 p-2 bg-muted/50 rounded">
+                                <div className="text-xs space-y-2 mt-2">
                                   {execution.documents_failed > 0 && (
-                                    <div>❌ Documenti falliti: {execution.documents_failed}</div>
+                                    <div className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                                      <div className="font-semibold text-red-600 mb-1">
+                                        ❌ Documenti Falliti: {execution.documents_failed}
+                                      </div>
+                                      <div className="text-muted-foreground">
+                                        Alcuni documenti non sono stati riparati automaticamente. 
+                                        Potrebbero richiedere intervento manuale o verranno ritentati nel prossimo ciclo.
+                                      </div>
+                                    </div>
                                   )}
                                   {execution.agents_sync_failed > 0 && (
-                                    <div>❌ Sync agenti falliti: {execution.agents_sync_failed}</div>
+                                    <div className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                                      <div className="font-semibold text-red-600 mb-1">
+                                        ❌ Sincronizzazione Agenti Fallita: {execution.agents_sync_failed}
+                                      </div>
+                                      <div className="text-muted-foreground">
+                                        Alcuni agenti hanno problemi di sincronizzazione. 
+                                        Il sistema riproverà automaticamente fino a 3 volte.
+                                        {execution.agents_sync_failed > 0 && execution.agents_synced > 0 && (
+                                          <span className="block mt-1 text-green-600">
+                                            ✅ {execution.agents_synced} agenti sincronizzati con successo
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
                               )}
