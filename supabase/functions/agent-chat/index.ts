@@ -2712,15 +2712,21 @@ ${agent.system_prompt}${knowledgeContext}`;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_prompt`);
                         console.log('   Agent name:', toolInput.agent_name);
                         
+                        // Normalize agent name: replace hyphens with spaces for better matching
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        console.log('   Normalized name:', normalizedName);
+                        
                         const { data: targetAgent, error: agentError } = await supabase
                           .from('agents')
                           .select('id, name, slug, system_prompt')
-                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
                           .eq('active', true)
                           .single();
                         
                         if (agentError || !targetAgent) {
                           console.error('❌ Agent not found:', toolInput.agent_name);
+                          console.error('   Search attempted with normalized name:', normalizedName);
+                          console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
                         } else {
                           console.log('✅ Retrieved prompt for agent:', targetAgent.name);
@@ -2738,15 +2744,21 @@ ${agent.system_prompt}${knowledgeContext}`;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_knowledge`);
                         console.log('   Agent name:', toolInput.agent_name);
                         
+                        // Normalize agent name: replace hyphens with spaces for better matching
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        console.log('   Normalized name:', normalizedName);
+                        
                         const { data: targetAgent, error: agentError } = await supabase
                           .from('agents')
                           .select('id, name, slug')
-                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
                           .eq('active', true)
                           .single();
                         
                         if (agentError || !targetAgent) {
                           console.error('❌ Agent not found:', toolInput.agent_name);
+                          console.error('   Search attempted with normalized name:', normalizedName);
+                          console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
                         } else {
                           const { data: documents, error: docsError } = await supabase
@@ -2785,15 +2797,21 @@ ${agent.system_prompt}${knowledgeContext}`;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_chat_history`);
                         console.log('   Agent name:', toolInput.agent_name);
                         
+                        // Normalize agent name: replace hyphens with spaces for better matching
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        console.log('   Normalized name:', normalizedName);
+                        
                         const { data: targetAgent, error: agentError } = await supabase
                           .from('agents')
                           .select('id, name, slug')
-                          .or(`name.ilike.%${toolInput.agent_name}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
                           .eq('active', true)
                           .single();
                         
                         if (agentError || !targetAgent) {
                           console.error('❌ Agent not found:', toolInput.agent_name);
+                          console.error('   Search attempted with normalized name:', normalizedName);
+                          console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
                         } else {
                           // Get conversation for this agent and user
