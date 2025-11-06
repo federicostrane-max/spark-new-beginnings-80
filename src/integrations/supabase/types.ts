@@ -84,6 +84,10 @@ export type Database = {
           created_at: string | null
           document_id: string
           id: string
+          sync_completed_at: string | null
+          sync_error: string | null
+          sync_started_at: string | null
+          sync_status: string | null
         }
         Insert: {
           agent_id: string
@@ -93,6 +97,10 @@ export type Database = {
           created_at?: string | null
           document_id: string
           id?: string
+          sync_completed_at?: string | null
+          sync_error?: string | null
+          sync_started_at?: string | null
+          sync_status?: string | null
         }
         Update: {
           agent_id?: string
@@ -102,6 +110,10 @@ export type Database = {
           created_at?: string | null
           document_id?: string
           id?: string
+          sync_completed_at?: string | null
+          sync_error?: string | null
+          sync_started_at?: string | null
+          sync_status?: string | null
         }
         Relationships: [
           {

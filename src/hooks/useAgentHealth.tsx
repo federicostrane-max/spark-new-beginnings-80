@@ -34,25 +34,39 @@ export const useAgentHealth = (agentIds: string[]) => {
       // Conta documenti realmente non sincronizzati o parzialmente sincronizzati
       const statuses = data?.statuses || [];
       const missingCount = statuses.filter((s: any) => s.status === 'missing').length;
+      const failedCount = statuses.filter((s: any) => s.status === 'failed').length;
       const orphanedCount = statuses.filter((s: any) => s.status === 'orphaned').length;
-      const unsyncedCount = missingCount + orphanedCount;
+      const syncingCount = statuses.filter((s: any) => s.status === 'syncing').length;
+      
+      const unsyncedCount = missingCount + orphanedCount + failedCount;
 
-      // ✅ Considera "problemi" SOLO le discrepanze attuali, non i fallimenti storici
+      // ✅ Considera "problemi" SOLO se ci sono discrepanze permanenti (non in sync)
       const hasIssues = unsyncedCount > 0;
 
       const healthStatus: AgentHealthStatus = {
         agentId,
         hasIssues, // ✅ Badge rosso SOLO se ci sono documenti attualmente non sincronizzati
         unsyncedCount,
-        errorCount: missingCount, // Documenti mancanti (assigned ma senza chunks)
+        errorCount: missingCount + failedCount, // Documenti mancanti o falliti
         warningCount: orphanedCount, // Chunks orfani (non più assigned)
         lastChecked: new Date()
       };
+      
+      // Log dettagliato se ci sono documenti in sync
+      if (syncingCount > 0) {
+        logger.info('agent-operation', `Agent ${agentId} has ${syncingCount} documents currently syncing`, {
+          syncingCount,
+          missingCount,
+          failedCount,
+          orphanedCount
+        }, { agentId });
+      }
 
-      // Log SOLO se ci sono problemi reali
+      // Log SOLO se ci sono problemi reali (non documenti in sync)
       if (hasIssues) {
         logger.warning('agent-operation', `Agent ${agentId} has sync discrepancies`, {
           missingCount,
+          failedCount,
           orphanedCount,
           unsyncedCount
         }, { agentId });

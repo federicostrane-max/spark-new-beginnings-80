@@ -81,7 +81,7 @@ serve(async (req) => {
     console.log(`[sync-pool-document] Found document: ${poolDoc.file_name}`);
 
     // ========================================
-    // STEP 2: CRITICAL - Create/Verify agent_document_links FIRST
+    // STEP 2: CRITICAL - Create/Verify agent_document_links and mark as 'syncing'
     // ========================================
     console.log('[sync-pool-document] Creating/verifying agent_document_links...');
     
@@ -91,7 +91,10 @@ serve(async (req) => {
         agent_id: agentId,
         document_id: documentId,
         assignment_type: 'ai_assigned',
-        confidence_score: 1.0
+        confidence_score: 1.0,
+        sync_status: 'syncing',
+        sync_started_at: new Date().toISOString(),
+        sync_error: null
       }, { 
         onConflict: 'agent_id,document_id',
         ignoreDuplicates: false
@@ -102,7 +105,7 @@ serve(async (req) => {
       throw new Error(`Failed to create document link: ${linkError.message}`);
     }
 
-    console.log('[sync-pool-document] ✓ Agent document link guaranteed');
+    console.log('[sync-pool-document] ✓ Agent document link guaranteed, sync status: syncing');
 
     // ========================================
     // STEP 3: Check if already synced
@@ -191,6 +194,17 @@ serve(async (req) => {
       }
 
       console.log(`[sync-pool-document] ✓ Successfully copied ${totalInserted} chunks to agent`);
+
+      // Mark sync as completed
+      await supabase
+        .from('agent_document_links')
+        .update({
+          sync_status: 'completed',
+          sync_completed_at: new Date().toISOString(),
+          sync_error: null
+        })
+        .eq('agent_id', agentId)
+        .eq('document_id', documentId);
 
       return new Response(JSON.stringify({ 
         success: true,
@@ -325,6 +339,17 @@ serve(async (req) => {
 
     console.log(`[sync-pool-document] Successfully inserted ${insertedCount}/${chunks.length} chunks`);
 
+    // Mark sync as completed
+    await supabase
+      .from('agent_document_links')
+      .update({
+        sync_status: 'completed',
+        sync_completed_at: new Date().toISOString(),
+        sync_error: null
+      })
+      .eq('agent_id', agentId)
+      .eq('document_id', documentId);
+
     return new Response(JSON.stringify({ 
       success: true,
       chunksCount: insertedCount,
@@ -336,6 +361,30 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[sync-pool-document] Error:', error);
+    
+    // Mark sync as failed (try to extract documentId and agentId from request)
+    try {
+      const requestClone = req.clone();
+      const { documentId, agentId } = await requestClone.json();
+      
+      if (documentId && agentId) {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+        const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        await supabase
+          .from('agent_document_links')
+          .update({
+            sync_status: 'failed',
+            sync_error: error instanceof Error ? error.message : 'Sync error'
+          })
+          .eq('agent_id', agentId)
+          .eq('document_id', documentId);
+      }
+    } catch (updateError) {
+      console.error('[sync-pool-document] Failed to update sync_status to failed:', updateError);
+    }
+    
     return new Response(JSON.stringify({ 
       error: error instanceof Error ? error.message : 'Sync error' 
     }), {

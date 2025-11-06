@@ -16,7 +16,8 @@ interface SyncStatus {
   fileName: string;
   isAssigned: boolean;
   chunkCount: number;
-  status: 'synced' | 'missing' | 'orphaned';
+  status: 'synced' | 'missing' | 'orphaned' | 'syncing' | 'failed';
+  message?: string;
 }
 
 serve(async (req) => {
@@ -45,6 +46,9 @@ serve(async (req) => {
         .from('agent_document_links')
         .select(`
           document_id,
+          sync_status,
+          sync_started_at,
+          sync_error,
           knowledge_documents (
             id,
             file_name
@@ -66,10 +70,18 @@ serve(async (req) => {
 
     const assignedDocIds = new Set<string>();
     const docNameMap = new Map<string, string>();
+    const docSyncStatusMap = new Map<string, any>();
 
     assignedLinks?.forEach(link => {
       const docId = link.document_id;
       assignedDocIds.add(docId);
+      
+      // Store sync status info
+      docSyncStatusMap.set(docId, {
+        sync_status: link.sync_status || 'completed',
+        sync_started_at: link.sync_started_at,
+        sync_error: link.sync_error
+      });
       
       // Handle case where document might be deleted but link still exists
       if (link.knowledge_documents && typeof link.knowledge_documents === 'object') {
@@ -114,7 +126,7 @@ serve(async (req) => {
     console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents`);
 
     // ========================================
-    // STEP 3: Find discrepancies
+    // STEP 3: Find discrepancies (considering sync_status)
     // ========================================
     const statuses: SyncStatus[] = [];
     const missingDocs: string[] = [];
@@ -124,16 +136,47 @@ serve(async (req) => {
     for (const docId of assignedDocIds) {
       const agentChunkCount = agentChunkMap.get(docId) || 0;
       const fileName = docNameMap.get(docId) || 'Unknown';
+      const syncInfo = docSyncStatusMap.get(docId) || { sync_status: 'completed' };
+      const syncStatus = syncInfo.sync_status;
+      const syncStartedAt = syncInfo.sync_started_at;
+      const syncError = syncInfo.sync_error;
+      
+      // Check if actively syncing
+      const isSyncing = syncStatus === 'pending' || syncStatus === 'syncing';
+      const isRecentlyStarted = syncStartedAt && (Date.now() - new Date(syncStartedAt).getTime() < 60000); // 60s
       
       if (agentChunkCount === 0) {
-        missingDocs.push(docId);
-        statuses.push({
-          documentId: docId,
-          fileName,
-          isAssigned: true,
-          chunkCount: 0,
-          status: 'missing',
-        });
+        // Distinguish between syncing, failed, and genuinely missing
+        if (isSyncing && isRecentlyStarted) {
+          statuses.push({
+            documentId: docId,
+            fileName,
+            isAssigned: true,
+            chunkCount: 0,
+            status: 'syncing',
+            message: `Sync in progress (${syncStatus})`
+          });
+        } else if (syncStatus === 'failed') {
+          missingDocs.push(docId);
+          statuses.push({
+            documentId: docId,
+            fileName,
+            isAssigned: true,
+            chunkCount: 0,
+            status: 'failed',
+            message: `Sync failed: ${syncError || 'Unknown error'}`
+          });
+        } else {
+          missingDocs.push(docId);
+          statuses.push({
+            documentId: docId,
+            fileName,
+            isAssigned: true,
+            chunkCount: 0,
+            status: 'missing',
+            message: 'Document assigned but no chunks found'
+          });
+        }
       } else {
         statuses.push({
           documentId: docId,
@@ -141,6 +184,7 @@ serve(async (req) => {
           isAssigned: true,
           chunkCount: agentChunkCount,
           status: 'synced',
+          message: `Document synced with ${agentChunkCount} chunks`
         });
       }
     }
