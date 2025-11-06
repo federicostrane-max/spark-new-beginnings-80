@@ -90,7 +90,7 @@ serve(async (req) => {
       .upsert({
         agent_id: agentId,
         document_id: documentId,
-        assignment_type: 'automatic',
+        assignment_type: 'ai_assigned',
         confidence_score: 1.0
       }, { 
         onConflict: 'agent_id,document_id',
