@@ -1859,19 +1859,26 @@ Deno.serve(async (req) => {
           
           console.log(`✅ [REQ-${requestId}] Found target agent: ${targetAgent.name} (@${targetSlug})`);
           
-          // 2. Create consultation conversation for target agent
-          const { data: consultConversation, error: consultConvError } = await supabase
-            .from('agent_conversations')
-            .insert({
-              user_id: user.id,
-              agent_id: targetAgent.id,
-              title: `Consultation: ${messageWithoutTags.substring(0, 100)}`
-            })
-            .select()
-            .single();
+          // 2. Get or create consultation conversation for target agent
+          const { data: consultConvId, error: consultConvError } = await supabase
+            .rpc('get_or_create_conversation', {
+              p_user_id: user.id,
+              p_agent_id: targetAgent.id
+            });
           
           if (consultConvError) {
-            console.error(`❌ [REQ-${requestId}] Failed to create consultation conversation:`, consultConvError);
+            console.error(`❌ [REQ-${requestId}] Failed to get/create consultation conversation:`, consultConvError);
+            continue;
+          }
+
+          const { data: consultConversation, error: fetchConvError } = await supabase
+            .from('agent_conversations')
+            .select('*')
+            .eq('id', consultConvId)
+            .single();
+          
+          if (fetchConvError || !consultConversation) {
+            console.error(`❌ [REQ-${requestId}] Failed to fetch consultation conversation:`, fetchConvError);
             continue;
           }
           
