@@ -2402,6 +2402,26 @@ ${agent.system_prompt}${knowledgeContext}`;
             }
           });
           
+          tools.push({
+            name: 'consult_agent_full_knowledge',
+            description: 'Get the COMPLETE content of all documents in another agent\'s knowledge base. This retrieves ALL text chunks from all documents, allowing you to understand the full context of what an agent knows. Use this when you need to deeply understand another agent\'s knowledge before making decisions or writing prompts for them. WARNING: This can return a lot of data, use only when you need full knowledge access.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent whose full knowledge base you want to access'
+                },
+                max_chunks: {
+                  type: 'number',
+                  description: 'Maximum number of knowledge chunks to retrieve (default 100, max 500)',
+                  default: 100
+                }
+              },
+              required: ['agent_name']
+            }
+          });
+          
           // Log tool availability
           if (tools) {
             console.log(`🔧 [REQ-${requestId}] Tools available to agent:`);
@@ -3053,6 +3073,106 @@ ${agent.system_prompt}${knowledgeContext}`;
                               fullResponse += historyText;
                               sendSSE(JSON.stringify({ type: 'content', text: historyText }));
                             }
+                          }
+                        }
+                      }
+                      
+                      if (toolUseName === 'consult_agent_full_knowledge') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: consult_agent_full_knowledge`);
+                        console.log('   Agent name:', toolInput.agent_name);
+                        console.log('   Max chunks:', toolInput.max_chunks || 100);
+                        
+                        // Normalize agent name
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        console.log('   Normalized name:', normalizedName);
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug')
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                          
+                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        } else {
+                          // Get ALL knowledge chunks for this agent (up to max_chunks limit)
+                          const maxChunks = Math.min(toolInput.max_chunks || 100, 500);
+                          
+                          const { data: knowledgeChunks, error: knowledgeError } = await supabase
+                            .from('agent_knowledge')
+                            .select('document_name, category, summary, content')
+                            .eq('agent_id', targetAgent.id)
+                            .not('embedding', 'is', null)
+                            .limit(maxChunks);
+                          
+                          if (knowledgeError) {
+                            console.error('❌ Error retrieving knowledge:', knowledgeError);
+                            toolResult = { success: false, error: 'Failed to retrieve knowledge' };
+                            
+                            const errorText = `\n\n❌ Errore nel recuperare il knowledge di ${targetAgent.name}.\n\n`;
+                            fullResponse += errorText;
+                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else {
+                            console.log(`✅ Retrieved ${knowledgeChunks?.length || 0} knowledge chunks for agent:`, targetAgent.name);
+                            
+                            // Organize chunks by document
+                            const documentMap = new Map<string, any[]>();
+                            knowledgeChunks?.forEach((chunk: any) => {
+                              if (!documentMap.has(chunk.document_name)) {
+                                documentMap.set(chunk.document_name, []);
+                              }
+                              documentMap.get(chunk.document_name)!.push(chunk);
+                            });
+                            
+                            const documents = Array.from(documentMap.entries()).map(([docName, chunks]) => ({
+                              document_name: docName,
+                              category: chunks[0]?.category,
+                              summary: chunks[0]?.summary,
+                              total_chunks: chunks.length,
+                              content_chunks: chunks.map(c => c.content)
+                            }));
+                            
+                            toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              agent_slug: targetAgent.slug,
+                              total_documents: documents.length,
+                              total_chunks: knowledgeChunks?.length || 0,
+                              documents: documents
+                            };
+                            
+                            // Format full knowledge for display
+                            let knowledgeText = `\n\n📚 **KNOWLEDGE COMPLETO DI ${targetAgent.name.toUpperCase()}**\n\n`;
+                            knowledgeText += `Ho recuperato ${documents.length} documenti (${knowledgeChunks?.length || 0} chunks totali):\n\n`;
+                            
+                            documents.forEach((doc: any, idx: number) => {
+                              knowledgeText += `\n---\n\n### ${idx + 1}. ${doc.document_name}\n`;
+                              if (doc.category) knowledgeText += `**Categoria**: ${doc.category}\n`;
+                              if (doc.summary) knowledgeText += `**Riassunto**: ${doc.summary}\n`;
+                              knowledgeText += `**Chunks**: ${doc.total_chunks}\n\n`;
+                              
+                              // Include first 2 chunks as preview in user-facing message
+                              knowledgeText += `**Contenuto (anteprima primi 2 chunks)**:\n\n`;
+                              doc.content_chunks.slice(0, 2).forEach((content: string, chunkIdx: number) => {
+                                knowledgeText += `\n**Chunk ${chunkIdx + 1}**:\n${content}\n`;
+                              });
+                              
+                              if (doc.total_chunks > 2) {
+                                knowledgeText += `\n*... altri ${doc.total_chunks - 2} chunks disponibili nel knowledge completo ...*\n`;
+                              }
+                            });
+                            
+                            knowledgeText += `\n\n✅ Ho accesso completo a tutto il knowledge di ${targetAgent.name}. Posso ora utilizzare queste informazioni per aiutarti.\n\n`;
+                            
+                            fullResponse += knowledgeText;
+                            sendSSE(JSON.stringify({ type: 'content', text: knowledgeText }));
                           }
                         }
                       }
