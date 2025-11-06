@@ -14,6 +14,81 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_alerts: {
+        Row: {
+          action_type: string | null
+          action_url: string | null
+          agent_id: string | null
+          alert_type: string
+          created_at: string | null
+          details: Json | null
+          dismissed: boolean | null
+          dismissed_at: string | null
+          expires_at: string | null
+          id: string
+          is_read: boolean | null
+          message: string
+          operation_log_id: string | null
+          read_at: string | null
+          severity: string
+          title: string
+          user_id: string | null
+        }
+        Insert: {
+          action_type?: string | null
+          action_url?: string | null
+          agent_id?: string | null
+          alert_type: string
+          created_at?: string | null
+          details?: Json | null
+          dismissed?: boolean | null
+          dismissed_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          message: string
+          operation_log_id?: string | null
+          read_at?: string | null
+          severity?: string
+          title: string
+          user_id?: string | null
+        }
+        Update: {
+          action_type?: string | null
+          action_url?: string | null
+          agent_id?: string | null
+          alert_type?: string
+          created_at?: string | null
+          details?: Json | null
+          dismissed?: boolean | null
+          dismissed_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          message?: string
+          operation_log_id?: string | null
+          read_at?: string | null
+          severity?: string
+          title?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_alerts_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_alerts_operation_log_id_fkey"
+            columns: ["operation_log_id"]
+            isOneToOne: false
+            referencedRelation: "agent_operation_logs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_config: {
         Row: {
           agent_id: string
@@ -264,6 +339,83 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_operation_logs: {
+        Row: {
+          agent_id: string
+          agent_name: string
+          completed_at: string | null
+          correlation_id: string | null
+          created_at: string | null
+          duration_ms: number | null
+          error_code: string | null
+          error_message: string | null
+          error_stack: string | null
+          id: string
+          input_data: Json | null
+          metrics: Json | null
+          operation_type: string
+          output_data: Json | null
+          started_at: string
+          status: string
+          triggered_by: string | null
+          user_id: string | null
+          validation_details: Json | null
+          validation_status: string | null
+        }
+        Insert: {
+          agent_id: string
+          agent_name: string
+          completed_at?: string | null
+          correlation_id?: string | null
+          created_at?: string | null
+          duration_ms?: number | null
+          error_code?: string | null
+          error_message?: string | null
+          error_stack?: string | null
+          id?: string
+          input_data?: Json | null
+          metrics?: Json | null
+          operation_type: string
+          output_data?: Json | null
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
+          user_id?: string | null
+          validation_details?: Json | null
+          validation_status?: string | null
+        }
+        Update: {
+          agent_id?: string
+          agent_name?: string
+          completed_at?: string | null
+          correlation_id?: string | null
+          created_at?: string | null
+          duration_ms?: number | null
+          error_code?: string | null
+          error_message?: string | null
+          error_stack?: string | null
+          id?: string
+          input_data?: Json | null
+          metrics?: Json | null
+          operation_type?: string
+          output_data?: Json | null
+          started_at?: string
+          status?: string
+          triggered_by?: string | null
+          user_id?: string | null
+          validation_details?: Json | null
+          validation_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_operation_logs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
         ]
@@ -1166,6 +1318,31 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      log_operation_complete: {
+        Args: {
+          p_error_code?: string
+          p_error_message?: string
+          p_error_stack?: string
+          p_log_id: string
+          p_metrics?: Json
+          p_output_data?: Json
+          p_status: string
+          p_validation_details?: Json
+          p_validation_status?: string
+        }
+        Returns: undefined
+      }
+      log_operation_start: {
+        Args: {
+          p_agent_id: string
+          p_correlation_id?: string
+          p_input_data?: Json
+          p_operation_type: string
+          p_triggered_by?: string
+          p_user_id?: string
+        }
+        Returns: string
       }
       match_documents: {
         Args: {
