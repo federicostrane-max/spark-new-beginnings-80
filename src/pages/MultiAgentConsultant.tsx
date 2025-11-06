@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTTS } from "@/contexts/TTSContext";
+import { useAgentHealth } from "@/hooks/useAgentHealth";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
@@ -57,6 +58,7 @@ export default function MultiAgentConsultant() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
@@ -71,8 +73,12 @@ export default function MultiAgentConsultant() {
   const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(false);
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [unsyncedDocsCount, setUnsyncedDocsCount] = useState(0);
+  const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
+
+  // Monitora la salute di tutti gli agenti per mostrare gli alert globali
+  const agentHealth = useAgentHealth(agents.map(a => a.id));
 
   // Intelligent auto-scroll
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -131,6 +137,22 @@ export default function MultiAgentConsultant() {
     };
   }, [currentConversation?.id, streamingConversationId]);
 
+  // Carica tutti gli agenti all'avvio per useAgentHealth
+  useEffect(() => {
+    if (session?.user?.id) {
+      supabase
+        .from('agents')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('active', true)
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setAgents(data);
+          }
+        });
+    }
+  }, [session?.user?.id, agentUpdateTrigger]);
+
   // Auto-select agent from URL parameter when returning from presentation
   useEffect(() => {
     const urlAgentId = searchParams.get('agentId');
@@ -149,8 +171,6 @@ export default function MultiAgentConsultant() {
         });
     }
   }, [searchParams, session?.user?.id, currentAgent]);
-
-  const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
 
   // Check for unsynced documents when agent changes
   useEffect(() => {
@@ -623,7 +643,7 @@ export default function MultiAgentConsultant() {
         {currentAgent ? (
           <>
             {/* Global Alerts */}
-            <GlobalAlerts />
+            <GlobalAlerts hasAgentIssues={agentHealth.hasAnyIssues()} />
 
             {/* Header with Settings */}
             <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">

@@ -7,7 +7,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useState } from "react";
 
-export const GlobalAlerts = () => {
+interface GlobalAlertsProps {
+  hasAgentIssues?: boolean;
+}
+
+export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
   const navigate = useNavigate();
   const poolHealth = usePoolDocumentsHealth();
   const [isSyncing, setIsSyncing] = useState(false);
@@ -66,15 +70,20 @@ export const GlobalAlerts = () => {
     }
   };
 
-  if (!poolHealth.hasIssues) {
+  // Mostra alert se ci sono problemi nel pool O problemi negli agenti
+  if (!poolHealth.hasIssues && !hasAgentIssues) {
     return null;
   }
 
   const issueDetails = [
     poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`,
     poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`,
-    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`
+    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`,
+    hasAgentIssues && 'Documenti agenti non sincronizzati'
   ].filter(Boolean).join(' • ');
+
+  const totalIssueCount = poolHealth.issueCount + (hasAgentIssues ? 1 : 0);
+  const issueLabel = poolHealth.hasIssues ? 'pool documenti' : 'agenti';
 
   return (
     <Alert variant="destructive" className="mx-4 mt-4 border-2">
@@ -82,7 +91,7 @@ export const GlobalAlerts = () => {
       <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <span className="font-semibold">
-            {poolHealth.issueCount} {poolHealth.issueCount === 1 ? 'problema' : 'problemi'} nel pool documenti
+            {totalIssueCount} {totalIssueCount === 1 ? 'problema' : 'problemi'} {issueLabel}
           </span>
           <p className="text-sm mt-1 opacity-90">
             {issueDetails}
