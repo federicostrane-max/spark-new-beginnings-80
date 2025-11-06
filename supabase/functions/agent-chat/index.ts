@@ -1986,6 +1986,7 @@ Deno.serve(async (req) => {
           let toolUseId: string | null = null;
           let toolUseName: string | null = null;
           let toolUseInputJson = '';
+          let needsToolResultContinuation = false;
           
           // Use truncatedMessages instead of cleanedMessages
           const anthropicMessages = truncatedMessages
@@ -2728,6 +2729,11 @@ ${agent.system_prompt}${knowledgeContext}`;
                           console.error('   Search attempted with normalized name:', normalizedName);
                           console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
+                          
+                          // Aggiungi risposta testuale per l'utente
+                          const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}". Assicurati che il nome sia corretto.\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           console.log('✅ Retrieved prompt for agent:', targetAgent.name);
                           toolResult = {
@@ -2736,6 +2742,11 @@ ${agent.system_prompt}${knowledgeContext}`;
                             agent_slug: targetAgent.slug,
                             system_prompt: targetAgent.system_prompt
                           };
+                          
+                          // Aggiungi il prompt nella risposta per l'utente  
+                          const promptText = `\n\n✅ Ho recuperato il prompt di **${targetAgent.name}**:\n\n---\n\n${targetAgent.system_prompt}\n\n---\n\n`;
+                          fullResponse += promptText;
+                          sendSSE(JSON.stringify({ type: 'content', text: promptText }));
                         }
                       }
                       
@@ -2760,6 +2771,11 @@ ${agent.system_prompt}${knowledgeContext}`;
                           console.error('   Search attempted with normalized name:', normalizedName);
                           console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
+                          
+                          // Aggiungi risposta testuale per l'utente
+                          const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           const { data: documents, error: docsError } = await supabase
                             .from('agent_knowledge')
@@ -2770,6 +2786,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                           if (docsError) {
                             console.error('❌ Error retrieving documents:', docsError);
                             toolResult = { success: false, error: 'Failed to retrieve documents' };
+                            
+                            const errorText = `\n\n❌ Errore nel recuperare i documenti di ${targetAgent.name}.\n\n`;
+                            fullResponse += errorText;
+                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
                             console.log(`✅ Retrieved ${documents.length} documents for agent:`, targetAgent.name);
                             
@@ -2788,6 +2808,17 @@ ${agent.system_prompt}${knowledgeContext}`;
                               document_count: uniqueDocs.size,
                               documents: Array.from(uniqueDocs.values())
                             };
+                            
+                            // Aggiungi lista documenti nella risposta
+                            let docsText = `\n\n✅ **${targetAgent.name}** ha accesso a ${uniqueDocs.size} documenti:\n\n`;
+                            Array.from(uniqueDocs.values()).forEach((doc: any, idx: number) => {
+                              docsText += `${idx + 1}. **${doc.document_name}**\n`;
+                              if (doc.category) docsText += `   - Categoria: ${doc.category}\n`;
+                              if (doc.summary) docsText += `   - ${doc.summary}\n`;
+                              docsText += `\n`;
+                            });
+                            fullResponse += docsText;
+                            sendSSE(JSON.stringify({ type: 'content', text: docsText }));
                           }
                         }
                       }
@@ -2813,6 +2844,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                           console.error('   Search attempted with normalized name:', normalizedName);
                           console.error('   Error:', agentError);
                           toolResult = { success: false, error: 'Agent not found' };
+                          
+                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           // Get conversation for this agent and user
                           const { data: targetConv, error: convError } = await supabase
@@ -2831,6 +2866,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                               message_count: 0,
                               messages: []
                             };
+                            
+                            const noHistoryText = `\n\n📭 Non hai ancora conversazioni con **${targetAgent.name}**.\n\n`;
+                            fullResponse += noHistoryText;
+                            sendSSE(JSON.stringify({ type: 'content', text: noHistoryText }));
                           } else {
                             const limit = toolInput.limit || 50;
                             const { data: messages, error: msgsError } = await supabase
@@ -2843,6 +2882,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                             if (msgsError) {
                               console.error('❌ Error retrieving messages:', msgsError);
                               toolResult = { success: false, error: 'Failed to retrieve messages' };
+                              
+                              const errorText = `\n\n❌ Errore nel recuperare la cronologia di ${targetAgent.name}.\n\n`;
+                              fullResponse += errorText;
+                              sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                             } else {
                               console.log(`✅ Retrieved ${messages.length} messages for agent:`, targetAgent.name);
                               toolResult = {
@@ -2852,6 +2895,16 @@ ${agent.system_prompt}${knowledgeContext}`;
                                 message_count: messages.length,
                                 messages: messages.reverse() // Return in chronological order
                               };
+                              
+                              // Aggiungi riepilogo cronologia
+                              let historyText = `\n\n💬 **Cronologia conversazione con ${targetAgent.name}** (${messages.length} messaggi):\n\n`;
+                              messages.reverse().slice(-10).forEach((msg: any) => {
+                                const role = msg.role === 'user' ? '👤 Tu' : '🤖 Agente';
+                                const preview = msg.content.slice(0, 100) + (msg.content.length > 100 ? '...' : '');
+                                historyText += `**${role}**: ${preview}\n\n`;
+                              });
+                              fullResponse += historyText;
+                              sendSSE(JSON.stringify({ type: 'content', text: historyText }));
                             }
                           }
                         }
@@ -2886,9 +2939,19 @@ ${agent.system_prompt}${knowledgeContext}`;
                       toolUseName = null;
                       toolUseInputJson = '';
                       
+                      // Flag che indica che dobbiamo fare un'altra chiamata API con il tool result
+                      needsToolResultContinuation = true;
+                      
                     } catch (jsonError) {
                       console.error('❌ Error parsing tool input JSON:', jsonError, toolUseInputJson);
                     }
+                  }
+                  
+                  // Handle message_stop
+                  if (parsed.type === 'message_stop') {
+                    console.log(`🛑 [REQ-${requestId}] Message stop received`);
+                    console.log(`   Full response length: ${fullResponse.length} chars`);
+                    console.log(`   Needs tool result continuation: ${needsToolResultContinuation}`);
                   }
                   
                   // Handle text content
