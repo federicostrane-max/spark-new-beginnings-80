@@ -26,6 +26,7 @@ interface KnowledgeDocument {
   link_id: string;
   syncStatus?: 'synced' | 'missing' | 'checking' | 'storage_missing';
   chunkCount?: number;
+  expectedChunks?: number;
 }
 
 interface KnowledgeBaseManagerProps {
@@ -142,6 +143,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
               ...doc,
               syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
               chunkCount: status.chunkCount || 0,
+              expectedChunks: status.expectedChunks || status.chunkCount || 0,
             };
           }
           return doc;

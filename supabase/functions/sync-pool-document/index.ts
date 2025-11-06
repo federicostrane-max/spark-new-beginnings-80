@@ -102,28 +102,40 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 3: Copy existing chunks from shared pool
+    // STEP 3: Copy ALL existing chunks for this document
     // ========================================
-    console.log('[sync-pool-document] Looking for existing chunks in shared pool...');
+    console.log('[sync-pool-document] Looking for existing chunks (any agent or shared pool)...');
     
-    const { data: poolChunks, error: poolChunksError } = await supabase
+    // First check if ANY chunks exist for this document
+    const { data: sampleChunks, error: sampleError } = await supabase
       .from('agent_knowledge')
-      .select('*')
+      .select('id')
       .eq('pool_document_id', documentId)
-      .is('agent_id', null)
-      .eq('source_type', 'shared_pool');
+      .limit(1);
 
-    if (poolChunksError) {
-      console.error('[sync-pool-document] Error fetching pool chunks:', poolChunksError);
-      throw poolChunksError;
+    if (sampleError) {
+      console.error('[sync-pool-document] Error checking for chunks:', sampleError);
+      throw sampleError;
     }
 
-    if (poolChunks && poolChunks.length > 0) {
-      console.log(`[sync-pool-document] Found ${poolChunks.length} existing chunks in shared pool`);
-      console.log('[sync-pool-document] Copying chunks to agent...');
+    if (sampleChunks && sampleChunks.length > 0) {
+      console.log('[sync-pool-document] Document has chunks, fetching ALL for copy...');
+      
+      // Fetch ALL chunks for this document (from any source)
+      const { data: allChunks, error: allChunksError } = await supabase
+        .from('agent_knowledge')
+        .select('document_name, content, category, summary, embedding')
+        .eq('pool_document_id', documentId);
 
-      // Copy chunks and assign to agent
-      const chunksToInsert = poolChunks.map(chunk => ({
+      if (allChunksError) {
+        console.error('[sync-pool-document] Error fetching all chunks:', allChunksError);
+        throw allChunksError;
+      }
+
+      console.log(`[sync-pool-document] Found ${allChunks?.length || 0} total chunks to copy`);
+
+      // Copy ALL chunks and assign to agent
+      const chunksToInsert = (allChunks || []).map(chunk => ({
         agent_id: agentId,
         document_name: chunk.document_name,
         content: chunk.content,
@@ -158,9 +170,9 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true,
-        chunksCount: poolChunks.length,
-        totalChunks: poolChunks.length,
-        method: 'copied_from_pool'
+        chunksCount: totalInserted,
+        totalChunks: totalInserted,
+        method: 'copied_all_chunks'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

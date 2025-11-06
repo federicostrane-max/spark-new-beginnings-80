@@ -14,6 +14,8 @@ import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Data
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -165,8 +167,9 @@ export default function MultiAgentConsultant() {
       });
 
       if (!error && data?.statuses) {
-        const missingCount = data.statuses.filter((s: any) => s.status === 'missing').length;
-        setUnsyncedDocsCount(missingCount);
+        // Conta sia documenti missing CHE parzialmente sincronizzati
+        const problemCount = data.statuses.filter((s: any) => s.status === 'missing' || s.status === 'partial').length;
+        setUnsyncedDocsCount(problemCount);
       }
     } catch (error) {
       console.error('Error checking unsynced docs:', error);
@@ -654,23 +657,32 @@ export default function MultiAgentConsultant() {
                                 messages={messages as any}
                               />
                             )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setEditingAgent(currentAgent);
-                                setShowCreateModal(true);
-                              }}
-                              title="Modifica agente"
-                              className="relative"
-                            >
-                              <Edit className="h-4 w-4" />
-                              {unsyncedDocsCount > 0 && (
-                                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                                  {unsyncedDocsCount}
-                                </span>
-                              )}
-                            </Button>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    setEditingAgent(currentAgent);
+                                    setShowCreateModal(true);
+                                  }}
+                                  className="relative"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                  {unsyncedDocsCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                                      {unsyncedDocsCount}
+                                    </span>
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {unsyncedDocsCount > 0 
+                                  ? `${unsyncedDocsCount} ${unsyncedDocsCount === 1 ? 'documento con problemi di sincronizzazione' : 'documenti con problemi di sincronizzazione'}`
+                                  : 'Modifica agente'
+                                }
+                              </TooltipContent>
+                            </Tooltip>
                        </div>
                   </>
                 ) : (

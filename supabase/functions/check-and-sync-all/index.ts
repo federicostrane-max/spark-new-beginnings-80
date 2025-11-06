@@ -108,10 +108,22 @@ serve(async (req) => {
 
     // Check assigned documents
     for (const docId of assignedDocIds) {
-      const chunkCount = syncedDocMap.get(docId) || 0;
+      const agentChunkCount = syncedDocMap.get(docId) || 0;
       const fileName = docNameMap.get(docId) || 'Unknown';
       
-      if (chunkCount === 0) {
+      // Conta i chunk TOTALI disponibili per questo documento
+      const { data: allChunksData, error: allChunksError } = await supabase
+        .from('agent_knowledge')
+        .select('id')
+        .eq('pool_document_id', docId);
+      
+      if (allChunksError) {
+        console.error(`[check-and-sync-all] Error counting total chunks for ${docId}:`, allChunksError);
+      }
+      
+      const totalChunks = allChunksData?.length || 0;
+      
+      if (agentChunkCount === 0) {
         missingDocs.push(docId);
         statuses.push({
           documentId: docId,
@@ -120,12 +132,22 @@ serve(async (req) => {
           chunkCount: 0,
           status: 'missing',
         });
+      } else if (totalChunks > 0 && agentChunkCount < totalChunks) {
+        // NUOVO: Documenti parzialmente sincronizzati
+        console.log(`[check-and-sync-all] Partial sync detected: ${fileName} (${agentChunkCount}/${totalChunks} chunks)`);
+        statuses.push({
+          documentId: docId,
+          fileName,
+          isAssigned: true,
+          chunkCount: agentChunkCount,
+          status: 'partial' as any, // Status parziale
+        });
       } else {
         statuses.push({
           documentId: docId,
           fileName,
           isAssigned: true,
-          chunkCount,
+          chunkCount: agentChunkCount,
           status: 'synced',
         });
       }
