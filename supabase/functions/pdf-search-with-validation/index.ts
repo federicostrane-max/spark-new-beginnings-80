@@ -26,9 +26,10 @@ interface VerifiedPDF {
   domain: string;
   credibilityScore: number;
   foundViaQuery: string;
+  googlePosition: number; // Position in Google results (lower = better)
 }
 
-async function verifyPdfUrl(url: string): Promise<{
+async function verifyPdfUrl(url: string, bookTitle: string): Promise<{
   success: boolean;
   metadata?: {
     contentType: string;
@@ -86,6 +87,17 @@ async function verifyPdfUrl(url: string): Promise<{
       credibilityScore = 6;
     }
     
+    // BOOST: Direct PDF link with book title in filename/URL
+    const urlLower = url.toLowerCase();
+    const titleWords = bookTitle.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const matchingWords = titleWords.filter(word => urlLower.includes(word));
+    
+    if (matchingWords.length >= 2) {
+      // URL contains multiple words from title - likely a direct match
+      credibilityScore = Math.min(10, credibilityScore + 3);
+      console.log(`    🎯 TITLE MATCH BOOST: ${matchingWords.length} words matched, score +3 → ${credibilityScore}`);
+    }
+    
     return {
       success: true,
       metadata: {
@@ -129,18 +141,18 @@ serve(async (req) => {
     for (const book of books) {
       console.log(`📖 Processing: ${book.title} by ${book.authors}`);
       
-      // 3 query variations
+      // Query variations - PRIORITIZE DIRECT SEARCHES
       const queryVariations = [
+        `${book.title} ${book.authors} filetype:pdf`, // Most direct
+        `"${book.title}" PDF`, // Simple title search
         `"${book.title}" "${book.authors}" PDF`,
-        `"${book.title}" "${book.authors}" download`,
+        `${book.title} download pdf`,
         `"${book.title}" "${book.authors}" PDF download`
       ];
       
-      let foundForBook = false;
+      const bookPdfs: VerifiedPDF[] = [];
       
       for (const query of queryVariations) {
-        if (foundForBook) break;
-        
         console.log(`  🔍 Query: ${query}`);
         
         try {
@@ -164,19 +176,20 @@ serve(async (req) => {
           const urlsToCheck = Math.min(data.items.length, maxUrlsToCheck);
           
           for (let i = 0; i < urlsToCheck; i++) {
-            if (foundForBook) break;
-            
             const item = data.items[i];
             const pdfUrl = item.link;
             
+            // Skip if already found
+            if (bookPdfs.some(p => p.pdfUrl === pdfUrl)) continue;
+            
             console.log(`    🔗 Checking URL ${i + 1}/${urlsToCheck}: ${pdfUrl.slice(0, 60)}...`);
             
-            const verification = await verifyPdfUrl(pdfUrl);
+            const verification = await verifyPdfUrl(pdfUrl, book.title);
             
             if (verification.success && verification.metadata) {
-              console.log(`    ✅ VERIFIED: ${pdfUrl}`);
+              console.log(`    ✅ VERIFIED: ${pdfUrl} (score: ${verification.metadata.credibilityScore})`);
               
-              allVerifiedPdfs.push({
+              bookPdfs.push({
                 bookTitle: book.title,
                 bookAuthors: book.authors,
                 pdfUrl,
@@ -185,11 +198,12 @@ serve(async (req) => {
                 fileSize: verification.metadata.fileSize,
                 domain: verification.metadata.domain,
                 credibilityScore: verification.metadata.credibilityScore,
-                foundViaQuery: query
+                foundViaQuery: query,
+                googlePosition: i + 1 // Track Google ranking
               });
               
-              foundForBook = true;
-              break;
+              // Found enough? (but keep searching for better ones)
+              if (bookPdfs.length >= maxResultsPerBook * 2) break;
             } else {
               console.log(`    ❌ Failed verification`);
             }
@@ -200,12 +214,29 @@ serve(async (req) => {
         }
         
         // Rate limiting between variations
-        if (!foundForBook) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Stop if we have plenty of options
+        if (bookPdfs.length >= maxResultsPerBook * 3) break;
       }
       
-      if (!foundForBook) {
+      // Sort by GOOGLE POSITION first (earlier = better), then credibility
+      bookPdfs.sort((a, b) => {
+        // Primary: Google position (lower is better)
+        if (a.googlePosition !== b.googlePosition) {
+          return a.googlePosition - b.googlePosition;
+        }
+        // Secondary: Credibility score (higher is better)
+        return b.credibilityScore - a.credibilityScore;
+      });
+      
+      // Take only top results
+      const topPdfs = bookPdfs.slice(0, maxResultsPerBook);
+      allVerifiedPdfs.push(...topPdfs);
+      
+      console.log(`  ✅ Found ${bookPdfs.length} PDFs, keeping top ${topPdfs.length}`);
+      
+      if (topPdfs.length === 0) {
         console.log(`  ⚠️ No verified PDF found for: ${book.title}`);
       }
       
