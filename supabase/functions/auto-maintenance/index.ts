@@ -216,16 +216,24 @@ serve(async (req) => {
     // 4. REGENERATE MISSING AI SUMMARIES
     console.log('[auto-maintenance] --- Step 3.5: Regenerating missing AI summaries ---');
     
-    const { data: docsWithoutSummary, error: summaryError } = await supabase
+    // Query documents without valid AI summary (null, empty, or placeholder)
+    const { data: allValidatedDocs, error: summaryError } = await supabase
       .from('knowledge_documents')
-      .select('id, file_name')
-      .eq('validation_status', 'validated')
-      .or('ai_summary.is.null,ai_summary.eq.,ai_summary.eq.Documento migrato dal knowledge base degli agenti')
-      .limit(5); // Max 5 documenti alla volta
+      .select('id, file_name, ai_summary')
+      .eq('validation_status', 'validated');
 
     if (summaryError) {
-      console.error('[auto-maintenance] ⚠️ Error querying documents without summary:', summaryError);
-    } else if (docsWithoutSummary && docsWithoutSummary.length > 0) {
+      console.error('[auto-maintenance] ⚠️ Error querying documents:', summaryError);
+    }
+
+    // Filter in JavaScript for documents without valid summaries
+    const docsWithoutSummary = allValidatedDocs?.filter(doc => 
+      !doc.ai_summary || 
+      doc.ai_summary.trim() === '' || 
+      doc.ai_summary === 'Documento migrato dal knowledge base degli agenti'
+    ).slice(0, 5); // Max 5 documenti alla volta
+
+    if (docsWithoutSummary && docsWithoutSummary.length > 0) {
       console.log(`[auto-maintenance] Found ${docsWithoutSummary.length} documents without AI summary`);
 
       for (const doc of docsWithoutSummary) {
