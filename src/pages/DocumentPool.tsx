@@ -233,31 +233,31 @@ export default function DocumentPool() {
               <div className="flex flex-col items-center p-4 rounded-lg bg-green-500/10 border border-green-500/20">
                 <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
                 <div className="text-2xl font-bold text-green-500">{healthMetrics.ready}</div>
-                <div className="text-sm text-muted-foreground text-center">Pronti</div>
+                <div className="text-sm text-muted-foreground text-center">Documenti Pronti</div>
               </div>
               
               <div className="flex flex-col items-center p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
                 <Loader2 className="h-8 w-8 text-blue-500 mb-2" />
                 <div className="text-2xl font-bold text-blue-500">{healthMetrics.processing}</div>
-                <div className="text-sm text-muted-foreground text-center">In Elaborazione</div>
+                <div className="text-sm text-muted-foreground text-center">In Lavorazione</div>
               </div>
               
               <div className="flex flex-col items-center p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                 <AlertTriangle className="h-8 w-8 text-yellow-500 mb-2" />
                 <div className="text-2xl font-bold text-yellow-500">{healthMetrics.orphanedChunks}</div>
-                <div className="text-sm text-muted-foreground text-center">Chunks Orfani</div>
+                <div className="text-sm text-muted-foreground text-center">Chunks da Rimuovere</div>
               </div>
               
               <div className="flex flex-col items-center p-4 rounded-lg bg-red-500/10 border border-red-500/20">
                 <FileX className="h-8 w-8 text-red-500 mb-2" />
                 <div className="text-2xl font-bold text-red-500">{healthMetrics.failed}</div>
-                <div className="text-sm text-muted-foreground text-center">Errori</div>
+                <div className="text-sm text-muted-foreground text-center">Con Errori</div>
               </div>
               
               <div className="flex flex-col items-center p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">
                 <FileWarning className="h-8 w-8 text-orange-500 mb-2" />
                 <div className="text-2xl font-bold text-orange-500">{healthMetrics.unprocessed}</div>
-                <div className="text-sm text-muted-foreground text-center">Non Elaborati</div>
+                <div className="text-sm text-muted-foreground text-center">Da Elaborare</div>
               </div>
             </div>
           </CardContent>
