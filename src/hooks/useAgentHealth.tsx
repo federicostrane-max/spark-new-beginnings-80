@@ -149,13 +149,15 @@ export const useAgentHealth = (agentIds: string[]) => {
 export const usePoolDocumentsHealth = () => {
   const [hasIssues, setHasIssues] = useState(false);
   const [issueCount, setIssueCount] = useState(0);
+  const [stuckCount, setStuckCount] = useState(0);
+  const [errorCount, setErrorCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkPoolHealth = async () => {
     setIsLoading(true);
     try {
       // Documenti validati ma non processati
-      const { count: stuckCount, error: stuckError } = await supabase
+      const { count: stuckDocCount, error: stuckError } = await supabase
         .from('knowledge_documents')
         .select('id', { count: 'exact', head: true })
         .eq('validation_status', 'validated')
@@ -167,7 +169,7 @@ export const usePoolDocumentsHealth = () => {
       }
 
       // Documenti con errori
-      const { count: errorCount, error: errorCheckError } = await supabase
+      const { count: errorDocCount, error: errorCheckError } = await supabase
         .from('knowledge_documents')
         .select('id', { count: 'exact', head: true })
         .or('processing_status.eq.error,validation_status.eq.rejected');
@@ -177,20 +179,27 @@ export const usePoolDocumentsHealth = () => {
         throw errorCheckError;
       }
 
-      const totalIssues = (stuckCount || 0) + (errorCount || 0);
+      const stuck = stuckDocCount || 0;
+      const errors = errorDocCount || 0;
+      const totalIssues = stuck + errors;
+      
+      setStuckCount(stuck);
+      setErrorCount(errors);
       setIssueCount(totalIssues);
       setHasIssues(totalIssues > 0);
 
       if (totalIssues > 0) {
         logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
-          stuckCount,
-          errorCount
+          stuckCount: stuck,
+          errorCount: errors
         });
       }
     } catch (error) {
       logger.error('pool-documents', 'Error checking pool health', error);
       setHasIssues(true);
       setIssueCount(1);
+      setStuckCount(0);
+      setErrorCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -207,6 +216,8 @@ export const usePoolDocumentsHealth = () => {
   return {
     hasIssues,
     issueCount,
+    stuckCount,
+    errorCount,
     isLoading,
     refresh: checkPoolHealth
   };

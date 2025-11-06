@@ -227,19 +227,43 @@ export const AgentsSidebar = ({
 
       {/* Footer Buttons */}
       <div className="p-3 border-t border-sidebar-border space-y-2">
-        <Button 
-          variant="ghost" 
-          className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
-          onClick={() => navigate("/documents")}
-        >
-          <Database className="h-4 w-4" />
-          <span className="flex-1 text-left">Pool Documenti</span>
-          {poolHealth.hasIssues && (
-            <Badge variant="destructive" className="ml-auto">
-              {poolHealth.issueCount}
-            </Badge>
-          )}
-        </Button>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
+                onClick={() => navigate("/documents")}
+              >
+                <Database className="h-4 w-4" />
+                <span className="flex-1 text-left">Pool Documenti</span>
+                {poolHealth.hasIssues && (
+                  <Badge variant="destructive" className="ml-auto">
+                    {poolHealth.issueCount}
+                  </Badge>
+                )}
+              </Button>
+            </TooltipTrigger>
+            {poolHealth.hasIssues && (
+              <TooltipContent side="right" className="max-w-xs">
+                <div className="space-y-2">
+                  <p className="font-semibold text-destructive">⚠️ Problemi nel Pool Documenti</p>
+                  <div className="text-sm space-y-1">
+                    {poolHealth.stuckCount > 0 && (
+                      <p>• <strong>{poolHealth.stuckCount}</strong> {poolHealth.stuckCount === 1 ? 'documento bloccato' : 'documenti bloccati'} in validazione</p>
+                    )}
+                    {poolHealth.errorCount > 0 && (
+                      <p>• <strong>{poolHealth.errorCount}</strong> {poolHealth.errorCount === 1 ? 'documento con errore' : 'documenti con errori'} di elaborazione</p>
+                    )}
+                  </div>
+                  <p className="text-xs opacity-80 mt-2 border-t pt-2">
+                    Questi documenti non possono essere utilizzati dagli agenti fino a quando i problemi non vengono risolti.
+                  </p>
+                </div>
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </TooltipProvider>
         <Button 
           variant="ghost" 
           className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
