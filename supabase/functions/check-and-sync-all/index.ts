@@ -55,8 +55,19 @@ serve(async (req) => {
     assignedLinks?.forEach(link => {
       const docId = link.document_id;
       assignedDocIds.add(docId);
-      if (link.knowledge_documents) {
-        docNameMap.set(docId, (link.knowledge_documents as any).file_name);
+      
+      // Handle case where document might be deleted but link still exists
+      if (link.knowledge_documents && typeof link.knowledge_documents === 'object') {
+        const docData = link.knowledge_documents as any;
+        if (docData.file_name) {
+          docNameMap.set(docId, docData.file_name);
+        } else {
+          console.warn(`[check-and-sync-all] Document ${docId} has no file_name`);
+          docNameMap.set(docId, `Unknown Document (${docId.substring(0, 8)})`);
+        }
+      } else {
+        console.warn(`[check-and-sync-all] Document ${docId} not found in knowledge_documents table`);
+        docNameMap.set(docId, `Missing Document (${docId.substring(0, 8)})`);
       }
     });
 
@@ -215,8 +226,11 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[check-and-sync-all] Error:', error);
+    console.error('[check-and-sync-all] Error stack:', error instanceof Error ? error.stack : 'N/A');
+    
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Check sync error' 
+      error: error instanceof Error ? error.message : 'Check sync error',
+      details: error instanceof Error ? error.stack : String(error)
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
