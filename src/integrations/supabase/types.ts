@@ -692,6 +692,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      count_processing_documents: { Args: never; Returns: number }
       find_orphaned_chunks: {
         Args: never
         Returns: {

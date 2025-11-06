@@ -32,6 +32,7 @@ import {
   Info,
   RefreshCw,
   X,
+  AlertCircle,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
@@ -537,24 +538,8 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell className="max-w-0">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="font-medium truncate text-sm" title={doc.file_name}>
-                            {doc.file_name}
-                          </div>
-                          {(!doc.ai_summary || doc.ai_summary.trim() === "") && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge variant="destructive" className="text-xs whitespace-nowrap cursor-help">
-                                    Non elaborato
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs">
-                                  <p className="text-sm">⚠️ Questo documento non è stato elaborato e non è utilizzabile dagli agenti. Clicca per vedere i dettagli.</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-                          )}
+                        <div className="font-medium truncate text-sm" title={doc.file_name}>
+                          {doc.file_name}
                         </div>
                         {doc.ai_summary && doc.ai_summary.trim() !== "" && (
                           <TooltipProvider>
@@ -574,10 +559,21 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {getStatusIcon(doc.validation_status)}
-                        <span className="text-sm">
-                          {getStatusLabel(doc.validation_status)}
-                        </span>
+                        {(!doc.ai_summary || doc.ai_summary.trim() === "") ? (
+                          <>
+                            <AlertCircle className="h-4 w-4 text-orange-500" />
+                            <span className="text-sm text-orange-500 font-medium">
+                              Non elaborato
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {getStatusIcon(doc.validation_status)}
+                            <span className="text-sm">
+                              {getStatusLabel(doc.validation_status)}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>

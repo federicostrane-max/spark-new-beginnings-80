@@ -73,11 +73,9 @@ export default function DocumentPool() {
         .select('id', { count: 'exact', head: true })
         .eq('processing_status', 'ready_for_assignment');
 
-      // Raggruppa validating, processing e validated in "In Elaborazione"
-      const { count: processingCount } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .in('processing_status', ['validating', 'processing', 'validated']);
+      // Usa RPC function per contare documenti in elaborazione
+      const { data: processingCount } = await supabase
+        .rpc('count_processing_documents');
 
       const { count: failedCount } = await supabase
         .from('knowledge_documents')
@@ -92,7 +90,7 @@ export default function DocumentPool() {
 
       setHealthMetrics({
         ready: readyCount || 0,
-        processing: processingCount || 0,
+        processing: (processingCount as number) || 0,
         orphanedChunks: 0, // Calculated by cleanup function
         failed: failedCount || 0,
         unprocessed: unprocessedCount || 0
