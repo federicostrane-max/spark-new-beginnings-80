@@ -39,7 +39,8 @@ export const MaintenanceMonitor = () => {
     failedExecutions: 0,
     totalDocumentsFixed: 0,
     totalChunksCleaned: 0,
-    totalAgentsSynced: 0
+    totalAgentsSynced: 0,
+    totalSummariesGenerated: 0
   });
   const [persistentProblems, setPersistentProblems] = useState<MaintenanceOperationDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,7 +161,8 @@ export const MaintenanceMonitor = () => {
     const labels = {
       fix_stuck_document: '📄 Fix Documento',
       cleanup_orphaned_chunk: '🧹 Cleanup Chunk',
-      sync_agent: '🔄 Sync Agente'
+      sync_agent: '🔄 Sync Agente',
+      regenerate_summary: '✨ Rigenera Summary'
     };
     return labels[type as keyof typeof labels] || type;
   };
@@ -243,6 +245,14 @@ export const MaintenanceMonitor = () => {
                 <div className="text-2xl font-bold text-cyan-500">{stats.totalAgentsSynced}</div>
                 <div className="text-sm text-muted-foreground text-center">Agenti Sincronizzati</div>
               </div>
+
+              {stats.totalSummariesGenerated > 0 && (
+                <div className="flex flex-col items-center p-4 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                  <div className="text-3xl mb-2">✨</div>
+                  <div className="text-2xl font-bold text-violet-500">{stats.totalSummariesGenerated}</div>
+                  <div className="text-sm text-muted-foreground text-center">Summary Generati</div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

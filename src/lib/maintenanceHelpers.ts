@@ -19,7 +19,7 @@ export interface MaintenanceExecutionLog {
 export interface MaintenanceOperationDetail {
   id: string;
   execution_log_id: string;
-  operation_type: 'fix_stuck_document' | 'cleanup_orphaned_chunk' | 'sync_agent';
+  operation_type: 'fix_stuck_document' | 'cleanup_orphaned_chunk' | 'sync_agent' | 'regenerate_summary';
   target_id: string;
   target_name: string;
   status: 'success' | 'failed' | 'retry_needed';
@@ -50,10 +50,13 @@ export const formatExecutionSummary = (log: MaintenanceExecutionLog): string => 
   if (log.agents_synced > 0) {
     parts.push(`${log.agents_synced} agenti sincronizzati`);
   }
+  if (log.details?.summaries_generated && log.details.summaries_generated > 0) {
+    parts.push(`${log.details.summaries_generated} summary generati`);
+  }
   
   if (parts.length === 0) {
-    if (log.documents_failed > 0 || log.agents_sync_failed > 0) {
-      return `${log.documents_failed + log.agents_sync_failed} errori`;
+    if (log.documents_failed > 0 || log.agents_sync_failed > 0 || (log.details?.summaries_failed && log.details.summaries_failed > 0)) {
+      return `${(log.documents_failed || 0) + (log.agents_sync_failed || 0) + (log.details?.summaries_failed || 0)} errori`;
     }
     return 'Nessuna operazione';
   }
@@ -115,6 +118,7 @@ export const getMaintenanceStats = async (): Promise<{
   totalDocumentsFixed: number;
   totalChunksCleaned: number;
   totalAgentsSynced: number;
+  totalSummariesGenerated: number;
 }> => {
   // Get stats from last 24 hours
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -132,7 +136,8 @@ export const getMaintenanceStats = async (): Promise<{
       failedExecutions: 0,
       totalDocumentsFixed: 0,
       totalChunksCleaned: 0,
-      totalAgentsSynced: 0
+      totalAgentsSynced: 0,
+      totalSummariesGenerated: 0
     };
   }
   
@@ -144,7 +149,8 @@ export const getMaintenanceStats = async (): Promise<{
     failedExecutions: logs.filter(l => l.execution_status === 'error' || l.execution_status === 'partial_failure').length,
     totalDocumentsFixed: logs.reduce((sum, l) => sum + (l.documents_fixed || 0), 0),
     totalChunksCleaned: logs.reduce((sum, l) => sum + (l.chunks_cleaned || 0), 0),
-    totalAgentsSynced: logs.reduce((sum, l) => sum + (l.agents_synced || 0), 0)
+    totalAgentsSynced: logs.reduce((sum, l) => sum + (l.agents_synced || 0), 0),
+    totalSummariesGenerated: logs.reduce((sum, l) => sum + (l.details?.summaries_generated || 0), 0)
   };
 };
 

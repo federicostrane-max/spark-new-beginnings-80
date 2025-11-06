@@ -47,6 +47,9 @@ serve(async (req) => {
     let chunksCleaned = 0;
     let agentsSynced = 0;
     let agentsSyncFailed = 0;
+    let summariesGenerated = 0;
+    let summariesFailed = 0;
+
 
     // 2. FIX STUCK DOCUMENTS (validating da >10 min)
     console.log('[auto-maintenance] --- Step 1: Fixing stuck documents ---');
@@ -210,7 +213,69 @@ serve(async (req) => {
       console.log('[auto-maintenance] ✅ No orphaned chunks found');
     }
 
-    // 4. AUTO-SYNC AGENTS
+    // 4. REGENERATE MISSING AI SUMMARIES
+    console.log('[auto-maintenance] --- Step 3.5: Regenerating missing AI summaries ---');
+    
+    const { data: docsWithoutSummary, error: summaryError } = await supabase
+      .from('knowledge_documents')
+      .select('id, file_name')
+      .eq('validation_status', 'validated')
+      .or('ai_summary.is.null,ai_summary.eq.')
+      .limit(5); // Max 5 documenti alla volta
+
+    if (summaryError) {
+      console.error('[auto-maintenance] ⚠️ Error querying documents without summary:', summaryError);
+    } else if (docsWithoutSummary && docsWithoutSummary.length > 0) {
+      console.log(`[auto-maintenance] Found ${docsWithoutSummary.length} documents without AI summary`);
+
+      for (const doc of docsWithoutSummary) {
+        try {
+          console.log(`[auto-maintenance] 🔄 Regenerating summary for ${doc.file_name}`);
+          
+          const { error: validateError } = await supabase.functions.invoke('validate-document', {
+            body: { documentId: doc.id }
+          });
+
+          if (validateError) {
+            console.error(`[auto-maintenance] ❌ Failed to regenerate summary for ${doc.file_name}:`, validateError);
+            summariesFailed++;
+            
+            await supabase
+              .from('maintenance_operation_details')
+              .insert({
+                execution_log_id: execLogId,
+                operation_type: 'regenerate_summary',
+                target_id: doc.id,
+                target_name: doc.file_name,
+                status: 'failed',
+                attempt_number: 1,
+                error_message: validateError.message
+              });
+          } else {
+            console.log(`[auto-maintenance] ✅ Successfully regenerated summary for ${doc.file_name}`);
+            summariesGenerated++;
+            
+            await supabase
+              .from('maintenance_operation_details')
+              .insert({
+                execution_log_id: execLogId,
+                operation_type: 'regenerate_summary',
+                target_id: doc.id,
+                target_name: doc.file_name,
+                status: 'success',
+                attempt_number: 1
+              });
+          }
+        } catch (err) {
+          console.error(`[auto-maintenance] ❌ Exception regenerating summary for ${doc.file_name}:`, err);
+          summariesFailed++;
+        }
+      }
+    } else {
+      console.log('[auto-maintenance] ✅ All validated documents have AI summaries');
+    }
+
+    // 5. AUTO-SYNC AGENTS
     console.log('[auto-maintenance] --- Step 3: Syncing agents ---');
     
     const { data: agents, error: agentsError } = await supabase
@@ -319,7 +384,7 @@ serve(async (req) => {
     }
 
     // 5. Aggiorna log di esecuzione
-    const executionStatus = (documentsFailed > 0 || agentsSyncFailed > 0) 
+    const executionStatus = (documentsFailed > 0 || agentsSyncFailed > 0 || summariesFailed > 0) 
       ? 'partial_failure' 
       : 'success';
 
@@ -332,12 +397,16 @@ serve(async (req) => {
         documents_failed: documentsFailed,
         chunks_cleaned: chunksCleaned,
         agents_synced: agentsSynced,
-        agents_sync_failed: agentsSyncFailed
+        agents_sync_failed: agentsSyncFailed,
+        details: {
+          summaries_generated: summariesGenerated,
+          summaries_failed: summariesFailed
+        }
       })
       .eq('id', execLogId);
 
     console.log(`[auto-maintenance] ========== COMPLETED (${executionStatus}) ==========`);
-    console.log(`[auto-maintenance] Summary: ${documentsFixed} docs fixed, ${documentsFailed} docs failed, ${chunksCleaned} chunks cleaned, ${agentsSynced} agents synced, ${agentsSyncFailed} agents failed`);
+    console.log(`[auto-maintenance] Summary: ${documentsFixed} docs fixed, ${documentsFailed} docs failed, ${chunksCleaned} chunks cleaned, ${agentsSynced} agents synced, ${agentsSyncFailed} agents failed, ${summariesGenerated} summaries generated, ${summariesFailed} summaries failed`);
 
     // 6. Pulizia log vecchi (> 7 giorni)
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
