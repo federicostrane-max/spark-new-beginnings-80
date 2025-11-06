@@ -746,14 +746,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                         <>
                           <CheckCircle2 className="h-4 w-4 text-green-600" />
                           <span className="text-green-600">
-                            Sincronizzato ({doc.chunkCount} chunks)
+                            Sincronizzato
                           </span>
                         </>
                       )}
                       {doc.syncStatus === 'missing' && (
                         <>
                           <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0" />
-                          <span className="text-destructive">Non sincronizzato</span>
+                          <span className="text-destructive">Non sincronizzato (0 chunks)</span>
                         </>
                       )}
                       {doc.syncStatus === 'storage_missing' && (
@@ -805,14 +805,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                             <>
                               <CheckCircle2 className="h-4 w-4 text-green-600" />
                               <span className="text-sm text-green-600">
-                                Sincronizzato ({doc.chunkCount} chunks)
+                                Sincronizzato
                               </span>
                             </>
                           )}
                           {doc.syncStatus === 'missing' && (
                             <>
                               <AlertCircle className="h-4 w-4 text-destructive" />
-                              <span className="text-sm text-destructive">Non sincronizzato</span>
+                              <span className="text-sm text-destructive">Non sincronizzato (0 chunks)</span>
                             </>
                           )}
                           {doc.syncStatus === 'storage_missing' && (
