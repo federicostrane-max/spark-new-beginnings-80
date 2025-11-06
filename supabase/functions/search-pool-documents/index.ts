@@ -146,7 +146,7 @@ serve(async (req) => {
 
     // Calculate similarity scores and combine with document info
     const results = (poolDocs || []).map(doc => {
-      // Find if this doc was found in title search
+      // Check if this doc was found in title search
       const fromTitleSearch = titleDocIds.includes(doc.id);
       
       // Find max similarity for this document from semantic search
@@ -158,9 +158,9 @@ serve(async (req) => {
         ? Math.max(...docMatches.map((m: any) => m.similarity || 0))
         : 0;
       
-      // Boost similarity for title matches
+      // Boost similarity for title matches to ensure they appear first
       const finalSimilarity = fromTitleSearch 
-        ? Math.max(maxSimilarity, 0.95) // Title match gets at least 0.95 similarity
+        ? 0.99  // Title matches get highest priority
         : maxSimilarity;
 
       return {
