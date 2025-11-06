@@ -19,8 +19,7 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
   const handleSyncAllAgents = async () => {
     try {
       setIsSyncing(true);
-      toast.info("Sincronizzazione di tutti gli agenti in corso...");
-
+      
       // Get all agents
       const { data: agents, error: agentsError } = await supabase
         .from('agents')
@@ -29,33 +28,66 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
 
       if (agentsError) throw agentsError;
 
-      let totalFixed = 0;
-      const errors: string[] = [];
-
-      // Sync each agent
-      for (const agent of agents || []) {
-        try {
-          const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
-            body: { agentId: agent.id, autoFix: true }
-          });
-
-          if (error) throw error;
-          
-          if (data?.fixedCount > 0) {
-            totalFixed += data.fixedCount;
-          }
-        } catch (err: any) {
-          console.error(`Error syncing agent ${agent.name}:`, err);
-          errors.push(`${agent.name}: ${err.message}`);
-        }
+      if (!agents || agents.length === 0) {
+        toast.info("Nessun agente attivo da sincronizzare");
+        return;
       }
 
-      if (errors.length > 0) {
-        toast.error(`Alcuni agenti non sono stati sincronizzati: ${errors.join(', ')}`);
+      toast.info(`Avvio sincronizzazione di ${agents.length} agenti in parallelo...`);
+
+      // Helper function to sync a single agent with timeout
+      const syncAgentWithTimeout = async (agent: { id: string; name: string }, index: number) => {
+        const TIMEOUT_MS = 120000; // 2 minutes timeout per agent
+        
+        toast.info(`Sincronizzando ${agent.name} (${index + 1}/${agents.length})...`);
+        
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Timeout - operazione troppo lenta')), TIMEOUT_MS)
+        );
+        
+        const syncPromise = supabase.functions.invoke('check-and-sync-all', {
+          body: { agentId: agent.id, autoFix: true }
+        });
+        
+        return Promise.race([syncPromise, timeoutPromise]);
+      };
+
+      // Sync all agents in parallel
+      const results = await Promise.allSettled(
+        agents.map((agent, index) => syncAgentWithTimeout(agent, index))
+      );
+
+      // Process results
+      let totalFixed = 0;
+      const errors: string[] = [];
+      const successful: string[] = [];
+
+      results.forEach((result, index) => {
+        const agent = agents[index];
+        
+        if (result.status === 'fulfilled') {
+          const { data, error } = result.value;
+          
+          if (error) {
+            errors.push(`${agent.name}: ${error.message}`);
+          } else if (data?.fixedCount > 0) {
+            totalFixed += data.fixedCount;
+            successful.push(agent.name);
+          }
+        } else {
+          errors.push(`${agent.name}: ${result.reason?.message || 'Errore sconosciuto'}`);
+        }
+      });
+
+      // Show results
+      if (errors.length > 0 && successful.length === 0) {
+        toast.error(`Sincronizzazione fallita per tutti gli agenti: ${errors.join(', ')}`);
+      } else if (errors.length > 0) {
+        toast.warning(`Sincronizzati ${successful.length}/${agents.length} agenti. Errori: ${errors.join(', ')}`);
       } else if (totalFixed > 0) {
-        toast.success(`Sincronizzazione completata: ${totalFixed} documenti sincronizzati`);
+        toast.success(`✅ Sincronizzazione completata: ${totalFixed} documenti sincronizzati su ${agents.length} agenti`);
       } else {
-        toast.info("Nessun documento da sincronizzare");
+        toast.info("✓ Tutti gli agenti sono già sincronizzati");
       }
 
       // Refresh page after sync
