@@ -56,39 +56,67 @@ serve(async (req) => {
     let triggered = 0;
 
     for (const doc of stuckDocs) {
-      console.log(`[fix-stuck-documents] Processing ${doc.file_name} (${doc.id.slice(0, 8)})`);
+      console.log(`[fix-stuck-documents] ========================================`);
+      console.log(`[fix-stuck-documents] Processing: ${doc.file_name}`);
+      console.log(`[fix-stuck-documents] Document ID: ${doc.id}`);
+      console.log(`[fix-stuck-documents] Current validation status: ${doc.validation_status}`);
+      console.log(`[fix-stuck-documents] Current processing status: ${doc.processing_status}`);
+      console.log(`[fix-stuck-documents] Validation completed at: ${doc.document_processing_cache?.[0]?.validation_completed_at || 'N/A'}`);
+
+      // Check if document has any chunks in agent_knowledge
+      const { data: existingChunks, error: chunksError } = await supabase
+        .from('agent_knowledge')
+        .select('id')
+        .eq('pool_document_id', doc.id)
+        .limit(1);
+
+      if (chunksError) {
+        console.warn(`[fix-stuck-documents] ⚠️ Error checking chunks for ${doc.file_name}:`, chunksError);
+      } else if (!existingChunks || existingChunks.length === 0) {
+        console.log(`[fix-stuck-documents] ⚠️ No chunks found for ${doc.file_name} - will need re-processing`);
+      } else {
+        console.log(`[fix-stuck-documents] ✓ Document has existing chunks`);
+      }
 
       // Update status to validated and ready for processing
+      const targetProcessingStatus = doc.processing_status === 'validating' ? 'pending_processing' : doc.processing_status;
+      console.log(`[fix-stuck-documents] Updating status: validated → ${targetProcessingStatus}`);
+      
       const { error: updateError } = await supabase
         .from('knowledge_documents')
         .update({
           validation_status: 'validated',
-          processing_status: doc.processing_status === 'validating' ? 'pending_processing' : doc.processing_status,
+          processing_status: targetProcessingStatus,
           validation_reason: 'Document validation completed (recovered from stuck state)',
           validation_date: new Date().toISOString()
         })
         .eq('id', doc.id);
 
       if (updateError) {
-        console.error(`[fix-stuck-documents] Failed to update ${doc.file_name}:`, updateError);
+        console.error(`[fix-stuck-documents] ❌ Failed to update ${doc.file_name}:`, updateError);
+        console.error(`[fix-stuck-documents] Error details:`, JSON.stringify(updateError, null, 2));
         continue;
       }
 
+      console.log(`[fix-stuck-documents] ✓ Status updated successfully`);
       fixed++;
 
       // If document is still pending processing, trigger it
       if (doc.processing_status === 'pending_processing' || doc.processing_status === 'validating') {
-        console.log(`[fix-stuck-documents] Triggering processing for ${doc.file_name}`);
+        console.log(`[fix-stuck-documents] 🚀 Triggering processing for ${doc.file_name}...`);
         
         supabase.functions.invoke('process-document', {
           body: { documentId: doc.id }
         }).then(() => {
-          console.log(`[fix-stuck-documents] Processing triggered for ${doc.file_name}`);
+          console.log(`[fix-stuck-documents] ✓ Processing triggered for ${doc.file_name}`);
         }).catch((err: Error) => {
-          console.error(`[fix-stuck-documents] Failed to trigger processing for ${doc.file_name}:`, err);
+          console.error(`[fix-stuck-documents] ❌ Failed to trigger processing for ${doc.file_name}:`, err);
+          console.error(`[fix-stuck-documents] Error details:`, err.message);
         });
         
         triggered++;
+      } else {
+        console.log(`[fix-stuck-documents] ℹ️ Document already in status '${doc.processing_status}', skipping trigger`);
       }
     }
 

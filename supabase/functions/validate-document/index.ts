@@ -399,10 +399,11 @@ Se confidence < 70, considera il documento NON rilevante.`;
       });
     }
 
-    // ✅ VALIDATION PASSED - Save AI summary
-    console.log('[validate-document] ✅ Validation successful! Saving AI summary...');
+    // ✅ VALIDATION PASSED - Update to VALIDATED status
+    console.log('[validate-document] ✅ Validation successful! Updating status to VALIDATED...');
 
-    await supabase
+    // STEP 4A: Update document status to VALIDATED (BEFORE triggering processing)
+    const { error: updateError } = await supabase
       .from('knowledge_documents')
       .update({ 
         validation_status: 'validated',
@@ -418,14 +419,27 @@ Se confidence < 70, considera il documento NON rilevante.`;
       })
       .eq('id', documentId);
 
-    await supabase
+    if (updateError) {
+      console.error('[validate-document] ❌ CRITICAL: Failed to update status to VALIDATED:', updateError);
+      throw new Error(`Failed to mark document as validated: ${updateError.message}`);
+    }
+
+    console.log('[validate-document] ✓ Status successfully updated to VALIDATED');
+
+    // STEP 4B: Update processing cache
+    const { error: cacheError } = await supabase
       .from('document_processing_cache')
       .update({ 
         validation_completed_at: new Date().toISOString()
       })
       .eq('document_id', documentId);
 
-    // Update pdf_download_queue if this download was queued
+    if (cacheError) {
+      console.warn('[validate-document] ⚠️ Failed to update processing cache:', cacheError);
+      // Non-fatal, continue
+    }
+
+    // STEP 4C: Update pdf_download_queue if this download was queued
     const { data: queueEntry } = await supabase
       .from('pdf_download_queue')
       .select('id')
@@ -433,8 +447,8 @@ Se confidence < 70, considera il documento NON rilevante.`;
       .single();
 
     if (queueEntry) {
-      console.log(`📝 [validate-document] Updating queue entry ${queueEntry.id.slice(0, 8)}`);
-      await supabase
+      console.log(`[validate-document] Updating queue entry ${queueEntry.id.slice(0, 8)}...`);
+      const { error: queueError } = await supabase
         .from('pdf_download_queue')
         .update({
           status: 'completed',
@@ -442,20 +456,28 @@ Se confidence < 70, considera il documento NON rilevante.`;
           completed_at: new Date().toISOString()
         })
         .eq('id', queueEntry.id);
+      
+      if (queueError) {
+        console.warn('[validate-document] ⚠️ Failed to update queue entry:', queueError);
+        // Non-fatal, continue
+      }
     }
 
-    // Trigger processing WITH fullText
-    console.log('[validate-document] Triggering document processing with fullText...');
-    supabase.functions.invoke('process-document', {
-      body: { 
-        documentId,
-        fullText: requestBody.fullText || extractedText
-      }
-    }).then(() => console.log('[validate-document] Processing triggered with fullText'))
-      .catch((err: Error) => {
-        console.error('[validate-document] Failed to trigger processing:', err);
-        console.error('[validate-document] Stack:', err.stack);
+    // STEP 5: Trigger processing (AFTER status is confirmed as VALIDATED)
+    console.log('[validate-document] 🚀 Triggering document processing...');
+    try {
+      await supabase.functions.invoke('process-document', {
+        body: { 
+          documentId,
+          fullText: requestBody.fullText || extractedText
+        }
       });
+      console.log('[validate-document] ✓ Processing triggered successfully');
+    } catch (processError) {
+      console.error('[validate-document] ⚠️ Failed to trigger processing (non-fatal):', processError);
+      console.error('[validate-document] Stack:', (processError as Error).stack);
+      // Don't throw - document is already validated, processing can be retried later
+    }
 
     console.log('[validate-document] ========== END SUCCESS ==========');
     
