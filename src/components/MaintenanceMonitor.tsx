@@ -47,6 +47,8 @@ export const MaintenanceMonitor = () => {
   const [selectedExecution, setSelectedExecution] = useState<MaintenanceExecutionLog | null>(null);
   const [operationDetails, setOperationDetails] = useState<MaintenanceOperationDetail[]>([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [showErrorsDialog, setShowErrorsDialog] = useState(false);
+  const [errorExecutions, setErrorExecutions] = useState<MaintenanceExecutionLog[]>([]);
 
   useEffect(() => {
     loadData();
@@ -131,6 +133,29 @@ export const MaintenanceMonitor = () => {
     }
   };
 
+  const handleViewErrors = async () => {
+    try {
+      // Fetch executions with errors or partial failures from last 24h
+      const twentyFourHoursAgo = new Date();
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+      
+      const { data, error } = await supabase
+        .from('maintenance_execution_logs')
+        .select('*')
+        .in('execution_status', ['partial_failure', 'failure'])
+        .gte('execution_started_at', twentyFourHoursAgo.toISOString())
+        .order('execution_started_at', { ascending: false });
+
+      if (error) throw error;
+      
+      setErrorExecutions((data || []) as MaintenanceExecutionLog[]);
+      setShowErrorsDialog(true);
+    } catch (error) {
+      console.error('[MaintenanceMonitor] Error fetching error executions:', error);
+      toast.error('Errore nel caricamento degli errori');
+    }
+  };
+
   const getOperationTypeLabel = (type: string) => {
     const labels = {
       fix_stuck_document: '📄 Fix Documento',
@@ -192,7 +217,10 @@ export const MaintenanceMonitor = () => {
                 <div className="text-sm text-muted-foreground text-center">Successi</div>
               </div>
 
-              <div className="flex flex-col items-center p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div 
+                className="flex flex-col items-center p-4 rounded-lg bg-red-500/10 border border-red-500/20 cursor-pointer hover:bg-red-500/20 transition-colors"
+                onClick={handleViewErrors}
+              >
                 <XCircle className="h-8 w-8 text-red-500 mb-2" />
                 <div className="text-2xl font-bold text-red-500">{stats.failedExecutions}</div>
                 <div className="text-sm text-muted-foreground text-center">Con Errori</div>
@@ -422,16 +450,14 @@ export const MaintenanceMonitor = () => {
                           <div className="flex items-start gap-2">
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
-                                <Badge variant={statusBadge.variant} className={statusBadge.className}>
+                                <Badge className={statusBadge.className} variant={statusBadge.variant}>
                                   {statusBadge.label}
                                 </Badge>
                                 <span className="text-sm font-medium">{detail.target_name}</span>
                               </div>
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <span>{getOperationTypeLabel(detail.operation_type)}</span>
-                                <span>•</span>
-                                <span>Tentativo {detail.attempt_number}</span>
-                              </div>
+                              <p className="text-xs text-muted-foreground mb-1">
+                                {getOperationTypeLabel(detail.operation_type)} • Tentativo {detail.attempt_number}
+                              </p>
                               {detail.error_message && (
                                 <p className="text-xs text-red-500 mt-1">
                                   {detail.error_message}
@@ -444,6 +470,99 @@ export const MaintenanceMonitor = () => {
                     );
                   })
                 )}
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog per Errori */}
+      <Dialog open={showErrorsDialog} onOpenChange={setShowErrorsDialog}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-red-500" />
+              Esecuzioni con Errori (Ultime 24h)
+            </DialogTitle>
+            <DialogDescription>
+              Dettagli delle esecuzioni che hanno riscontrato problemi
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh]">
+            {errorExecutions.length === 0 ? (
+              <Alert className="border-green-500/50 bg-green-500/10">
+                <CheckCircle className="h-4 w-4 text-green-500" />
+                <AlertTitle className="text-green-500">Nessun Errore</AlertTitle>
+                <AlertDescription>
+                  Tutte le esecuzioni delle ultime 24h sono state completate con successo!
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className="space-y-4">
+                {errorExecutions.map((execution) => {
+                  const badge = getExecutionStatusBadge(execution.execution_status);
+                  const Icon = badge.icon;
+                  
+                  return (
+                    <Card key={execution.id} className="border-red-500/30">
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-3">
+                          <Icon className={`h-5 w-5 mt-1 flex-shrink-0 ${badge.className}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Badge className={badge.color}>{badge.text}</Badge>
+                              <span className="text-sm text-muted-foreground">
+                                {formatDistanceToNow(new Date(execution.execution_started_at), { 
+                                  addSuffix: true, 
+                                  locale: it 
+                                })}
+                              </span>
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <p className="text-sm font-medium">
+                                {formatExecutionSummary(execution)}
+                              </p>
+                              
+                              {execution.error_message && (
+                                <Alert variant="destructive" className="mt-2">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  <AlertTitle>Messaggio di Errore</AlertTitle>
+                                  <AlertDescription className="text-xs mt-1">
+                                    {execution.error_message}
+                                  </AlertDescription>
+                                </Alert>
+                              )}
+
+                              {(execution.documents_failed > 0 || execution.agents_sync_failed > 0) && (
+                                <div className="text-xs text-muted-foreground space-y-1 mt-2 p-2 bg-muted/50 rounded">
+                                  {execution.documents_failed > 0 && (
+                                    <div>❌ Documenti falliti: {execution.documents_failed}</div>
+                                  )}
+                                  {execution.agents_sync_failed > 0 && (
+                                    <div>❌ Sync agenti falliti: {execution.agents_sync_failed}</div>
+                                  )}
+                                </div>
+                              )}
+
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setShowErrorsDialog(false);
+                                  handleViewDetails(execution);
+                                }}
+                                className="mt-2"
+                              >
+                                Vedi Dettagli Operazioni
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </ScrollArea>
