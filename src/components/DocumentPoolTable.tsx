@@ -94,6 +94,7 @@ export const DocumentPoolTable = () => {
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
   const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   useEffect(() => {
     loadDocuments();
@@ -324,6 +325,50 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleBulkProcessUnprocessed = async () => {
+    try {
+      setBulkProcessing(true);
+      
+      // Trova documenti senza summary
+      const { data: docsToProcess, error: queryError } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_name')
+        .or('ai_summary.is.null,ai_summary.eq.');
+
+      if (queryError) throw queryError;
+
+      if (!docsToProcess || docsToProcess.length === 0) {
+        toast.info('Nessun documento da elaborare');
+        return;
+      }
+
+      toast.loading(`Elaborazione di ${docsToProcess.length} documenti...`, { id: 'bulk-process' });
+
+      // Processa in parallelo con limite
+      const batchSize = 3;
+      for (let i = 0; i < docsToProcess.length; i += batchSize) {
+        const batch = docsToProcess.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(doc =>
+            supabase.functions.invoke('process-document', {
+              body: { documentId: doc.id }
+            })
+          )
+        );
+      }
+
+      toast.success(`${docsToProcess.length} documenti in elaborazione`, { id: 'bulk-process' });
+      
+      // Reload dopo un po'
+      setTimeout(() => loadDocuments(), 3000);
+    } catch (error: any) {
+      console.error('Error bulk processing:', error);
+      toast.error(`Errore: ${error.message}`, { id: 'bulk-process' });
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
   const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
   const validatedSelectedDocs = selectedDocuments.filter((d) => d.validation_status === "validated");
 
@@ -416,6 +461,24 @@ export const DocumentPoolTable = () => {
               <FileText className="h-5 w-5" />
               Documenti ({filteredDocuments.length})
             </span>
+            <Button
+              onClick={handleBulkProcessUnprocessed}
+              disabled={bulkProcessing}
+              variant="outline"
+              size="sm"
+            >
+              {bulkProcessing ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  Elaborazione...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Elabora documenti mancanti
+                </>
+              )}
+            </Button>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -474,10 +537,26 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell className="max-w-0">
                       <div className="space-y-1">
-                        <div className="font-medium truncate text-sm" title={doc.file_name}>
-                          {doc.file_name}
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium truncate text-sm" title={doc.file_name}>
+                            {doc.file_name}
+                          </div>
+                          {(!doc.ai_summary || doc.ai_summary.trim() === "") && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Badge variant="destructive" className="text-xs whitespace-nowrap cursor-help">
+                                    Non elaborato
+                                  </Badge>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">
+                                  <p className="text-sm">⚠️ Questo documento non è stato elaborato e non è utilizzabile dagli agenti. Clicca per vedere i dettagli.</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
                         </div>
-                        {doc.ai_summary && (
+                        {doc.ai_summary && doc.ai_summary.trim() !== "" && (
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>

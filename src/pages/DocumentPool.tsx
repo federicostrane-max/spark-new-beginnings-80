@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle, FileX } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle, FileX, FileWarning } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { FixStuckDocuments } from "@/components/FixStuckDocuments";
@@ -33,7 +33,8 @@ export default function DocumentPool() {
     ready: 0,
     processing: 0,
     orphanedChunks: 0,
-    failed: 0
+    failed: 0,
+    unprocessed: 0
   });
 
   useEffect(() => {
@@ -83,11 +84,18 @@ export default function DocumentPool() {
         .select('id', { count: 'exact', head: true })
         .in('processing_status', ['validation_failed', 'processing_failed']);
 
+      // Documenti senza summary (non elaborati)
+      const { count: unprocessedCount } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .or('ai_summary.is.null,ai_summary.eq.');
+
       setHealthMetrics({
         ready: readyCount || 0,
         processing: processingCount || 0,
         orphanedChunks: 0, // Calculated by cleanup function
-        failed: failedCount || 0
+        failed: failedCount || 0,
+        unprocessed: unprocessedCount || 0
       });
     } catch (error) {
       console.error('[Health Metrics] Error:', error);
@@ -203,6 +211,18 @@ export default function DocumentPool() {
           </Alert>
         )}
 
+        {/* Unprocessed Documents Alert */}
+        {healthMetrics.unprocessed > 0 && (
+          <Alert className="bg-orange-500/10 border-orange-500 mb-6">
+            <FileWarning className="h-4 w-4 text-orange-500" />
+            <AlertTitle className="text-orange-500">Documenti Non Elaborati</AlertTitle>
+            <AlertDescription>
+              Ci sono {healthMetrics.unprocessed} documenti non elaborati che non sono utilizzabili dagli agenti.
+              Usa il bottone "Elabora documenti mancanti" nella tabella per processarli tutti.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Health Dashboard */}
         <Card className="mb-6">
           <CardHeader>
@@ -234,6 +254,12 @@ export default function DocumentPool() {
                 <FileX className="h-8 w-8 text-red-500 mb-2" />
                 <div className="text-2xl font-bold text-red-500">{healthMetrics.failed}</div>
                 <div className="text-sm text-muted-foreground text-center">Errori</div>
+              </div>
+              
+              <div className="flex flex-col items-center p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                <FileWarning className="h-8 w-8 text-orange-500 mb-2" />
+                <div className="text-2xl font-bold text-orange-500">{healthMetrics.unprocessed}</div>
+                <div className="text-sm text-muted-foreground text-center">Non Elaborati</div>
               </div>
             </div>
           </CardContent>

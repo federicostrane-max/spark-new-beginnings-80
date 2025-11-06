@@ -42,16 +42,18 @@ export const DocumentDetailsDialog = ({
   open,
   onOpenChange,
 }: DocumentDetailsDialogProps) => {
-  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   if (!document) return null;
 
-  const handleRegenerateSummary = async () => {
+  const handleProcessDocument = async () => {
     if (!document.id) return;
 
     try {
-      setIsRegenerating(true);
-      toast.info("Rigenerazione summary in corso...");
+      setIsProcessing(true);
+      const hasNoSummary = !document.ai_summary || document.ai_summary.trim() === "";
+      
+      toast.info(hasNoSummary ? "Elaborazione documento in corso..." : "Rigenerazione summary in corso...");
 
       const { error } = await supabase.functions.invoke("process-document", {
         body: {
@@ -61,15 +63,15 @@ export const DocumentDetailsDialog = ({
 
       if (error) throw error;
 
-      toast.success("Summary rigenerato con successo!");
+      toast.success(hasNoSummary ? "Documento elaborato con successo!" : "Summary rigenerato con successo!");
       onOpenChange(false);
       
       setTimeout(() => window.location.reload(), 1000);
     } catch (error) {
-      console.error("Error regenerating summary:", error);
-      toast.error("Errore nella rigenerazione del summary");
+      console.error("Error processing document:", error);
+      toast.error("Errore durante l'elaborazione");
     } finally {
-      setIsRegenerating(false);
+      setIsProcessing(false);
     }
   };
 
@@ -113,23 +115,21 @@ export const DocumentDetailsDialog = ({
                 {document.file_name}
               </DialogDescription>
             </div>
-            {document.validation_status === "validated" && (!document.ai_summary || document.ai_summary.trim() === "") && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRegenerateSummary}
-                disabled={isRegenerating}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${isRegenerating ? 'animate-spin' : ''}`} />
-                Rigenera Summary
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant={(!document.ai_summary || document.ai_summary.trim() === "") ? "default" : "outline"}
+              onClick={handleProcessDocument}
+              disabled={isProcessing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${isProcessing ? 'animate-spin' : ''}`} />
+              {(!document.ai_summary || document.ai_summary.trim() === "") ? "Elabora Documento" : "Rigenera Summary"}
+            </Button>
           </div>
         </DialogHeader>
 
         <div className="space-y-6 pt-4">
           {/* AI Summary Section */}
-          {document.ai_summary && (
+          {document.ai_summary && document.ai_summary.trim() !== "" ? (
             <div className="space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <FileText className="h-4 w-4" />
@@ -138,6 +138,17 @@ export const DocumentDetailsDialog = ({
               <p className="text-sm text-muted-foreground leading-relaxed bg-muted/50 p-4 rounded-lg">
                 {document.ai_summary}
               </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-red-500">
+                <FileText className="h-4 w-4" />
+                Documento Non Elaborato
+              </h3>
+              <div className="text-sm text-muted-foreground leading-relaxed bg-red-500/10 border border-red-500/20 p-4 rounded-lg">
+                <p className="mb-2">⚠️ Questo documento non è stato elaborato completamente e non è utilizzabile dagli agenti.</p>
+                <p className="text-xs">Clicca su "Elabora Documento" per avviare l'elaborazione completa (estrazione testo, chunking, embedding e analisi AI).</p>
+              </div>
             </div>
           )}
 
