@@ -401,11 +401,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
             rows={1}
           />
           
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" title="Azioni Agente" className="h-9 w-9">
-                  <AtSign className="h-4 w-4" />
+                <Button variant="ghost" size="icon" title="Azioni Agente" className="h-8 w-8">
+                  <Zap className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               
@@ -440,17 +440,17 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
               </DropdownMenuContent>
             </DropdownMenu>
           
-          <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
-          
-          <Button
-            type="button"
-            onClick={() => handleSubmit()}
-            disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
-            size="icon"
-            className="flex-shrink-0"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
+            <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
+            
+            <Button
+              type="button"
+              onClick={() => handleSubmit()}
+              disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
+              size="icon"
+              className="flex-shrink-0 h-8 w-8"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>
