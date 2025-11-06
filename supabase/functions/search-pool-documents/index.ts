@@ -62,15 +62,16 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Search for similar documents using match_documents function
-    // We'll search across ALL documents first, then filter for ready_for_assignment
+    // DUAL SEARCH STRATEGY: Combine semantic search with title search
+    
+    // 1. SEMANTIC SEARCH - Search for similar documents using match_documents function
     const { data: matches, error: matchError } = await supabase.rpc(
       'match_documents',
       {
         query_embedding: queryEmbedding,
-        filter_agent_id: agentId, // This will check if docs are assigned
-        match_threshold: 0.3, // Lower threshold to get more results
-        match_count: 50 // Get more results initially
+        filter_agent_id: agentId,
+        match_threshold: 0.3,
+        match_count: 50
       }
     );
 
@@ -79,27 +80,47 @@ serve(async (req) => {
       throw matchError;
     }
 
-    console.log('📊 Found', matches?.length || 0, 'matches from match_documents');
+    console.log('📊 Semantic search found', matches?.length || 0, 'chunk matches');
 
-    // Get unique pool_document_ids from matches (filter out nulls for direct uploads)
-    const poolDocumentIds = [...new Set(
+    // Get unique pool_document_ids from semantic matches
+    const semanticDocIds = [...new Set(
       matches
         ?.map((m: any) => m.pool_document_id)
         .filter((id: any) => id != null) || []
     )];
+
+    // 2. TITLE SEARCH - Search by file name
+    const { data: titleMatches, error: titleError } = await supabase
+      .from('knowledge_documents')
+      .select('id')
+      .ilike('file_name', `%${query}%`)
+      .eq('validation_status', 'validated')
+      .eq('processing_status', 'ready_for_assignment');
+
+    if (titleError) {
+      console.error('Error in title search:', titleError);
+    }
+
+    const titleDocIds = titleMatches?.map(d => d.id) || [];
+    console.log('📝 Title search found', titleDocIds.length, 'matches');
+
+    // Combine both search results (union)
+    const allDocIds = [...new Set([...semanticDocIds, ...titleDocIds])];
     
-    if (poolDocumentIds.length === 0) {
+    if (allDocIds.length === 0) {
       return new Response(
         JSON.stringify({ results: [], count: 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get full document details from knowledge_documents
+    console.log('🔍 Total unique documents:', allDocIds.length, '(semantic:', semanticDocIds.length, 'title:', titleDocIds.length, ')');
+
+    // Get full document details
     const { data: poolDocs, error: poolError } = await supabase
       .from('knowledge_documents')
       .select('id, file_name, ai_summary, created_at')
-      .in('id', poolDocumentIds)
+      .in('id', allDocIds)
       .eq('validation_status', 'validated')
       .eq('processing_status', 'ready_for_assignment');
 
@@ -125,23 +146,31 @@ serve(async (req) => {
 
     // Calculate similarity scores and combine with document info
     const results = (poolDocs || []).map(doc => {
-      // Find max similarity for this document across all its chunks
+      // Find if this doc was found in title search
+      const fromTitleSearch = titleDocIds.includes(doc.id);
+      
+      // Find max similarity for this document from semantic search
       const docMatches = matches?.filter((m: any) => {
-        // Use pool_document_id to match chunks to documents
         return m.pool_document_id === doc.id;
       }) || [];
       
       const maxSimilarity = docMatches.length > 0 
         ? Math.max(...docMatches.map((m: any) => m.similarity || 0))
         : 0;
+      
+      // Boost similarity for title matches
+      const finalSimilarity = fromTitleSearch 
+        ? Math.max(maxSimilarity, 0.95) // Title match gets at least 0.95 similarity
+        : maxSimilarity;
 
       return {
         id: doc.id,
         file_name: doc.file_name,
         ai_summary: doc.ai_summary,
         created_at: doc.created_at,
-        similarity: maxSimilarity,
+        similarity: finalSimilarity,
         isAssigned: assignedIds.has(doc.id),
+        matchType: fromTitleSearch ? 'title' : 'semantic'
       };
     })
     .sort((a, b) => b.similarity - a.similarity); // Sort by similarity descending
