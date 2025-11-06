@@ -94,6 +94,22 @@ function parseKnowledgeSearchIntent(message: string): UserIntent {
     }
   }
   
+  // AUTO-DETECT SIMPLE TOPIC: If user just pastes a topic without explicit command
+  // Check if message looks like a simple search topic (no questions, short, few words)
+  const wordCount = message.trim().split(/\s+/).length;
+  const hasQuestionMark = message.includes('?');
+  const hasExplicitAction = /\b(cerca|trova|dammi|voglio|search|find|look for|mi servono|download|get|scarica|show|filter)\b/i.test(message);
+  const isReasonableLength = message.length >= 5 && message.length <= 100;
+  const isShortPhrase = wordCount >= 1 && wordCount <= 10;
+  
+  if (!hasQuestionMark && !hasExplicitAction && isReasonableLength && isShortPhrase) {
+    // This looks like a simple topic - auto-add "find pdf on" prefix
+    const autoTopic = message.trim();
+    console.log('🎯 [INTENT PARSER] AUTO-DETECTED simple topic, treating as search:', autoTopic);
+    console.log('✅ [INTENT PARSER] Auto-wrapped as: "find pdf on ' + autoTopic + '"');
+    return { type: 'SEARCH_REQUEST', topic: autoTopic, count: requestedCount };
+  }
+  
   // Check for vague search intent to provide feedback
   const hasSearchIntent = /\b(cerca|trova|dammi|voglio|search|find|look for|mi servono|mi occorrono)\b/i.test(message);
   const hasTopicWords = /\b(pdf|paper|articol|document)\b/i.test(message);
