@@ -426,16 +426,38 @@ serve(async (req) => {
                     error_message: syncError.message
                   });
               } else {
-                // ✅ POST-OPERATION VERIFICATION
-                console.log(`[auto-maintenance] ⏳ Waiting 2 seconds to verify sync status...`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // ✅ POST-OPERATION VERIFICATION (direct DB query instead of function call)
+                console.log(`[auto-maintenance] ⏳ Verifying sync status for ${agent.name}...`);
                 
-                const { data: verifyData, error: verifyError } = await supabase.functions.invoke('check-and-sync-all', {
-                  body: { agentId: agent.id, autoFix: false }
+                // Get assigned document IDs
+                const { data: assignedLinks } = await supabase
+                  .from('agent_document_links')
+                  .select('document_id')
+                  .eq('agent_id', agent.id);
+                
+                const assignedDocIds = new Set(assignedLinks?.map(l => l.document_id) || []);
+                
+                // Get chunk counts for this agent
+                const { data: agentChunks } = await supabase
+                  .from('agent_knowledge')
+                  .select('pool_document_id')
+                  .eq('agent_id', agent.id)
+                  .not('pool_document_id', 'is', null);
+                
+                const agentChunkMap = new Map<string, number>();
+                agentChunks?.forEach(chunk => {
+                  if (chunk.pool_document_id) {
+                    const count = agentChunkMap.get(chunk.pool_document_id) || 0;
+                    agentChunkMap.set(chunk.pool_document_id, count + 1);
+                  }
                 });
                 
-                const verifyStatuses = verifyData?.statuses || [];
-                const isActuallySynced = !verifyStatuses.some((s: any) => s.status !== 'synced');
+                // Check if all assigned docs have chunks
+                const missingCount = Array.from(assignedDocIds).filter(docId => 
+                  !agentChunkMap.has(docId) || agentChunkMap.get(docId) === 0
+                ).length;
+                
+                const isActuallySynced = missingCount === 0;
                 
                 if (isActuallySynced) {
                   console.log(`[auto-maintenance] ✅ VERIFIED: Agent ${agent.name} successfully synced`);
@@ -453,7 +475,7 @@ serve(async (req) => {
 
                   agentsSynced++;
                 } else {
-                  console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Agent ${agent.name} still has sync issues`);
+                  console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Agent ${agent.name} still has ${missingCount} missing documents`);
                   
                   await supabase
                     .from('maintenance_operation_details')
@@ -464,7 +486,7 @@ serve(async (req) => {
                       target_name: agent.name,
                       status: 'retry_needed',
                       attempt_number: attemptNumber,
-                      error_message: 'Post-verification failed: agent still has sync issues'
+                      error_message: `Post-verification failed: ${missingCount} documents still not synced`
                     });
                 }
               }
