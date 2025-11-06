@@ -379,6 +379,7 @@ export const DocumentPoolTable = () => {
                 <SelectContent className="bg-background">
                   <SelectItem value="all">Tutti</SelectItem>
                   <SelectItem value="validated">Validato</SelectItem>
+                  <SelectItem value="validating">In Validazione</SelectItem>
                   <SelectItem value="validation_failed">Non Valido</SelectItem>
                   <SelectItem value="ready_for_assignment">Pronto</SelectItem>
                   <SelectItem value="processing">In Elaborazione</SelectItem>
