@@ -254,26 +254,38 @@ serve(async (req) => {
       console.error('[auto-maintenance] ⚠️ Error querying documents:', summaryError);
     }
 
-    // Filter in JavaScript for documents without valid summaries
+    // Filter in JavaScript for documents with missing or incomplete AI metadata
     const docsWithoutSummary = allValidatedDocs?.filter(doc => 
       !doc.ai_summary || 
       doc.ai_summary.trim() === '' || 
-      doc.ai_summary === 'Documento migrato dal knowledge base degli agenti'
+      doc.ai_summary === 'Documento migrato dal knowledge base degli agenti' ||
+      !doc.keywords ||
+      !doc.topics ||
+      !doc.complexity_level
     ).slice(0, 5); // Max 5 documenti alla volta
 
     if (docsWithoutSummary && docsWithoutSummary.length > 0) {
-      console.log(`[auto-maintenance] Found ${docsWithoutSummary.length} documents without AI summary`);
+      console.log(`[auto-maintenance] Found ${docsWithoutSummary.length} documents with missing AI metadata`);
 
       for (const doc of docsWithoutSummary) {
         try {
-          console.log(`[auto-maintenance] 🔄 Regenerating summary for ${doc.file_name}`);
+          const hasSummary = doc.ai_summary && 
+                           doc.ai_summary.trim() !== '' && 
+                           doc.ai_summary !== 'Documento migrato dal knowledge base degli agenti';
           
-          const { error: validateError } = await supabase.functions.invoke('validate-document', {
+          if (hasSummary) {
+            console.log(`[auto-maintenance] 🔄 Completing metadata for ${doc.file_name} (has summary, missing keywords/topics/complexity)`);
+          } else {
+            console.log(`[auto-maintenance] 🔄 Regenerating full AI metadata for ${doc.file_name}`);
+          }
+          
+          // Call process-document to generate or complete AI metadata
+          const { error: processError } = await supabase.functions.invoke('process-document', {
             body: { documentId: doc.id }
           });
 
-          if (validateError) {
-            console.error(`[auto-maintenance] ❌ Failed to invoke validate-document for ${doc.file_name}:`, validateError);
+          if (processError) {
+            console.error(`[auto-maintenance] ❌ Failed to invoke process-document for ${doc.file_name}:`, processError);
             summariesFailed++;
             
             await supabase
@@ -285,26 +297,29 @@ serve(async (req) => {
                 target_name: doc.file_name,
                 status: 'failed',
                 attempt_number: 1,
-                error_message: validateError.message
+                error_message: processError.message
               });
           } else {
             // ✅ POST-OPERATION VERIFICATION
-            console.log(`[auto-maintenance] ⏳ Waiting 3 seconds for summary generation...`);
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for processing
+            console.log(`[auto-maintenance] ⏳ Waiting 5 seconds for metadata generation...`);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for processing
             
             // Verify actual result in database
             const { data: verifiedDoc } = await supabase
               .from('knowledge_documents')
-              .select('ai_summary')
+              .select('ai_summary, keywords, topics, complexity_level')
               .eq('id', doc.id)
               .single();
             
-            const isActuallyGenerated = verifiedDoc?.ai_summary && 
-                                       verifiedDoc.ai_summary.trim() !== '' &&
-                                       verifiedDoc.ai_summary !== 'Documento migrato dal knowledge base degli agenti';
+            const isFullyGenerated = verifiedDoc?.ai_summary && 
+                                    verifiedDoc.ai_summary.trim() !== '' &&
+                                    verifiedDoc.ai_summary !== 'Documento migrato dal knowledge base degli agenti' &&
+                                    verifiedDoc.keywords &&
+                                    verifiedDoc.topics &&
+                                    verifiedDoc.complexity_level;
             
-            if (isActuallyGenerated) {
-              console.log(`[auto-maintenance] ✅ VERIFIED: Summary successfully generated for ${doc.file_name}`);
+            if (isFullyGenerated) {
+              console.log(`[auto-maintenance] ✅ VERIFIED: Full AI metadata generated for ${doc.file_name}`);
               summariesGenerated++;
               
               await supabase
@@ -318,7 +333,8 @@ serve(async (req) => {
                   attempt_number: 1
                 });
             } else {
-              console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Summary not generated for ${doc.file_name}`);
+              console.log(`[auto-maintenance] ❌ VERIFICATION FAILED: Metadata incomplete for ${doc.file_name}`);
+              console.log(`[auto-maintenance]   Summary: ${!!verifiedDoc?.ai_summary}, Keywords: ${!!verifiedDoc?.keywords}, Topics: ${!!verifiedDoc?.topics}, Complexity: ${!!verifiedDoc?.complexity_level}`);
               summariesFailed++;
               
               await supabase
@@ -330,17 +346,17 @@ serve(async (req) => {
                   target_name: doc.file_name,
                   status: 'failed',
                   attempt_number: 1,
-                  error_message: 'Post-verification failed: summary not updated in database'
+                  error_message: 'Post-verification failed: metadata incomplete in database'
                 });
             }
           }
         } catch (err) {
-          console.error(`[auto-maintenance] ❌ Exception regenerating summary for ${doc.file_name}:`, err);
+          console.error(`[auto-maintenance] ❌ Exception regenerating metadata for ${doc.file_name}:`, err);
           summariesFailed++;
         }
       }
     } else {
-      console.log('[auto-maintenance] ✅ All validated documents have AI summaries');
+      console.log('[auto-maintenance] ✅ All validated documents have complete AI metadata');
     }
 
     // 5. AUTO-SYNC AGENTS
