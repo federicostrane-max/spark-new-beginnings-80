@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle } from "lucide-react";
+import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle, Settings } from "lucide-react";
 import { logger } from "@/lib/logger";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,6 +16,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface KnowledgeDocument {
   id: string;
@@ -556,6 +563,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     }
   }, [showAssignDialog]);
 
+  const missingCount = documents.filter(doc => doc.syncStatus === 'missing').length;
+  const storageMissingCount = documents.filter(doc => doc.syncStatus === 'storage_missing').length;
+  const totalIssues = missingCount + storageMissingCount;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -566,49 +577,69 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           </p>
         </div>
         <div className="flex gap-2">
-          {documents.some(doc => doc.syncStatus === 'missing') && (
-            <Button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleSyncAllMissing(hasTriedQuickSync);
-              }} 
-              size="sm" 
-              type="button"
-              variant="default"
-            >
-              {hasTriedQuickSync ? (
-                <>
-                  <Download className="h-4 w-4 mr-2" />
-                  Riscarica Tutti
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Sincronizza Tutti
-                </>
-              )}
-            </Button>
-          )}
-          {documents.some(doc => doc.syncStatus === 'storage_missing') && (
-            <Button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleRemoveBrokenDocs();
-              }} 
-              size="sm" 
-              type="button"
-              variant="destructive"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Rimuovi Documenti Rotti
-            </Button>
-          )}
-          <Button onClick={() => setShowAssignDialog(true)} size="sm" type="button">
+          <Button 
+            onClick={() => setShowAssignDialog(true)} 
+            size="sm" 
+            type="button"
+          >
             <Plus className="h-4 w-4 mr-2" />
             Assegna Documento
           </Button>
+          
+          {totalIssues > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  type="button"
+                  className="gap-2"
+                >
+                  <Settings className="h-4 w-4" />
+                  Gestione
+                  <Badge variant="destructive" className="ml-1">
+                    {totalIssues}
+                  </Badge>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {missingCount > 0 && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSyncAllMissing(hasTriedQuickSync);
+                    }}
+                  >
+                    {hasTriedQuickSync ? (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Riscarica Tutti ({missingCount})
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Sincronizza Tutti ({missingCount})
+                      </>
+                    )}
+                  </DropdownMenuItem>
+                )}
+                {storageMissingCount > 0 && (
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRemoveBrokenDocs();
+                    }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Rimuovi Documenti Rotti ({storageMissingCount})
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 

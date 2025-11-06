@@ -6,11 +6,27 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Copy, History } from "lucide-react";
+import { Loader2, Copy, History, MoreVertical, Trash2 } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { PromptHistoryDialog } from "@/components/PromptHistoryDialog";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Agent {
   id: string;
@@ -38,6 +54,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [llmProvider, setLlmProvider] = useState("anthropic");
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const isEditingRef = useRef(false);
   const previousPromptRef = useRef<string>("");
 
@@ -597,52 +614,59 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           )}
 
           {/* Actions */}
-          <div className="flex flex-col gap-3">
-            <div className="flex gap-2 justify-end">
-              {editingAgent && (
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={handleClone}
-                  disabled={loading}
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Clone Agent
-                </Button>
-              )}
+          <div className="flex gap-2 justify-end items-center">
+            {editingAgent && (
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={() => onOpenChange(false)}
+                onClick={handleClone}
                 disabled={loading}
               >
-                Cancel
+                <Copy className="h-4 w-4 mr-2" />
+                Clone Agent
               </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {editingAgent ? 'Updating...' : 'Creating...'}
-                  </>
-                ) : (
-                  editingAgent ? "Update Agent" : "Create Agent"
-                )}
-              </Button>
-            </div>
+            )}
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => onOpenChange(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {editingAgent ? 'Updating...' : 'Creating...'}
+                </>
+              ) : (
+                editingAgent ? "Update Agent" : "Create Agent"
+              )}
+            </Button>
             
             {editingAgent && onDelete && (
-              <Button 
-                type="button" 
-                variant="destructive" 
-                onClick={() => {
-                  onDelete(editingAgent.id);
-                  onOpenChange(false);
-                }}
-                disabled={loading}
-                className="w-full"
-              >
-                Delete Agent
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    type="button" 
+                    variant="ghost" 
+                    size="icon"
+                    disabled={loading}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem 
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Agent
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </div>
         </form>
@@ -657,6 +681,42 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           />
         )}
       </DialogContent>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Elimina Agente
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Sei sicuro di voler eliminare questo agente? Questa azione non può essere annullata.
+              </p>
+              <div className="text-sm space-y-1 pl-4 border-l-2 border-destructive/50">
+                <p>• Tutte le conversazioni con questo agente andranno perse</p>
+                <p>• I documenti assegnati rimarranno nel pool e non verranno eliminati</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (editingAgent && onDelete) {
+                  onDelete(editingAgent.id);
+                  onOpenChange(false);
+                  setShowDeleteDialog(false);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Elimina Definitivamente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 };
