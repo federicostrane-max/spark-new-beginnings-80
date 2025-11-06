@@ -21,9 +21,9 @@ export const useAgentHealth = (agentIds: string[]) => {
 
   const checkAgentHealth = async (agentId: string): Promise<AgentHealthStatus> => {
     try {
-      // Usa check-and-sync-all per logica precisa di sincronizzazione
+      // Usa check-and-sync-all con autoFix per sincronizzare automaticamente
       const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
-        body: { agentId, autoFix: false }
+        body: { agentId, autoFix: true }
       });
 
       if (error) {
@@ -52,23 +52,17 @@ export const useAgentHealth = (agentIds: string[]) => {
         lastChecked: new Date()
       };
       
-      // Log dettagliato se ci sono documenti in sync
-      if (syncingCount > 0) {
-        logger.info('agent-operation', `Agent ${agentId} has ${syncingCount} documents currently syncing`, {
-          syncingCount,
-          missingCount,
-          failedCount,
-          orphanedCount
-        }, { agentId });
-      }
-
-      // Log SOLO se ci sono problemi reali (non documenti in sync)
+      // Log SOLO se ci sono problemi reali dopo il tentativo di fix
       if (hasIssues) {
-        logger.warning('agent-operation', `Agent ${agentId} has sync discrepancies`, {
+        logger.warning('agent-operation', `Agent ${agentId} still has sync issues after auto-fix`, {
           missingCount,
           failedCount,
           orphanedCount,
           unsyncedCount
+        }, { agentId });
+      } else if (syncingCount > 0) {
+        logger.info('agent-operation', `Agent ${agentId} sync in progress`, {
+          syncingCount
         }, { agentId });
       }
 
