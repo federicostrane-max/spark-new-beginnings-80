@@ -141,7 +141,10 @@ export type Database = {
           document_name: string
           embedding: string | null
           id: string
+          is_active: boolean
           pool_document_id: string | null
+          removal_reason: string | null
+          removed_at: string | null
           source_type: string | null
           summary: string | null
         }
@@ -153,7 +156,10 @@ export type Database = {
           document_name: string
           embedding?: string | null
           id?: string
+          is_active?: boolean
           pool_document_id?: string | null
+          removal_reason?: string | null
+          removed_at?: string | null
           source_type?: string | null
           summary?: string | null
         }
@@ -165,7 +171,10 @@ export type Database = {
           document_name?: string
           embedding?: string | null
           id?: string
+          is_active?: boolean
           pool_document_id?: string | null
+          removal_reason?: string | null
+          removed_at?: string | null
           source_type?: string | null
           summary?: string | null
         }
@@ -294,12 +303,63 @@ export type Database = {
           },
         ]
       }
+      agent_task_requirements: {
+        Row: {
+          agent_id: string
+          core_concepts: Json
+          created_at: string
+          decision_patterns: Json
+          domain_vocabulary: Json
+          extracted_at: string
+          extraction_model: string
+          id: string
+          procedural_knowledge: Json
+          system_prompt_hash: string
+          updated_at: string
+        }
+        Insert: {
+          agent_id: string
+          core_concepts?: Json
+          created_at?: string
+          decision_patterns?: Json
+          domain_vocabulary?: Json
+          extracted_at?: string
+          extraction_model?: string
+          id?: string
+          procedural_knowledge?: Json
+          system_prompt_hash: string
+          updated_at?: string
+        }
+        Update: {
+          agent_id?: string
+          core_concepts?: Json
+          created_at?: string
+          decision_patterns?: Json
+          domain_vocabulary?: Json
+          extracted_at?: string
+          extraction_model?: string
+          id?: string
+          procedural_knowledge?: Json
+          system_prompt_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_task_requirements_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: true
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agents: {
         Row: {
           active: boolean | null
           avatar: string | null
           created_at: string | null
           description: string
+          first_alignment_completed_at: string | null
           id: string
           llm_provider: string | null
           name: string
@@ -312,6 +372,7 @@ export type Database = {
           avatar?: string | null
           created_at?: string | null
           description: string
+          first_alignment_completed_at?: string | null
           id?: string
           llm_provider?: string | null
           name: string
@@ -324,6 +385,7 @@ export type Database = {
           avatar?: string | null
           created_at?: string | null
           description?: string
+          first_alignment_completed_at?: string | null
           id?: string
           llm_provider?: string | null
           name?: string
@@ -332,6 +394,68 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      alignment_analysis_log: {
+        Row: {
+          agent_id: string
+          chunks_auto_removed: number
+          chunks_flagged_for_removal: number
+          completed_at: string | null
+          concept_coverage_percentage: number | null
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          id: string
+          identified_gaps: Json | null
+          safe_mode_active: boolean
+          started_at: string
+          surplus_categories: Json | null
+          total_chunks_analyzed: number
+          trigger_type: string
+        }
+        Insert: {
+          agent_id: string
+          chunks_auto_removed?: number
+          chunks_flagged_for_removal: number
+          completed_at?: string | null
+          concept_coverage_percentage?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          identified_gaps?: Json | null
+          safe_mode_active?: boolean
+          started_at?: string
+          surplus_categories?: Json | null
+          total_chunks_analyzed: number
+          trigger_type: string
+        }
+        Update: {
+          agent_id?: string
+          chunks_auto_removed?: number
+          chunks_flagged_for_removal?: number
+          completed_at?: string | null
+          concept_coverage_percentage?: number | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          id?: string
+          identified_gaps?: Json | null
+          safe_mode_active?: boolean
+          started_at?: string
+          surplus_categories?: Json | null
+          total_chunks_analyzed?: number
+          trigger_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alignment_analysis_log_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       document_processing_cache: {
         Row: {
@@ -574,6 +698,151 @@ export type Database = {
           validation_status?: string
         }
         Relationships: []
+      }
+      knowledge_relevance_scores: {
+        Row: {
+          agent_id: string
+          analysis_model: string
+          analysis_reasoning: string | null
+          analyzed_at: string
+          chunk_id: string
+          concept_coverage: number
+          created_at: string
+          final_relevance_score: number
+          id: string
+          procedural_match: number
+          requirement_id: string
+          semantic_relevance: number
+          vocabulary_alignment: number
+        }
+        Insert: {
+          agent_id: string
+          analysis_model?: string
+          analysis_reasoning?: string | null
+          analyzed_at?: string
+          chunk_id: string
+          concept_coverage: number
+          created_at?: string
+          final_relevance_score: number
+          id?: string
+          procedural_match: number
+          requirement_id: string
+          semantic_relevance: number
+          vocabulary_alignment: number
+        }
+        Update: {
+          agent_id?: string
+          analysis_model?: string
+          analysis_reasoning?: string | null
+          analyzed_at?: string
+          chunk_id?: string
+          concept_coverage?: number
+          created_at?: string
+          final_relevance_score?: number
+          id?: string
+          procedural_match?: number
+          requirement_id?: string
+          semantic_relevance?: number
+          vocabulary_alignment?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_relevance_scores_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_relevance_scores_chunk_id_fkey"
+            columns: ["chunk_id"]
+            isOneToOne: false
+            referencedRelation: "agent_knowledge"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_relevance_scores_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "agent_task_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_removal_history: {
+        Row: {
+          agent_id: string
+          category: string
+          chunk_id: string
+          content: string
+          created_at: string
+          document_name: string
+          embedding: string | null
+          final_relevance_score: number | null
+          id: string
+          pool_document_id: string | null
+          removal_reason: string
+          removal_type: string
+          removed_at: string
+          restoration_user_id: string | null
+          restored_at: string | null
+          source_type: string | null
+          summary: string | null
+        }
+        Insert: {
+          agent_id: string
+          category: string
+          chunk_id: string
+          content: string
+          created_at?: string
+          document_name: string
+          embedding?: string | null
+          final_relevance_score?: number | null
+          id?: string
+          pool_document_id?: string | null
+          removal_reason: string
+          removal_type: string
+          removed_at?: string
+          restoration_user_id?: string | null
+          restored_at?: string | null
+          source_type?: string | null
+          summary?: string | null
+        }
+        Update: {
+          agent_id?: string
+          category?: string
+          chunk_id?: string
+          content?: string
+          created_at?: string
+          document_name?: string
+          embedding?: string | null
+          final_relevance_score?: number | null
+          id?: string
+          pool_document_id?: string | null
+          removal_reason?: string
+          removal_type?: string
+          removed_at?: string
+          restoration_user_id?: string | null
+          restored_at?: string | null
+          source_type?: string | null
+          summary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_removal_history_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_removal_history_pool_document_id_fkey"
+            columns: ["pool_document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       maintenance_execution_logs: {
         Row: {

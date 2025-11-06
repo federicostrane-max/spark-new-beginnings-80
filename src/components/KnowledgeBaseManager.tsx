@@ -24,6 +24,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { KnowledgeAlignmentDashboard } from "./KnowledgeAlignmentDashboard";
 
 interface KnowledgeDocument {
   id: string;
@@ -618,7 +620,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const totalIssues = missingCount + storageMissingCount;
 
   return (
-    <div className="space-y-4">
+    <Tabs defaultValue="documents" className="space-y-4">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="documents">Documenti Assegnati</TabsTrigger>
+        <TabsTrigger value="alignment">Allineamento AI ✨</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="alignment">
+        <KnowledgeAlignmentDashboard agentId={agentId} />
+      </TabsContent>
+
+      <TabsContent value="documents" className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h3 className="text-lg font-semibold">Documenti Assegnati dal Pool</h3>
@@ -982,6 +994,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 };

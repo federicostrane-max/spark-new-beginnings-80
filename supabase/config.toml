@@ -63,3 +63,12 @@ verify_jwt = false
 
 [functions.auto-maintenance]
 verify_jwt = false
+
+[functions.extract-task-requirements]
+verify_jwt = false
+
+[functions.analyze-knowledge-alignment]
+verify_jwt = false
+
+[functions.restore-removed-chunks]
+verify_jwt = false
