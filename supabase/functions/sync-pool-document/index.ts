@@ -238,32 +238,21 @@ serve(async (req) => {
       throw new Error(`Failed to download PDF: ${downloadError?.message || 'File not found'}`);
     }
 
-    // Use extract-pdf-text edge function instead of OCR
+    // Use extract-pdf-text edge function with documentId
     console.log('[sync-pool-document] Extracting text from PDF...');
     
-    const arrayBuffer = await fileData.arrayBuffer();
-    const base64Pdf = arrayBufferToBase64(arrayBuffer);
-    
-    const extractResponse = await fetch(`${supabaseUrl}/functions/v1/extract-pdf-text`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ 
-        pdfBase64: base64Pdf,
-        fileName: poolDoc.file_name 
-      }),
+    const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+      body: { 
+        documentId: documentId
+      }
     });
 
-    if (!extractResponse.ok) {
-      const errorText = await extractResponse.text();
-      console.error('[sync-pool-document] Text extraction failed:', errorText);
-      throw new Error(`Text extraction failed: ${extractResponse.status} - ${errorText}`);
+    if (extractError) {
+      console.error('[sync-pool-document] Text extraction failed:', extractError);
+      throw new Error(`Text extraction failed: ${extractError.message}`);
     }
 
-    const extractData = await extractResponse.json();
-    const fullText = extractData.text || '';
+    const fullText = extractData?.text || '';
 
     if (!fullText || fullText.trim().length < 100) {
       throw new Error(`Extracted text too short or empty (${fullText.length} chars). PDF may be scanned or corrupted.`);
