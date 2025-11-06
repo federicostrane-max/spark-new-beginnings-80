@@ -33,32 +33,27 @@ export const useAgentHealth = (agentIds: string[]) => {
 
       // Conta documenti realmente non sincronizzati o parzialmente sincronizzati
       const statuses = data?.statuses || [];
-      const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
+      const missingCount = statuses.filter((s: any) => s.status === 'missing').length;
+      const orphanedCount = statuses.filter((s: any) => s.status === 'orphaned').length;
+      const unsyncedCount = missingCount + orphanedCount;
 
-      // Conta SOLO errori PERMANENTI (falliti dopo 3 retry automatici)
-      const { count: permanentFailures } = await supabase
-        .from('maintenance_operation_details')
-        .select('*', { count: 'exact', head: true })
-        .eq('target_id', agentId)
-        .eq('operation_type', 'sync_agent')
-        .eq('status', 'failed')
-        .gte('attempt_number', 3);
-
-      const errorCount = permanentFailures || 0;
+      // ✅ Considera "problemi" SOLO le discrepanze attuali, non i fallimenti storici
+      const hasIssues = unsyncedCount > 0;
 
       const healthStatus: AgentHealthStatus = {
         agentId,
-        hasIssues: errorCount > 0, // ✅ Badge rosso SOLO per errori permanenti
+        hasIssues, // ✅ Badge rosso SOLO se ci sono documenti attualmente non sincronizzati
         unsyncedCount,
-        errorCount,
-        warningCount: 0,
+        errorCount: missingCount, // Documenti mancanti (assigned ma senza chunks)
+        warningCount: orphanedCount, // Chunks orfani (non più assigned)
         lastChecked: new Date()
       };
 
-      // Log SOLO se ci sono errori permanenti
-      if (errorCount > 0) {
-        logger.error('agent-operation', `Agent ${agentId} has permanent sync failures`, {
-          permanentFailures: errorCount,
+      // Log SOLO se ci sono problemi reali
+      if (hasIssues) {
+        logger.warning('agent-operation', `Agent ${agentId} has sync discrepancies`, {
+          missingCount,
+          orphanedCount,
           unsyncedCount
         }, { agentId });
       }
@@ -68,7 +63,7 @@ export const useAgentHealth = (agentIds: string[]) => {
       logger.error('agent-operation', `Error checking agent health for ${agentId}`, error, { agentId });
       return {
         agentId,
-        hasIssues: true,
+        hasIssues: true, // ✅ Flag come problema solo se la check fallisce
         unsyncedCount: 0,
         errorCount: 1,
         warningCount: 0,
