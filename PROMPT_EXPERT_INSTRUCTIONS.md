@@ -4,6 +4,23 @@
 
 L'edge function `agent-chat/index.ts` ora implementa un **workflow deterministico** per l'agente Knowledge Search Expert. Questo significa che molte azioni sono gestite da automazioni lato server, riducendo la dipendenza dall'interpretazione dell'AI.
 
+## Sintassi Comandi Multi-Agente
+
+### 1. Azione Diretta (utente → agente)
+**Sintassi**: `[azione] @agente`
+- Es: `modifica prompt @esperto` → L'utente chiede all'agente attuale di modificare il prompt di @esperto
+- Es: `mostra knowledge @supervisore` → L'utente chiede all'agente attuale di mostrare la knowledge di @supervisore
+
+### 2. Azione Delegata (agente1 → agente2 → agente3)  
+**Sintassi**: `@agente1 [azione] @agente2`
+- Es: `@supervisore modifica prompt @esperto` → L'utente dice a @supervisore di modificare il prompt di @esperto
+- Es: `@coordinatore verifica knowledge @specialista` → L'utente dice a @coordinatore di verificare la knowledge di @specialista
+
+**IMPORTANTE**: Nella sintassi delegata:
+- Il **primo @agente** è il destinatario del comando (chi deve eseguire)
+- L'**[azione]** è cosa deve fare
+- Il **secondo @agente** è il target dell'azione (su chi agire)
+
 ## Nuovo Workflow Automatizzato
 
 ### 1. SEARCH_REQUEST (Completamente automatizzato)

@@ -278,6 +278,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       case 'modify':
         template = 'modifica prompt @';
         break;
+      case 'delegate':
+        // Sintassi: @agente1 [azione] @agente2
+        // Es: "@supervisore modifica prompt @esperto"
+        template = '@ [scrivi l\'azione] @';
+        break;
       case 'show-prompt':
         template = 'mostra prompt @';
         break;
@@ -418,6 +423,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                 <DropdownMenuItem onClick={() => insertAgentAction('modify')}>
                   <Edit className="mr-2 h-4 w-4" />
                   Modifica Prompt Agente
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem onClick={() => insertAgentAction('delegate')}>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Delega Azione ad Altro Agente
                 </DropdownMenuItem>
                 
                 <DropdownMenuSub>
