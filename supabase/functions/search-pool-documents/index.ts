@@ -81,10 +81,14 @@ serve(async (req) => {
 
     console.log('📊 Found', matches?.length || 0, 'matches from match_documents');
 
-    // Get unique document IDs from matches
-    const documentIds = [...new Set(matches?.map((m: any) => m.id) || [])];
+    // Get unique pool_document_ids from matches (filter out nulls for direct uploads)
+    const poolDocumentIds = [...new Set(
+      matches
+        ?.map((m: any) => m.pool_document_id)
+        .filter((id: any) => id != null) || []
+    )];
     
-    if (documentIds.length === 0) {
+    if (poolDocumentIds.length === 0) {
       return new Response(
         JSON.stringify({ results: [], count: 0 }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -95,7 +99,7 @@ serve(async (req) => {
     const { data: poolDocs, error: poolError } = await supabase
       .from('knowledge_documents')
       .select('id, file_name, ai_summary, created_at')
-      .in('id', documentIds)
+      .in('id', poolDocumentIds)
       .eq('validation_status', 'validated')
       .eq('processing_status', 'ready_for_assignment');
 
@@ -123,9 +127,8 @@ serve(async (req) => {
     const results = (poolDocs || []).map(doc => {
       // Find max similarity for this document across all its chunks
       const docMatches = matches?.filter((m: any) => {
-        // The match_documents function returns chunks, we need to map back to documents
-        // Since we don't have direct pool_document_id in the return, we use the id
-        return m.id === doc.id;
+        // Use pool_document_id to match chunks to documents
+        return m.pool_document_id === doc.id;
       }) || [];
       
       const maxSimilarity = docMatches.length > 0 

@@ -734,6 +734,7 @@ export type Database = {
           content: string
           document_name: string
           id: string
+          pool_document_id: string
           similarity: number
           summary: string
         }[]
