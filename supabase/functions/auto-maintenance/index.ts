@@ -241,7 +241,101 @@ serve(async (req) => {
       console.log('[auto-maintenance] ✅ No orphaned chunks found');
     }
 
-    // 4. REGENERATE MISSING AI SUMMARIES
+    // 4. FIX STUCK SYNC LINKS
+    console.log('[auto-maintenance] --- Step 3: Fixing stuck sync links ---');
+    
+    // Find links stuck in 'syncing' status
+    const { data: stuckLinks, error: stuckLinksError } = await supabase
+      .from('agent_document_links')
+      .select('agent_id, document_id, sync_started_at')
+      .eq('sync_status', 'syncing');
+    
+    if (stuckLinksError) {
+      console.error('[auto-maintenance] ⚠️ Error finding stuck sync links:', stuckLinksError);
+    } else if (stuckLinks && stuckLinks.length > 0) {
+      console.log(`[auto-maintenance] Found ${stuckLinks.length} stuck sync links`);
+      
+      let linksFixed = 0;
+      
+      for (const link of stuckLinks) {
+        try {
+          // Check if chunks already exist for this agent-document pair
+          const { data: chunks, error: chunksError } = await supabase
+            .from('agent_knowledge')
+            .select('id')
+            .eq('agent_id', link.agent_id)
+            .eq('pool_document_id', link.document_id)
+            .limit(1);
+          
+          if (chunksError) {
+            console.error(`[auto-maintenance] ⚠️ Error checking chunks for link:`, chunksError);
+            continue;
+          }
+          
+          if (chunks && chunks.length > 0) {
+            // Chunks exist, mark as completed
+            console.log(`[auto-maintenance] ✅ Link has chunks, marking as completed`);
+            
+            const { error: updateError } = await supabase
+              .from('agent_document_links')
+              .update({ 
+                sync_status: 'completed',
+                sync_completed_at: new Date().toISOString(),
+                sync_error: null
+              })
+              .eq('agent_id', link.agent_id)
+              .eq('document_id', link.document_id);
+            
+            if (updateError) {
+              console.error(`[auto-maintenance] ❌ Failed to update link:`, updateError);
+            } else {
+              linksFixed++;
+              
+              await supabase
+                .from('maintenance_operation_details')
+                .insert({
+                  execution_log_id: execLogId,
+                  operation_type: 'fix_stuck_sync_link',
+                  target_id: link.document_id,
+                  target_name: `Link ${link.agent_id.substring(0, 8)}-${link.document_id.substring(0, 8)}`,
+                  status: 'success',
+                  attempt_number: 1
+                });
+            }
+          } else {
+            // No chunks, check if stuck for too long (> 10 minutes)
+            const syncStarted = new Date(link.sync_started_at);
+            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+            
+            if (syncStarted < tenMinutesAgo) {
+              console.log(`[auto-maintenance] 🔄 Link stuck > 10min without chunks, resetting`);
+              
+              const { error: resetError } = await supabase
+                .from('agent_document_links')
+                .update({ 
+                  sync_status: null,
+                  sync_started_at: null,
+                  sync_error: 'Reset by auto-maintenance: stuck in syncing status'
+                })
+                .eq('agent_id', link.agent_id)
+                .eq('document_id', link.document_id);
+              
+              if (!resetError) {
+                linksFixed++;
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[auto-maintenance] ❌ Exception fixing stuck link:`, err);
+        }
+      }
+      
+      console.log(`[auto-maintenance] ✅ Fixed ${linksFixed} stuck sync links`);
+    } else {
+      console.log('[auto-maintenance] ✅ No stuck sync links found');
+    }
+
+    // 5. REGENERATE MISSING AI SUMMARIES
     console.log('[auto-maintenance] --- Step 3.5: Regenerating missing AI summaries ---');
     
     // Query documents without valid AI summary (null, empty, or placeholder)
@@ -359,8 +453,8 @@ serve(async (req) => {
       console.log('[auto-maintenance] ✅ All validated documents have complete AI metadata');
     }
 
-    // 5. AUTO-SYNC AGENTS
-    console.log('[auto-maintenance] --- Step 3: Syncing agents ---');
+    // 6. AUTO-SYNC AGENTS
+    console.log('[auto-maintenance] --- Step 4: Syncing agents ---');
     
     const { data: agents, error: agentsError } = await supabase
       .from('agents')

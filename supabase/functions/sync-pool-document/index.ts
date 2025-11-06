@@ -70,7 +70,7 @@ serve(async (req) => {
       .from('knowledge_documents')
       .select('*')
       .eq('id', documentId)
-      .eq('validation_status', 'validated')
+      .eq('processing_status', 'ready_for_assignment')
       .maybeSingle();
 
     if (docError) throw docError;

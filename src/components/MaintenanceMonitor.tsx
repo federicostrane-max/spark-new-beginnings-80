@@ -162,7 +162,8 @@ export const MaintenanceMonitor = () => {
       fix_stuck_document: '📄 Fix Documento',
       cleanup_orphaned_chunk: '🧹 Cleanup Chunk',
       sync_agent: '🔄 Sync Agente',
-      regenerate_summary: '✨ Rigenera Summary'
+      regenerate_summary: '✨ Rigenera Summary',
+      fix_stuck_sync_link: '🔗 Fix Link Sync'
     };
     return labels[type as keyof typeof labels] || type;
   };

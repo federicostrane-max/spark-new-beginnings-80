@@ -19,7 +19,7 @@ export interface MaintenanceExecutionLog {
 export interface MaintenanceOperationDetail {
   id: string;
   execution_log_id: string;
-  operation_type: 'fix_stuck_document' | 'cleanup_orphaned_chunk' | 'sync_agent' | 'regenerate_summary';
+  operation_type: 'fix_stuck_document' | 'cleanup_orphaned_chunk' | 'sync_agent' | 'regenerate_summary' | 'fix_stuck_sync_link';
   target_id: string;
   target_name: string;
   status: 'success' | 'failed' | 'retry_needed';
