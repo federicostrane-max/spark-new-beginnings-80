@@ -2422,6 +2422,48 @@ ${agent.system_prompt}${knowledgeContext}`;
             }
           });
           
+          tools.push({
+            name: 'ask_agent_to_perform_task',
+            description: 'Ask another agent to perform a specific task and get their response. This creates a direct communication between agents. Use this when you need another agent to do something for you (e.g., ask the Prompt Expert to write a prompt, ask a specialist to analyze something). The other agent will receive your request and respond based on their expertise and knowledge.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent you want to ask'
+                },
+                task_description: {
+                  type: 'string',
+                  description: 'A clear description of what you want the agent to do. Be specific and provide all necessary context.'
+                },
+                context_information: {
+                  type: 'string',
+                  description: 'Optional additional context or information the agent should consider when performing the task',
+                }
+              },
+              required: ['agent_name', 'task_description']
+            }
+          });
+          
+          tools.push({
+            name: 'update_agent_system_prompt',
+            description: 'Update the system prompt of another agent. Use this when you need to modify how an agent behaves or what instructions it follows. Only use this when explicitly asked to update or change an agent\'s prompt.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                agent_name: {
+                  type: 'string',
+                  description: 'The name or slug of the agent whose prompt you want to update'
+                },
+                new_system_prompt: {
+                  type: 'string',
+                  description: 'The complete new system prompt for the agent'
+                }
+              },
+              required: ['agent_name', 'new_system_prompt']
+            }
+          });
+          
           // Log tool availability
           if (tools) {
             console.log(`🔧 [REQ-${requestId}] Tools available to agent:`);
@@ -3173,6 +3215,259 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             fullResponse += knowledgeText;
                             sendSSE(JSON.stringify({ type: 'content', text: knowledgeText }));
+                          }
+                        }
+                      }
+                      
+                      if (toolUseName === 'ask_agent_to_perform_task') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: ask_agent_to_perform_task`);
+                        console.log('   Target agent:', toolInput.agent_name);
+                        console.log('   Task:', toolInput.task_description?.slice(0, 100));
+                        
+                        // Normalize agent name
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug, system_prompt, llm_provider')
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                          
+                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        } else {
+                          console.log('✅ Found target agent:', targetAgent.name);
+                          
+                          // Send notification to user that consultation is happening
+                          const consultText = `\n\n🤝 **Consultazione con ${targetAgent.name}**\n\nSto chiedendo a ${targetAgent.name} di: ${toolInput.task_description}\n\n⏳ Attendere la risposta...\n\n`;
+                          fullResponse += consultText;
+                          sendSSE(JSON.stringify({ type: 'content', text: consultText }));
+                          
+                          try {
+                            // Prepare the request message for the target agent
+                            let requestMessage = `${agent.name} mi ha chiesto di aiutarlo con questo compito:\n\n${toolInput.task_description}`;
+                            
+                            if (toolInput.context_information) {
+                              requestMessage += `\n\nContesto aggiuntivo:\n${toolInput.context_information}`;
+                            }
+                            
+                            // Get or create conversation with target agent for this user
+                            let { data: targetConv, error: convError } = await supabase
+                              .from('agent_conversations')
+                              .select('id')
+                              .eq('agent_id', targetAgent.id)
+                              .eq('user_id', user.id)
+                              .single();
+                            
+                            if (convError || !targetConv) {
+                              console.log('Creating new conversation for inter-agent communication');
+                              const { data: newConv, error: createError } = await supabase
+                                .from('agent_conversations')
+                                .insert({
+                                  agent_id: targetAgent.id,
+                                  user_id: user.id,
+                                  title: `Consultazione da ${agent.name}`
+                                })
+                                .select('id')
+                                .single();
+                              
+                              if (createError) {
+                                throw new Error('Failed to create conversation');
+                              }
+                              targetConv = newConv;
+                            }
+                            
+                            // Get conversation history for context
+                            const { data: historyMessages } = await supabase
+                              .from('agent_messages')
+                              .select('role, content')
+                              .eq('conversation_id', targetConv.id)
+                              .order('created_at', { ascending: true })
+                              .limit(10);
+                            
+                            // Build message history
+                            const messages = [
+                              ...(historyMessages || []),
+                              { role: 'user', content: requestMessage }
+                            ];
+                            
+                            // Call the target agent's LLM
+                            const targetLLMProvider = targetAgent.llm_provider || 'anthropic';
+                            let agentResponse = '';
+                            
+                            if (targetLLMProvider === 'anthropic') {
+                              const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+                              if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured');
+                              
+                              const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  'x-api-key': anthropicKey,
+                                  'anthropic-version': '2023-06-01'
+                                },
+                                body: JSON.stringify({
+                                  model: 'claude-sonnet-4-5',
+                                  max_tokens: 64000,
+                                  temperature: 0.7,
+                                  system: targetAgent.system_prompt,
+                                  messages: messages.map(m => ({ role: m.role, content: m.content }))
+                                })
+                              });
+                              
+                              if (!anthropicResponse.ok) {
+                                const errorBody = await anthropicResponse.text();
+                                throw new Error(`Anthropic API error: ${anthropicResponse.status} - ${errorBody}`);
+                              }
+                              
+                              const responseData = await anthropicResponse.json();
+                              agentResponse = responseData.content[0].text;
+                              
+                            } else {
+                              throw new Error(`LLM provider ${targetLLMProvider} not supported for inter-agent communication`);
+                            }
+                            
+                            console.log(`✅ Received response from ${targetAgent.name} (${agentResponse.length} chars)`);
+                            
+                            // Store the inter-agent communication in database
+                            await supabase
+                              .from('inter_agent_messages')
+                              .insert({
+                                requesting_agent_id: agent.id,
+                                consulted_agent_id: targetAgent.id,
+                                question: toolInput.task_description,
+                                answer: agentResponse,
+                                context_conversation_id: conversation.id
+                              });
+                            
+                            // Store messages in target agent's conversation
+                            await supabase
+                              .from('agent_messages')
+                              .insert([
+                                {
+                                  conversation_id: targetConv.id,
+                                  role: 'user',
+                                  content: requestMessage
+                                },
+                                {
+                                  conversation_id: targetConv.id,
+                                  role: 'assistant',
+                                  content: agentResponse,
+                                  llm_provider: targetLLMProvider
+                                }
+                              ]);
+                            
+                            toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              agent_slug: targetAgent.slug,
+                              task_description: toolInput.task_description,
+                              response: agentResponse
+                            };
+                            
+                            // Display the response to user
+                            const responseText = `\n\n✅ **Risposta di ${targetAgent.name}**:\n\n${agentResponse}\n\n`;
+                            fullResponse += responseText;
+                            sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                            
+                          } catch (error) {
+                            console.error('❌ Error during inter-agent communication:', error);
+                            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                            toolResult = { success: false, error: errorMessage };
+                            
+                            const errorText = `\n\n❌ Errore durante la consultazione con ${targetAgent.name}: ${errorMessage}\n\n`;
+                            fullResponse += errorText;
+                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          }
+                        }
+                      }
+                      
+                      if (toolUseName === 'update_agent_system_prompt') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: update_agent_system_prompt`);
+                        console.log('   Target agent:', toolInput.agent_name);
+                        console.log('   New prompt length:', toolInput.new_system_prompt?.length);
+                        
+                        // Normalize agent name
+                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                        
+                        const { data: targetAgent, error: agentError } = await supabase
+                          .from('agents')
+                          .select('id, name, slug, system_prompt, user_id')
+                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                          .eq('active', true)
+                          .single();
+                        
+                        if (agentError || !targetAgent) {
+                          console.error('❌ Agent not found:', toolInput.agent_name);
+                          toolResult = { success: false, error: 'Agent not found' };
+                          
+                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        } else {
+                          console.log('✅ Found target agent:', targetAgent.name);
+                          
+                          try {
+                            // Save current prompt to history
+                            const { data: versionData } = await supabase
+                              .from('agent_prompt_history')
+                              .select('version_number')
+                              .eq('agent_id', targetAgent.id)
+                              .order('version_number', { ascending: false })
+                              .limit(1)
+                              .single();
+                            
+                            const nextVersion = (versionData?.version_number || 0) + 1;
+                            
+                            await supabase
+                              .from('agent_prompt_history')
+                              .insert({
+                                agent_id: targetAgent.id,
+                                system_prompt: targetAgent.system_prompt,
+                                version_number: nextVersion,
+                                created_by: user.id
+                              });
+                            
+                            // Update the agent's prompt
+                            const { error: updateError } = await supabase
+                              .from('agents')
+                              .update({ system_prompt: toolInput.new_system_prompt })
+                              .eq('id', targetAgent.id);
+                            
+                            if (updateError) {
+                              throw new Error(`Failed to update prompt: ${updateError.message}`);
+                            }
+                            
+                            console.log(`✅ Updated prompt for ${targetAgent.name}, saved version ${nextVersion}`);
+                            
+                            toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              agent_slug: targetAgent.slug,
+                              version_saved: nextVersion,
+                              new_prompt_length: toolInput.new_system_prompt.length
+                            };
+                            
+                            const successText = `\n\n✅ **Prompt aggiornato per ${targetAgent.name}**\n\nHo salvato il vecchio prompt nella cronologia (versione ${nextVersion}) e aggiornato il prompt dell'agente.\n\nNuovo prompt (${toolInput.new_system_prompt.length} caratteri):\n\n---\n\n${toolInput.new_system_prompt}\n\n---\n\n`;
+                            fullResponse += successText;
+                            sendSSE(JSON.stringify({ type: 'content', text: successText }));
+                            
+                          } catch (error) {
+                            console.error('❌ Error updating agent prompt:', error);
+                            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                            toolResult = { success: false, error: errorMessage };
+                            
+                            const errorText = `\n\n❌ Errore durante l'aggiornamento del prompt di ${targetAgent.name}: ${errorMessage}\n\n`;
+                            fullResponse += errorText;
+                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           }
                         }
                       }
