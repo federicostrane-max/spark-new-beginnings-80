@@ -1,8 +1,6 @@
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { FileDown, Loader2 } from "lucide-react";
+import { FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
 
 interface Message {
   id: string;
@@ -18,48 +16,29 @@ interface ExportChatPDFProps {
 }
 
 export const ExportChatPDF = ({ conversationId, agentName, messages }: ExportChatPDFProps) => {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async () => {
+  const handleExport = () => {
     if (messages.length === 0) {
       toast.error("Nessun messaggio da esportare");
       return;
     }
 
-    setExporting(true);
-    
-    try {
-      // Crea il contenuto HTML formattato
-      const htmlContent = generateHTMLContent(agentName, messages);
-      
-      // Chiama l'edge function per generare il PDF
-      const { data, error } = await supabase.functions.invoke('export-chat-pdf', {
-        body: {
-          conversationId,
-          agentName,
-          htmlContent,
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.url) {
-        // Scarica il PDF
-        const link = document.createElement('a');
-        link.href = data.url;
-        link.download = `chat_${agentName}_${new Date().toISOString().split('T')[0]}.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        toast.success("Chat esportata con successo!");
-      }
-    } catch (error) {
-      console.error("Errore durante l'esportazione:", error);
-      toast.error("Errore durante l'esportazione della chat");
-    } finally {
-      setExporting(false);
+    // Crea una finestra di stampa con il contenuto formattato
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error("Impossibile aprire la finestra di stampa. Controlla le impostazioni del browser.");
+      return;
     }
+
+    const htmlContent = generatePrintHTML(agentName, messages);
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    
+    // Attendi che le risorse siano caricate prima di stampare
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+      toast.success("Finestra di stampa aperta. Seleziona 'Salva come PDF' come destinazione.");
+    };
   };
 
   return (
@@ -67,24 +46,15 @@ export const ExportChatPDF = ({ conversationId, agentName, messages }: ExportCha
       variant="outline" 
       size="sm" 
       onClick={handleExport}
-      disabled={exporting || messages.length === 0}
+      disabled={messages.length === 0}
     >
-      {exporting ? (
-        <>
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Esportazione...
-        </>
-      ) : (
-        <>
-          <FileDown className="mr-2 h-4 w-4" />
-          Esporta PDF
-        </>
-      )}
+      <FileDown className="mr-2 h-4 w-4" />
+      Esporta PDF
     </Button>
   );
 };
 
-function generateHTMLContent(agentName: string, messages: Message[]): string {
+function generatePrintHTML(agentName: string, messages: Message[]): string {
   const messagesHTML = messages
     .map(msg => {
       const time = new Date(msg.created_at).toLocaleString('it-IT');
@@ -114,6 +84,9 @@ function generateHTMLContent(agentName: string, messages: Message[]): string {
         <meta charset="UTF-8">
         <title>Chat - ${agentName}</title>
         <style>
+          * {
+            box-sizing: border-box;
+          }
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             max-width: 800px;
@@ -142,6 +115,17 @@ function generateHTMLContent(agentName: string, messages: Message[]): string {
             padding-top: 20px;
             border-top: 1px solid #e5e7eb;
           }
+          @media print {
+            body {
+              padding: 20px;
+            }
+            .no-print {
+              display: none !important;
+            }
+            @page {
+              margin: 2cm;
+            }
+          }
         </style>
       </head>
       <body>
@@ -154,6 +138,11 @@ function generateHTMLContent(agentName: string, messages: Message[]): string {
         <div class="footer">
           Questa conversazione è stata esportata dal sistema Multi-Agent Consultant
         </div>
+        <script>
+          window.onafterprint = function() {
+            window.close();
+          };
+        </script>
       </body>
     </html>
   `;
