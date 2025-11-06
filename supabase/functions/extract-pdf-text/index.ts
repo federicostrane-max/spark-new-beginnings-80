@@ -88,8 +88,9 @@ serve(async (req) => {
 
     const extractedText = ocrData?.extractedText || '';
 
-    if (!extractedText || extractedText.trim().length < 10) {
-      throw new Error('Extracted text too short or empty. PDF might be corrupted or contain only images.');
+    if (!extractedText || extractedText.trim().length === 0) {
+      console.warn('[extract-pdf-text] ⚠️ Warning: OCR returned empty or very short text');
+      // Don't throw error - return what we have and let process-document handle it
     }
 
     console.log(`[extract-pdf-text] ✅ Extraction successful: ${extractedText.length} characters`);
