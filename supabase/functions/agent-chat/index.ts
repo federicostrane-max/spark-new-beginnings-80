@@ -1025,7 +1025,7 @@ function formatSearchResults(results: SearchResult[], topic: string, requestedCo
   
   const formattedResults = results.map(r => {
     // Multi-line format with all metadata
-    let formatted = `#${r.number}. **${r.title}**\n`;
+    let formatted = `**${r.number}. [${r.title}](${r.url})**\n`;
     
     // Authors line
     if (r.authors) {
