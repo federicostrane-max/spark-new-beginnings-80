@@ -1937,14 +1937,14 @@ Deno.serve(async (req) => {
           console.log(`   User Message: ${message.slice(0, 100)}...`);
           console.log('='.repeat(80));
 
-          // Create placeholder message in DB FIRST
+          // Create placeholder message in DB FIRST (without llm_provider to avoid ghost messages)
           const { data: placeholder, error: placeholderError } = await supabase
             .from('agent_messages')
             .insert({
               conversation_id: conversation.id,
               role: 'assistant',
-              content: '',
-              llm_provider: llmProvider  // Track which LLM will respond
+              content: ''
+              // ⚠️ llm_provider will be set ONLY after successful stream completion
             })
             .select()
             .single();
@@ -2449,6 +2449,14 @@ ${agent.system_prompt}${knowledgeContext}`;
                 throw new Error('ANTHROPIC_API_KEY is required but not set');
               }
               
+              console.log('🚀 ROUTING TO ANTHROPIC');
+              console.log(`   Model: claude-sonnet-4-5`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
+              console.log(`   API Key present: ${ANTHROPIC_API_KEY ? 'YES' : 'NO'}`);
+              console.log(`   API Key prefix: ${ANTHROPIC_API_KEY?.slice(0, 8)}...`);
+              console.log(`   System prompt length: ${enhancedSystemPrompt.length} chars`);
+              console.log(`   Tools enabled: ${tools.length} tools`);
+              
               response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -2467,13 +2475,32 @@ ${agent.system_prompt}${knowledgeContext}`;
                 }),
                 signal: controller.signal
               });
+              
+              console.log(`   ✅ Response status: ${response.status}`);
+              console.log(`   ✅ Response ok: ${response.ok}`);
+              console.log(`   ✅ Response headers:`, Object.fromEntries(response.headers.entries()));
             }
           
             clearTimeout(timeout);
 
             if (!response.ok) {
               const errorBody = await response.text();
-              console.error(`${llmProvider.toUpperCase()} API error details:`, response.status, errorBody);
+              console.error(`❌ ${llmProvider.toUpperCase()} API ERROR`);
+              console.error(`   Status: ${response.status}`);
+              console.error(`   Body: ${errorBody}`);
+              console.error(`   Headers:`, Object.fromEntries(response.headers.entries()));
+              
+              // Update placeholder with error message so user sees something
+              if (placeholderMsg) {
+                await supabase
+                  .from('agent_messages')
+                  .update({
+                    content: `❌ Errore API (${response.status}): ${errorBody.slice(0, 200)}...`,
+                    llm_provider: llmProvider
+                  })
+                  .eq('id', placeholderMsg.id);
+              }
+              
               throw new Error(`${llmProvider.toUpperCase()} API error: ${response.status} - ${errorBody}`);
             }
           } catch (error: any) {
@@ -2488,6 +2515,25 @@ ${agent.system_prompt}${knowledgeContext}`;
           if (!reader) throw new Error('No response body');
 
           const decoder = new TextDecoder();
+          
+          // Add Anthropic-specific timeout (30 seconds for first chunk)
+          let anthropicTimeout: number | undefined;
+          if (llmProvider === 'anthropic') {
+            anthropicTimeout = setTimeout(() => {
+              console.error('❌ Anthropic stream timeout after 30s - no content received');
+              if (placeholderMsg) {
+                supabase
+                  .from('agent_messages')
+                  .update({
+                    content: '❌ Timeout: nessuna risposta ricevuta da Claude dopo 30 secondi.',
+                    llm_provider: llmProvider
+                  })
+                  .eq('id', placeholderMsg.id);
+              }
+              clearInterval(keepAliveInterval);
+              closeStream();
+            }, 30000);
+          }
           let buffer = '';
           let lastKeepAlive = Date.now();
           let chunkCount = 0;
@@ -2537,6 +2583,17 @@ ${agent.system_prompt}${knowledgeContext}`;
                 try {
                   const parsed = JSON.parse(data);
                   chunkCount++;
+                  
+                  // Clear Anthropic timeout on first chunk received
+                  if (anthropicTimeout && chunkCount === 1) {
+                    clearTimeout(anthropicTimeout);
+                    console.log('✅ First chunk received, Anthropic timeout cleared');
+                  }
+                  
+                  // Log chunk details for debugging
+                  if (llmProvider === 'anthropic') {
+                    console.log(`🔍 [REQ-${requestId}] Anthropic Chunk ${chunkCount}: type=${parsed.type}`);
+                  }
                   
                   // Handle DeepSeek streaming format
                   if (llmProvider === 'deepseek') {
@@ -2591,6 +2648,16 @@ ${agent.system_prompt}${knowledgeContext}`;
                   }
                   
                   // Anthropic-specific handling
+                  // Handle message start
+                  if (parsed.type === 'message_start') {
+                    console.log(`📨 [REQ-${requestId}] Anthropic message started`);
+                  }
+                  
+                  // Handle content block start
+                  if (parsed.type === 'content_block_start') {
+                    console.log(`📝 [REQ-${requestId}] Content block started: type=${parsed.content_block?.type}`);
+                  }
+                  
                   // Handle tool use start
                   if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
                     toolUseId = parsed.content_block.id;
