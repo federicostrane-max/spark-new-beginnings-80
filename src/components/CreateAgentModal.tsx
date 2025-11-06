@@ -112,8 +112,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         console.log("Agent updated successfully");
         previousPromptRef.current = systemPrompt; // Update ref after save
-        onSuccess(data);
-        onOpenChange(false);
+        
+        // Force a more reliable refresh by calling onSuccess with updated data
+        setTimeout(() => {
+          onSuccess(data);
+          onOpenChange(false);
+        }, 100);
       } else {
         // Create new agent
         // Auto-generate slug
@@ -157,13 +161,16 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         console.log("Agent created successfully");
         
-        onSuccess(data);
-        onOpenChange(false);
-        
-        // Reset form
-        setName("");
-        setDescription("");
-        setSystemPrompt("");
+        // Force a more reliable refresh with a small delay
+        setTimeout(() => {
+          onSuccess(data);
+          onOpenChange(false);
+          
+          // Reset form
+          setName("");
+          setDescription("");
+          setSystemPrompt("");
+        }, 100);
       }
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);

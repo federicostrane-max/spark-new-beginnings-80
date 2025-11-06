@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw, Search } from "lucide-react";
 import { useAgentHealth, usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
@@ -55,6 +56,7 @@ export const AgentsSidebar = ({
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
+  const [searchQuery, setSearchQuery] = useState("");
   
   // Health monitoring
   const agentIds = agents.map(a => a.id);
@@ -210,16 +212,35 @@ export const AgentsSidebar = ({
         </Button>
       </div>
 
+      {/* Search Box */}
+      <div className="px-3 pb-2">
+        <div className="relative">
+          <Search className="absolute left-2 top-2.5 h-4 w-4 text-sidebar-foreground/50" />
+          <Input
+            placeholder="Cerca agente..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 bg-sidebar-accent/50 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+          />
+        </div>
+      </div>
+
       {/* Agents List */}
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="space-y-1 p-2">
           {loading ? (
             <div className="text-sm text-sidebar-foreground/70 text-center py-4">Loading...</div>
-          ) : agents.length === 0 ? (
-            <div className="text-sm text-sidebar-foreground/70 text-center py-4">No agents yet</div>
+          ) : agents.filter(agent => 
+              agent.name.toLowerCase().includes(searchQuery.toLowerCase())
+            ).length === 0 ? (
+            <div className="text-sm text-sidebar-foreground/70 text-center py-4">
+              {searchQuery ? "Nessun agente trovato" : "No agents yet"}
+            </div>
           ) : (
-            agents.map((agent) => {
+            agents
+              .filter(agent => agent.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map((agent) => {
               const agentHealth = getAgentStatus(agent.id);
               const showHealthBadge = agentHealth?.hasIssues;
               
@@ -230,15 +251,12 @@ export const AgentsSidebar = ({
                       <button
                         onClick={() => onSelectAgent(agent)}
                         className={cn(
-                          "flex items-center gap-3 w-full rounded-lg p-3 transition-colors text-left relative",
+                          "flex items-center gap-2 w-full rounded-lg p-3 transition-colors text-left relative",
                           agent.id === currentAgentId
                             ? "bg-sidebar-accent text-sidebar-accent-foreground"
                             : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                         )}
                       >
-                        <div className="relative text-2xl flex-shrink-0">
-                          {agent.avatar || "🤖"}
-                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
                           <p className="text-xs opacity-70 line-clamp-2">{agent.description}</p>
