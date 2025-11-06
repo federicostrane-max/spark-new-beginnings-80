@@ -407,7 +407,7 @@ Se confidence < 70, considera il documento NON rilevante.`;
       .from('knowledge_documents')
       .update({ 
         validation_status: 'validated',
-        processing_status: 'pending_processing',
+        processing_status: 'validated',
         validation_reason: `Documento valido: ${aiResult.motivazione}`,
         validation_date: new Date().toISOString(),
         text_length: textLength,

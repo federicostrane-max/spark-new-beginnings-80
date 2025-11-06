@@ -78,15 +78,14 @@ serve(async (req) => {
         console.log(`[fix-stuck-documents] ✓ Document has existing chunks`);
       }
 
-      // Update status to validated and ready for processing
-      const targetProcessingStatus = doc.processing_status === 'validating' ? 'pending_processing' : doc.processing_status;
-      console.log(`[fix-stuck-documents] Updating status: validated → ${targetProcessingStatus}`);
+      // Update status to validated
+      console.log(`[fix-stuck-documents] Updating status to 'validated'`);
       
       const { error: updateError } = await supabase
         .from('knowledge_documents')
         .update({
           validation_status: 'validated',
-          processing_status: targetProcessingStatus,
+          processing_status: 'validated',
           validation_reason: 'Document validation completed (recovered from stuck state)',
           validation_date: new Date().toISOString()
         })
