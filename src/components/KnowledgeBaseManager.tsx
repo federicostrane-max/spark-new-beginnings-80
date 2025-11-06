@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle, Settings } from "lucide-react";
+import { Loader2, Trash2, FileText, Plus, RefreshCw, CheckCircle2, AlertCircle, Download, XCircle, Settings, Search } from "lucide-react";
 import { logger } from "@/lib/logger";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +49,7 @@ interface PoolDocument {
   ai_summary: string | null;
   created_at: string;
   isAssigned: boolean;
+  similarity?: number;
 }
 
 export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: KnowledgeBaseManagerProps) => {
@@ -61,6 +63,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [syncStatuses, setSyncStatuses] = useState<Map<string, 'synced' | 'syncing' | 'error'>>(new Map());
   const [hasTriedQuickSync, setHasTriedQuickSync] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [displayedDocuments, setDisplayedDocuments] = useState<PoolDocument[]>([]);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -439,7 +444,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       console.log('📚 LOAD POOL DOCUMENTS SUCCESS, found:', poolDocs.length);
       setPoolDocuments(poolDocs);
+      setDisplayedDocuments(poolDocs);
       setSelectedDocuments(new Set());
+      setSearchQuery('');
     } catch (error: any) {
       console.error('❌ Error loading pool documents:', error);
       toast.error('Errore nel caricamento dei documenti disponibili');
@@ -447,6 +454,49 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       setLoadingPool(false);
     }
   };
+
+  const performSemanticSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setDisplayedDocuments(poolDocuments);
+      return;
+    }
+
+    try {
+      setSearching(true);
+      console.log('🔍 Performing semantic search:', query);
+
+      const { data, error } = await supabase.functions.invoke('search-pool-documents', {
+        body: { query: query.trim(), agentId }
+      });
+
+      if (error) {
+        console.error('Search error:', error);
+        toast.error('Errore nella ricerca');
+        return;
+      }
+
+      console.log('✅ Search results:', data.results?.length || 0);
+      setDisplayedDocuments(data.results || []);
+      
+      if (data.results?.length === 0) {
+        toast.info('Nessun documento trovato per questa ricerca');
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      toast.error('Errore nella ricerca');
+    } finally {
+      setSearching(false);
+    }
+  }, [poolDocuments, agentId]);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      performSemanticSearch(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, performSemanticSearch]);
 
   const handleAssignDocuments = async () => {
     if (selectedDocuments.size === 0) {
@@ -809,18 +859,48 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             </DialogDescription>
           </DialogHeader>
 
+          <div className="space-y-3 pb-4">
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Cerca documenti (es: team building, leadership)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+              {searching && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+            </div>
+
+            {/* Results count */}
+            {searchQuery && (
+              <div className="flex items-center justify-between text-sm">
+                <Badge variant="outline">
+                  {displayedDocuments.length} risultat{displayedDocuments.length === 1 ? 'o' : 'i'} per "{searchQuery}"
+                </Badge>
+                {displayedDocuments.length > 0 && displayedDocuments.some(d => d.similarity) && (
+                  <span className="text-xs text-muted-foreground">
+                    Ordinati per rilevanza
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="flex-1 overflow-auto">
             {loadingPool ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : poolDocuments.length === 0 ? (
+            ) : displayedDocuments.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                Nessun documento disponibile nel pool
+                {searchQuery ? 'Nessun documento trovato per questa ricerca' : 'Nessun documento disponibile nel pool'}
               </div>
             ) : (
               <div className="space-y-2">
-                {poolDocuments.map((doc) => (
+                {displayedDocuments.map((doc) => (
                   <div
                     key={doc.id}
                     className={`flex items-start gap-3 p-3 border rounded-lg ${
@@ -841,11 +921,16 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                       }}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         <p className="font-medium truncate">{doc.file_name}</p>
                         {doc.isAssigned && (
-                          <span className="text-xs text-muted-foreground">(già assegnato)</span>
+                          <Badge variant="secondary" className="text-xs">già assegnato</Badge>
+                        )}
+                        {doc.similarity !== undefined && doc.similarity > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            {Math.round(doc.similarity * 100)}% rilevanza
+                          </Badge>
                         )}
                       </div>
                       {doc.ai_summary && (
