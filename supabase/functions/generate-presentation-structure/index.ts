@@ -11,6 +11,41 @@ interface PresentationSlide {
   type: 'title' | 'content' | 'bullets' | 'conclusion';
 }
 
+function createFallbackStructure(text: string, title?: string): PresentationSlide[] {
+  console.log('[generate-presentation-structure] Creating fallback structure');
+  
+  const lines = text.split('\n').filter(line => line.trim().length > 0);
+  const slides: PresentationSlide[] = [];
+  
+  // Title slide
+  slides.push({
+    title: title || 'Presentation',
+    content: ['Generated from document'],
+    type: 'title'
+  });
+  
+  // Split content into chunks for slides
+  const chunkSize = Math.max(3, Math.min(5, Math.ceil(lines.length / 5)));
+  for (let i = 0; i < lines.length && slides.length < 6; i += chunkSize) {
+    const chunk = lines.slice(i, i + chunkSize).slice(0, 5); // Max 5 points per slide
+    if (chunk.length > 0) {
+      slides.push({
+        title: `Slide ${slides.length}`,
+        content: chunk,
+        type: 'bullets'
+      });
+    }
+  }
+  
+  // Conclusion slide
+  if (slides.length > 1) {
+    slides[slides.length - 1].type = 'conclusion';
+    slides[slides.length - 1].title = 'Summary';
+  }
+  
+  return slides;
+}
+
 serve(async (req) => {
   console.log('[generate-presentation-structure] ========== START ==========');
   
@@ -31,21 +66,27 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    // Use Lovable AI to analyze text and extract presentation structure
+    // Use Lovable AI to analyze text and extract presentation structure with retry logic
     console.log('[generate-presentation-structure] Calling Lovable AI for structure extraction...');
     
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a presentation structure analyzer. Extract key concepts from text and organize them into presentation slides.
+    let aiResponse;
+    let lastError;
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              {
+                role: 'system',
+                content: `You are a presentation structure analyzer. Extract key concepts from text and organize them into presentation slides.
             
 Return a JSON array of slides with this exact structure:
 [
@@ -74,20 +115,55 @@ Rules:
 - Use "conclusion" type for the last slide
 - Keep content concise and impactful
 - Extract only the most important concepts`
-          },
-          {
-            role: 'user',
-            content: `Analyze this text and create a presentation structure:\n\nTitle: ${title || 'Presentation'}\n\nContent:\n${text}`
-          }
-        ],
-        temperature: 0.3,
-      }),
-    });
+              },
+              {
+                role: 'user',
+                content: `Analyze this text and create a presentation structure:\n\nTitle: ${title || 'Presentation'}\n\nContent:\n${text}`
+              }
+            ],
+            temperature: 0.3,
+          }),
+        });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('[generate-presentation-structure] AI API error:', aiResponse.status, errorText);
-      throw new Error(`AI API error: ${aiResponse.status}`);
+        if (aiResponse.ok) {
+          break; // Success, exit retry loop
+        }
+
+        const errorText = await aiResponse.text();
+        console.error(`[generate-presentation-structure] AI API error (attempt ${attempt}/${maxRetries}):`, aiResponse.status, errorText);
+        
+        // Retry on 503, 429, or 500 errors
+        if ([503, 429, 500].includes(aiResponse.status) && attempt < maxRetries) {
+          const delayMs = attempt * 1000; // 1s, 2s, 3s
+          console.log(`[generate-presentation-structure] Retrying in ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+        
+        lastError = new Error(`AI API error: ${aiResponse.status}`);
+      } catch (fetchError) {
+        console.error(`[generate-presentation-structure] Fetch error (attempt ${attempt}/${maxRetries}):`, fetchError);
+        lastError = fetchError;
+        
+        if (attempt < maxRetries) {
+          const delayMs = attempt * 1000;
+          console.log(`[generate-presentation-structure] Retrying in ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+      }
+    }
+
+    // If all retries failed, use fallback
+    if (!aiResponse || !aiResponse.ok) {
+      console.warn('[generate-presentation-structure] AI API unavailable after retries, using fallback structure');
+      const fallbackSlides = createFallbackStructure(text, title);
+      return new Response(
+        JSON.stringify({ slides: fallbackSlides }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const aiData = await aiResponse.json();
