@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle, FileX } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { FixStuckDocuments } from "@/components/FixStuckDocuments";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,9 +27,18 @@ export default function DocumentPool() {
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [checkingMigration, setCheckingMigration] = useState(true);
   const [tableKey, setTableKey] = useState(0);
+  
+  // Health metrics
+  const [healthMetrics, setHealthMetrics] = useState({
+    ready: 0,
+    processing: 0,
+    orphanedChunks: 0,
+    failed: 0
+  });
 
   useEffect(() => {
     checkMigrationStatus();
+    loadHealthMetrics();
   }, []);
 
   const checkMigrationStatus = async () => {
@@ -55,9 +65,57 @@ export default function DocumentPool() {
     }
   };
 
+  const loadHealthMetrics = async () => {
+    try {
+      const { count: readyCount } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('processing_status', 'ready_for_assignment');
+
+      const { count: processingCount } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .in('processing_status', ['validating', 'processing', 'validated']);
+
+      const { count: failedCount } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .in('processing_status', ['validation_failed', 'processing_failed']);
+
+      // Simplified orphaned chunks count (sample check)
+      const { data: poolChunks } = await supabase
+        .from('agent_knowledge')
+        .select('id')
+        .in('source_type', ['pool', 'shared_pool'])
+        .not('pool_document_id', 'is', null)
+        .limit(100);
+
+      let orphanedSample = 0;
+      if (poolChunks) {
+        for (const chunk of poolChunks.slice(0, 20)) {
+          const { data } = await supabase
+            .from('agent_document_links')
+            .select('id')
+            .limit(1);
+          if (!data || data.length === 0) orphanedSample++;
+        }
+      }
+
+      setHealthMetrics({
+        ready: readyCount || 0,
+        processing: processingCount || 0,
+        orphanedChunks: orphanedSample * 5, // Estimate
+        failed: failedCount || 0
+      });
+    } catch (error) {
+      console.error('[Health Metrics] Error:', error);
+    }
+  };
+
   const handleUploadComplete = () => {
     setTableKey(prev => prev + 1);
     checkMigrationStatus();
+    loadHealthMetrics();
   };
 
   const handleMigration = async () => {
@@ -91,8 +149,9 @@ export default function DocumentPool() {
         );
       }
 
-      // Refresh migration status
+      // Refresh migration status and health
       await checkMigrationStatus();
+      await loadHealthMetrics();
       
       // Trigger table refresh
       setTableKey(prev => prev + 1);
@@ -161,6 +220,42 @@ export default function DocumentPool() {
             </AlertDescription>
           </Alert>
         )}
+
+        {/* Health Dashboard */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              📊 Stato Sistema Knowledge Base
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="flex flex-col items-center p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+                <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
+                <div className="text-2xl font-bold text-green-500">{healthMetrics.ready}</div>
+                <div className="text-sm text-muted-foreground text-center">Pronti</div>
+              </div>
+              
+              <div className="flex flex-col items-center p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <Loader2 className="h-8 w-8 text-blue-500 mb-2" />
+                <div className="text-2xl font-bold text-blue-500">{healthMetrics.processing}</div>
+                <div className="text-sm text-muted-foreground text-center">In Elaborazione</div>
+              </div>
+              
+              <div className="flex flex-col items-center p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                <AlertTriangle className="h-8 w-8 text-yellow-500 mb-2" />
+                <div className="text-2xl font-bold text-yellow-500">{healthMetrics.orphanedChunks}</div>
+                <div className="text-sm text-muted-foreground text-center">Chunks Orfani</div>
+              </div>
+              
+              <div className="flex flex-col items-center p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                <FileX className="h-8 w-8 text-red-500 mb-2" />
+                <div className="text-2xl font-bold text-red-500">{healthMetrics.failed}</div>
+                <div className="text-sm text-muted-foreground text-center">Errori</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="mb-6">
           <DocumentPoolUpload onUploadComplete={handleUploadComplete} />

@@ -81,7 +81,31 @@ serve(async (req) => {
     console.log(`[sync-pool-document] Found document: ${poolDoc.file_name}`);
 
     // ========================================
-    // STEP 2: Check if already synced
+    // STEP 2: CRITICAL - Create/Verify agent_document_links FIRST
+    // ========================================
+    console.log('[sync-pool-document] Creating/verifying agent_document_links...');
+    
+    const { error: linkError } = await supabase
+      .from('agent_document_links')
+      .upsert({
+        agent_id: agentId,
+        document_id: documentId,
+        assignment_type: 'automatic',
+        confidence_score: 1.0
+      }, { 
+        onConflict: 'agent_id,document_id',
+        ignoreDuplicates: false
+      });
+
+    if (linkError) {
+      console.error('[sync-pool-document] Failed to create agent_document_link:', linkError);
+      throw new Error(`Failed to create document link: ${linkError.message}`);
+    }
+
+    console.log('[sync-pool-document] ✓ Agent document link guaranteed');
+
+    // ========================================
+    // STEP 3: Check if already synced
     // ========================================
     const { data: existingChunks } = await supabase
       .from('agent_knowledge')
@@ -102,7 +126,7 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 3: Copy ALL existing chunks for this document
+    // STEP 4: Copy ALL existing chunks for this document
     // ========================================
     console.log('[sync-pool-document] Looking for existing chunks (any agent or shared pool)...');
     
@@ -181,7 +205,7 @@ serve(async (req) => {
     console.log('[sync-pool-document] No existing chunks found, falling back to PDF processing...');
 
     // ========================================
-    // STEP 4: FALLBACK - Download and extract text from PDF
+    // STEP 5: FALLBACK - Download and extract text from PDF
     // ========================================
     console.log(`[sync-pool-document] Downloading PDF from bucket: knowledge-pdfs, path: ${poolDoc.file_path}`);
     
@@ -248,13 +272,13 @@ serve(async (req) => {
     console.log(`[sync-pool-document] Extracted ${fullText.length} characters`);
 
     // ========================================
-    // STEP 5: Chunk the text
+    // STEP 6: Chunk the text
     // ========================================
     const chunks = chunkText(fullText, 1000, 200);
     console.log(`[sync-pool-document] Created ${chunks.length} chunks`);
 
     // ========================================
-    // STEP 6: Generate embeddings and insert chunks
+    // STEP 7: Generate embeddings and insert chunks
     // ========================================
     const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
     if (!openAIApiKey) {

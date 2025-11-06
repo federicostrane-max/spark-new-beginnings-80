@@ -152,6 +152,8 @@ export const usePoolDocumentsHealth = () => {
   const [stuckCount, setStuckCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const [validatingCount, setValidatingCount] = useState(0);
+  const [orphanedChunksCount, setOrphanedChunksCount] = useState(0);
+  const [documentsWithoutChunksCount, setDocumentsWithoutChunksCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkPoolHealth = async () => {
@@ -193,14 +195,54 @@ export const usePoolDocumentsHealth = () => {
         throw validatingError;
       }
 
+      // Chunks orfani (pool/shared_pool senza agent_document_links)
+      const { data: poolChunks, error: poolChunksError } = await supabase
+        .from('agent_knowledge')
+        .select('id, agent_id, pool_document_id')
+        .in('source_type', ['pool', 'shared_pool'])
+        .not('pool_document_id', 'is', null);
+
+      let orphanedCount = 0;
+      if (!poolChunksError && poolChunks) {
+        for (const chunk of poolChunks) {
+          const { count } = await supabase
+            .from('agent_document_links')
+            .select('id', { count: 'exact', head: true })
+            .eq('agent_id', chunk.agent_id)
+            .eq('document_id', chunk.pool_document_id);
+          
+          if ((count || 0) === 0) orphanedCount++;
+        }
+      }
+
+      // Documenti senza chunks
+      const { data: allDocs, error: allDocsError } = await supabase
+        .from('knowledge_documents')
+        .select('id')
+        .eq('processing_status', 'ready_for_assignment');
+
+      let docsWithoutChunks = 0;
+      if (!allDocsError && allDocs) {
+        for (const doc of allDocs) {
+          const { count } = await supabase
+            .from('agent_knowledge')
+            .select('id', { count: 'exact', head: true })
+            .eq('pool_document_id', doc.id);
+          
+          if ((count || 0) === 0) docsWithoutChunks++;
+        }
+      }
+
       const stuck = stuckDocCount || 0;
       const errors = errorDocCount || 0;
       const validating = validatingDocCount || 0;
-      const totalIssues = stuck + errors + validating;
+      const totalIssues = stuck + errors + validating + orphanedCount + docsWithoutChunks;
       
       setStuckCount(stuck);
       setErrorCount(errors);
       setValidatingCount(validating);
+      setOrphanedChunksCount(orphanedCount);
+      setDocumentsWithoutChunksCount(docsWithoutChunks);
       setIssueCount(totalIssues);
       setHasIssues(totalIssues > 0);
 
@@ -208,7 +250,9 @@ export const usePoolDocumentsHealth = () => {
         logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
           stuckCount: stuck,
           errorCount: errors,
-          validatingCount: validating
+          validatingCount: validating,
+          orphanedChunksCount: orphanedCount,
+          documentsWithoutChunksCount: docsWithoutChunks
         });
       }
     } catch (error) {
@@ -218,6 +262,8 @@ export const usePoolDocumentsHealth = () => {
       setStuckCount(0);
       setErrorCount(0);
       setValidatingCount(0);
+      setOrphanedChunksCount(0);
+      setDocumentsWithoutChunksCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -237,6 +283,8 @@ export const usePoolDocumentsHealth = () => {
     stuckCount,
     errorCount,
     validatingCount,
+    orphanedChunksCount,
+    documentsWithoutChunksCount,
     isLoading,
     refresh: checkPoolHealth
   };

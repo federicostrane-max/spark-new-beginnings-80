@@ -9,6 +9,7 @@ const corsHeaders = {
 interface ProcessRequest {
   documentId: string;
   fullText?: string; // Complete extracted text (optional, can be fetched from DB)
+  retryCount?: number; // Numero di retry già effettuati
 }
 
 interface AIAnalysis {
@@ -30,15 +31,16 @@ serve(async (req) => {
   }, 5 * 60 * 1000);
 
   try {
-    const { documentId, fullText: providedFullText }: ProcessRequest = await req.json();
+    const { documentId, fullText: providedFullText, retryCount = 0 }: ProcessRequest = await req.json();
 
     console.log(`[process-document] ========== START ==========`);
     console.log(`[process-document] Input:`, JSON.stringify({
       documentId,
       fullTextProvided: !!providedFullText,
-      fullTextLength: providedFullText?.length || 0
+      fullTextLength: providedFullText?.length || 0,
+      retryCount
     }));
-    console.log(`[process-document] Starting processing for document ${documentId}`);
+    console.log(`[process-document] Starting processing for document ${documentId} (retry: ${retryCount})`);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -158,7 +160,48 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       if (!aiResponse.ok) {
         const errorText = await aiResponse.text();
         console.error('[process-document] AI API error:', aiResponse.status, errorText);
-        throw new Error(`AI API error: ${aiResponse.status}`);
+        
+        // Retry logic per errori temporanei (429, 500, 503)
+        if ([429, 500, 503].includes(aiResponse.status) && retryCount < 3) {
+          const nextRetryCount = retryCount + 1;
+          const delays = [2000, 5000, 10000]; // 2s, 5s, 10s
+          const delay = delays[retryCount] || 10000;
+          
+          console.log(`[process-document] Retrying in ${delay}ms (attempt ${nextRetryCount}/3)...`);
+          
+          // Update retry count in cache
+          await supabase
+            .from('document_processing_cache')
+            .update({ retry_count: nextRetryCount })
+            .eq('document_id', documentId);
+          
+          // Wait before retry
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
+          // Recursive retry
+          const retryResponse = await fetch(`${supabaseUrl}/functions/v1/process-document`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              documentId,
+              fullText: fullText,
+              retryCount: nextRetryCount
+            }),
+          });
+          
+          if (retryResponse.ok) {
+            const retryData = await retryResponse.json();
+            console.log('[process-document] Retry successful!');
+            return new Response(JSON.stringify(retryData), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        
+        throw new Error(`AI API error: ${aiResponse.status} - ${errorText}`);
       }
 
       const aiData = await aiResponse.json();
@@ -237,7 +280,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
 
     // Try to mark as failed in database
     try {
-      const { documentId } = await req.clone().json();
+      const { documentId, retryCount = 0 } = await req.clone().json();
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
       const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
       const supabase = createClient(supabaseUrl, supabaseKey);
@@ -253,7 +296,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         .from('document_processing_cache')
         .update({ 
           error_message: error instanceof Error ? error.message : 'Processing error',
-          retry_count: 0 // Could increment for retry logic
+          retry_count: retryCount
         })
         .eq('document_id', documentId);
     } catch (dbError) {

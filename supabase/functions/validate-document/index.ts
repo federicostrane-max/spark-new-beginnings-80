@@ -40,10 +40,48 @@ serve(async (req) => {
     }));
     console.log(`[validate-document] Starting validation for document ${documentId}`);
 
-    // Initialize Supabase client
+    // ========================================
+    // IDEMPOTENCY CHECK
+    // ========================================
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Check if already validated or processing
+    const { data: docCheck, error: checkError } = await supabase
+      .from('knowledge_documents')
+      .select('validation_status, processing_status, validation_date')
+      .eq('id', documentId)
+      .single();
+
+    if (checkError) {
+      console.error('[validate-document] Error checking document status:', checkError);
+      // Continue with validation
+    } else if (docCheck) {
+      // Skip if already validated
+      if (docCheck.validation_date && docCheck.validation_status === 'validated') {
+        console.log('[validate-document] ⏭️ Document already validated, skipping...');
+        return new Response(JSON.stringify({
+          success: true,
+          reason: 'Document already validated',
+          skipped: true
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Skip if already in ready_for_assignment status
+      if (docCheck.processing_status === 'ready_for_assignment') {
+        console.log('[validate-document] ⏭️ Document already ready for assignment, skipping...');
+        return new Response(JSON.stringify({
+          success: true,
+          reason: 'Document already processed',
+          skipped: true
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
 
     // Get document info
     const { data: doc, error: docError } = await supabase

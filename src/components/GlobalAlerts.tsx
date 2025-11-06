@@ -12,20 +12,24 @@ export const GlobalAlerts = () => {
     return null;
   }
 
+  const issueDetails = [
+    poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`,
+    poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`,
+    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`,
+    poolHealth.orphanedChunksCount > 0 && `${poolHealth.orphanedChunksCount} chunks orfani`,
+    poolHealth.documentsWithoutChunksCount > 0 && `${poolHealth.documentsWithoutChunksCount} senza chunks`
+  ].filter(Boolean).join(' • ');
+
   return (
     <Alert variant="destructive" className="mx-4 mt-4 border-2">
       <AlertTriangle className="h-5 w-5" />
       <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <span className="font-semibold">
-            {poolHealth.issueCount} {poolHealth.issueCount === 1 ? 'documento' : 'documenti'} nel pool {poolHealth.issueCount === 1 ? 'necessita' : 'necessitano'} di attenzione
+            {poolHealth.issueCount} {poolHealth.issueCount === 1 ? 'problema' : 'problemi'} nel pool documenti
           </span>
           <p className="text-sm mt-1 opacity-90">
-            {poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`}
-            {poolHealth.stuckCount > 0 && (poolHealth.errorCount > 0 || poolHealth.validatingCount > 0) && ' • '}
-            {poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`}
-            {poolHealth.errorCount > 0 && poolHealth.validatingCount > 0 && ' • '}
-            {poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`}
+            {issueDetails}
           </p>
         </div>
         <Button 
