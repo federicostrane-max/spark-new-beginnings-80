@@ -47,10 +47,10 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // If fullText is not provided, reconstruct it from agent_knowledge chunks
+    // If fullText is not provided, try to get it from chunks or extract from PDF
     let fullText = providedFullText;
     if (!fullText) {
-      console.log('[process-document] Full text not provided, reconstructing from chunks...');
+      console.log('[process-document] Full text not provided, checking for chunks...');
       
       const { data: chunks, error: chunksError } = await supabase
         .from('agent_knowledge')
@@ -58,13 +58,37 @@ serve(async (req) => {
         .eq('pool_document_id', documentId)
         .order('created_at', { ascending: true });
 
-      if (chunksError || !chunks || chunks.length === 0) {
-        throw new Error(`Cannot retrieve chunks for document ${documentId}: ${chunksError?.message || 'No chunks found'}`);
-      }
+      if (!chunksError && chunks && chunks.length > 0) {
+        // Reconstruct full text from chunks (remove potential duplicates from overlap)
+        fullText = chunks.map(c => c.content).join(' ');
+        console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
+      } else {
+        // No chunks found, extract text from PDF
+        console.log('[process-document] No chunks found, extracting text from PDF...');
+        
+        const { data: extractResult, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+          body: { documentId }
+        });
 
-      // Reconstruct full text from chunks (remove potential duplicates from overlap)
-      fullText = chunks.map(c => c.content).join(' ');
-      console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
+        if (extractError || !extractResult?.text) {
+          throw new Error(`Cannot extract text from PDF for document ${documentId}: ${extractError?.message || 'No text extracted'}`);
+        }
+
+        const extractedText = extractResult.text;
+        fullText = extractedText;
+        console.log(`[process-document] Extracted ${extractedText.length} characters from PDF`);
+        
+        // Update the document with the extracted text length
+        await supabase
+          .from('knowledge_documents')
+          .update({ text_length: extractedText.length })
+          .eq('id', documentId);
+      }
+    }
+
+    // Ensure we have text to process
+    if (!fullText || fullText.trim().length === 0) {
+      throw new Error('No text content available for processing');
     }
 
     // Update status to processing
