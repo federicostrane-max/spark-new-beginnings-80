@@ -193,25 +193,18 @@ serve(async (req) => {
         
         for (const docId of missingDocs) {
           try {
-            const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-pool-document`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${supabaseKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
+            const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-pool-document', {
+              body: {
                 documentId: docId,
                 agentId: agentId,
-              }),
+              },
             });
 
-            if (!syncResponse.ok) {
-              const errorText = await syncResponse.text();
-              throw new Error(`Sync failed: ${errorText}`);
+            if (syncError) {
+              throw syncError;
             }
 
-            const syncResult = await syncResponse.json();
-            console.log(`[check-and-sync-all] Synced ${docId}: ${syncResult.chunksCount} chunks`);
+            console.log(`[check-and-sync-all] Synced ${docId}: ${syncResult?.chunksCount || 0} chunks`);
             fixedCount++;
           } catch (error) {
             console.error(`[check-and-sync-all] Error syncing ${docId}:`, error);
