@@ -1,12 +1,21 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, X, AtSign } from "lucide-react";
+import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Agent {
   id: string;
@@ -259,6 +268,45 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     }
   };
 
+  const insertAgentAction = (action: string) => {
+    let template = '';
+    
+    switch(action) {
+      case 'consult':
+        template = '@';
+        break;
+      case 'modify':
+        template = 'modifica prompt @';
+        break;
+      case 'show-prompt':
+        template = 'mostra prompt @';
+        break;
+      case 'show-knowledge':
+        template = 'mostra knowledge @';
+        break;
+      case 'search-knowledge':
+        template = 'cerca knowledge @';
+        break;
+    }
+    
+    // Insert template at cursor position
+    const cursorPos = textareaRef.current?.selectionStart || input.length;
+    const textBefore = input.slice(0, cursorPos);
+    const textAfter = input.slice(cursorPos);
+    
+    const newInput = textBefore + template + textAfter;
+    setInput(newInput);
+    
+    // Move cursor after template
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = cursorPos + template.length;
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  };
+
   return (
     <div className="space-y-2">
       {/* Agent Mentions Preview */}
@@ -357,6 +405,44 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
             <div className="text-xs text-muted-foreground px-1" title="Tag agents with @agent-name to request their help">
               <AtSign className="h-4 w-4" />
             </div>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" title="Azioni Agente" className="h-9 w-9">
+                  <Zap className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => insertAgentAction('consult')}>
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  Consulta Agente
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem onClick={() => insertAgentAction('modify')}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Modifica Prompt Agente
+                </DropdownMenuItem>
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Eye className="mr-2 h-4 w-4" />
+                    Visualizza Info Agente
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => insertAgentAction('show-prompt')}>
+                      Mostra Prompt
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('show-knowledge')}>
+                      Mostra Knowledge Base
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('search-knowledge')}>
+                      Cerca nel Knowledge
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
           
           <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
           
