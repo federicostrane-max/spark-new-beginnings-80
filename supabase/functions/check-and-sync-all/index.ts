@@ -36,18 +36,33 @@ serve(async (req) => {
     // ========================================
     // STEP 1: Get all assigned documents from agent_document_links
     // ========================================
-    const { data: assignedLinks, error: linksError } = await supabase
-      .from('agent_document_links')
-      .select(`
-        document_id,
-        knowledge_documents (
-          id,
-          file_name
-        )
-      `)
-      .eq('agent_id', agentId);
+    // Retry logic for transient network errors
+    let assignedLinks = null;
+    let retries = 3;
+    
+    while (retries > 0) {
+      const { data, error: linksError } = await supabase
+        .from('agent_document_links')
+        .select(`
+          document_id,
+          knowledge_documents (
+            id,
+            file_name
+          )
+        `)
+        .eq('agent_id', agentId);
 
-    if (linksError) throw linksError;
+      if (!linksError) {
+        assignedLinks = data;
+        break;
+      }
+      
+      retries--;
+      if (retries === 0) throw linksError;
+      
+      console.warn(`[check-and-sync-all] Retry fetching links (${retries} left):`, linksError);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
     const assignedDocIds = new Set<string>();
     const docNameMap = new Map<string, string>();
@@ -228,9 +243,27 @@ serve(async (req) => {
     console.error('[check-and-sync-all] Error:', error);
     console.error('[check-and-sync-all] Error stack:', error instanceof Error ? error.stack : 'N/A');
     
+    // Better error serialization
+    let errorMessage = 'Check sync error';
+    let errorDetails = 'Unknown error';
+    
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorDetails = error.stack || error.message;
+    } else if (typeof error === 'object' && error !== null) {
+      try {
+        errorDetails = JSON.stringify(error, null, 2);
+        errorMessage = (error as any).message || errorMessage;
+      } catch {
+        errorDetails = String(error);
+      }
+    } else {
+      errorDetails = String(error);
+    }
+    
     return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Check sync error',
-      details: error instanceof Error ? error.stack : String(error)
+      error: errorMessage,
+      details: errorDetails
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
