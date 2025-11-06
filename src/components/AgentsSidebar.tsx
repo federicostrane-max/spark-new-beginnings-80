@@ -208,13 +208,13 @@ export const AgentsSidebar = ({
                         <div className="space-y-1">
                           <p className="font-semibold">Problemi rilevati:</p>
                           {agentHealth.unsyncedCount > 0 && (
-                            <p className="text-sm">• {agentHealth.unsyncedCount} documento/i non sincronizzato/i</p>
+                            <p className="text-sm">• {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}</p>
                           )}
                           {agentHealth.errorCount > 0 && (
-                            <p className="text-sm">• {agentHealth.errorCount} errore/i recente/i</p>
+                            <p className="text-sm">• {agentHealth.errorCount === 1 ? 'Errore recente rilevato' : `${agentHealth.errorCount} errori recenti rilevati`}</p>
                           )}
                           {agentHealth.warningCount > 0 && (
-                            <p className="text-sm">• {agentHealth.warningCount} avviso/i</p>
+                            <p className="text-sm">• {agentHealth.warningCount === 1 ? 'Avviso di sistema' : `${agentHealth.warningCount} avvisi di sistema`}</p>
                           )}
                         </div>
                       </TooltipContent>
