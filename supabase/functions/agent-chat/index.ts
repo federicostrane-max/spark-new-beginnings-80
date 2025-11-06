@@ -2412,6 +2412,282 @@ Deno.serve(async (req) => {
           }
           
           // ========================================
+          // DETECT "MODIFICA PROMPT @AGENT" COMMAND
+          // ========================================
+          const modifyPromptPattern = /modifica\s+prompt\s+@([a-z0-9-]+):?\s*(.+)/is;
+          const modifyMatch = message.match(modifyPromptPattern);
+          
+          if (modifyMatch) {
+            const targetAgentSlug = modifyMatch[1];
+            const modificationInstructions = modifyMatch[2].trim();
+            
+            console.log(`🔧 [MODIFY PROMPT] Detected prompt modification request`);
+            console.log(`   Target agent: @${targetAgentSlug}`);
+            console.log(`   Instructions: ${modificationInstructions.slice(0, 100)}...`);
+            
+            // Find target agent
+            const { data: targetAgent, error: targetError } = await supabase
+              .from('agents')
+              .select('id, name, slug, system_prompt')
+              .eq('slug', targetAgentSlug)
+              .eq('active', true)
+              .single();
+            
+            if (targetError || !targetAgent) {
+              console.error('❌ [MODIFY PROMPT] Target agent not found:', targetAgentSlug);
+              const errorMsg = `❌ Non ho trovato l'agente @${targetAgentSlug}. Verifica che il nome sia corretto.`;
+              
+              await supabase
+                .from('agent_messages')
+                .insert({
+                  conversation_id: conversation.id,
+                  role: 'assistant',
+                  content: errorMsg,
+                  llm_provider: llmProvider
+                });
+              
+              return new Response(JSON.stringify({ error: errorMsg }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 404
+              });
+            }
+            
+            // Find prompt expert agent
+            const { data: promptExpert, error: expertError } = await supabase
+              .from('agents')
+              .select('id, name, slug, system_prompt')
+              .eq('slug', 'prompt-expert')
+              .eq('active', true)
+              .single();
+            
+            if (expertError || !promptExpert) {
+              console.error('❌ [MODIFY PROMPT] Prompt Expert not found');
+              const errorMsg = `❌ Non riesco a trovare l'agente Prompt Expert necessario per modificare i prompt.`;
+              
+              await supabase
+                .from('agent_messages')
+                .insert({
+                  conversation_id: conversation.id,
+                  role: 'assistant',
+                  content: errorMsg,
+                  llm_provider: llmProvider
+                });
+              
+              return new Response(JSON.stringify({ error: errorMsg }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 500
+              });
+            }
+            
+            console.log(`✅ [MODIFY PROMPT] Found target agent: ${targetAgent.name}`);
+            console.log(`✅ [MODIFY PROMPT] Found Prompt Expert: ${promptExpert.name}`);
+            
+            // Prepare structured task for Prompt Expert
+            const taskForPromptExpert = `TASK: Modifica il system prompt dell'agente '${targetAgent.name}'
+
+AGENTE DA MODIFICARE:
+- Nome: ${targetAgent.name}
+- Slug: ${targetAgent.slug}
+- ID: ${targetAgent.id}
+- Prompt attuale:
+---
+${targetAgent.system_prompt}
+---
+
+ISTRUZIONI DI MODIFICA:
+${modificationInstructions}
+
+AZIONE RICHIESTA:
+Genera il nuovo system prompt completo basandoti sulle istruzioni fornite.
+Rispondi SOLO con il nuovo prompt completo, senza spiegazioni aggiuntive o formattazioni markdown.
+Il prompt deve essere pronto all'uso direttamente.`;
+
+            // Notify user that modification is in progress
+            const progressMsg = `🔧 **Modifica Prompt in corso**\n\nSto consultando ${promptExpert.name} per modificare il prompt di **${targetAgent.name}**...\n\n⏳ Attendere...`;
+            
+            const { data: progressMsgRecord } = await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'assistant',
+                content: progressMsg,
+                llm_provider: llmProvider
+              })
+              .select('id')
+              .single();
+            
+            console.log('📤 [MODIFY PROMPT] Consulting Prompt Expert...');
+            
+            // Get or create conversation with Prompt Expert
+            let { data: expertConv, error: convError } = await supabase
+              .from('agent_conversations')
+              .select('id')
+              .eq('agent_id', promptExpert.id)
+              .eq('user_id', user.id)
+              .single();
+            
+            if (convError || !expertConv) {
+              const { data: newConv, error: createError } = await supabase
+                .from('agent_conversations')
+                .insert({
+                  agent_id: promptExpert.id,
+                  user_id: user.id,
+                  title: `Modifica prompt da ${agent.name}`
+                })
+                .select('id')
+                .single();
+              
+              if (createError) {
+                console.error('❌ [MODIFY PROMPT] Failed to create conversation');
+                throw new Error('Failed to create conversation with Prompt Expert');
+              }
+              expertConv = newConv;
+            }
+            
+            // Call Prompt Expert
+            try {
+              const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+              if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured');
+              
+              const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': anthropicKey,
+                  'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                  model: 'claude-sonnet-4-5',
+                  max_tokens: 64000,
+                  temperature: 0.7,
+                  system: promptExpert.system_prompt || 'You are an expert in creating and modifying AI agent system prompts.',
+                  messages: [
+                    { role: 'user', content: taskForPromptExpert }
+                  ]
+                })
+              });
+              
+              if (!anthropicResponse.ok) {
+                const errorBody = await anthropicResponse.text();
+                throw new Error(`Anthropic API error: ${anthropicResponse.status} - ${errorBody}`);
+              }
+              
+              const responseData = await anthropicResponse.json();
+              const newPrompt = responseData.content[0].text.trim();
+              
+              console.log(`✅ [MODIFY PROMPT] Received new prompt from Prompt Expert (${newPrompt.length} chars)`);
+              
+              // Save conversation with Prompt Expert
+              await supabase
+                .from('agent_messages')
+                .insert([
+                  {
+                    conversation_id: expertConv.id,
+                    role: 'user',
+                    content: taskForPromptExpert
+                  },
+                  {
+                    conversation_id: expertConv.id,
+                    role: 'assistant',
+                    content: newPrompt,
+                    llm_provider: 'anthropic'
+                  }
+                ]);
+              
+              // Save current prompt to history
+              const { data: versionData } = await supabase
+                .from('agent_prompt_history')
+                .select('version_number')
+                .eq('agent_id', targetAgent.id)
+                .order('version_number', { ascending: false })
+                .limit(1)
+                .single();
+              
+              const nextVersion = (versionData?.version_number || 0) + 1;
+              
+              await supabase
+                .from('agent_prompt_history')
+                .insert({
+                  agent_id: targetAgent.id,
+                  system_prompt: targetAgent.system_prompt,
+                  version_number: nextVersion,
+                  created_by: user.id
+                });
+              
+              console.log(`💾 [MODIFY PROMPT] Saved old prompt to history (version ${nextVersion})`);
+              
+              // Update the agent's prompt
+              const { error: updateError } = await supabase
+                .from('agents')
+                .update({ system_prompt: newPrompt })
+                .eq('id', targetAgent.id);
+              
+              if (updateError) {
+                throw new Error(`Failed to update prompt: ${updateError.message}`);
+              }
+              
+              console.log(`✅ [MODIFY PROMPT] Successfully updated prompt for ${targetAgent.name}`);
+              
+              // Send success message
+              const successMsg = `✅ **Prompt aggiornato con successo!**\n\n**Agente**: ${targetAgent.name}\n**Versione precedente salvata**: ${nextVersion}\n\n**Nuovo prompt** (${newPrompt.length} caratteri):\n\n---\n\n${newPrompt}\n\n---\n\nIl prompt è stato aggiornato e la versione precedente è stata salvata nella cronologia.`;
+              
+              // Update the progress message
+              if (progressMsgRecord?.id) {
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: successMsg })
+                  .eq('id', progressMsgRecord.id);
+              } else {
+                await supabase
+                  .from('agent_messages')
+                  .insert({
+                    conversation_id: conversation.id,
+                    role: 'assistant',
+                    content: successMsg,
+                    llm_provider: llmProvider
+                  });
+              }
+              
+              return new Response(JSON.stringify({ 
+                success: true, 
+                message: successMsg,
+                agent_name: targetAgent.name,
+                version_saved: nextVersion
+              }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200
+              });
+              
+            } catch (error) {
+              console.error('❌ [MODIFY PROMPT] Error during prompt modification:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+              const errorMsg = `❌ **Errore durante la modifica del prompt**\n\nAgente: ${targetAgent.name}\nErrore: ${errorMessage}\n\nLa modifica non è stata applicata.`;
+              
+              // Update progress message with error
+              if (progressMsgRecord?.id) {
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: errorMsg })
+                  .eq('id', progressMsgRecord.id);
+              } else {
+                await supabase
+                  .from('agent_messages')
+                  .insert({
+                    conversation_id: conversation.id,
+                    role: 'assistant',
+                    content: errorMsg,
+                    llm_provider: llmProvider
+                  });
+              }
+              
+              return new Response(JSON.stringify({ error: errorMsg }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 500
+              });
+            }
+          }
+          
+          // ========================================
           // DETECT @AGENT MENTIONS FOR INTER-AGENT COMMUNICATION
           // ========================================
           const agentMentionRegex = /@([a-zA-Z0-9\-_]+)/g;
