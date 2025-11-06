@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentHealth, usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -135,6 +136,32 @@ export const AgentsSidebar = ({
     }
   };
 
+  const handleSyncAgent = async (agentId: string, agentName: string) => {
+    try {
+      toast.info(`Sincronizzazione di ${agentName} in corso...`);
+      
+      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
+        body: { agentId, autoFix: true }
+      });
+
+      if (error) throw error;
+
+      if (data?.fixedCount > 0) {
+        toast.success(`${agentName}: ${data.fixedCount} documenti sincronizzati`);
+      } else {
+        toast.info(`${agentName}: nessun documento da sincronizzare`);
+      }
+      
+      // Refresh health status after sync
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (error: any) {
+      console.error("Error syncing agent:", error);
+      toast.error(`Errore nella sincronizzazione: ${error.message}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-sidebar">
       {/* User Profile */}
@@ -205,10 +232,24 @@ export const AgentsSidebar = ({
                     </TooltipTrigger>
                     {showHealthBadge && (
                       <TooltipContent side="right" className="max-w-xs">
-                        <div className="space-y-1">
+                        <div className="space-y-2">
                           <p className="font-semibold">Problemi rilevati:</p>
                           {agentHealth.unsyncedCount > 0 && (
-                            <p className="text-sm">• {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}</p>
+                            <div className="space-y-2">
+                              <p className="text-sm">• {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}</p>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                className="w-full"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSyncAgent(agent.id, agent.name);
+                                }}
+                              >
+                                <RefreshCw className="h-3 w-3 mr-2" />
+                                Sincronizza
+                              </Button>
+                            </div>
                           )}
                           {agentHealth.errorCount > 0 && (
                             <p className="text-sm">• {agentHealth.errorCount === 1 ? 'Errore recente rilevato' : `${agentHealth.errorCount} errori recenti rilevati`}</p>
