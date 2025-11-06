@@ -1923,6 +1923,8 @@ Deno.serve(async (req) => {
           
           // 6. Call target agent (invoke agent-chat recursively for target agent)
           try {
+            console.log(`🔐 [REQ-${requestId}] Calling @${targetSlug} with auth header: ${req.headers.get('authorization') ? 'Present' : 'Missing'}`);
+            
             const { data: consultResponse, error: consultError } = await supabase.functions.invoke(
               'agent-chat',
               {
@@ -1930,6 +1932,9 @@ Deno.serve(async (req) => {
                   conversationId: consultConversation.id,
                   message: messageWithoutTags,
                   agentSlug: targetSlug
+                },
+                headers: {
+                  Authorization: req.headers.get('authorization') || ''
                 }
               }
             );
