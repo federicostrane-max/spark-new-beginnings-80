@@ -220,7 +220,7 @@ serve(async (req) => {
       .from('knowledge_documents')
       .select('id, file_name')
       .eq('validation_status', 'validated')
-      .or('ai_summary.is.null,ai_summary.eq.')
+      .or('ai_summary.is.null,ai_summary.eq.,ai_summary.eq.Documento migrato dal knowledge base degli agenti')
       .limit(5); // Max 5 documenti alla volta
 
     if (summaryError) {
