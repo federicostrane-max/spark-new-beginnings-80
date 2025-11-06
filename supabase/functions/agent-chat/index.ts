@@ -2323,6 +2323,26 @@ ${agent.system_prompt}${knowledgeContext}`;
           
           // Add collaboration tools for all agents
           tools.push({
+            name: 'web_search',
+            description: 'Search the internet for information using Google Custom Search. Use this when the user asks you to search for current information, news, articles, or any web content. Returns a list of search results with titles, URLs, and snippets.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'The search query to send to Google. Be specific and use relevant keywords.'
+                },
+                num_results: {
+                  type: 'number',
+                  description: 'Number of results to return (1-10, default 5)',
+                  default: 5
+                }
+              },
+              required: ['query']
+            }
+          });
+          
+          tools.push({
             name: 'list_other_agents',
             description: 'Get a list of all available agents in the system. Use this when the user asks about other agents or when you need to know what agents are available for consultation.',
             input_schema: {
@@ -2715,6 +2735,92 @@ ${agent.system_prompt}${knowledgeContext}`;
                         } else {
                           console.log('✅ Download successful:', downloadData);
                           toolResult = downloadData;
+                        }
+                      }
+                      
+                      if (toolUseName === 'web_search') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: web_search`);
+                        console.log('   Query:', toolInput.query);
+                        console.log('   Num results:', toolInput.num_results || 5);
+                        
+                        const numResults = Math.min(toolInput.num_results || 5, 10);
+                        
+                        try {
+                          const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
+                          const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+                          
+                          if (!apiKey || !searchEngineId) {
+                            console.error('❌ Missing Google Custom Search credentials');
+                            toolResult = { success: false, error: 'Google Custom Search not configured' };
+                            
+                            const errorText = `\n\n❌ Errore: ricerca web non configurata.\n\n`;
+                            fullResponse += errorText;
+                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else {
+                            const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(toolInput.query)}&num=${numResults}`;
+                            
+                            const searchResponse = await fetch(url);
+                            
+                            if (!searchResponse.ok) {
+                              const errorText = await searchResponse.text();
+                              console.error('❌ Google API Error:', searchResponse.status, errorText);
+                              toolResult = { success: false, error: `Google Search failed: ${searchResponse.status}` };
+                              
+                              const errorMsg = `\n\n❌ Errore nella ricerca: ${searchResponse.status}\n\n`;
+                              fullResponse += errorMsg;
+                              sendSSE(JSON.stringify({ type: 'content', text: errorMsg }));
+                            } else {
+                              const data = await searchResponse.json();
+                              
+                              if (!data.items || data.items.length === 0) {
+                                console.log('ℹ️ No results found');
+                                toolResult = {
+                                  success: true,
+                                  query: toolInput.query,
+                                  results_count: 0,
+                                  results: []
+                                };
+                                
+                                const noResultsText = `\n\n📭 Nessun risultato trovato per: "${toolInput.query}"\n\n`;
+                                fullResponse += noResultsText;
+                                sendSSE(JSON.stringify({ type: 'content', text: noResultsText }));
+                              } else {
+                                const results = data.items.map((item: any) => ({
+                                  title: item.title,
+                                  url: item.link,
+                                  snippet: item.snippet,
+                                  displayLink: item.displayLink
+                                }));
+                                
+                                console.log(`✅ Found ${results.length} results`);
+                                toolResult = {
+                                  success: true,
+                                  query: toolInput.query,
+                                  results_count: results.length,
+                                  results: results
+                                };
+                                
+                                // Aggiungi risultati nella risposta
+                                let searchText = `\n\n🔍 **Risultati ricerca per**: "${toolInput.query}"\n\n`;
+                                results.forEach((r: any, idx: number) => {
+                                  searchText += `**${idx + 1}. ${r.title}**\n`;
+                                  searchText += `   ${r.snippet}\n`;
+                                  searchText += `   🔗 [${r.displayLink}](${r.url})\n\n`;
+                                });
+                                fullResponse += searchText;
+                                sendSSE(JSON.stringify({ type: 'content', text: searchText }));
+                              }
+                            }
+                          }
+                        } catch (error) {
+                          console.error('❌ Web search error:', error);
+                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                          toolResult = { success: false, error: errorMessage };
+                          
+                          const errorText = `\n\n❌ Errore durante la ricerca web: ${errorMessage}\n\n`;
+                          fullResponse += errorText;
+                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         }
                       }
                       
