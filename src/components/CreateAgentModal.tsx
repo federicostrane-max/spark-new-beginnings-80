@@ -6,17 +6,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Copy, History, MoreVertical, Trash2 } from "lucide-react";
+import { Loader2, Copy, History, Trash2 } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
 import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { PromptHistoryDialog } from "@/components/PromptHistoryDialog";
 import { toast } from "sonner";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -614,60 +608,54 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           )}
 
           {/* Actions */}
-          <div className="flex gap-2 justify-end items-center">
-            {editingAgent && (
+          <div className="flex gap-2 justify-between items-center">
+            {/* Sinistra: Delete Agent */}
+            <div>
+              {editingAgent && onDelete && (
+                <Button 
+                  type="button" 
+                  variant="destructive"
+                  onClick={() => setShowDeleteDialog(true)}
+                  disabled={loading}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Agent
+                </Button>
+              )}
+            </div>
+
+            {/* Destra: Altre azioni */}
+            <div className="flex gap-2">
+              {editingAgent && (
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={handleClone}
+                  disabled={loading}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Clone Agent
+                </Button>
+              )}
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={handleClone}
+                onClick={() => onOpenChange(false)}
                 disabled={loading}
               >
-                <Copy className="h-4 w-4 mr-2" />
-                Clone Agent
+                Cancel
               </Button>
-            )}
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => onOpenChange(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {editingAgent ? 'Updating...' : 'Creating...'}
-                </>
-              ) : (
-                editingAgent ? "Update Agent" : "Create Agent"
-              )}
-            </Button>
-            
-            {editingAgent && onDelete && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="icon"
-                    disabled={loading}
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem 
-                    onClick={() => setShowDeleteDialog(true)}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete Agent
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+              <Button type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {editingAgent ? 'Updating...' : 'Creating...'}
+                  </>
+                ) : (
+                  editingAgent ? "Update Agent" : "Create Agent"
+                )}
+              </Button>
+            </div>
           </div>
         </form>
 
