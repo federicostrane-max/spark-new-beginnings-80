@@ -32,7 +32,6 @@ export default function DocumentPool() {
   const [healthMetrics, setHealthMetrics] = useState({
     ready: 0,
     processing: 0,
-    validated: 0,
     orphanedChunks: 0,
     failed: 0
   });
@@ -73,15 +72,11 @@ export default function DocumentPool() {
         .select('id', { count: 'exact', head: true })
         .eq('processing_status', 'ready_for_assignment');
 
+      // Raggruppa validating, processing e validated in "In Elaborazione"
       const { count: processingCount } = await supabase
         .from('knowledge_documents')
         .select('id', { count: 'exact', head: true })
-        .in('processing_status', ['validating', 'processing']);
-
-      const { count: validatedCount } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('processing_status', 'validated');
+        .in('processing_status', ['validating', 'processing', 'validated']);
 
       const { count: failedCount } = await supabase
         .from('knowledge_documents')
@@ -91,7 +86,6 @@ export default function DocumentPool() {
       setHealthMetrics({
         ready: readyCount || 0,
         processing: processingCount || 0,
-        validated: validatedCount || 0,
         orphanedChunks: 0, // Calculated by cleanup function
         failed: failedCount || 0
       });
@@ -217,7 +211,7 @@ export default function DocumentPool() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="flex flex-col items-center p-4 rounded-lg bg-green-500/10 border border-green-500/20">
                 <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
                 <div className="text-2xl font-bold text-green-500">{healthMetrics.ready}</div>
@@ -228,12 +222,6 @@ export default function DocumentPool() {
                 <Loader2 className="h-8 w-8 text-blue-500 mb-2" />
                 <div className="text-2xl font-bold text-blue-500">{healthMetrics.processing}</div>
                 <div className="text-sm text-muted-foreground text-center">In Elaborazione</div>
-              </div>
-
-              <div className="flex flex-col items-center p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                <CheckCircle2 className="h-8 w-8 text-purple-500 mb-2" />
-                <div className="text-2xl font-bold text-purple-500">{healthMetrics.validated}</div>
-                <div className="text-sm text-muted-foreground text-center">Validati</div>
               </div>
               
               <div className="flex flex-col items-center p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
