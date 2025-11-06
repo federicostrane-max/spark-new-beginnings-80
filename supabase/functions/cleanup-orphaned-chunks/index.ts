@@ -19,48 +19,29 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // ========================================
-    // STEP 1: Find orphaned chunks
+    // STEP 1: Find orphaned chunks using optimized SQL function
     // ========================================
     console.log('[cleanup-orphaned-chunks] Finding orphaned chunks...');
     
     const { data: orphanedChunks, error: queryError } = await supabase
-      .from('agent_knowledge')
-      .select('id, agent_id, pool_document_id, document_name')
-      .in('source_type', ['pool', 'shared_pool'])
-      .not('pool_document_id', 'is', null);
+      .rpc('find_orphaned_chunks');
 
     if (queryError) throw queryError;
 
-    console.log(`[cleanup-orphaned-chunks] Found ${orphanedChunks?.length || 0} pool/shared_pool chunks to check`);
+    console.log(`[cleanup-orphaned-chunks] Found ${orphanedChunks?.length || 0} orphaned chunks`);
 
-    // Filter chunks that don't have corresponding agent_document_links
+    // Collect IDs and metadata
     const orphanedIds: string[] = [];
     const affectedAgents = new Set<string>();
     const affectedDocuments = new Set<string>();
 
     if (orphanedChunks && orphanedChunks.length > 0) {
       for (const chunk of orphanedChunks) {
-        // Check if agent_document_link exists
-        const { data: link, error: linkError } = await supabase
-          .from('agent_document_links')
-          .select('id')
-          .eq('agent_id', chunk.agent_id)
-          .eq('document_id', chunk.pool_document_id)
-          .maybeSingle();
-
-        if (linkError) {
-          console.error(`[cleanup-orphaned-chunks] Error checking link for chunk ${chunk.id}:`, linkError);
-          continue;
-        }
-
-        if (!link) {
-          // No link found - this is orphaned
-          orphanedIds.push(chunk.id);
-          affectedAgents.add(chunk.agent_id);
-          affectedDocuments.add(chunk.pool_document_id);
-          
-          console.log(`[cleanup-orphaned-chunks] Orphaned chunk: ${chunk.id.slice(0, 8)}... (agent: ${chunk.agent_id.slice(0, 8)}, doc: ${chunk.document_name})`);
-        }
+        orphanedIds.push(chunk.chunk_id);
+        affectedAgents.add(chunk.agent_id);
+        affectedDocuments.add(chunk.pool_document_id);
+        
+        console.log(`[cleanup-orphaned-chunks] Orphaned chunk: ${chunk.chunk_id.slice(0, 8)}... (agent: ${chunk.agent_id.slice(0, 8)}, doc: ${chunk.document_name})`);
       }
     }
 

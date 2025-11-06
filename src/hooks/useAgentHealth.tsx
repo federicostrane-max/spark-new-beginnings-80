@@ -159,17 +159,9 @@ export const usePoolDocumentsHealth = () => {
   const checkPoolHealth = async () => {
     setIsLoading(true);
     try {
-      // Documenti validati ma non processati
-      const { count: stuckDocCount, error: stuckError } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
-
-      if (stuckError) {
-        logger.error('pool-documents', 'Failed to check pool health', stuckError);
-        throw stuckError;
-      }
+      // Note: Documents with processing_status='validated' are in a normal intermediate state
+      // They will be automatically processed to 'ready_for_assignment'
+      // We don't count them as "stuck" anymore
 
       // Documenti con errori
       const { count: errorDocCount, error: errorCheckError } = await supabase
@@ -195,15 +187,13 @@ export const usePoolDocumentsHealth = () => {
         throw validatingError;
       }
 
-      const stuck = stuckDocCount || 0;
       const errors = errorDocCount || 0;
       const validating = validatingDocCount || 0;
       
-      // Simplified: assume orphaned chunks exist if we have issues
-      // Full check is done by cleanup-orphaned-chunks edge function
-      const totalIssues = stuck + errors + validating;
+      // Only count real errors and documents stuck in validating too long
+      const totalIssues = errors + validating;
       
-      setStuckCount(stuck);
+      setStuckCount(0); // No longer tracking false positive
       setErrorCount(errors);
       setValidatingCount(validating);
       setOrphanedChunksCount(0); // Set by cleanup function
@@ -213,7 +203,6 @@ export const usePoolDocumentsHealth = () => {
 
       if (totalIssues > 0) {
         logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
-          stuckCount: stuck,
           errorCount: errors,
           validatingCount: validating
         });

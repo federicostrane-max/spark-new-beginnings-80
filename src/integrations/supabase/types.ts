@@ -692,6 +692,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      find_orphaned_chunks: {
+        Args: never
+        Returns: {
+          agent_id: string
+          chunk_id: string
+          document_name: string
+          pool_document_id: string
+        }[]
+      }
       get_distinct_documents: {
         Args: { p_agent_id: string }
         Returns: {
