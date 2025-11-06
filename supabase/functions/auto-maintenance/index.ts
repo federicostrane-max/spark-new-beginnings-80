@@ -152,7 +152,7 @@ serve(async (req) => {
       console.log('[auto-maintenance] ✅ No stuck documents found');
     }
 
-    // 3. CLEANUP ORPHANED CHUNKS
+    // 3. CLEANUP ORPHANED CHUNKS (in batches to avoid limits)
     console.log('[auto-maintenance] --- Step 2: Cleaning orphaned chunks ---');
     
     const { data: orphanedChunks, error: orphanError } = await supabase
@@ -163,32 +163,48 @@ serve(async (req) => {
     } else if (orphanedChunks && orphanedChunks.length > 0) {
       console.log(`[auto-maintenance] Found ${orphanedChunks.length} orphaned chunks`);
 
-      const chunkIds = orphanedChunks.map((c: any) => c.chunk_id);
+      // Delete in batches of 100 to avoid "Bad Request" errors
+      const BATCH_SIZE = 100;
+      const totalToDelete = Math.min(orphanedChunks.length, 500); // Max 500 per run
+      let deletedCount = 0;
       
-      const { error: deleteError } = await supabase
-        .from('agent_knowledge')
-        .delete()
-        .in('id', chunkIds);
+      for (let i = 0; i < totalToDelete; i += BATCH_SIZE) {
+        const batch = orphanedChunks.slice(i, i + BATCH_SIZE);
+        const chunkIds = batch.map((c: any) => c.chunk_id);
+        
+        const { error: deleteError } = await supabase
+          .from('agent_knowledge')
+          .delete()
+          .in('id', chunkIds);
 
-      if (deleteError) {
-        console.error('[auto-maintenance] ❌ Failed to delete orphaned chunks:', deleteError);
-      } else {
-        console.log(`[auto-maintenance] ✅ Deleted ${orphanedChunks.length} orphaned chunks`);
-        chunksCleaned = orphanedChunks.length;
-
-        // Log ogni chunk eliminato
-        for (const chunk of orphanedChunks) {
-          await supabase
-            .from('maintenance_operation_details')
-            .insert({
-              execution_log_id: execLogId,
-              operation_type: 'cleanup_orphaned_chunk',
-              target_id: chunk.chunk_id,
-              target_name: chunk.document_name || 'Unknown',
-              status: 'success',
-              attempt_number: 1
-            });
+        if (deleteError) {
+          console.error(`[auto-maintenance] ❌ Failed to delete batch ${i / BATCH_SIZE + 1}:`, deleteError);
+          break; // Stop on first error
+        } else {
+          deletedCount += batch.length;
+          console.log(`[auto-maintenance] ✅ Deleted batch ${i / BATCH_SIZE + 1}: ${batch.length} chunks`);
+          
+          // Log ogni chunk eliminato (solo per questo batch)
+          for (const chunk of batch) {
+            await supabase
+              .from('maintenance_operation_details')
+              .insert({
+                execution_log_id: execLogId,
+                operation_type: 'cleanup_orphaned_chunk',
+                target_id: chunk.chunk_id,
+                target_name: chunk.document_name || 'Unknown',
+                status: 'success',
+                attempt_number: 1
+              });
+          }
         }
+      }
+      
+      chunksCleaned = deletedCount;
+      console.log(`[auto-maintenance] ✅ Total deleted: ${deletedCount} orphaned chunks`);
+      
+      if (orphanedChunks.length > totalToDelete) {
+        console.log(`[auto-maintenance] ⚠️ ${orphanedChunks.length - totalToDelete} chunks remaining, will be processed in next run`);
       }
     } else {
       console.log('[auto-maintenance] ✅ No orphaned chunks found');
