@@ -1795,20 +1795,255 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ============================================
+    // DETERMINISTIC @TAG DETECTION SYSTEM
+    // ============================================
+    const agentTagRegex = /@([a-zA-Z0-9\-_]+)/g;
+    const mentionedAgentSlugs: string[] = [];
+    let match: RegExpExecArray | null;
+    while ((match = agentTagRegex.exec(message)) !== null) {
+      if (match[1]) {
+        mentionedAgentSlugs.push(match[1]);
+      }
+    }
+    
+    console.log(`🏷️ [REQ-${requestId}] Detected @tags:`, mentionedAgentSlugs);
+    
+    // Remove @tags from the message for processing
+    const messageWithoutTags = message.replace(agentTagRegex, '').trim();
+    
     const finalUserMessage = attachmentContext 
-      ? `${message}${attachmentContext}`
-      : message;
+      ? `${messageWithoutTags}${attachmentContext}`
+      : messageWithoutTags;
 
-    // Save user message
+    // Save user message (original with @tags)
     const { error: userMsgError } = await supabase
       .from('agent_messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
-        content: finalUserMessage
+        content: message  // Keep original message with @tags
       });
 
     if (userMsgError) throw userMsgError;
+    
+    // ============================================
+    // INTER-AGENT CONSULTATION - DETERMINISTIC
+    // ============================================
+    if (mentionedAgentSlugs.length > 0) {
+      console.log(`🤝 [REQ-${requestId}] Inter-agent consultation mode activated`);
+      
+      for (const targetSlug of mentionedAgentSlugs) {
+        try {
+          // 1. Get target agent
+          const { data: targetAgent, error: targetAgentError } = await supabase
+            .from('agents')
+            .select('*')
+            .eq('slug', targetSlug)
+            .eq('active', true)
+            .single();
+          
+          if (targetAgentError || !targetAgent) {
+            console.error(`❌ [REQ-${requestId}] Agent @${targetSlug} not found`);
+            
+            // Insert system error message
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'system',
+                content: `❌ Agente @${targetSlug} non trovato o non attivo.`
+              });
+            continue;
+          }
+          
+          console.log(`✅ [REQ-${requestId}] Found target agent: ${targetAgent.name} (@${targetSlug})`);
+          
+          // 2. Create consultation conversation for target agent
+          const { data: consultConversation, error: consultConvError } = await supabase
+            .from('agent_conversations')
+            .insert({
+              user_id: user.id,
+              agent_id: targetAgent.id,
+              title: `Consultation: ${messageWithoutTags.substring(0, 100)}`
+            })
+            .select()
+            .single();
+          
+          if (consultConvError) {
+            console.error(`❌ [REQ-${requestId}] Failed to create consultation conversation:`, consultConvError);
+            continue;
+          }
+          
+          // 3. Insert system message: "Consulting @agent..."
+          const { data: systemMsgStart } = await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: conversation.id,
+              role: 'system',
+              content: `🔄 Consultando @${targetSlug}...`
+            })
+            .select()
+            .single();
+          
+          // 4. Create inter-agent log entry
+          const { data: logEntry, error: logError } = await supabase
+            .from('inter_agent_logs')
+            .insert({
+              requesting_conversation_id: conversation.id,
+              requesting_agent_id: agent.id,
+              consulted_agent_id: targetAgent.id,
+              consulted_conversation_id: consultConversation.id,
+              task_description: messageWithoutTags,
+              status: 'initiated'
+            })
+            .select()
+            .single();
+          
+          if (logError) {
+            console.error(`❌ [REQ-${requestId}] Failed to create inter-agent log:`, logError);
+          }
+          
+          console.log(`📝 [REQ-${requestId}] Created inter-agent log:`, logEntry?.id);
+          
+          // 5. Update log to processing
+          if (logEntry) {
+            await supabase
+              .from('inter_agent_logs')
+              .update({ status: 'processing' })
+              .eq('id', logEntry.id);
+          }
+          
+          // 6. Call target agent (invoke agent-chat recursively for target agent)
+          try {
+            const { data: consultResponse, error: consultError } = await supabase.functions.invoke(
+              'agent-chat',
+              {
+                body: {
+                  conversationId: consultConversation.id,
+                  message: messageWithoutTags,
+                  agentSlug: targetSlug
+                }
+              }
+            );
+            
+            if (consultError) {
+              throw consultError;
+            }
+            
+            // The response will be saved to consultConversation automatically by the recursive call
+            console.log(`✅ [REQ-${requestId}] Target agent @${targetSlug} responded`);
+            
+            // 7. Fetch the response from consulted agent's conversation
+            const { data: consultMessages, error: fetchError } = await supabase
+              .from('agent_messages')
+              .select('content')
+              .eq('conversation_id', consultConversation.id)
+              .eq('role', 'assistant')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+            
+            if (fetchError || !consultMessages) {
+              throw new Error('Failed to fetch consultation response');
+            }
+            
+            const consultationResponse = consultMessages.content;
+            
+            // 8. Update inter-agent log to completed
+            if (logEntry) {
+              await supabase
+                .from('inter_agent_logs')
+                .update({ 
+                  status: 'completed',
+                  completed_at: new Date().toISOString()
+                })
+                .eq('id', logEntry.id);
+            }
+            
+            // 9. Insert system message: "Response received"
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'system',
+                content: `✅ Risposta da @${targetSlug} ricevuta`
+              });
+            
+            // 10. Save consultation response to the original conversation
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'assistant',
+                content: `**Risposta da @${targetSlug}:**\n\n${consultationResponse}`,
+                llm_provider: targetAgent.llm_provider
+              });
+            
+            // 11. Save to inter_agent_messages for tracking
+            await supabase
+              .from('inter_agent_messages')
+              .insert({
+                requesting_agent_id: agent.id,
+                consulted_agent_id: targetAgent.id,
+                context_conversation_id: conversation.id,
+                question: messageWithoutTags,
+                answer: consultationResponse
+              });
+            
+            console.log(`✅ [REQ-${requestId}] Inter-agent consultation completed for @${targetSlug}`);
+            
+          } catch (consultError) {
+            console.error(`❌ [REQ-${requestId}] Consultation with @${targetSlug} failed:`, consultError);
+            
+            // Update log to failed
+            if (logEntry) {
+              await supabase
+                .from('inter_agent_logs')
+                .update({ 
+                  status: 'failed',
+                  completed_at: new Date().toISOString(),
+                  error_message: consultError instanceof Error ? consultError.message : 'Unknown error'
+                })
+                .eq('id', logEntry.id);
+            }
+            
+            // Insert system error message
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'system',
+                content: `❌ Errore nella consultazione di @${targetSlug}: ${consultError instanceof Error ? consultError.message : 'Errore sconosciuto'}`
+              });
+          }
+          
+        } catch (error) {
+          console.error(`❌ [REQ-${requestId}] Error processing @${targetSlug}:`, error);
+          
+          // Insert system error message
+          await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: conversation.id,
+              role: 'system',
+              content: `❌ Errore durante l'elaborazione di @${targetSlug}`
+            });
+        }
+      }
+      
+      // Return early - no need for LLM response when doing inter-agent consultation
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          conversationId: conversation.id,
+          consultedAgents: mentionedAgentSlugs
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
+    }
 
     // Get conversation history - EXCLUDE empty/incomplete messages at DB level
     const { data: messages, error: msgError } = await supabase

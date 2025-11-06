@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm';
 
 interface ChatMessageProps {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   isStreaming?: boolean;
   isSelected?: boolean;
@@ -158,9 +158,24 @@ export const ChatMessage = ({
   };
 
   const isUser = role === "user";
+  const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   const shouldBeCollapsed = isCollapsed;
   const previewLength = 500;
+
+  // System messages have special rendering
+  if (isSystem) {
+    return (
+      <div className="mb-4 flex justify-center">
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50 text-sm text-muted-foreground">
+          <Sparkles className="h-3 w-3" />
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {content}
+          </ReactMarkdown>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 

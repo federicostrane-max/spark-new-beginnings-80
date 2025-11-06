@@ -374,6 +374,80 @@ export type Database = {
           },
         ]
       }
+      inter_agent_logs: {
+        Row: {
+          completed_at: string | null
+          consulted_agent_id: string
+          consulted_conversation_id: string
+          created_at: string | null
+          error_message: string | null
+          id: string
+          initiated_at: string | null
+          metadata: Json | null
+          requesting_agent_id: string
+          requesting_conversation_id: string
+          status: string
+          task_description: string
+        }
+        Insert: {
+          completed_at?: string | null
+          consulted_agent_id: string
+          consulted_conversation_id: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          initiated_at?: string | null
+          metadata?: Json | null
+          requesting_agent_id: string
+          requesting_conversation_id: string
+          status: string
+          task_description: string
+        }
+        Update: {
+          completed_at?: string | null
+          consulted_agent_id?: string
+          consulted_conversation_id?: string
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          initiated_at?: string | null
+          metadata?: Json | null
+          requesting_agent_id?: string
+          requesting_conversation_id?: string
+          status?: string
+          task_description?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inter_agent_logs_consulted_agent_id_fkey"
+            columns: ["consulted_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_agent_logs_consulted_conversation_id_fkey"
+            columns: ["consulted_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_agent_logs_requesting_agent_id_fkey"
+            columns: ["requesting_agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inter_agent_logs_requesting_conversation_id_fkey"
+            columns: ["requesting_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inter_agent_messages: {
         Row: {
           answer: string
