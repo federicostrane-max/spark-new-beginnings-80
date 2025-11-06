@@ -140,11 +140,29 @@ export const AgentsSidebar = ({
     try {
       toast.info(`Sincronizzazione di ${agentName} in corso...`);
       
-      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
-        body: { agentId, autoFix: true }
-      });
+      const session = await supabase.auth.getSession();
+      if (!session.data.session) {
+        throw new Error('Sessione non valida');
+      }
 
-      if (error) throw error;
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-and-sync-all`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.data.session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ agentId, autoFix: true })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const data = await response.json();
 
       if (data?.fixedCount > 0) {
         toast.success(`${agentName}: ${data.fixedCount} documenti sincronizzati`);
@@ -257,18 +275,6 @@ export const AgentsSidebar = ({
                           {/* Mostra errori */}
                           {agentHealth.errorCount > 0 && (
                             <p className="text-sm text-destructive">• {agentHealth.errorCount} {agentHealth.errorCount === 1 ? 'errore recente' : 'errori recenti'}</p>
-                          )}
-                          
-                          {/* Mostra warning anche se non ci sono documenti non sincronizzati */}
-                          {agentHealth.warningCount > 0 && (
-                            <p className="text-sm text-yellow-600">• {agentHealth.warningCount} {agentHealth.warningCount === 1 ? 'avviso' : 'avvisi'} dal sistema</p>
-                          )}
-                          
-                          {/* Se ci sono solo warning, mostra un messaggio esplicativo */}
-                          {agentHealth.unsyncedCount === 0 && agentHealth.errorCount === 0 && agentHealth.warningCount > 0 && (
-                            <p className="text-xs opacity-80 mt-2 border-t pt-2">
-                              ℹ️ Questi avvisi sono generati dal sistema di monitoraggio. L'agente funziona correttamente.
-                            </p>
                           )}
                         </div>
                       </TooltipContent>

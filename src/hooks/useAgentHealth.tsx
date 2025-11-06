@@ -35,41 +35,12 @@ export const useAgentHealth = (agentIds: string[]) => {
       const statuses = data?.statuses || [];
       const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
 
-      // Log dettagliati per documenti problematici
-      statuses.forEach((status: any) => {
-        if (status.status !== 'synced') {
-          logger.warning('document-sync', 
-            `Document not synced: ${status.fileName}`, 
-            { 
-              status: status.status, 
-              chunkCount: status.chunkCount,
-              expectedChunks: status.expectedChunks 
-            }, 
-            { agentId, documentId: status.documentId }
-          );
-        }
-      });
-
       // Conta errori e warning recenti dal logger
       const issues = logger.getAgentIssueCount(agentId, 30);
 
-      // Log dettagliato per capire da dove vengono i warning
-      if (issues.warnings > 0) {
-        logger.info('agent-operation', `Agent ${agentId} has ${issues.warnings} warnings`, {
-          unsyncedCount,
-          errorCount: issues.errors,
-          warningCount: issues.warnings,
-          statuses: statuses.map((s: any) => ({
-            fileName: s.fileName,
-            status: s.status,
-            chunkCount: s.chunkCount
-          }))
-        }, { agentId });
-      }
-
       const healthStatus: AgentHealthStatus = {
         agentId,
-        hasIssues: unsyncedCount > 0 || issues.errors > 0 || issues.warnings > 0,
+        hasIssues: unsyncedCount > 0 || issues.errors > 0,
         unsyncedCount,
         errorCount: issues.errors,
         warningCount: issues.warnings,

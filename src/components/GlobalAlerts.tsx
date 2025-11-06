@@ -45,8 +45,23 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
           setTimeout(() => reject(new Error('Timeout - operazione troppo lenta')), TIMEOUT_MS)
         );
         
-        const syncPromise = supabase.functions.invoke('check-and-sync-all', {
-          body: { agentId: agent.id, autoFix: true }
+        const session = await supabase.auth.getSession();
+        if (!session.data.session) throw new Error('Sessione non valida');
+
+        const syncPromise = fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-and-sync-all`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.data.session.access_token}`,
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ agentId: agent.id, autoFix: true })
+          }
+        ).then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return { data: await res.json(), error: null };
         });
         
         return Promise.race([syncPromise, timeoutPromise]);
