@@ -63,41 +63,29 @@ serve(async (req) => {
     console.log(`[check-and-sync-all] Found ${assignedDocIds.size} assigned documents`);
 
     // ========================================
-    // STEP 2: Get chunk counts grouped by document from agent_knowledge
+    // STEP 2: Get chunk counts for THIS agent only
     // ========================================
-    // IMPORTANTE: Prendiamo TUTTI i chunks che hanno pool_document_id non null,
-    // indipendentemente dal source_type perché durante la clonazione potrebbero
-    // avere source_type diversi ma essere comunque chunks validi del pool
-    const { data: chunkCounts, error: chunksError } = await supabase
+    const { data: agentChunks, error: chunksError } = await supabase
       .from('agent_knowledge')
       .select('pool_document_id')
       .eq('agent_id', agentId)
       .not('pool_document_id', 'is', null)
-      .limit(100000); // High limit to get all chunks
+      .limit(10000);
 
     if (chunksError) {
       console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
       throw chunksError;
     }
 
-    console.log(`[check-and-sync-all] Total chunk records fetched: ${chunkCounts?.length || 0}`);
-
-    // Group chunks by document manually
-    const syncedDocMap = new Map<string, number>();
-    chunkCounts?.forEach(chunk => {
+    const agentChunkMap = new Map<string, number>();
+    agentChunks?.forEach(chunk => {
       if (chunk.pool_document_id) {
-        const count = syncedDocMap.get(chunk.pool_document_id) || 0;
-        syncedDocMap.set(chunk.pool_document_id, count + 1);
+        const count = agentChunkMap.get(chunk.pool_document_id) || 0;
+        agentChunkMap.set(chunk.pool_document_id, count + 1);
       }
     });
 
-    console.log(`[check-and-sync-all] Found chunks for ${syncedDocMap.size} documents`);
-    console.log('[check-and-sync-all] Document chunk counts:', 
-      Array.from(syncedDocMap.entries()).map(([docId, count]) => ({
-        docId: docId.substring(0, 8) + '...',
-        chunks: count
-      }))
-    );
+    console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents`);
 
     // ========================================
     // STEP 3: Find discrepancies
@@ -106,22 +94,10 @@ serve(async (req) => {
     const missingDocs: string[] = [];
     const orphanedDocs: string[] = [];
 
-    // Check assigned documents
+    // Check assigned documents - simplified check without per-doc queries
     for (const docId of assignedDocIds) {
-      const agentChunkCount = syncedDocMap.get(docId) || 0;
+      const agentChunkCount = agentChunkMap.get(docId) || 0;
       const fileName = docNameMap.get(docId) || 'Unknown';
-      
-      // Conta i chunk TOTALI disponibili per questo documento
-      const { data: allChunksData, error: allChunksError } = await supabase
-        .from('agent_knowledge')
-        .select('id')
-        .eq('pool_document_id', docId);
-      
-      if (allChunksError) {
-        console.error(`[check-and-sync-all] Error counting total chunks for ${docId}:`, allChunksError);
-      }
-      
-      const totalChunks = allChunksData?.length || 0;
       
       if (agentChunkCount === 0) {
         missingDocs.push(docId);
@@ -131,16 +107,6 @@ serve(async (req) => {
           isAssigned: true,
           chunkCount: 0,
           status: 'missing',
-        });
-      } else if (totalChunks > 0 && agentChunkCount < totalChunks) {
-        // NUOVO: Documenti parzialmente sincronizzati
-        console.log(`[check-and-sync-all] Partial sync detected: ${fileName} (${agentChunkCount}/${totalChunks} chunks)`);
-        statuses.push({
-          documentId: docId,
-          fileName,
-          isAssigned: true,
-          chunkCount: agentChunkCount,
-          status: 'partial' as any, // Status parziale
         });
       } else {
         statuses.push({
@@ -154,7 +120,7 @@ serve(async (req) => {
     }
 
     // Check for orphaned documents (in agent_knowledge but not assigned)
-    for (const [docId, chunkCount] of syncedDocMap.entries()) {
+    for (const [docId, chunkCount] of agentChunkMap.entries()) {
       if (!assignedDocIds.has(docId)) {
         orphanedDocs.push(docId);
         statuses.push({
@@ -236,7 +202,7 @@ serve(async (req) => {
       success: true,
       agentId,
       totalAssigned: assignedDocIds.size,
-      totalSynced: syncedDocMap.size,
+      totalSynced: agentChunkMap.size,
       missingCount: missingDocs.length,
       orphanedCount: orphanedDocs.length,
       statuses,
