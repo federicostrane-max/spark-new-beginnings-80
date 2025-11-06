@@ -6,6 +6,7 @@ import { usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useState } from "react";
+import { logger } from "@/lib/logger";
 
 interface GlobalAlertsProps {
   hasAgentIssues?: boolean;
@@ -100,6 +101,9 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
         }
       });
 
+      // Clean all client-side logs before showing results
+      logger.clearAllLogs();
+
       // Show results
       if (errors.length > 0 && successful.length === 0) {
         toast.error(`Sincronizzazione fallita: ${errors.slice(0, 2).join(', ')}${errors.length > 2 ? `... +${errors.length - 2}` : ''}`);
@@ -121,8 +125,13 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
     }
   };
 
-  // Mostra alert se ci sono problemi nel pool O problemi negli agenti
+  // NON mostrare alert se non ci sono problemi reali
   if (!poolHealth.hasIssues && !hasAgentIssues) {
+    return null;
+  }
+
+  // NON mostrare se issueCount è 0 (fix bug "0 problemi")
+  if (poolHealth.issueCount === 0 && !hasAgentIssues) {
     return null;
   }
 
@@ -144,11 +153,16 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
       <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <span className="font-semibold">
-            {totalIssueCount} {totalIssueCount === 1 ? 'problema' : 'problemi'} nel pool documenti
+            {totalIssueCount > 0 
+              ? `${totalIssueCount} ${totalIssueCount === 1 ? 'problema' : 'problemi'} nel pool documenti`
+              : 'Problemi di sincronizzazione agenti'
+            }
           </span>
-          <p className="text-sm mt-1 opacity-90">
-            {issueDetails.join(' • ')}
-          </p>
+          {issueDetails.length > 0 && (
+            <p className="text-sm mt-1 opacity-90">
+              {issueDetails.join(' • ')}
+            </p>
+          )}
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <Button 

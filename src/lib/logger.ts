@@ -174,6 +174,18 @@ class Logger {
     this.persistLogs();
   }
 
+  // Pulisci log per agente specifico
+  clearAgentLogs(agentId: string) {
+    this.logs = this.logs.filter(log => log.agentId !== agentId);
+    this.persistLogs();
+  }
+
+  // Pulisci tutti i log
+  clearAllLogs() {
+    this.logs = [];
+    this.persistLogs();
+  }
+
   // Esporta log come JSON per debugging
   exportLogs(): string {
     return JSON.stringify(this.logs, null, 2);

@@ -35,12 +35,12 @@ export const useAgentHealth = (agentIds: string[]) => {
       const statuses = data?.statuses || [];
       const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
 
-      // Conta errori e warning recenti dal logger
+      // Conta errori e warning recenti dal logger (solo per info, non per badge)
       const issues = logger.getAgentIssueCount(agentId, 30);
 
       const healthStatus: AgentHealthStatus = {
         agentId,
-        hasIssues: unsyncedCount > 0 || issues.errors > 0,
+        hasIssues: unsyncedCount > 0, // SOLO unsyncedCount determina il badge rosso
         unsyncedCount,
         errorCount: issues.errors,
         warningCount: issues.warnings,

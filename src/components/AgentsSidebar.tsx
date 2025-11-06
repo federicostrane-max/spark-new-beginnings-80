@@ -314,7 +314,7 @@ export const AgentsSidebar = ({
               >
                 <Database className="h-4 w-4" />
                 <span className="flex-1 text-left">Pool Documenti</span>
-                {poolHealth.hasIssues && (
+                {poolHealth.hasIssues && poolHealth.issueCount > 0 && (
                   <Badge variant="destructive" className="ml-auto">
                     {poolHealth.issueCount}
                   </Badge>
