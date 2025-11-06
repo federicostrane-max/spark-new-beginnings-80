@@ -8,6 +8,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 
+interface Agent {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+}
+
 interface ChatInputProps {
   onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>) => void;
   disabled?: boolean;
@@ -19,7 +26,30 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Array<{ url: string; name: string; type: string }>>([]);
   const [mentionedAgents, setMentionedAgents] = useState<string[]>([]);
+  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
+  const [showAgentSuggestions, setShowAgentSuggestions] = useState(false);
+  const [agentSuggestions, setAgentSuggestions] = useState<Agent[]>([]);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [mentionStartPos, setMentionStartPos] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // Fetch available agents on mount
+  useEffect(() => {
+    const fetchAgents = async () => {
+      const { data, error } = await supabase
+        .from('agents')
+        .select('id, name, slug, description')
+        .eq('active', true)
+        .order('name', { ascending: true });
+      
+      if (!error && data) {
+        setAvailableAgents(data);
+      }
+    };
+    
+    fetchAgents();
+  }, []);
 
   // Detect @agent mentions in input
   useEffect(() => {
@@ -34,6 +64,41 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     setMentionedAgents(matches);
   }, [input]);
 
+  // Detect @ trigger and show suggestions
+  useEffect(() => {
+    const cursorPos = textareaRef.current?.selectionStart || 0;
+    const textBeforeCursor = input.slice(0, cursorPos);
+    
+    // Find the last @ before cursor
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    if (lastAtIndex !== -1) {
+      // Get text after @ up to cursor
+      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
+      
+      // Check if there's no space (we're still in the mention)
+      if (!textAfterAt.includes(' ') && textAfterAt.length >= 0) {
+        setMentionStartPos(lastAtIndex);
+        
+        // Filter agents by the text after @
+        const filtered = availableAgents.filter(agent => 
+          agent.name.toLowerCase().includes(textAfterAt.toLowerCase()) ||
+          agent.slug.toLowerCase().includes(textAfterAt.toLowerCase())
+        );
+        
+        setAgentSuggestions(filtered);
+        setShowAgentSuggestions(filtered.length > 0);
+        setSelectedSuggestionIndex(0);
+      } else {
+        setShowAgentSuggestions(false);
+        setMentionStartPos(null);
+      }
+    } else {
+      setShowAgentSuggestions(false);
+      setMentionStartPos(null);
+    }
+  }, [input, availableAgents]);
+
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
@@ -46,6 +111,8 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (input.trim() && !disabled) {
+      // Close suggestions when submitting
+      setShowAgentSuggestions(false);
       onSend(input.trim(), attachments.length > 0 ? attachments : undefined);
       setInput("");
       setAttachments([]);
@@ -53,10 +120,65 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Handle agent suggestions navigation
+    if (showAgentSuggestions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => 
+          prev < agentSuggestions.length - 1 ? prev + 1 : prev
+        );
+        return;
+      }
+      
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : 0);
+        return;
+      }
+      
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectAgent(agentSuggestions[selectedSuggestionIndex]);
+        return;
+      }
+      
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowAgentSuggestions(false);
+        return;
+      }
+    }
+    
+    // Normal Enter to send
+    if (e.key === "Enter" && !e.shiftKey && !showAgentSuggestions) {
       e.preventDefault();
       handleSubmit();
     }
+  };
+
+  const selectAgent = (agent: Agent) => {
+    if (mentionStartPos === null) return;
+    
+    const cursorPos = textareaRef.current?.selectionStart || 0;
+    const textBefore = input.slice(0, mentionStartPos);
+    const textAfter = input.slice(cursorPos);
+    
+    // Insert agent slug after @
+    const newInput = `${textBefore}@${agent.slug} ${textAfter}`;
+    setInput(newInput);
+    
+    // Close suggestions
+    setShowAgentSuggestions(false);
+    setMentionStartPos(null);
+    
+    // Focus back on textarea
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = mentionStartPos + agent.slug.length + 2; // +2 for @ and space
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
   };
 
   const handleTranscription = (text: string) => {
@@ -183,37 +305,71 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       )}
 
       {/* Input Container */}
-      <div className="flex items-end gap-2 p-3 border rounded-2xl bg-background shadow-lg">
-        <VoiceInput onTranscription={handleTranscription} disabled={disabled} />
-        
-        <Textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={placeholder}
-          disabled={disabled}
-          className="min-h-[44px] max-h-[200px] resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent"
-          rows={1}
-        />
-        
-        <div className="flex items-center gap-1">
-          <div className="text-xs text-muted-foreground px-1" title="Tag agents with @agent-name to request their help">
-            <AtSign className="h-4 w-4" />
+      <div className="relative">
+        {/* Agent Suggestions Dropdown */}
+        {showAgentSuggestions && agentSuggestions.length > 0 && (
+          <div 
+            ref={suggestionsRef}
+            className="absolute bottom-full left-0 mb-2 w-full max-w-md bg-background border rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
+          >
+            {agentSuggestions.map((agent, index) => (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => selectAgent(agent)}
+                className={`w-full text-left px-4 py-3 hover:bg-accent transition-colors ${
+                  index === selectedSuggestionIndex ? 'bg-accent' : ''
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <AtSign className="h-4 w-4 text-primary flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{agent.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">@{agent.slug}</div>
+                    {agent.description && (
+                      <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                        {agent.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
+        )}
         
-        <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
-        
-        <Button
-          type="button"
-          onClick={() => handleSubmit()}
-          disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
-          size="icon"
-          className="flex-shrink-0"
-        >
-          <Send className="h-4 w-4" />
-        </Button>
+        <div className="flex items-end gap-2 p-3 border rounded-2xl bg-background shadow-lg">
+          <VoiceInput onTranscription={handleTranscription} disabled={disabled} />
+          
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={placeholder}
+            disabled={disabled}
+            className="min-h-[44px] max-h-[200px] resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent"
+            rows={1}
+          />
+          
+          <div className="flex items-center gap-1">
+            <div className="text-xs text-muted-foreground px-1" title="Tag agents with @agent-name to request their help">
+              <AtSign className="h-4 w-4" />
+            </div>
+          
+          <AttachmentUpload onAttachmentAdded={handleAttachment} disabled={disabled} />
+          
+          <Button
+            type="button"
+            onClick={() => handleSubmit()}
+            disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
+            size="icon"
+            className="flex-shrink-0"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+          </div>
         </div>
       </div>
     </div>
