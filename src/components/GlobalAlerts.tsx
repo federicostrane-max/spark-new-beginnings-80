@@ -1,21 +1,102 @@
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Database, RefreshCw } from "lucide-react";
+import { AlertTriangle, Database, RefreshCw, Eye, X } from "lucide-react";
 import { usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { logger } from "@/lib/logger";
 
 interface GlobalAlertsProps {
   hasAgentIssues?: boolean;
 }
 
+interface AgentAlert {
+  id: string;
+  title: string;
+  message: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  action_url: string | null;
+  created_at: string;
+}
+
 export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
   const navigate = useNavigate();
   const poolHealth = usePoolDocumentsHealth();
   const [isSyncing, setIsSyncing] = useState(false);
+  const [agentAlerts, setAgentAlerts] = useState<AgentAlert[]>([]);
+
+  // Fetch agent alerts
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      const { data } = await supabase
+        .from('agent_alerts')
+        .select('*')
+        .eq('is_read', false)
+        .eq('dismissed', false)
+        .order('created_at', { ascending: false })
+        .limit(3);
+      
+      setAgentAlerts((data as any) || []);
+    };
+    
+    fetchAlerts();
+    
+    // Subscribe to new alerts
+    const channel = supabase
+      .channel('agent_alerts_global')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'agent_alerts'
+        },
+        (payload) => {
+          setAgentAlerts(prev => [payload.new as AgentAlert, ...prev].slice(0, 3));
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      channel.unsubscribe();
+    };
+  }, []);
+
+  const handleDismissAlert = async (alertId: string) => {
+    await supabase
+      .from('agent_alerts')
+      .update({ dismissed: true, dismissed_at: new Date().toISOString() })
+      .eq('id', alertId);
+    
+    setAgentAlerts(prev => prev.filter(a => a.id !== alertId));
+  };
+
+  const handleMarkAsRead = async (alertId: string, actionUrl?: string | null) => {
+    await supabase
+      .from('agent_alerts')
+      .update({ is_read: true, read_at: new Date().toISOString() })
+      .eq('id', alertId);
+    
+    setAgentAlerts(prev => prev.filter(a => a.id !== alertId));
+    
+    if (actionUrl) {
+      navigate(actionUrl);
+    }
+  };
+
+  const getSeverityVariant = (severity: string): "default" | "destructive" => {
+    switch (severity) {
+      case 'error':
+      case 'critical':
+        return 'destructive';
+      case 'warning':
+      case 'info':
+      default:
+        return 'default';
+    }
+  };
 
   const handleSyncAllAgents = async () => {
     try {
@@ -147,10 +228,55 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
 
   const totalIssueCount = poolHealth.issueCount;
 
+  // Render both agent alerts and pool alerts
   return (
-    <Alert variant="destructive" className="mx-4 mt-4 border-2">
-      <AlertTriangle className="h-5 w-5" />
-      <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
+    <div className="space-y-4 mx-4 mt-4">
+      {/* Agent Operation Alerts */}
+      {agentAlerts.map((alert) => (
+        <Alert key={alert.id} variant={getSeverityVariant(alert.severity)} className="border-2 shadow-lg">
+          <AlertTriangle className="h-5 w-5" />
+          <AlertTitle className="flex items-center justify-between">
+            <span>{alert.title}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => handleDismissAlert(alert.id)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </AlertTitle>
+          <AlertDescription className="space-y-2 mt-2">
+            <p className="text-sm">{alert.message}</p>
+            <div className="flex gap-2">
+              {alert.action_url && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleMarkAsRead(alert.id, alert.action_url)}
+                  className="bg-background hover:bg-background/90"
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  Visualizza
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleDismissAlert(alert.id)}
+              >
+                Ignora
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ))}
+
+      {/* Pool Health Alert */}
+      {(poolHealth.hasIssues || hasAgentIssues) && poolHealth.issueCount > 0 && (
+        <Alert variant="destructive" className="border-2">
+          <AlertTriangle className="h-5 w-5" />
+          <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <span className="font-semibold">
             {totalIssueCount > 0 
@@ -187,5 +313,7 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
         </div>
       </AlertDescription>
     </Alert>
+      )}
+    </div>
   );
 };

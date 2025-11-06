@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProcessingLogs } from "./ProcessingLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MaintenanceMonitor } from "./MaintenanceMonitor";
+import { OperationsDashboard } from "./OperationsDashboard";
 
 interface ProcessingResult {
   id: string;
@@ -106,10 +107,11 @@ export const AdminPanel = () => {
 
   return (
     <Tabs defaultValue="tools" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-3">
+      <TabsList className="grid w-full grid-cols-4">
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
         <TabsTrigger value="logs">Log Processing</TabsTrigger>
         <TabsTrigger value="maintenance">Manutenzione Auto</TabsTrigger>
+        <TabsTrigger value="operations">Operazioni</TabsTrigger>
       </TabsList>
 
       <TabsContent value="tools">
@@ -287,6 +289,10 @@ export const AdminPanel = () => {
 
       <TabsContent value="maintenance">
         <MaintenanceMonitor />
+      </TabsContent>
+
+      <TabsContent value="operations">
+        <OperationsDashboard />
       </TabsContent>
     </Tabs>
   );
