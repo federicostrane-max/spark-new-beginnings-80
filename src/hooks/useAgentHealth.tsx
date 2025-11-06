@@ -35,7 +35,7 @@ export const useAgentHealth = (agentIds: string[]) => {
       const statuses = data?.statuses || [];
       const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
 
-      // Conta errori e warning recenti dal logger (solo per info, non per badge)
+      // Conta SOLO errori reali, non warning generici
       const issues = logger.getAgentIssueCount(agentId, 30);
 
       const healthStatus: AgentHealthStatus = {
@@ -47,7 +47,8 @@ export const useAgentHealth = (agentIds: string[]) => {
         lastChecked: new Date()
       };
 
-      if (healthStatus.hasIssues) {
+      // Log SOLO se ci sono documenti non sincronizzati
+      if (unsyncedCount > 0) {
         logger.warning('agent-operation', `Agent ${agentId} has issues`, {
           unsyncedCount,
           errorCount: issues.errors,
