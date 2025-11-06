@@ -462,6 +462,20 @@ serve(async (req) => {
                 if (isActuallySynced) {
                   console.log(`[auto-maintenance] ✅ VERIFIED: Agent ${agent.name} successfully synced`);
                   
+                  // ✅ CLEANUP: Rimuovi i vecchi record di fallimento per questo agente
+                  const { error: cleanupError } = await supabase
+                    .from('maintenance_operation_details')
+                    .delete()
+                    .eq('target_id', agent.id)
+                    .eq('operation_type', 'sync_agent')
+                    .in('status', ['failed', 'retry_needed']);
+                  
+                  if (cleanupError) {
+                    console.error(`[auto-maintenance] ⚠️ Failed to cleanup old failure records:`, cleanupError);
+                  } else {
+                    console.log(`[auto-maintenance] 🧹 Cleaned up old failure records for ${agent.name}`);
+                  }
+                  
                   await supabase
                     .from('maintenance_operation_details')
                     .insert({
