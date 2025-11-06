@@ -2932,11 +2932,11 @@ ${agent.system_prompt}${knowledgeContext}`;
                           fullResponse += errorText;
                           sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
-                          const { data: documents, error: docsError } = await supabase
-                            .from('agent_knowledge')
-                            .select('document_name, category, summary, created_at, source_type')
-                            .eq('agent_id', targetAgent.id)
-                            .order('created_at', { ascending: false });
+                          // Get distinct documents using aggregation to ensure we get all unique documents
+                          const { data: documents, error: docsError } = await supabase.rpc(
+                            'get_distinct_documents',
+                            { p_agent_id: targetAgent.id }
+                          );
                           
                           if (docsError) {
                             console.error('❌ Error retrieving documents:', docsError);
@@ -2946,27 +2946,19 @@ ${agent.system_prompt}${knowledgeContext}`;
                             fullResponse += errorText;
                             sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
-                            console.log(`✅ Retrieved ${documents.length} documents for agent:`, targetAgent.name);
-                            
-                            // Group by document_name to avoid duplicates
-                            const uniqueDocs = new Map();
-                            documents.forEach(doc => {
-                              if (!uniqueDocs.has(doc.document_name)) {
-                                uniqueDocs.set(doc.document_name, doc);
-                              }
-                            });
+                            console.log(`✅ Retrieved ${documents?.length || 0} distinct documents for agent:`, targetAgent.name);
                             
                             toolResult = {
                               success: true,
                               agent_name: targetAgent.name,
                               agent_slug: targetAgent.slug,
-                              document_count: uniqueDocs.size,
-                              documents: Array.from(uniqueDocs.values())
+                              document_count: documents?.length || 0,
+                              documents: documents || []
                             };
                             
                             // Aggiungi lista documenti nella risposta
-                            let docsText = `\n\n✅ **${targetAgent.name}** ha accesso a ${uniqueDocs.size} documenti:\n\n`;
-                            Array.from(uniqueDocs.values()).forEach((doc: any, idx: number) => {
+                            let docsText = `\n\n✅ **${targetAgent.name}** ha accesso a ${documents?.length || 0} documenti:\n\n`;
+                            documents?.forEach((doc: any, idx: number) => {
                               docsText += `${idx + 1}. **${doc.document_name}**\n`;
                               if (doc.category) docsText += `   - Categoria: ${doc.category}\n`;
                               if (doc.summary) docsText += `   - ${doc.summary}\n`;
