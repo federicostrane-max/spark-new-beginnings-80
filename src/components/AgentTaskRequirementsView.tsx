@@ -24,21 +24,30 @@ import { Loader2, Edit, Save, X, Plus, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import crypto from "crypto-js";
 
-interface RequirementItem {
-  concept?: string;
-  term?: string;
-  pattern?: string;
-  procedure?: string;
+interface CoreConceptItem {
+  concept: string;
   importance: string;
 }
+
+interface ProceduralKnowledgeItem {
+  process: string;
+  steps: string[];
+}
+
+interface DecisionPatternItem {
+  pattern: string;
+  criteria: string[];
+}
+
+type DomainVocabularyItem = string;
 
 interface TaskRequirements {
   id: string;
   agent_id: string;
-  core_concepts: RequirementItem[];
-  procedural_knowledge: RequirementItem[];
-  decision_patterns: RequirementItem[];
-  domain_vocabulary: RequirementItem[];
+  core_concepts: CoreConceptItem[];
+  procedural_knowledge: ProceduralKnowledgeItem[];
+  decision_patterns: DecisionPatternItem[];
+  domain_vocabulary: DomainVocabularyItem[];
   system_prompt_hash: string;
   extracted_at: string;
   extraction_model: string;
@@ -59,10 +68,10 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Edit state
-  const [editedCoreConcepts, setEditedCoreConcepts] = useState<RequirementItem[]>([]);
-  const [editedProceduralKnowledge, setEditedProceduralKnowledge] = useState<RequirementItem[]>([]);
-  const [editedDecisionPatterns, setEditedDecisionPatterns] = useState<RequirementItem[]>([]);
-  const [editedDomainVocabulary, setEditedDomainVocabulary] = useState<RequirementItem[]>([]);
+  const [editedCoreConcepts, setEditedCoreConcepts] = useState<CoreConceptItem[]>([]);
+  const [editedProceduralKnowledge, setEditedProceduralKnowledge] = useState<ProceduralKnowledgeItem[]>([]);
+  const [editedDecisionPatterns, setEditedDecisionPatterns] = useState<DecisionPatternItem[]>([]);
+  const [editedDomainVocabulary, setEditedDomainVocabulary] = useState<DomainVocabularyItem[]>([]);
 
   useEffect(() => {
     fetchRequirements();
@@ -83,10 +92,10 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
       if (data) {
         setRequirements({
           ...data,
-          core_concepts: data.core_concepts as unknown as RequirementItem[],
-          procedural_knowledge: data.procedural_knowledge as unknown as RequirementItem[],
-          decision_patterns: data.decision_patterns as unknown as RequirementItem[],
-          domain_vocabulary: data.domain_vocabulary as unknown as RequirementItem[]
+          core_concepts: data.core_concepts as unknown as CoreConceptItem[],
+          procedural_knowledge: data.procedural_knowledge as unknown as ProceduralKnowledgeItem[],
+          decision_patterns: data.decision_patterns as unknown as DecisionPatternItem[],
+          domain_vocabulary: data.domain_vocabulary as unknown as DomainVocabularyItem[]
         });
       }
     } catch (error) {
@@ -152,10 +161,10 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
       const { error } = await supabase.functions.invoke("update-task-requirements", {
         body: {
           agentId,
-          core_concepts: editedCoreConcepts.filter(c => (c.concept || c.term || c.pattern || c.procedure)?.trim()),
-          procedural_knowledge: editedProceduralKnowledge.filter(c => (c.concept || c.term || c.pattern || c.procedure)?.trim()),
-          decision_patterns: editedDecisionPatterns.filter(c => (c.concept || c.term || c.pattern || c.procedure)?.trim()),
-          domain_vocabulary: editedDomainVocabulary.filter(c => (c.concept || c.term || c.pattern || c.procedure)?.trim())
+          core_concepts: editedCoreConcepts.filter(c => c.concept?.trim()),
+          procedural_knowledge: editedProceduralKnowledge.filter(p => p.process?.trim()),
+          decision_patterns: editedDecisionPatterns.filter(d => d.pattern?.trim()),
+          domain_vocabulary: editedDomainVocabulary.filter(v => v?.trim())
         }
       });
 
@@ -173,13 +182,9 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     }
   };
 
-  const handleItemChange = (
-    setter: React.Dispatch<React.SetStateAction<RequirementItem[]>>,
-    index: number,
-    field: 'concept' | 'term' | 'pattern' | 'procedure' | 'importance',
-    value: string
-  ) => {
-    setter(prev => {
+  // Core Concepts handlers
+  const handleCoreConceptChange = (index: number, field: keyof CoreConceptItem, value: string) => {
+    setEditedCoreConcepts(prev => {
       const newArr = [...prev];
       newArr[index] = { ...newArr[index], [field]: value };
       return newArr;
@@ -187,80 +192,318 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     setHasUnsavedChanges(true);
   };
 
-  const handleAddItem = (setter: React.Dispatch<React.SetStateAction<RequirementItem[]>>, type: 'concept' | 'term' | 'pattern' | 'procedure') => {
-    setter(prev => [...prev, { [type]: "", importance: "medium" } as RequirementItem]);
+  // Procedural Knowledge handlers
+  const handleProceduralChange = (index: number, field: 'process', value: string) => {
+    setEditedProceduralKnowledge(prev => {
+      const newArr = [...prev];
+      newArr[index] = { ...newArr[index], [field]: value };
+      return newArr;
+    });
     setHasUnsavedChanges(true);
   };
 
-  const handleRemoveItem = (
-    setter: React.Dispatch<React.SetStateAction<RequirementItem[]>>,
-    index: number
-  ) => {
-    setter(prev => prev.filter((_, i) => i !== index));
+  const handleStepChange = (procIndex: number, stepIndex: number, value: string) => {
+    setEditedProceduralKnowledge(prev => {
+      const newArr = [...prev];
+      newArr[procIndex].steps[stepIndex] = value;
+      return newArr;
+    });
     setHasUnsavedChanges(true);
   };
 
-  const renderEditableList = (
-    items: RequirementItem[],
-    setter: React.Dispatch<React.SetStateAction<RequirementItem[]>>,
-    title: string,
-    fieldName: 'concept' | 'term' | 'pattern' | 'procedure'
-  ) => {
-    return (
-      <div className="space-y-2">
-        {items.map((item, idx) => {
-          const mainValue = item.concept || item.term || item.pattern || item.procedure || "";
-          return (
-            <div key={idx} className="flex gap-2">
-              <Input
-                value={mainValue}
-                onChange={(e) => handleItemChange(setter, idx, fieldName, e.target.value)}
-                placeholder={`${title} ${idx + 1}`}
-                className="flex-1"
-              />
-              <Input
-                value={item.importance || "medium"}
-                onChange={(e) => handleItemChange(setter, idx, 'importance', e.target.value)}
-                placeholder="Importance"
-                className="w-24"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleRemoveItem(setter, idx)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          );
-        })}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleAddItem(setter, fieldName)}
-          className="w-full"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Aggiungi
-        </Button>
-      </div>
-    );
+  const handleAddStep = (procIndex: number) => {
+    setEditedProceduralKnowledge(prev => {
+      const newArr = [...prev];
+      newArr[procIndex].steps.push("");
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
   };
 
-  const renderReadOnlyList = (items: RequirementItem[]) => {
-    return (
-      <ul className="list-disc list-inside space-y-1">
-        {items.map((item, idx) => {
-          const mainValue = item.concept || item.term || item.pattern || item.procedure || "";
-          return (
-            <li key={idx} className="text-sm text-muted-foreground">
-              {mainValue} <Badge variant="outline" className="ml-2 text-xs">{item.importance}</Badge>
-            </li>
-          );
-        })}
-      </ul>
-    );
+  const handleRemoveStep = (procIndex: number, stepIndex: number) => {
+    setEditedProceduralKnowledge(prev => {
+      const newArr = [...prev];
+      newArr[procIndex].steps = newArr[procIndex].steps.filter((_, i) => i !== stepIndex);
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
   };
+
+  // Decision Pattern handlers
+  const handleDecisionChange = (index: number, field: 'pattern', value: string) => {
+    setEditedDecisionPatterns(prev => {
+      const newArr = [...prev];
+      newArr[index] = { ...newArr[index], [field]: value };
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleCriterionChange = (patIndex: number, critIndex: number, value: string) => {
+    setEditedDecisionPatterns(prev => {
+      const newArr = [...prev];
+      newArr[patIndex].criteria[critIndex] = value;
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleAddCriterion = (patIndex: number) => {
+    setEditedDecisionPatterns(prev => {
+      const newArr = [...prev];
+      newArr[patIndex].criteria.push("");
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleRemoveCriterion = (patIndex: number, critIndex: number) => {
+    setEditedDecisionPatterns(prev => {
+      const newArr = [...prev];
+      newArr[patIndex].criteria = newArr[patIndex].criteria.filter((_, i) => i !== critIndex);
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  // Domain Vocabulary handlers
+  const handleVocabularyChange = (index: number, value: string) => {
+    setEditedDomainVocabulary(prev => {
+      const newArr = [...prev];
+      newArr[index] = value;
+      return newArr;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  // Generic handlers
+  const handleRemoveCoreConcept = (index: number) => {
+    setEditedCoreConcepts(prev => prev.filter((_, i) => i !== index));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleRemoveProcedural = (index: number) => {
+    setEditedProceduralKnowledge(prev => prev.filter((_, i) => i !== index));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleRemoveDecision = (index: number) => {
+    setEditedDecisionPatterns(prev => prev.filter((_, i) => i !== index));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleRemoveVocabulary = (index: number) => {
+    setEditedDomainVocabulary(prev => prev.filter((_, i) => i !== index));
+    setHasUnsavedChanges(true);
+  };
+
+  const handleAddCoreConcept = () => {
+    setEditedCoreConcepts(prev => [...prev, { concept: "", importance: "medium" }]);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleAddProcedural = () => {
+    setEditedProceduralKnowledge(prev => [...prev, { process: "", steps: [""] }]);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleAddDecision = () => {
+    setEditedDecisionPatterns(prev => [...prev, { pattern: "", criteria: [""] }]);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleAddVocabulary = () => {
+    setEditedDomainVocabulary(prev => [...prev, ""]);
+    setHasUnsavedChanges(true);
+  };
+
+  // Render functions
+  const renderCoreConceptsEdit = () => (
+    <div className="space-y-3">
+      {editedCoreConcepts.map((item, idx) => (
+        <div key={idx} className="flex gap-2">
+          <Input
+            value={item.concept}
+            onChange={(e) => handleCoreConceptChange(idx, 'concept', e.target.value)}
+            placeholder="Concept"
+            className="flex-1"
+          />
+          <Input
+            value={item.importance}
+            onChange={(e) => handleCoreConceptChange(idx, 'importance', e.target.value)}
+            placeholder="Importance"
+            className="w-28"
+          />
+          <Button variant="ghost" size="icon" onClick={() => handleRemoveCoreConcept(idx)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={handleAddCoreConcept} className="w-full">
+        <Plus className="h-4 w-4 mr-2" />
+        Aggiungi Concept
+      </Button>
+    </div>
+  );
+
+  const renderProceduralEdit = () => (
+    <div className="space-y-4">
+      {editedProceduralKnowledge.map((item, idx) => (
+        <div key={idx} className="border rounded-lg p-3 space-y-2">
+          <div className="flex gap-2">
+            <Input
+              value={item.process}
+              onChange={(e) => handleProceduralChange(idx, 'process', e.target.value)}
+              placeholder="Process name"
+              className="flex-1"
+            />
+            <Button variant="ghost" size="icon" onClick={() => handleRemoveProcedural(idx)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="ml-4 space-y-2">
+            <p className="text-xs text-muted-foreground">Steps:</p>
+            {item.steps.map((step, stepIdx) => (
+              <div key={stepIdx} className="flex gap-2">
+                <Input
+                  value={step}
+                  onChange={(e) => handleStepChange(idx, stepIdx, e.target.value)}
+                  placeholder={`Step ${stepIdx + 1}`}
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="icon" onClick={() => handleRemoveStep(idx, stepIdx)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => handleAddStep(idx)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Aggiungi Step
+            </Button>
+          </div>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={handleAddProcedural} className="w-full">
+        <Plus className="h-4 w-4 mr-2" />
+        Aggiungi Process
+      </Button>
+    </div>
+  );
+
+  const renderDecisionEdit = () => (
+    <div className="space-y-4">
+      {editedDecisionPatterns.map((item, idx) => (
+        <div key={idx} className="border rounded-lg p-3 space-y-2">
+          <div className="flex gap-2">
+            <Input
+              value={item.pattern}
+              onChange={(e) => handleDecisionChange(idx, 'pattern', e.target.value)}
+              placeholder="Decision pattern"
+              className="flex-1"
+            />
+            <Button variant="ghost" size="icon" onClick={() => handleRemoveDecision(idx)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="ml-4 space-y-2">
+            <p className="text-xs text-muted-foreground">Criteria:</p>
+            {item.criteria.map((crit, critIdx) => (
+              <div key={critIdx} className="flex gap-2">
+                <Input
+                  value={crit}
+                  onChange={(e) => handleCriterionChange(idx, critIdx, e.target.value)}
+                  placeholder={`Criterion ${critIdx + 1}`}
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="icon" onClick={() => handleRemoveCriterion(idx, critIdx)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" onClick={() => handleAddCriterion(idx)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Aggiungi Criterion
+            </Button>
+          </div>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={handleAddDecision} className="w-full">
+        <Plus className="h-4 w-4 mr-2" />
+        Aggiungi Pattern
+      </Button>
+    </div>
+  );
+
+  const renderVocabularyEdit = () => (
+    <div className="space-y-2">
+      {editedDomainVocabulary.map((term, idx) => (
+        <div key={idx} className="flex gap-2">
+          <Input
+            value={term}
+            onChange={(e) => handleVocabularyChange(idx, e.target.value)}
+            placeholder="Term"
+            className="flex-1"
+          />
+          <Button variant="ghost" size="icon" onClick={() => handleRemoveVocabulary(idx)}>
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button variant="outline" size="sm" onClick={handleAddVocabulary} className="w-full">
+        <Plus className="h-4 w-4 mr-2" />
+        Aggiungi Term
+      </Button>
+    </div>
+  );
+
+  const renderCoreConceptsReadOnly = (items: CoreConceptItem[]) => (
+    <ul className="list-disc list-inside space-y-1">
+      {items.map((item, idx) => (
+        <li key={idx} className="text-sm text-muted-foreground">
+          {item.concept}
+          <Badge variant="outline" className="ml-2 text-xs">{item.importance}</Badge>
+        </li>
+      ))}
+    </ul>
+  );
+
+  const renderProceduralReadOnly = (items: ProceduralKnowledgeItem[]) => (
+    <div className="space-y-3">
+      {items.map((item, idx) => (
+        <div key={idx}>
+          <p className="text-sm font-medium text-foreground">{item.process}</p>
+          <ul className="list-decimal list-inside ml-4 mt-1 space-y-0.5">
+            {item.steps.map((step, stepIdx) => (
+              <li key={stepIdx} className="text-sm text-muted-foreground">{step}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderDecisionReadOnly = (items: DecisionPatternItem[]) => (
+    <div className="space-y-3">
+      {items.map((item, idx) => (
+        <div key={idx}>
+          <p className="text-sm font-medium text-foreground">{item.pattern}</p>
+          <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
+            {item.criteria.map((crit, critIdx) => (
+              <li key={critIdx} className="text-sm text-muted-foreground">{crit}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderVocabularyReadOnly = (items: DomainVocabularyItem[]) => (
+    <ul className="list-disc list-inside space-y-1">
+      {items.map((term, idx) => (
+        <li key={idx} className="text-sm text-muted-foreground">{term}</li>
+      ))}
+    </ul>
+  );
 
   if (loading) {
     return (
@@ -362,8 +605,8 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
               </AccordionTrigger>
               <AccordionContent>
                 {editMode
-                  ? renderEditableList(editedCoreConcepts, setEditedCoreConcepts, "Concept", "concept")
-                  : renderReadOnlyList(requirements.core_concepts)}
+                  ? renderCoreConceptsEdit()
+                  : renderCoreConceptsReadOnly(requirements.core_concepts)}
               </AccordionContent>
             </AccordionItem>
 
@@ -373,8 +616,8 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
               </AccordionTrigger>
               <AccordionContent>
                 {editMode
-                  ? renderEditableList(editedProceduralKnowledge, setEditedProceduralKnowledge, "Procedure", "procedure")
-                  : renderReadOnlyList(requirements.procedural_knowledge)}
+                  ? renderProceduralEdit()
+                  : renderProceduralReadOnly(requirements.procedural_knowledge)}
               </AccordionContent>
             </AccordionItem>
 
@@ -384,8 +627,8 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
               </AccordionTrigger>
               <AccordionContent>
                 {editMode
-                  ? renderEditableList(editedDecisionPatterns, setEditedDecisionPatterns, "Pattern", "pattern")
-                  : renderReadOnlyList(requirements.decision_patterns)}
+                  ? renderDecisionEdit()
+                  : renderDecisionReadOnly(requirements.decision_patterns)}
               </AccordionContent>
             </AccordionItem>
 
@@ -395,8 +638,8 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
               </AccordionTrigger>
               <AccordionContent>
                 {editMode
-                  ? renderEditableList(editedDomainVocabulary, setEditedDomainVocabulary, "Term", "term")
-                  : renderReadOnlyList(requirements.domain_vocabulary)}
+                  ? renderVocabularyEdit()
+                  : renderVocabularyReadOnly(requirements.domain_vocabulary)}
               </AccordionContent>
             </AccordionItem>
           </Accordion>
