@@ -21,49 +21,39 @@ export const useAgentHealth = (agentIds: string[]) => {
 
   const checkAgentHealth = async (agentId: string): Promise<AgentHealthStatus> => {
     try {
-      // Verifica documenti assegnati all'agente
-      const { data: assignedDocs, error: assignError } = await supabase
-        .from('agent_document_links')
-        .select('document_id')
-        .eq('agent_id', agentId);
+      // Usa check-and-sync-all per logica precisa di sincronizzazione
+      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
+        body: { agentId, autoFix: false }
+      });
 
-      if (assignError) {
-        logger.error('agent-operation', `Failed to check health for agent ${agentId}`, assignError, { agentId });
-        throw assignError;
+      if (error) {
+        logger.error('agent-operation', `Failed to check health for agent ${agentId}`, error, { agentId });
+        throw error;
       }
 
-      const documentIds = assignedDocs?.map(d => d.document_id) || [];
+      // Conta documenti realmente non sincronizzati o parzialmente sincronizzati
+      const statuses = data?.statuses || [];
+      const unsyncedCount = statuses.filter((s: any) => s.status !== 'synced').length;
 
-      if (documentIds.length === 0) {
-        return {
-          agentId,
-          hasIssues: false,
-          unsyncedCount: 0,
-          errorCount: 0,
-          warningCount: 0,
-          lastChecked: new Date()
-        };
-      }
-
-      // Verifica quanti documenti non sono sincronizzati
-      const { data: knowledgeData, error: knowledgeError } = await supabase
-        .from('agent_knowledge')
-        .select('id, pool_document_id')
-        .eq('agent_id', agentId)
-        .in('pool_document_id', documentIds);
-
-      if (knowledgeError) {
-        logger.error('document-sync', `Failed to check synced documents for agent ${agentId}`, knowledgeError, { agentId });
-        throw knowledgeError;
-      }
-
-      const syncedDocIds = new Set(knowledgeData?.map(k => k.pool_document_id) || []);
-      const unsyncedCount = documentIds.filter(id => !syncedDocIds.has(id)).length;
+      // Log dettagliati per documenti problematici
+      statuses.forEach((status: any) => {
+        if (status.status !== 'synced') {
+          logger.warning('document-sync', 
+            `Document not synced: ${status.fileName}`, 
+            { 
+              status: status.status, 
+              chunkCount: status.chunkCount,
+              expectedChunks: status.expectedChunks 
+            }, 
+            { agentId, documentId: status.documentId }
+          );
+        }
+      });
 
       // Conta errori e warning recenti dal logger
       const issues = logger.getAgentIssueCount(agentId, 30);
 
-      const status: AgentHealthStatus = {
+      const healthStatus: AgentHealthStatus = {
         agentId,
         hasIssues: unsyncedCount > 0 || issues.errors > 0 || issues.warnings > 0,
         unsyncedCount,
@@ -72,7 +62,7 @@ export const useAgentHealth = (agentIds: string[]) => {
         lastChecked: new Date()
       };
 
-      if (status.hasIssues) {
+      if (healthStatus.hasIssues) {
         logger.warning('agent-operation', `Agent ${agentId} has issues`, {
           unsyncedCount,
           errorCount: issues.errors,
@@ -80,7 +70,7 @@ export const useAgentHealth = (agentIds: string[]) => {
         }, { agentId });
       }
 
-      return status;
+      return healthStatus;
     } catch (error) {
       logger.error('agent-operation', `Error checking agent health for ${agentId}`, error, { agentId });
       return {
