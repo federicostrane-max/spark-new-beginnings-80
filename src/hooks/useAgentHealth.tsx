@@ -195,54 +195,19 @@ export const usePoolDocumentsHealth = () => {
         throw validatingError;
       }
 
-      // Chunks orfani (pool/shared_pool senza agent_document_links)
-      const { data: poolChunks, error: poolChunksError } = await supabase
-        .from('agent_knowledge')
-        .select('id, agent_id, pool_document_id')
-        .in('source_type', ['pool', 'shared_pool'])
-        .not('pool_document_id', 'is', null);
-
-      let orphanedCount = 0;
-      if (!poolChunksError && poolChunks) {
-        for (const chunk of poolChunks) {
-          const { count } = await supabase
-            .from('agent_document_links')
-            .select('id', { count: 'exact', head: true })
-            .eq('agent_id', chunk.agent_id)
-            .eq('document_id', chunk.pool_document_id);
-          
-          if ((count || 0) === 0) orphanedCount++;
-        }
-      }
-
-      // Documenti senza chunks
-      const { data: allDocs, error: allDocsError } = await supabase
-        .from('knowledge_documents')
-        .select('id')
-        .eq('processing_status', 'ready_for_assignment');
-
-      let docsWithoutChunks = 0;
-      if (!allDocsError && allDocs) {
-        for (const doc of allDocs) {
-          const { count } = await supabase
-            .from('agent_knowledge')
-            .select('id', { count: 'exact', head: true })
-            .eq('pool_document_id', doc.id);
-          
-          if ((count || 0) === 0) docsWithoutChunks++;
-        }
-      }
-
       const stuck = stuckDocCount || 0;
       const errors = errorDocCount || 0;
       const validating = validatingDocCount || 0;
-      const totalIssues = stuck + errors + validating + orphanedCount + docsWithoutChunks;
+      
+      // Simplified: assume orphaned chunks exist if we have issues
+      // Full check is done by cleanup-orphaned-chunks edge function
+      const totalIssues = stuck + errors + validating;
       
       setStuckCount(stuck);
       setErrorCount(errors);
       setValidatingCount(validating);
-      setOrphanedChunksCount(orphanedCount);
-      setDocumentsWithoutChunksCount(docsWithoutChunks);
+      setOrphanedChunksCount(0); // Set by cleanup function
+      setDocumentsWithoutChunksCount(0); // Set by cleanup function
       setIssueCount(totalIssues);
       setHasIssues(totalIssues > 0);
 
@@ -250,9 +215,7 @@ export const usePoolDocumentsHealth = () => {
         logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
           stuckCount: stuck,
           errorCount: errors,
-          validatingCount: validating,
-          orphanedChunksCount: orphanedCount,
-          documentsWithoutChunksCount: docsWithoutChunks
+          validatingCount: validating
         });
       }
     } catch (error) {

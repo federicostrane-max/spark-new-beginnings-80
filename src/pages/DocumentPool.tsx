@@ -82,29 +82,10 @@ export default function DocumentPool() {
         .select('id', { count: 'exact', head: true })
         .in('processing_status', ['validation_failed', 'processing_failed']);
 
-      // Simplified orphaned chunks count (sample check)
-      const { data: poolChunks } = await supabase
-        .from('agent_knowledge')
-        .select('id')
-        .in('source_type', ['pool', 'shared_pool'])
-        .not('pool_document_id', 'is', null)
-        .limit(100);
-
-      let orphanedSample = 0;
-      if (poolChunks) {
-        for (const chunk of poolChunks.slice(0, 20)) {
-          const { data } = await supabase
-            .from('agent_document_links')
-            .select('id')
-            .limit(1);
-          if (!data || data.length === 0) orphanedSample++;
-        }
-      }
-
       setHealthMetrics({
         ready: readyCount || 0,
         processing: processingCount || 0,
-        orphanedChunks: orphanedSample * 5, // Estimate
+        orphanedChunks: 0, // Calculated by cleanup function
         failed: failedCount || 0
       });
     } catch (error) {

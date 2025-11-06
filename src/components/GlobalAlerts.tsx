@@ -15,9 +15,7 @@ export const GlobalAlerts = () => {
   const issueDetails = [
     poolHealth.stuckCount > 0 && `${poolHealth.stuckCount} bloccati`,
     poolHealth.errorCount > 0 && `${poolHealth.errorCount} con errori`,
-    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`,
-    poolHealth.orphanedChunksCount > 0 && `${poolHealth.orphanedChunksCount} chunks orfani`,
-    poolHealth.documentsWithoutChunksCount > 0 && `${poolHealth.documentsWithoutChunksCount} senza chunks`
+    poolHealth.validatingCount > 0 && `${poolHealth.validatingCount} bloccati in validazione`
   ].filter(Boolean).join(' • ');
 
   return (
