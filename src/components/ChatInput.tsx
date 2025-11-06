@@ -402,14 +402,10 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
           />
           
           <div className="flex items-center gap-1">
-            <div className="text-xs text-muted-foreground px-1" title="Tag agents with @agent-name to request their help">
-              <AtSign className="h-4 w-4" />
-            </div>
-            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" title="Azioni Agente" className="h-9 w-9">
-                  <Zap className="h-4 w-4" />
+                  <AtSign className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               
