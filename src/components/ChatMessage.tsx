@@ -164,18 +164,41 @@ export const ChatMessage = ({
     ? isManuallyExpanded  // Override manuale ha priorità assoluta
     : (forceExpanded ?? true);  // Default: espanso se forceExpanded non è definito
   
-  // Preview intelligente: primi 3 paragrafi o 800 caratteri
+  // Preview intelligente: primi 5-8 paragrafi con soglia più alta
   const getPreviewContent = (text: string): string => {
     const paragraphs = text.split('\n\n').filter(p => p.trim());
-    if (paragraphs.length <= 3) return text;
     
-    const preview = paragraphs.slice(0, 3).join('\n\n');
-    return preview.length > 800 ? text.substring(0, 800) : preview;
+    // Se ci sono 5 o meno paragrafi, mostra tutto
+    if (paragraphs.length <= 5) return text;
+    
+    // Mostra i primi 5 paragrafi come preview
+    const preview = paragraphs.slice(0, 5).join('\n\n');
+    
+    // Se l'anteprima è comunque corta (< 2000 caratteri), aggiungi altri paragrafi
+    if (preview.length < 2000 && paragraphs.length > 5) {
+      return paragraphs.slice(0, 8).join('\n\n');
+    }
+    
+    return preview;
   };
   
-  const PREVIEW_THRESHOLD = 800;
+  const PREVIEW_THRESHOLD = 2000;
   const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
   const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
+  
+  // DEBUG: rimuovere dopo aver risolto
+  useEffect(() => {
+    if (content.length > 5000) {
+      console.log(`[ChatMessage ${id.slice(0,8)}]`, {
+        contentLength: content.length,
+        forceExpanded,
+        isManuallyExpanded,
+        isExpanded,
+        shouldShowPreview,
+        displayContentLength: displayContent.length
+      });
+    }
+  }, [content.length, forceExpanded, isManuallyExpanded, isExpanded, shouldShowPreview, displayContent.length, id]);
 
   // System messages have special rendering
   if (isSystem) {
