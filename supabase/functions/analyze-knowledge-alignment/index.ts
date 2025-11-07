@@ -114,6 +114,18 @@ serve(async (req) => {
 
     console.log('[analyze-alignment] Total chunks:', totalChunks);
 
+    if (!totalChunks || totalChunks === 0) {
+      console.log('[analyze-alignment] No active chunks found for agent');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          message: 'No active knowledge chunks found for this agent',
+          total_chunks: 0,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Check for existing analysis log to resume
     const { data: existingLog } = await supabase
       .from('alignment_analysis_log')
@@ -125,7 +137,7 @@ serve(async (req) => {
       .single();
 
     const startOffset = existingLog?.progress_chunks_analyzed || 0;
-    const endOffset = Math.min(startOffset + CONFIG.batch_processing.batch_size, totalChunks || 0);
+    const endOffset = Math.min(startOffset + CONFIG.batch_processing.batch_size, totalChunks);
 
     console.log('[analyze-alignment] Batch range:', startOffset, '-', endOffset);
 
@@ -140,7 +152,7 @@ serve(async (req) => {
     if (chunksError) {
       console.error('[analyze-alignment] Chunks fetch error:', chunksError);
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch chunks' }),
+        JSON.stringify({ error: 'Failed to fetch chunks', details: chunksError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
