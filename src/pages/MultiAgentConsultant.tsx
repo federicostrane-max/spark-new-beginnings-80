@@ -252,7 +252,7 @@ export default function MultiAgentConsultant() {
     }
   }, [session?.user?.id, agentUpdateTrigger]);
 
-  // Realtime subscription for message updates from background processing
+  // Realtime subscription for message updates
   useEffect(() => {
     if (!currentConversation?.id) return;
 
@@ -266,30 +266,13 @@ export default function MultiAgentConsultant() {
           table: 'agent_messages',
           filter: `conversation_id=eq.${currentConversation.id}`
         },
-        async (payload) => {
-          console.log('📨 Realtime notification for message:', payload.new.id);
-          
-          // CRITICAL FIX: Use RPC to bypass Supabase JS client payload size limits
-          const { data: fullMessageData, error } = await supabase.rpc('get_full_message_content', {
-            p_message_id: payload.new.id
-          });
-          
-          if (error) {
-            console.error('❌ Error loading full message via RPC:', error);
-            return;
-          }
-          
-          if (!fullMessageData || fullMessageData.length === 0) {
-            console.error('❌ No data returned from RPC');
-            return;
-          }
-          
-          const fullMessage = fullMessageData[0];
-          console.log('✅ Loaded via RPC:', fullMessage.id, 'length:', fullMessage.content?.length);
+        (payload) => {
+          console.log('📨 Realtime update:', payload.new.id);
+          const updatedMessage = payload.new as Message;
           
           setMessages(prev => 
             prev.map(msg => 
-              msg.id === fullMessage.id ? fullMessage as Message : msg
+              msg.id === updatedMessage.id ? updatedMessage : msg
             )
           );
         }
@@ -412,41 +395,18 @@ export default function MultiAgentConsultant() {
       if (convError) throw convError;
       setCurrentConversation(conv);
 
-      // Load basic message metadata first (IDs, roles, small content)
+      // Load all messages with full content
       const { data: msgs, error: msgsError } = await supabase
         .from("agent_messages")
-        .select("id, role, conversation_id, created_at, llm_provider")
+        .select("*")
         .eq("conversation_id", conversationId)
         .order("created_at");
 
       if (msgsError) throw msgsError;
       
-      console.log('🔍 [LOAD] Loaded', msgs?.length, 'message metadata');
+      console.log('🔍 Loaded', msgs?.length, 'messages');
       
-      // Load full content for each message using RPC to bypass payload limits
-      const fullMessages = await Promise.all(
-        msgs.map(async (msg) => {
-          const { data: fullData, error: rpcError } = await supabase.rpc('get_full_message_content', {
-            p_message_id: msg.id
-          });
-          
-          if (rpcError) {
-            console.error(`❌ [LOAD] Error loading message ${msg.id}:`, rpcError);
-            return { ...msg, content: '' };
-          }
-          
-          if (!fullData || fullData.length === 0) {
-            console.error(`❌ [LOAD] No data for message ${msg.id}`);
-            return { ...msg, content: '' };
-          }
-          
-          const fullMsg = fullData[0];
-          console.log(`✅ [LOAD] Message ${msg.id.slice(0, 8)}: ${fullMsg.content?.length || 0} chars`);
-          return fullMsg;
-        })
-      );
-      
-      setMessages(fullMessages.map((m) => ({ 
+      setMessages(msgs.map((m) => ({ 
         id: m.id, 
         role: m.role as "user" | "assistant", 
         content: m.content, 

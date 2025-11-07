@@ -270,88 +270,6 @@ export type Database = {
           },
         ]
       }
-      agent_long_responses: {
-        Row: {
-          agent_id: string
-          completed_at: string | null
-          conversation_id: string
-          created_at: string
-          current_chunk_index: number | null
-          error_message: string | null
-          generation_time_seconds: number | null
-          id: string
-          llm_model: string | null
-          llm_provider: string | null
-          message_id: string
-          response_chunks: Json
-          started_at: string
-          status: string
-          total_characters: number | null
-          total_tokens_used: number | null
-          user_id: string
-        }
-        Insert: {
-          agent_id: string
-          completed_at?: string | null
-          conversation_id: string
-          created_at?: string
-          current_chunk_index?: number | null
-          error_message?: string | null
-          generation_time_seconds?: number | null
-          id?: string
-          llm_model?: string | null
-          llm_provider?: string | null
-          message_id: string
-          response_chunks?: Json
-          started_at?: string
-          status?: string
-          total_characters?: number | null
-          total_tokens_used?: number | null
-          user_id: string
-        }
-        Update: {
-          agent_id?: string
-          completed_at?: string | null
-          conversation_id?: string
-          created_at?: string
-          current_chunk_index?: number | null
-          error_message?: string | null
-          generation_time_seconds?: number | null
-          id?: string
-          llm_model?: string | null
-          llm_provider?: string | null
-          message_id?: string
-          response_chunks?: Json
-          started_at?: string
-          status?: string
-          total_characters?: number | null
-          total_tokens_used?: number | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "agent_long_responses_agent_id_fkey"
-            columns: ["agent_id"]
-            isOneToOne: false
-            referencedRelation: "agents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "agent_long_responses_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "agent_conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "agent_long_responses_message_id_fkey"
-            columns: ["message_id"]
-            isOneToOne: false
-            referencedRelation: "agent_messages"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       agent_message_attachments: {
         Row: {
           created_at: string | null
@@ -1391,17 +1309,6 @@ export type Database = {
           document_name: string
           id: string
           summary: string
-        }[]
-      }
-      get_full_message_content: {
-        Args: { p_message_id: string }
-        Returns: {
-          content: string
-          conversation_id: string
-          created_at: string
-          id: string
-          llm_provider: string
-          role: string
         }[]
       }
       get_or_create_conversation: {
