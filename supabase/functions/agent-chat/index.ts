@@ -3354,29 +3354,11 @@ ${agent.system_prompt}${knowledgeContext}`;
 
           try {
             while (true) {
-              const { done, value } = await reader.read();
-              
-              if (done) {
-                const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
-                console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
-                console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
-                clearInterval(keepAliveInterval);
-                // Save before breaking
-                await supabase
-                  .from('agent_messages')
-                  .update({ 
-                    content: fullResponse,
-                    llm_provider: llmProvider 
-                  })
-                  .eq('id', placeholderMsg.id);
-                break;
-              }
-
-              // CHECK TIMEOUT - Switch to background processing if needed
+              // CHECK TIMEOUT FIRST - Before reading next chunk
               const elapsed = Date.now() - requestStartTime;
               if (elapsed > TIMEOUT_THRESHOLD && fullResponse.length > MIN_CHARS_FOR_BACKGROUND) {
-                console.log(`⏰ [REQ-${requestId}] ⚠️ TIMEOUT THRESHOLD REACHED (${elapsed}ms / ${TIMEOUT_THRESHOLD}ms, ${fullResponse.length} chars)`);
-                console.log(`🔄 [REQ-${requestId}] Switching to BACKGROUND PROCESSING...`);
+                console.log(`⏰ [REQ-${requestId}] TIMEOUT APPROACHING (${elapsed}ms elapsed, ${fullResponse.length} chars), switching to background...`);
+                console.log(`🚀 [LONG RESPONSE] Switching to background processing`);
                 
                 // Send switching notice to client
                 sendSSE(JSON.stringify({
@@ -3388,20 +3370,19 @@ ${agent.system_prompt}${knowledgeContext}`;
                 
                 // Create background task
                 const backgroundTask = async () => {
-                  console.log(`🔥 [REQ-${requestId}] Background task started`);
+                  console.log(`🔥 [BACKGROUND] Background task started`);
                   let backgroundResponse = fullResponse;
+                  let chunksSaved = 0;
+                  const backgroundStartTime = Date.now();
                   
                   try {
-                    // Process remaining stream
-                    let remainingBuffer = buffer + decoder.decode(value, { stream: true });
-                    
                     while (true) {
                       const { done: bgDone, value: bgValue } = await reader.read();
                       if (bgDone) break;
                       
-                      remainingBuffer += decoder.decode(bgValue, { stream: true });
-                      const bgLines = remainingBuffer.split('\n');
-                      remainingBuffer = bgLines.pop() || '';
+                      buffer += decoder.decode(bgValue, { stream: true });
+                      const bgLines = buffer.split('\n');
+                      buffer = bgLines.pop() || '';
                       
                       for (const bgLine of bgLines) {
                         if (!bgLine.trim() || bgLine.startsWith(':') || !bgLine.startsWith('data: ')) continue;
@@ -3424,6 +3405,12 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           if (contentChunk) {
                             backgroundResponse += contentChunk;
+                            chunksSaved++;
+                            
+                            // Log progress every 2000 chars
+                            if (backgroundResponse.length % 2000 < 100) {
+                              console.log(`📊 [BACKGROUND] Saved chunk ${chunksSaved}, total: ${backgroundResponse.length} chars`);
+                            }
                           }
                         } catch (e) {
                           // Ignore parse errors
@@ -3431,9 +3418,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                       }
                     }
                     
-                    // Save complete response
-                    console.log(`💾 [REQ-${requestId}] Saving background response (${backgroundResponse.length} chars)`);
+                    const backgroundDuration = ((Date.now() - backgroundStartTime) / 1000).toFixed(0);
+                    console.log(`✅ [BACKGROUND] Generation completed: ${backgroundResponse.length} chars in ${backgroundDuration}s`);
                     
+                    // Save to long_responses table
                     await supabase.from('agent_long_responses').upsert({
                       conversation_id: conversation.id,
                       message_id: placeholderMsg.id,
@@ -3443,37 +3431,76 @@ ${agent.system_prompt}${knowledgeContext}`;
                       metadata: {
                         total_chars: backgroundResponse.length,
                         elapsed_ms: Date.now() - requestStartTime,
-                        llm_provider: llmProvider
+                        llm_provider: llmProvider,
+                        chunks_saved: chunksSaved
                       }
                     });
                     
+                    // Update main message
                     await supabase.from('agent_messages').update({ 
                       content: backgroundResponse,
                       llm_provider: llmProvider 
                     }).eq('id', placeholderMsg.id);
                     
-                    console.log(`✅ [REQ-${requestId}] Background response saved`);
-                  } catch (bgErr) {
-                    console.error(`❌ [REQ-${requestId}] Background error:`, bgErr);
+                    console.log(`✅ [BACKGROUND] Response saved to database`);
+                  } catch (error) {
+                    console.error(`❌ [BACKGROUND] Error:`, error);
                     await supabase.from('agent_long_responses').upsert({
                       conversation_id: conversation.id,
                       message_id: placeholderMsg.id,
-                      status: 'error',
-                      metadata: { error: String(bgErr) }
+                      full_content: backgroundResponse,
+                      status: 'failed',
+                      metadata: { error: String(error) }
                     });
                   }
                 };
                 
-                // Execute background task
-                if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
-                  (globalThis as any).EdgeRuntime.waitUntil(backgroundTask());
+                // Start background task and return immediately
+                (globalThis as any).EdgeRuntime.waitUntil(backgroundTask());
+                
+                // Create long response record
+                const { data: longResponseRecord, error: longResponseError } = await supabase
+                  .from('agent_long_responses')
+                  .insert({
+                    conversation_id: conversation.id,
+                    message_id: placeholderMsg.id,
+                    full_content: fullResponse,
+                    status: 'processing',
+                    metadata: {
+                      initial_chars: fullResponse.length,
+                      llm_provider: llmProvider
+                    }
+                  })
+                  .select()
+                  .single();
+                
+                if (longResponseError) {
+                  console.error('❌ Failed to create long response record:', longResponseError);
                 } else {
-                  backgroundTask();
+                  console.log('✅ Long response record created:', longResponseRecord.id);
                 }
                 
-                // Return immediately
-                closeStream();
-                return;
+                // Send final event and close stream
+                sendSSE(JSON.stringify({ type: 'done', message: fullResponse }));
+                return new Response('', { headers: corsHeaders });
+              }
+              
+              const { done, value } = await reader.read();
+              
+              if (done) {
+                const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+                console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
+                console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
+                clearInterval(keepAliveInterval);
+                // Save before breaking
+                await supabase
+                  .from('agent_messages')
+                  .update({ 
+                    content: fullResponse,
+                    llm_provider: llmProvider 
+                  })
+                  .eq('id', placeholderMsg.id);
+                break;
               }
 
               buffer += decoder.decode(value, { stream: true });
