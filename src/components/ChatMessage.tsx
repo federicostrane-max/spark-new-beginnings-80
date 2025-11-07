@@ -188,7 +188,51 @@ export const ChatMessage = ({
     return preview;
   };
   
+  // Funzione per dividere intelligentemente il markdown in chunk
+  const splitMarkdownIntelligently = (markdown: string, maxChunkSize: number = 5000): string[] => {
+    if (markdown.length <= maxChunkSize) return [markdown];
+    
+    const chunks: string[] = [];
+    let currentPos = 0;
+    
+    while (currentPos < markdown.length) {
+      let chunkEnd = Math.min(currentPos + maxChunkSize, markdown.length);
+      
+      // Se non siamo alla fine, cerca un buon punto di divisione
+      if (chunkEnd < markdown.length) {
+        // Cerca il punto di divisione più vicino in questo ordine:
+        // 1. Fine di un code block (```)
+        // 2. Fine di un paragrafo (\n\n)
+        // 3. Fine di una riga (\n)
+        // 4. Spazio
+        
+        const searchArea = markdown.substring(currentPos, Math.min(chunkEnd + 500, markdown.length));
+        
+        const codeBlockEnd = searchArea.indexOf('\n```\n');
+        const doubleNewline = searchArea.indexOf('\n\n');
+        const singleNewline = searchArea.lastIndexOf('\n');
+        const space = searchArea.lastIndexOf(' ');
+        
+        if (codeBlockEnd !== -1 && codeBlockEnd < 500) {
+          chunkEnd = currentPos + codeBlockEnd + 4;
+        } else if (doubleNewline !== -1) {
+          chunkEnd = currentPos + doubleNewline + 2;
+        } else if (singleNewline !== -1) {
+          chunkEnd = currentPos + singleNewline + 1;
+        } else if (space !== -1) {
+          chunkEnd = currentPos + space + 1;
+        }
+      }
+      
+      chunks.push(markdown.substring(currentPos, chunkEnd));
+      currentPos = chunkEnd;
+    }
+    
+    return chunks;
+  };
+  
   const PREVIEW_THRESHOLD = 800;
+  const MARKDOWN_CHUNK_THRESHOLD = 7000;
   const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
   const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
   
@@ -274,13 +318,26 @@ export const ChatMessage = ({
           </div>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-visible [&_pre]:max-h-none [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {displayContent}
-            </ReactMarkdown>
-            {displayContent.length > 15000 && (
-              <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
-                ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri)
-              </div>
+            {displayContent.length > MARKDOWN_CHUNK_THRESHOLD ? (
+              <>
+                {splitMarkdownIntelligently(displayContent, 5000).map((chunk, idx, arr) => (
+                  <div key={idx}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {chunk}
+                    </ReactMarkdown>
+                    {idx < arr.length - 1 && (
+                      <div className="my-1 h-px bg-gradient-to-r from-transparent via-border to-transparent opacity-30" />
+                    )}
+                  </div>
+                ))}
+                <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
+                  ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri, diviso in {splitMarkdownIntelligently(displayContent, 5000).length} sezioni per ottimizzare il rendering)
+                </div>
+              </>
+            ) : (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {displayContent}
+              </ReactMarkdown>
             )}
             
             {shouldShowPreview && (
