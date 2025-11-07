@@ -418,6 +418,14 @@ export default function MultiAgentConsultant() {
 
       if (msgsError) throw msgsError;
       
+      // CRITICAL DEBUG: Log exactly what we get from database
+      console.log('🔍 [LOAD] Loaded', msgs?.length, 'messages from database');
+      msgs?.forEach((msg, idx) => {
+        if (msg.role === 'assistant') {
+          console.log(`📝 [LOAD] Message ${idx}: ID=${msg.id.slice(0, 8)}, length=${msg.content?.length || 0}, preview="${msg.content?.substring(0, 50)}..."`);
+        }
+      });
+      
       // Log message lengths for debugging
       console.log('📥 Loaded messages:', msgs.map(m => ({
         id: m.id,
