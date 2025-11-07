@@ -406,12 +406,28 @@ export default function MultiAgentConsultant() {
       
       console.log('🔍 Loaded', msgs?.length, 'messages');
       
-      setMessages(msgs.map((m) => ({ 
-        id: m.id, 
-        role: m.role as "user" | "assistant", 
-        content: m.content, 
-        llm_provider: m.llm_provider 
-      })));
+      if (!msgs || msgs.length === 0) {
+        console.warn('⚠️ No messages loaded');
+        setMessages([]);
+        return;
+      }
+      
+      const mappedMessages = msgs.map((m) => {
+        if (!m.content) {
+          console.error('❌ Message without content:', m.id, m);
+        }
+        return { 
+          id: m.id, 
+          role: m.role as "user" | "assistant", 
+          content: m.content || '', // Fallback to empty string
+          llm_provider: m.llm_provider 
+        };
+      });
+      
+      console.log('✅ Mapped', mappedMessages.length, 'messages');
+      console.log('📋 First message content length:', mappedMessages[0]?.content?.length);
+      
+      setMessages(mappedMessages);
       
       // Force scroll to last message after loading
       setTimeout(() => {
