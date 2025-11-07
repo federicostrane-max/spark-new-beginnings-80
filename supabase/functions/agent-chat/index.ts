@@ -3458,16 +3458,9 @@ ${agent.system_prompt}${knowledgeContext}`;
                 // Start background task and return immediately
                 (globalThis as any).EdgeRuntime.waitUntil(backgroundTask());
                 
-                // CRITICAL: Save full response to placeholder BEFORE returning
-                await supabase
-                  .from('agent_messages')
-                  .update({ 
-                    content: fullResponse,
-                    llm_provider: llmProvider 
-                  })
-                  .eq('id', placeholderMsg.id);
-                
-                console.log(`✅ Saved full response (${fullResponse.length} chars) to message ${placeholderMsg.id}`);
+                // ⚠️ DO NOT save partial content here - let background task update with full content
+                // This prevents the UI from showing truncated content via realtime updates
+                console.log(`🔄 Background task started, waiting for completion (current: ${fullResponse.length} chars)`);
                 
                 // Create long response record
                 const { data: longResponseRecord, error: longResponseError } = await supabase
