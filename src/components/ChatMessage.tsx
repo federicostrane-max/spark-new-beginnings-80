@@ -73,18 +73,44 @@ export const ChatMessage = ({
     }
   }, [selectionMode]);
 
-  // Auto-expand quando il contenuto passa da breve a lungo (realtime update)
+  // FIX 3: Espansione al primo render di messaggi lunghi già completati
+  useEffect(() => {
+    const COLLAPSE_THRESHOLD = 1000;
+    if (!isStreaming && content.length > COLLAPSE_THRESHOLD && isManuallyExpanded === null) {
+      console.log(`📖 [Message ${id.slice(0,8)}] Long message detected at mount (${content.length} chars) - auto-expanding`);
+      setIsManuallyExpanded(true);
+    }
+  }, []); // Empty deps = solo al mount
+
+  // FIX 1: Espansione quando finisce lo streaming con contenuto lungo
+  useEffect(() => {
+    const COLLAPSE_THRESHOLD = 1000;
+    // Quando finisce lo streaming E il messaggio è lungo → forza espansione
+    if (!isStreaming && content.length > COLLAPSE_THRESHOLD && prevContentLengthRef.current < content.length) {
+      console.log(`✅ [Message ${id.slice(0,8)}] Streaming completed with ${content.length} chars - auto-expanding`);
+      setIsManuallyExpanded(true);
+      setJustReceivedLongContent(true);
+      
+      setTimeout(() => {
+        setJustReceivedLongContent(false);
+      }, 2000);
+    }
+    
+    prevContentLengthRef.current = content.length;
+  }, [isStreaming, content.length, id]);
+
+  // FIX 2: Auto-expand quando il contenuto cresce significativamente (soglia ridotta a 2000)
   useEffect(() => {
     const prevLength = prevContentLengthRef.current;
     const currentLength = content.length;
+    const COLLAPSE_THRESHOLD = 1000;
     
-    // Se il contenuto è cresciuto significativamente (es: da 7000 a 17000)
-    if (currentLength > prevLength + 5000 && currentLength > COLLAPSE_THRESHOLD) {
+    // SOGLIA RIDOTTA: da 5000 a 2000 caratteri
+    if (currentLength > prevLength + 2000 && currentLength > COLLAPSE_THRESHOLD) {
       console.log(`🔄 [Message ${id.slice(0,8)}] Content grew from ${prevLength} to ${currentLength} - forcing expand`);
       setJustReceivedLongContent(true);
-      setIsManuallyExpanded(true); // Forza espansione
+      setIsManuallyExpanded(true);
       
-      // Reset dopo 2 secondi
       setTimeout(() => {
         setJustReceivedLongContent(false);
       }, 2000);
