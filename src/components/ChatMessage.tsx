@@ -161,12 +161,24 @@ export const ChatMessage = ({
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
+  const previewLength = 500;
+  
+  // DEBUG: Logga i valori per capire il problema
+  console.log('ChatMessage DEBUG:', {
+    id,
+    forceExpanded,
+    hasLocalOverride,
+    isCollapsed,
+    contentLength: content.length,
+    previewLength
+  });
+  
   // FIXED: Determina lo stato di collasso dando priorità assoluta a forceExpanded quando definito
   const shouldBeCollapsed = hasLocalOverride 
     ? isCollapsed  // Se l'utente ha cliccato espandi/collassa, rispetta la sua scelta
     : (forceExpanded !== undefined ? !forceExpanded : isCollapsed);  // Altrimenti usa forceExpanded se disponibile
   
-  const previewLength = 500;
+  console.log('shouldBeCollapsed:', shouldBeCollapsed);
 
   // System messages have special rendering
   if (isSystem) {
