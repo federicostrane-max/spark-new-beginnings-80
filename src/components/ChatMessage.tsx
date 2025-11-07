@@ -36,8 +36,8 @@ export const ChatMessage = ({
   llmProvider
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [hasLocalOverride, setHasLocalOverride] = useState(false);
+  // null = segui forceExpanded, true/false = override manuale
+  const [isManuallyExpanded, setIsManuallyExpanded] = useState<boolean | null>(null);
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
@@ -59,12 +59,9 @@ export const ChatMessage = ({
 
   const llmBadge = getLLMBadge();
 
-  // Reset local state when forceExpanded changes
+  // Reset override manuale quando forceExpanded cambia (comando globale)
   useEffect(() => {
-    if (forceExpanded !== undefined) {
-      setHasLocalOverride(false);
-      setIsCollapsed(!forceExpanded);
-    }
+    setIsManuallyExpanded(null);
   }, [forceExpanded]);
 
   // Reset justEnteredSelectionMode when exiting selection mode
@@ -162,13 +159,23 @@ export const ChatMessage = ({
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
-  const previewLength = 500;
+  // Logica semplice e chiara: override manuale > forceExpanded > default espanso
+  const isExpanded = isManuallyExpanded !== null 
+    ? isManuallyExpanded  // Override manuale ha priorità assoluta
+    : (forceExpanded ?? true);  // Default: espanso se forceExpanded non è definito
   
-  // FIXED: L'override manuale dell'utente ha la massima priorità
-  // Il comando globale (forceExpanded) viene applicato solo se l'utente non ha fatto override
-  const shouldBeCollapsed = hasLocalOverride
-    ? isCollapsed  // La scelta manuale dell'utente ha priorità assoluta
-    : (forceExpanded !== undefined ? !forceExpanded : false);  // Altrimenti usa forceExpanded se disponibile
+  // Preview intelligente: primi 3 paragrafi o 800 caratteri
+  const getPreviewContent = (text: string): string => {
+    const paragraphs = text.split('\n\n').filter(p => p.trim());
+    if (paragraphs.length <= 3) return text;
+    
+    const preview = paragraphs.slice(0, 3).join('\n\n');
+    return preview.length > 800 ? text.substring(0, 800) : preview;
+  };
+  
+  const PREVIEW_THRESHOLD = 800;
+  const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
+  const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
 
   // System messages have special rendering
   if (isSystem) {
@@ -227,17 +234,23 @@ export const ChatMessage = ({
       >
         {isUser ? (
           <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere select-none">
-            {shouldBeCollapsed && content.length > previewLength
-              ? content.substring(0, previewLength) + "..."
-              : content}
+            {displayContent}
+            {shouldShowPreview && (
+              <div className="mt-2 text-xs opacity-70">
+                ... ({content.length - displayContent.length} caratteri nascosti)
+              </div>
+            )}
           </div>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-hidden [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {shouldBeCollapsed && content.length > previewLength
-                ? content.substring(0, previewLength) + "..."
-                : content}
+              {displayContent}
             </ReactMarkdown>
+            {shouldShowPreview && (
+              <div className="mt-2 text-xs opacity-70">
+                ... ({content.length - displayContent.length} caratteri nascosti)
+              </div>
+            )}
           </div>
         )}
 
@@ -262,7 +275,7 @@ export const ChatMessage = ({
         )}
 
         {/* Badge per streaming in modalità collapsed */}
-        {isStreaming && shouldBeCollapsed && content.length > previewLength && (
+        {isStreaming && shouldShowPreview && (
           <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-primary/10 rounded-md">
             <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
             <span className="text-xs font-medium text-primary">
@@ -274,7 +287,7 @@ export const ChatMessage = ({
         {content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
             {/* Bottone Espandi/Collassa - visibile anche durante streaming */}
-            {content.length > previewLength && (
+            {content.length > PREVIEW_THRESHOLD && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -282,15 +295,15 @@ export const ChatMessage = ({
                 onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setHasLocalOverride(true);
-                  setIsCollapsed(prev => !prev);
+                  // Toggle: se era null (default), diventa !isExpanded, altrimenti toggle
+                  setIsManuallyExpanded(prev => prev === null ? !isExpanded : !prev);
                 }}
                 className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
               >
-                {shouldBeCollapsed ? (
+                {!isExpanded ? (
                   <>
                     <ChevronDown className="h-3 w-3" />
-                    <span className="text-xs">Mostra tutto</span>
+                    <span className="text-xs">Mostra tutto ({content.length.toLocaleString('it-IT')} caratteri)</span>
                   </>
                 ) : (
                   <>
