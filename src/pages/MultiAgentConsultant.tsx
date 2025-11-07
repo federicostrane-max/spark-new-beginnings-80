@@ -487,11 +487,19 @@ export default function MultiAgentConsultant() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
+          // Skip empty lines, comments, and keep-alive messages
           if (!line.trim() || line.startsWith(":")) continue;
+          
+          // Only process lines that start with "data: "
           if (!line.startsWith("data: ")) continue;
 
           const data = line.slice(6);
+          
+          // Skip completion markers
           if (data === "[DONE]") continue;
+          
+          // Skip empty data or keep-alive
+          if (!data.trim()) continue;
 
           try {
             const parsed = JSON.parse(data);
