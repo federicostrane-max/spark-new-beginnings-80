@@ -118,14 +118,15 @@ export default function MultiAgentConsultant() {
     }
   }, [streamingConversationId, messages, preGenerateAudio]);
 
-  // Realtime subscription for long responses
+  // Realtime subscription for long responses AND message updates
   useEffect(() => {
     if (!currentConversation?.id) return;
     
-    console.log('[REALTIME] Setting up long response subscription for conversation:', currentConversation.id);
+    console.log('[REALTIME] Setting up subscriptions for conversation:', currentConversation.id);
     
     const channel = supabase
-      .channel(`long-response-${currentConversation.id}`)
+      .channel(`conversation-updates-${currentConversation.id}`)
+      // Subscribe to agent_long_responses for background progress
       .on(
         'postgres_changes',
         {
@@ -167,65 +168,73 @@ export default function MultiAgentConsultant() {
             
             // Cleanup when completed
             if (data.status === 'completed' || data.status === 'failed') {
-              // Reload the final message from database to ensure we have the complete content
-              (async () => {
-                const { data: finalMessage, error: messageError } = await supabase
-                  .from('agent_messages')
-                  .select('*')
-                  .eq('id', data.message_id)
-                  .single();
-                
-                if (!messageError && finalMessage) {
-                  console.log(`✅ [REALTIME] Loaded final message: ${finalMessage.content.length} chars`);
-                  setMessages(prev => prev.map(msg => 
-                    msg.id === data.message_id
-                      ? { ...msg, content: finalMessage.content, llm_provider: finalMessage.llm_provider }
-                      : msg
-                  ));
-                }
-              })();
-              
-              setTimeout(() => {
-                setActiveLongResponse(null);
-                setBackgroundProgress(null);
-              }, 3000);
+              setActiveLongResponse(null);
+              setBackgroundProgress(null);
             }
           }
         }
       )
-      .subscribe();
+      // Subscribe to agent_messages for direct background updates
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'agent_messages',
+          filter: `conversation_id=eq.${currentConversation.id}`
+        },
+        (payload) => {
+          console.log('📡 [REALTIME] Message update:', payload.new);
+          const updatedMsg = payload.new;
+          
+          if (updatedMsg.role === 'assistant') {
+            setMessages(prev => prev.map(msg => 
+              msg.id === updatedMsg.id
+                ? { ...msg, content: updatedMsg.content }
+                : msg
+            ));
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`[REALTIME] Subscription status:`, status);
+      });
     
     return () => {
-      console.log('[REALTIME] Cleaning up long response subscription');
+      console.log('[REALTIME] Cleaning up subscriptions');
       supabase.removeChannel(channel);
     };
   }, [currentConversation?.id]);
 
-
-  // Reload messages when returning to the app
+  // Reload messages when user returns to the app (e.g., from background)
   useEffect(() => {
-    const reloadMessages = () => {
-      if (currentConversation?.id && !streamingConversationId) {
-        loadConversation(currentConversation.id);
-      }
-    };
-
-    // Reload when window regains focus (user returns to app)
-    window.addEventListener('focus', reloadMessages);
-    
-    // Also reload on visibility change (mobile)
     const handleVisibilityChange = () => {
-      if (!document.hidden && currentConversation?.id && !streamingConversationId) {
+      if (!document.hidden && currentConversation?.id) {
+        console.log('👁️ App visible again, reloading messages');
         loadConversation(currentConversation.id);
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    return () => {
-      window.removeEventListener('focus', reloadMessages);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    const checkUnsynced = async () => {
+      if (!currentAgent?.id) return;
+      
+      const { data: links } = await supabase
+        .from('agent_document_links')
+        .select('document_id')
+        .eq('agent_id', currentAgent.id)
+        .eq('sync_status', 'pending');
+      
+      setUnsyncedDocsCount(links?.length || 0);
     };
-  }, [currentConversation?.id, streamingConversationId]);
+    
+    checkUnsynced();
+  }, [currentAgent?.id]);
+
 
   // Carica tutti gli agenti all'avvio per useAgentHealth
   useEffect(() => {
@@ -262,14 +271,6 @@ export default function MultiAgentConsultant() {
     }
   }, [searchParams, session?.user?.id, currentAgent]);
 
-  // Check for unsynced documents when agent changes
-  useEffect(() => {
-    if (currentAgent?.id) {
-      checkUnsyncedDocs(currentAgent.id);
-    } else {
-      setUnsyncedDocsCount(0);
-    }
-  }, [currentAgent?.id]);
 
   const checkUnsyncedDocs = async (agentId: string) => {
     try {
