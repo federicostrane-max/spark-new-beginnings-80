@@ -288,11 +288,21 @@ export const ChatMessage = ({
             {/* Fallback a plain text per contenuti molto lunghi (>15.000 caratteri) */}
             {displayContent.length > 15000 ? (
               <>
-                <div className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">
-                  {displayContent}
-                </div>
+                {/* Rendering chunked per evitare limiti del browser */}
+                {(() => {
+                  const CHUNK_SIZE = 5000;
+                  const chunks: string[] = [];
+                  for (let i = 0; i < displayContent.length; i += CHUNK_SIZE) {
+                    chunks.push(displayContent.slice(i, i + CHUNK_SIZE));
+                  }
+                  return chunks.map((chunk, idx) => (
+                    <div key={idx} className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">
+                      {chunk}
+                    </div>
+                  ));
+                })()}
                 <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
-                  ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri) - Rendering ottimizzato
+                  ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri in {Math.ceil(displayContent.length / 5000)} parti) - Rendering ottimizzato
                 </div>
               </>
             ) : (
