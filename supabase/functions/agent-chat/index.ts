@@ -3349,79 +3349,12 @@ ${agent.system_prompt}${knowledgeContext}`;
             console.log('📡 Keep-alive sent');
           }, 15000);
 
-          const TIMEOUT_THRESHOLD = 100000; // 100 seconds
-          const MIN_CHARS_FOR_BACKGROUND = 5000;
+          const TIMEOUT_THRESHOLD = 60000; // 60 seconds - Switch to background before Supabase timeout
+          const MIN_CHARS_FOR_BACKGROUND = 2000; // Lower threshold to catch long responses earlier
 
           try {
             while (true) {
               const { done, value } = await reader.read();
-              
-              // CHECK TIMEOUT - Switch to background if needed
-              const elapsed = Date.now() - requestStartTime;
-              if (elapsed > TIMEOUT_THRESHOLD && fullResponse.length > MIN_CHARS_FOR_BACKGROUND) {
-                console.log(`⏰ [REQ-${requestId}] TIMEOUT APPROACHING (${elapsed}ms elapsed, ${fullResponse.length} chars), switching to background...`);
-                
-                // Send switching notice to client
-                const switchNotice = {
-                  type: 'switching_to_background',
-                  message: fullResponse,
-                  notice: 'Response is long, continuing in background...'
-                };
-                sendSSE(JSON.stringify(switchNotice));
-                
-                // Create generator for remaining chunks
-                const continueGen = async function*() {
-                  // Continue reading from current position
-                  while (true) {
-                    const { done: innerDone, value: innerValue } = await reader.read();
-                    if (innerDone) break;
-                    
-                    const chunk = decoder.decode(innerValue, { stream: true });
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                      if (!line.trim() || line.startsWith(':')) continue;
-                      if (!line.startsWith('data: ')) continue;
-                      
-                      const data = line.slice(6);
-                      if (data === '[DONE]') continue;
-                      
-                      try {
-                        const parsed = JSON.parse(data);
-                        
-                        if (llmProvider === 'anthropic') {
-                          if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-                            yield parsed.delta.text;
-                          }
-                        } else if (llmProvider === 'deepseek') {
-                          if (parsed.choices?.[0]?.delta?.content) {
-                            yield parsed.choices[0].delta.content;
-                          }
-                        }
-                      } catch (e) {
-                        // Ignore parse errors
-                      }
-                    }
-                  }
-                };
-                
-                // Start background processing
-                await handleLongResponse(
-                  supabase,
-                  conversation.id,
-                  agent.id,
-                  user.id,
-                  placeholderMsg.id,
-                  llmProvider,
-                  fullResponse,
-                  continueGen
-                );
-                
-                // Close current stream
-                clearInterval(keepAliveInterval);
-                closeStream();
-                return;
-              }
               
               if (done) {
                 const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
@@ -3437,6 +3370,110 @@ ${agent.system_prompt}${knowledgeContext}`;
                   })
                   .eq('id', placeholderMsg.id);
                 break;
+              }
+
+              // CHECK TIMEOUT - Switch to background processing if needed
+              const elapsed = Date.now() - requestStartTime;
+              if (elapsed > TIMEOUT_THRESHOLD && fullResponse.length > MIN_CHARS_FOR_BACKGROUND) {
+                console.log(`⏰ [REQ-${requestId}] ⚠️ TIMEOUT THRESHOLD REACHED (${elapsed}ms / ${TIMEOUT_THRESHOLD}ms, ${fullResponse.length} chars)`);
+                console.log(`🔄 [REQ-${requestId}] Switching to BACKGROUND PROCESSING...`);
+                
+                // Send switching notice to client
+                sendSSE(JSON.stringify({
+                  type: 'switching_to_background',
+                  message: fullResponse,
+                  notice: 'Risposta lunga rilevata. Continuazione in background...'
+                }));
+                clearInterval(keepAliveInterval);
+                
+                // Create background task
+                const backgroundTask = async () => {
+                  console.log(`🔥 [REQ-${requestId}] Background task started`);
+                  let backgroundResponse = fullResponse;
+                  
+                  try {
+                    // Process remaining stream
+                    let remainingBuffer = buffer + decoder.decode(value, { stream: true });
+                    
+                    while (true) {
+                      const { done: bgDone, value: bgValue } = await reader.read();
+                      if (bgDone) break;
+                      
+                      remainingBuffer += decoder.decode(bgValue, { stream: true });
+                      const bgLines = remainingBuffer.split('\n');
+                      remainingBuffer = bgLines.pop() || '';
+                      
+                      for (const bgLine of bgLines) {
+                        if (!bgLine.trim() || bgLine.startsWith(':') || !bgLine.startsWith('data: ')) continue;
+                        const bgData = bgLine.slice(6);
+                        if (bgData === '[DONE]') continue;
+                        
+                        try {
+                          const parsed = JSON.parse(bgData);
+                          let contentChunk = '';
+                          
+                          if (llmProvider === 'anthropic') {
+                            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                              contentChunk = parsed.delta.text;
+                            }
+                          } else if (llmProvider === 'deepseek') {
+                            if (parsed.choices?.[0]?.delta?.content) {
+                              contentChunk = parsed.choices[0].delta.content;
+                            }
+                          }
+                          
+                          if (contentChunk) {
+                            backgroundResponse += contentChunk;
+                          }
+                        } catch (e) {
+                          // Ignore parse errors
+                        }
+                      }
+                    }
+                    
+                    // Save complete response
+                    console.log(`💾 [REQ-${requestId}] Saving background response (${backgroundResponse.length} chars)`);
+                    
+                    await supabase.from('agent_long_responses').upsert({
+                      conversation_id: conversation.id,
+                      message_id: placeholderMsg.id,
+                      full_content: backgroundResponse,
+                      status: 'completed',
+                      completed_at: new Date().toISOString(),
+                      metadata: {
+                        total_chars: backgroundResponse.length,
+                        elapsed_ms: Date.now() - requestStartTime,
+                        llm_provider: llmProvider
+                      }
+                    });
+                    
+                    await supabase.from('agent_messages').update({ 
+                      content: backgroundResponse,
+                      llm_provider: llmProvider 
+                    }).eq('id', placeholderMsg.id);
+                    
+                    console.log(`✅ [REQ-${requestId}] Background response saved`);
+                  } catch (bgErr) {
+                    console.error(`❌ [REQ-${requestId}] Background error:`, bgErr);
+                    await supabase.from('agent_long_responses').upsert({
+                      conversation_id: conversation.id,
+                      message_id: placeholderMsg.id,
+                      status: 'error',
+                      metadata: { error: String(bgErr) }
+                    });
+                  }
+                };
+                
+                // Execute background task
+                if (typeof (globalThis as any).EdgeRuntime !== 'undefined') {
+                  (globalThis as any).EdgeRuntime.waitUntil(backgroundTask());
+                } else {
+                  backgroundTask();
+                }
+                
+                // Return immediately
+                closeStream();
+                return;
               }
 
               buffer += decoder.decode(value, { stream: true });
