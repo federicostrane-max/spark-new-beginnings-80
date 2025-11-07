@@ -21,12 +21,28 @@ interface SyncStatus {
 }
 
 serve(async (req) => {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { agentId, autoFix = false }: CheckSyncRequest = await req.json();
+    // Validate request body
+    let body;
+    try {
+      body = await req.json();
+    } catch (parseError) {
+      console.error('[check-and-sync-all] Invalid JSON in request body:', parseError);
+      return new Response(JSON.stringify({ 
+        error: 'Invalid request body',
+        details: 'Request body must be valid JSON'
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { agentId, autoFix = false }: CheckSyncRequest = body;
 
     console.log(`[check-and-sync-all] Checking sync status for agent ${agentId}`);
 
