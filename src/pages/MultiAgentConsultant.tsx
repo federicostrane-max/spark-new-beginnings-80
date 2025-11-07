@@ -70,7 +70,7 @@ export default function MultiAgentConsultant() {
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<string[]>([]);
-  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(false);
+  const [allMessagesExpanded, setAllMessagesExpanded] = useState<boolean>(true); // Messaggi partono espansi per default
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [unsyncedDocsCount, setUnsyncedDocsCount] = useState(0);
   const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
