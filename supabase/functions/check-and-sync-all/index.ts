@@ -261,13 +261,11 @@ serve(async (req) => {
             });
 
             if (syncError) {
-              // Handle 400 errors (missing files) gracefully
               console.error(`[check-and-sync-all] Error syncing ${docId}:`, syncError);
               errors.push(`Failed to sync ${docNameMap.get(docId)}: ${syncError.message || 'Sync error'}`);
               continue;
             }
 
-            // Check if response indicates an error (e.g., missing file)
             if (syncResult?.error) {
               console.error(`[check-and-sync-all] Sync returned error for ${docId}:`, syncResult.error);
               errors.push(`Failed to sync ${docNameMap.get(docId)}: ${syncResult.message || syncResult.error}`);
@@ -276,9 +274,9 @@ serve(async (req) => {
 
             console.log(`[check-and-sync-all] Synced ${docId}: ${syncResult?.chunksCount || 0} chunks`);
             fixedCount++;
-          } catch (error) {
-            console.error(`[check-and-sync-all] Error syncing ${docId}:`, error);
-            errors.push(`Failed to sync ${docNameMap.get(docId)}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          } catch (syncErr) {
+            console.error(`[check-and-sync-all] Exception syncing ${docId}:`, syncErr);
+            errors.push(`Failed to sync ${docNameMap.get(docId)}: ${syncErr instanceof Error ? syncErr.message : 'Unknown error'}`);
           }
         }
       }
