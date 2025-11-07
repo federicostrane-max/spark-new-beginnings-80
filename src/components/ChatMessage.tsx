@@ -38,6 +38,8 @@ export const ChatMessage = ({
   const [copied, setCopied] = useState(false);
   // null = segui forceExpanded, true/false = override manuale
   const [isManuallyExpanded, setIsManuallyExpanded] = useState<boolean | null>(null);
+  const [justReceivedLongContent, setJustReceivedLongContent] = useState(false);
+  const prevContentLengthRef = useRef(content.length);
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [isLongPressing, setIsLongPressing] = useState(false);
@@ -70,6 +72,26 @@ export const ChatMessage = ({
       justEnteredSelectionMode.current = false;
     }
   }, [selectionMode]);
+
+  // Auto-expand quando il contenuto passa da breve a lungo (realtime update)
+  useEffect(() => {
+    const prevLength = prevContentLengthRef.current;
+    const currentLength = content.length;
+    
+    // Se il contenuto è cresciuto significativamente (es: da 7000 a 17000)
+    if (currentLength > prevLength + 5000 && currentLength > COLLAPSE_THRESHOLD) {
+      console.log(`🔄 [Message ${id.slice(0,8)}] Content grew from ${prevLength} to ${currentLength} - forcing expand`);
+      setJustReceivedLongContent(true);
+      setIsManuallyExpanded(true); // Forza espansione
+      
+      // Reset dopo 2 secondi
+      setTimeout(() => {
+        setJustReceivedLongContent(false);
+      }, 2000);
+    }
+    
+    prevContentLengthRef.current = currentLength;
+  }, [content.length, id]);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
@@ -160,12 +182,27 @@ export const ChatMessage = ({
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
   const COLLAPSE_THRESHOLD = 1000;
-  const isExpanded = isManuallyExpanded ?? forceExpanded ?? true;
+  const isExpanded = isManuallyExpanded ?? (justReceivedLongContent ? true : forceExpanded) ?? true;
   
   const shouldCollapse = !isExpanded && content.length > COLLAPSE_THRESHOLD;
   const displayContent = shouldCollapse 
     ? content.slice(0, COLLAPSE_THRESHOLD) + "..."
     : content;
+  
+  // Diagnostic logging per messaggi lunghi
+  useEffect(() => {
+    if (!isUser && content.length > 1000) {
+      console.log(`📏 [Message ${id.slice(0,8)}] Render state:`, {
+        contentLength: content.length,
+        isExpanded,
+        forceExpanded,
+        isManuallyExpanded,
+        isStreaming,
+        displayLength: displayContent.length,
+        justReceivedLongContent
+      });
+    }
+  }, [content.length, isExpanded, forceExpanded, isManuallyExpanded, isStreaming, id, isUser, displayContent.length, justReceivedLongContent]);
   
 
   // System messages have special rendering

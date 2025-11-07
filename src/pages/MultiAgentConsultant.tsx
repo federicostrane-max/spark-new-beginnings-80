@@ -544,6 +544,9 @@ export default function MultiAgentConsultant() {
               if (payload.new.content) {
                 preGenerateAudio(assistantId, payload.new.content);
               }
+              
+              // Log finale per conferma
+              console.log(`✅ Message ${assistantId.slice(0,8)} updated to ${payload.new.content.length} chars`);
             }
           )
           .subscribe((status) => {
