@@ -2163,37 +2163,41 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Start streaming response
-    const stream = new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        let streamClosed = false;
-        
-        const sendSSE = (data: string) => {
-          if (streamClosed) {
-            console.warn('⚠️ Attempted to send SSE on closed stream, ignoring');
-            return;
-          }
-          try {
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          } catch (error) {
-            console.error('Error enqueueing SSE data:', error);
-            streamClosed = true;
-          }
-        };
-        
-        const closeStream = () => {
-          if (streamClosed) {
-            console.warn('⚠️ Stream already closed, ignoring duplicate close');
-            return;
-          }
-          streamClosed = true;
-          try {
-            controller.close();
-          } catch (error) {
-            console.error('Error closing stream:', error);
-          }
-        };
+    // Start streaming response with TransformStream for immediate flush
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+    let streamClosed = false;
+    
+    const sendSSE = async (data: string) => {
+      if (streamClosed) {
+        console.warn('⚠️ Attempted to send SSE on closed stream, ignoring');
+        return;
+      }
+      try {
+        const chunk = encoder.encode(`data: ${data}\n\n`);
+        await writer.write(chunk);
+      } catch (error) {
+        console.error('Error sending SSE data:', error);
+        streamClosed = true;
+      }
+    };
+    
+    const closeStream = async () => {
+      if (streamClosed) {
+        console.warn('⚠️ Stream already closed, ignoring duplicate close');
+        return;
+      }
+      streamClosed = true;
+      try {
+        await writer.close();
+      } catch (error) {
+        console.error('Error closing stream:', error);
+      }
+    };
+    
+    // Wrap logic in async IIFE to use await
+    (async () => {
 
         let placeholderMsg: any = null; // Declare outside try block for catch access
 
@@ -2245,7 +2249,7 @@ Deno.serve(async (req) => {
           }
 
           // Send message_start event with message ID
-          sendSSE(JSON.stringify({ 
+          await sendSSE(JSON.stringify({ 
             type: 'message_start', 
             messageId: placeholderMsg.id 
           }));
@@ -2346,7 +2350,7 @@ Deno.serve(async (req) => {
                 workflowResponse = formatSearchResults(searchResults, userIntent.topic, userIntent.count);
                 
                 // Send formatted results to user
-                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                await sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
                 fullResponse = workflowResponse;
                 
                 // Save to DB
@@ -2355,12 +2359,12 @@ Deno.serve(async (req) => {
                   .update({ content: fullResponse })
                   .eq('id', placeholderMsg.id);
                 
-                sendSSE(JSON.stringify({ 
+                await sendSSE(JSON.stringify({ 
                   type: 'complete', 
                   conversationId: conversation.id 
                 }));
                 
-                closeStream();
+                await closeStream();
                 return; // Exit early, no AI call needed
               } catch (searchError) {
                 console.error('Search error:', searchError);
@@ -2397,7 +2401,7 @@ Deno.serve(async (req) => {
                   workflowResponse += validationFeedback;
                 }
                 
-                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                await sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
                 fullResponse = workflowResponse;
                 
                 await supabase
@@ -2405,16 +2409,16 @@ Deno.serve(async (req) => {
                   .update({ content: fullResponse })
                   .eq('id', placeholderMsg.id);
                 
-                sendSSE(JSON.stringify({ 
+                await sendSSE(JSON.stringify({ 
                   type: 'complete', 
                   conversationId: conversation.id 
                 }));
                 
-                closeStream();
+                await closeStream();
                 return;
               } else {
                 workflowResponse = '⚠️ Non trovo risultati di ricerca precedenti. Per favore, esegui prima una ricerca con "Find PDFs on [topic]".';
-                sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                await sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
                 fullResponse = workflowResponse;
                 
                 await supabase
@@ -2422,12 +2426,12 @@ Deno.serve(async (req) => {
                   .update({ content: fullResponse })
                   .eq('id', placeholderMsg.id);
                 
-                sendSSE(JSON.stringify({ 
+                await sendSSE(JSON.stringify({ 
                   type: 'complete', 
                   conversationId: conversation.id 
                 }));
                 
-                closeStream();
+                await closeStream();
                 return;
               }
             }
@@ -3193,7 +3197,7 @@ ${agent.system_prompt}${knowledgeContext}`;
           // Add Anthropic-specific timeout (30 seconds for first chunk)
           let anthropicTimeout: number | undefined;
           if (llmProvider === 'anthropic') {
-            anthropicTimeout = setTimeout(() => {
+            anthropicTimeout = setTimeout(async () => {
               console.error('❌ Anthropic stream timeout after 30s - no content received');
               if (placeholderMsg) {
                 supabase
@@ -3205,7 +3209,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                   .eq('id', placeholderMsg.id);
               }
               clearInterval(keepAliveInterval);
-              closeStream();
+              await closeStream();
             }, 30000);
           }
           let buffer = '';
@@ -3216,8 +3220,8 @@ ${agent.system_prompt}${knowledgeContext}`;
           console.log(`🔄 [REQ-${requestId}] Starting stream from ${llmProvider.toUpperCase()}...`);
 
           // Send keep-alive every 15 seconds to prevent timeout
-          const keepAliveInterval = setInterval(() => {
-            sendSSE(':keep-alive\n\n');
+          const keepAliveInterval = setInterval(async () => {
+            await sendSSE(':keep-alive\n\n');
             console.log('📡 Keep-alive sent');
           }, 15000);
 
@@ -3278,7 +3282,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
                       fullResponse += newText;
-                      sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
                       // Log progress every 500 chars
                       const now = Date.now();
@@ -3304,7 +3308,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
                       fullResponse += newText;
-                      sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
                       // Log progress every 500 chars
                       const now = Date.now();
@@ -3403,7 +3407,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const errorText = `\n\n❌ Errore: ricerca web non configurata.\n\n`;
                             fullResponse += errorText;
-                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
                             const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(toolInput.query)}&num=${numResults}`;
                             
@@ -3416,7 +3420,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                               
                               const errorMsg = `\n\n❌ Errore nella ricerca: ${searchResponse.status}\n\n`;
                               fullResponse += errorMsg;
-                              sendSSE(JSON.stringify({ type: 'content', text: errorMsg }));
+                              await sendSSE(JSON.stringify({ type: 'content', text: errorMsg }));
                             } else {
                               const data = await searchResponse.json();
                               
@@ -3431,7 +3435,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                                 
                                 const noResultsText = `\n\n📭 Nessun risultato trovato per: "${toolInput.query}"\n\n`;
                                 fullResponse += noResultsText;
-                                sendSSE(JSON.stringify({ type: 'content', text: noResultsText }));
+                                await sendSSE(JSON.stringify({ type: 'content', text: noResultsText }));
                               } else {
                                 const results = data.items.map((item: any) => ({
                                   title: item.title,
@@ -3456,7 +3460,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                                   searchText += `   🔗 [${r.displayLink}](${r.url})\n\n`;
                                 });
                                 fullResponse += searchText;
-                                sendSSE(JSON.stringify({ type: 'content', text: searchText }));
+                                await sendSSE(JSON.stringify({ type: 'content', text: searchText }));
                               }
                             }
                           }
@@ -3467,7 +3471,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Errore durante la ricerca web: ${errorMessage}\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         }
                       }
                       
@@ -3488,7 +3492,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Errore nel recuperare la lista degli agenti.\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           console.log(`✅ Retrieved ${allAgents.length} agents`);
                           toolResult = {
@@ -3506,7 +3510,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           });
                           agentsText += `\nPosso consultare ciascuno di questi agenti per vedere il loro prompt, documenti, o cronologia conversazioni.\n\n`;
                           fullResponse += agentsText;
-                          sendSSE(JSON.stringify({ type: 'content', text: agentsText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: agentsText }));
                         }
                       }
                       
@@ -3535,7 +3539,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           // Aggiungi risposta testuale per l'utente
                           const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}". Assicurati che il nome sia corretto.\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           console.log('✅ Retrieved prompt for agent:', targetAgent.name);
                           toolResult = {
@@ -3548,7 +3552,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           // Aggiungi il prompt nella risposta per l'utente  
                           const promptText = `\n\n✅ Ho recuperato il prompt di **${targetAgent.name}**:\n\n---\n\n${targetAgent.system_prompt}\n\n---\n\n`;
                           fullResponse += promptText;
-                          sendSSE(JSON.stringify({ type: 'content', text: promptText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: promptText }));
                         }
                       }
                       
@@ -3577,7 +3581,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           // Aggiungi risposta testuale per l'utente
                           const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           // Get distinct documents using aggregation to ensure we get all unique documents
                           const { data: documents, error: docsError } = await supabase.rpc(
@@ -3591,7 +3595,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const errorText = `\n\n❌ Errore nel recuperare i documenti di ${targetAgent.name}.\n\n`;
                             fullResponse += errorText;
-                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
                             console.log(`✅ Retrieved ${documents?.length || 0} distinct documents for agent:`, targetAgent.name);
                             
@@ -3612,7 +3616,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                               docsText += `\n`;
                             });
                             fullResponse += docsText;
-                            sendSSE(JSON.stringify({ type: 'content', text: docsText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: docsText }));
                           }
                         }
                       }
@@ -3641,7 +3645,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           // Get conversation for this agent and user
                           const { data: targetConv, error: convError } = await supabase
@@ -3663,7 +3667,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const noHistoryText = `\n\n📭 Non hai ancora conversazioni con **${targetAgent.name}**.\n\n`;
                             fullResponse += noHistoryText;
-                            sendSSE(JSON.stringify({ type: 'content', text: noHistoryText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: noHistoryText }));
                           } else {
                             const limit = toolInput.limit || 50;
                             const { data: messages, error: msgsError } = await supabase
@@ -3679,7 +3683,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                               
                               const errorText = `\n\n❌ Errore nel recuperare la cronologia di ${targetAgent.name}.\n\n`;
                               fullResponse += errorText;
-                              sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                             } else {
                               console.log(`✅ Retrieved ${messages.length} messages for agent:`, targetAgent.name);
                               toolResult = {
@@ -3698,7 +3702,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                                 historyText += `**${role}**: ${preview}\n\n`;
                               });
                               fullResponse += historyText;
-                              sendSSE(JSON.stringify({ type: 'content', text: historyText }));
+                              await sendSSE(JSON.stringify({ type: 'content', text: historyText }));
                             }
                           }
                         }
@@ -3727,7 +3731,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           // Get ALL knowledge chunks for this agent (up to max_chunks limit)
                           const maxChunks = Math.min(toolInput.max_chunks || 100, 500);
@@ -3745,7 +3749,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const errorText = `\n\n❌ Errore nel recuperare il knowledge di ${targetAgent.name}.\n\n`;
                             fullResponse += errorText;
-                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
                             console.log(`✅ Retrieved ${knowledgeChunks?.length || 0} knowledge chunks for agent:`, targetAgent.name);
                             
@@ -3799,7 +3803,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             knowledgeText += `\n\n✅ Ho accesso completo a tutto il knowledge di ${targetAgent.name}. Posso ora utilizzare queste informazioni per aiutarti.\n\n`;
                             
                             fullResponse += knowledgeText;
-                            sendSSE(JSON.stringify({ type: 'content', text: knowledgeText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: knowledgeText }));
                           }
                         }
                       }
@@ -3826,14 +3830,14 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           console.log('✅ Found target agent:', targetAgent.name);
                           
                           // Send notification to user that consultation is happening
                           const consultText = `\n\n🤝 **Consultazione con ${targetAgent.name}**\n\nSto chiedendo a ${targetAgent.name} di: ${toolInput.task_description}\n\n⏳ Attendere la risposta...\n\n`;
                           fullResponse += consultText;
-                          sendSSE(JSON.stringify({ type: 'content', text: consultText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: consultText }));
                           
                           try {
                             // Prepare the request message for the target agent
@@ -3962,7 +3966,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             // Display the response to user
                             const responseText = `\n\n✅ **Risposta di ${targetAgent.name}**:\n\n${agentResponse}\n\n`;
                             fullResponse += responseText;
-                            sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: responseText }));
                             
                           } catch (error) {
                             console.error('❌ Error during inter-agent communication:', error);
@@ -3971,7 +3975,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const errorText = `\n\n❌ Errore durante la consultazione con ${targetAgent.name}: ${errorMessage}\n\n`;
                             fullResponse += errorText;
-                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           }
                         }
                       }
@@ -3998,7 +4002,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                           
                           const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
                           fullResponse += errorText;
-                          sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
                           console.log('✅ Found target agent:', targetAgent.name);
                           
@@ -4045,7 +4049,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const successText = `\n\n✅ **Prompt aggiornato per ${targetAgent.name}**\n\nHo salvato il vecchio prompt nella cronologia (versione ${nextVersion}) e aggiornato il prompt dell'agente.\n\nNuovo prompt (${toolInput.new_system_prompt.length} caratteri):\n\n---\n\n${toolInput.new_system_prompt}\n\n---\n\n`;
                             fullResponse += successText;
-                            sendSSE(JSON.stringify({ type: 'content', text: successText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: successText }));
                             
                           } catch (error) {
                             console.error('❌ Error updating agent prompt:', error);
@@ -4054,7 +4058,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                             
                             const errorText = `\n\n❌ Errore durante l'aggiornamento del prompt di ${targetAgent.name}: ${errorMessage}\n\n`;
                             fullResponse += errorText;
-                            sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           }
                         }
                       }
@@ -4107,7 +4111,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                   if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                     const newText = parsed.delta.text;
                     fullResponse += newText;
-                    sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                    await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                     
                     // Log progress every 500 chars
                     const now = Date.now();
@@ -4251,13 +4255,13 @@ ${agent.system_prompt}${knowledgeContext}`;
           console.log(`   Chunks processed: ${chunkCount}`);
           console.log('='.repeat(80));
 
-          sendSSE(JSON.stringify({ 
+          await sendSSE(JSON.stringify({ 
             type: 'complete', 
             conversationId: conversation.id,
             llmProvider: llmProvider  // Send provider info to client
           }));
           
-          closeStream();
+          await closeStream();
         } catch (error) {
           console.error('Stream error:', error);
           
@@ -4279,14 +4283,13 @@ ${agent.system_prompt}${knowledgeContext}`;
           // Only send error if stream is not closed yet
           if (!streamClosed) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
+            await sendSSE(JSON.stringify({ type: 'error', error: errorMessage }));
           }
-          closeStream();
+          await closeStream();
         }
-      }
-    });
+    })(); // Execute async IIFE
 
-    return new Response(stream, {
+    return new Response(readable, {
       headers: {
         ...corsHeaders,
         'Content-Type': 'text/event-stream',
