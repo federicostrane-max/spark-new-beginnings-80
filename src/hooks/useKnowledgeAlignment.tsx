@@ -117,37 +117,57 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       console.log('[useKnowledgeAlignment] Requirements extracted:', extractData);
 
-      // Step 2: Analyze alignment
-      console.log('[useKnowledgeAlignment] Analyzing alignment');
-      const { data: analysisData, error: analysisError } = await supabase.functions.invoke(
-        'analyze-knowledge-alignment',
-        { body: { agentId, forceReanalysis: true } }
-      );
+      // Step 2: Analyze alignment in batches
+      console.log('[useKnowledgeAlignment] Starting batch analysis');
+      let moreBatchesNeeded = true;
+      let totalAnalyzed = 0;
+      let totalChunks = 0;
+      let batchCount = 0;
+      let lastAnalysisData = null;
 
-      if (analysisError) throw analysisError;
+      while (moreBatchesNeeded) {
+        batchCount++;
+        console.log(`[useKnowledgeAlignment] Processing batch #${batchCount}`);
+        
+        const { data: analysisData, error: analysisError } = await supabase.functions.invoke(
+          'analyze-knowledge-alignment',
+          { body: { agentId, forceReanalysis: true } }
+        );
 
-      console.log('[useKnowledgeAlignment] Analysis complete:', analysisData);
+        if (analysisError) throw analysisError;
 
+        totalAnalyzed = analysisData.total_progress;
+        totalChunks = analysisData.total_chunks;
+        moreBatchesNeeded = analysisData.more_batches_needed;
+        lastAnalysisData = analysisData;
+
+        console.log(`[useKnowledgeAlignment] Batch ${batchCount} completed: ${totalAnalyzed}/${totalChunks} chunks (${((totalAnalyzed/totalChunks)*100).toFixed(1)}%)`);
+
+        // Brief pause between batches
+        if (moreBatchesNeeded) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+
+      console.log('[useKnowledgeAlignment] All batches completed!');
+      
       setLastAnalysis(new Date());
       setCooldownActive(false);
 
-      // Start polling for completion if analysis is incomplete
-      if (!analysisData.completed_at) {
-        pollAnalysisCompletion(analysisData.analysis_id);
-      }
-
-      if (analysisData.safe_mode_active) {
-        toast.success(
-          `Analisi completata. ${analysisData.chunks_flagged_for_removal} chunk saranno rimossi automaticamente tra ${KNOWLEDGE_ALIGNMENT_CONFIG.safe_mode.duration_days} giorni.`,
-          { duration: 5000 }
-        );
-      } else if (analysisData.chunks_auto_removed > 0) {
-        toast.success(
-          `Analisi completata. ${analysisData.chunks_auto_removed} chunk rimossi automaticamente.`,
-          { duration: 5000 }
-        );
-      } else {
-        toast.success('Analisi completata. Knowledge base ottimizzata.', { duration: 3000 });
+      if (lastAnalysisData) {
+        if (lastAnalysisData.safe_mode_active) {
+          toast.success(
+            `✅ Analisi completata! ${totalAnalyzed} chunk analizzati. ${lastAnalysisData.chunks_flagged_for_removal} chunk saranno rimossi automaticamente tra ${KNOWLEDGE_ALIGNMENT_CONFIG.safe_mode.duration_days} giorni.`,
+            { duration: 6000 }
+          );
+        } else if (lastAnalysisData.chunks_auto_removed > 0) {
+          toast.success(
+            `✅ Analisi completata! ${totalAnalyzed} chunk analizzati, ${lastAnalysisData.chunks_auto_removed} rimossi automaticamente.`,
+            { duration: 6000 }
+          );
+        } else {
+          toast.success(`✅ Analisi completata! ${totalAnalyzed} chunk analizzati. Knowledge base ottimizzata.`, { duration: 5000 });
+        }
       }
 
     } catch (error: any) {

@@ -23,6 +23,10 @@ const CONFIG = {
     procedural_match: 0.20,
     vocabulary_alignment: 0.15,
   },
+  batch_processing: {
+    batch_size: 100, // Process 100 chunks per batch to avoid timeout
+    max_concurrent: 15, // Concurrent AI calls per batch
+  },
 };
 
 serve(async (req) => {
@@ -101,12 +105,37 @@ serve(async (req) => {
       );
     }
 
-    // Fetch active chunks
+    // Get total chunks count
+    const { count: totalChunks } = await supabase
+      .from('agent_knowledge')
+      .select('*', { count: 'exact', head: true })
+      .eq('agent_id', agentId)
+      .eq('is_active', true);
+
+    console.log('[analyze-alignment] Total chunks:', totalChunks);
+
+    // Check for existing analysis log to resume
+    const { data: existingLog } = await supabase
+      .from('alignment_analysis_log')
+      .select('*')
+      .eq('agent_id', agentId)
+      .is('completed_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const startOffset = existingLog?.progress_chunks_analyzed || 0;
+    const endOffset = Math.min(startOffset + CONFIG.batch_processing.batch_size, totalChunks || 0);
+
+    console.log('[analyze-alignment] Batch range:', startOffset, '-', endOffset);
+
+    // Fetch batch of chunks
     const { data: chunks, error: chunksError } = await supabase
       .from('agent_knowledge')
       .select('id, content, category, summary, document_name')
       .eq('agent_id', agentId)
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .range(startOffset, endOffset - 1);
 
     if (chunksError) {
       console.error('[analyze-alignment] Chunks fetch error:', chunksError);
@@ -116,32 +145,39 @@ serve(async (req) => {
       );
     }
 
-    console.log('[analyze-alignment] Analyzing', chunks?.length || 0, 'chunks');
+    console.log('[analyze-alignment] Processing batch of', chunks?.length || 0, 'chunks');
 
-    // Create analysis log
-    const { data: analysisLog, error: logError } = await supabase
-      .from('alignment_analysis_log')
-      .insert({
-        agent_id: agentId,
-        trigger_type: forceReanalysis ? 'manual' : 'scheduled',
-        total_chunks_analyzed: chunks?.length || 0,
-        chunks_flagged_for_removal: 0,
-        safe_mode_active: safeModeActive,
-      })
-      .select()
-      .single();
+    // Use existing log or create new one
+    let analysisLog = existingLog;
+    
+    if (!analysisLog) {
+      const { data: newLog, error: logError } = await supabase
+        .from('alignment_analysis_log')
+        .insert({
+          agent_id: agentId,
+          trigger_type: forceReanalysis ? 'manual' : 'scheduled',
+          total_chunks_analyzed: totalChunks || 0,
+          chunks_flagged_for_removal: 0,
+          safe_mode_active: safeModeActive,
+          progress_chunks_analyzed: 0,
+        })
+        .select()
+        .single();
 
-    if (logError) {
-      console.error('[analyze-alignment] Log creation error:', logError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to create analysis log' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (logError) {
+        console.error('[analyze-alignment] Log creation error:', logError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to create analysis log' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      analysisLog = newLog;
     }
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
     const chunkScores: Array<{ chunk_id: string; final_score: number }> = [];
-    const maxConcurrent = 15; // Increased from 5 to 15
+    const maxConcurrent = CONFIG.batch_processing.max_concurrent;
 
     // Resume logic: Check which chunks already have scores
     const { data: existingScores } = await supabase
@@ -256,16 +292,20 @@ Return ONLY valid JSON:
           }
         }));
 
-        // Update progress
-        const totalAnalyzed = analyzedChunkIds.size + Math.min(i + maxConcurrent, chunksToAnalyze.length);
+        // Update progress after each mini-batch
+        const totalAnalyzed = startOffset + analyzedChunkIds.size + Math.min(i + maxConcurrent, chunksToAnalyze.length);
         await supabase
           .from('alignment_analysis_log')
           .update({ progress_chunks_analyzed: totalAnalyzed })
           .eq('id', analysisLog.id);
 
-        await new Promise(resolve => setTimeout(resolve, 50)); // Reduced from 100ms to 50ms
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
+
+    // Calculate if more batches are needed
+    const currentProgress = startOffset + (chunks?.length || 0);
+    const moreBatchesNeeded = currentProgress < (totalChunks || 0);
 
     // Identify chunks for removal
     const chunksToRemove = chunkScores.filter(s => s.final_score < CONFIG.auto_removal.threshold);
@@ -370,28 +410,43 @@ Return ONLY valid JSON:
       .slice(0, 5);
 
     // Update analysis log
+    const updateData: any = {
+      chunks_flagged_for_removal: chunksToRemove.length,
+      chunks_auto_removed: chunksAutoRemoved,
+      concept_coverage_percentage: avgConceptCoverage,
+      identified_gaps: gaps,
+      surplus_categories: surplus,
+      progress_chunks_analyzed: currentProgress,
+    };
+
+    // Mark as completed only if all batches are done
+    if (!moreBatchesNeeded) {
+      updateData.completed_at = new Date().toISOString();
+      updateData.duration_ms = Date.now() - new Date(analysisLog.started_at).getTime();
+    }
+
     await supabase
       .from('alignment_analysis_log')
-      .update({
-        chunks_flagged_for_removal: chunksToRemove.length,
-        chunks_auto_removed: chunksAutoRemoved,
-        concept_coverage_percentage: avgConceptCoverage,
-        identified_gaps: gaps,
-        surplus_categories: surplus,
-        progress_chunks_analyzed: chunks?.length || 0,
-        completed_at: new Date().toISOString(),
-        duration_ms: Date.now() - new Date(analysisLog.started_at).getTime(),
-      })
+      .update(updateData)
       .eq('id', analysisLog.id);
 
-    console.log('[analyze-alignment] Analysis completed');
+    const statusMessage = moreBatchesNeeded 
+      ? `Batch completed: ${currentProgress}/${totalChunks} chunks`
+      : 'Analysis completed';
+    
+    console.log('[analyze-alignment]', statusMessage);
 
     return new Response(
       JSON.stringify({
         success: true,
         analysis_id: analysisLog.id,
         safe_mode_active: safeModeActive,
-        total_chunks_analyzed: chunks?.length || 0,
+        batch_completed: true,
+        chunks_analyzed_this_batch: chunks?.length || 0,
+        total_progress: currentProgress,
+        total_chunks: totalChunks || 0,
+        more_batches_needed: moreBatchesNeeded,
+        next_batch_offset: currentProgress,
         chunks_flagged_for_removal: chunksToRemove.length,
         chunks_auto_removed: chunksAutoRemoved,
         requires_manual_approval: requiresManualApproval,

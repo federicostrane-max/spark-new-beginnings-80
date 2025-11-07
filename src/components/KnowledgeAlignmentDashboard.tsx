@@ -48,6 +48,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [isRestoring, setIsRestoring] = useState(false);
   const [safeModeActive, setSafeModeActive] = useState(false);
   const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
+  const [progressChunks, setProgressChunks] = useState(0);
+  const [totalChunksInAnalysis, setTotalChunksInAnalysis] = useState(0);
   const [stats, setStats] = useState({
     totalChunks: 0,
     removedChunks: 0,
@@ -72,16 +74,30 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     fetchData();
   }, [agentId]);
 
-  // Poll for updates when analyzing
+  // Poll for updates when analyzing - fetch progress from DB
   useEffect(() => {
     if (!isAnalyzing) return;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
+      // Fetch latest analysis log for real-time progress
+      const { data: log } = await supabase
+        .from('alignment_analysis_log')
+        .select('progress_chunks_analyzed, total_chunks_analyzed')
+        .eq('agent_id', agentId)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (log) {
+        setProgressChunks(log.progress_chunks_analyzed || 0);
+        setTotalChunksInAnalysis(log.total_chunks_analyzed || 0);
+      }
+
       fetchData();
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [isAnalyzing]);
+  }, [isAnalyzing, agentId]);
 
   const fetchData = async () => {
     // Fetch agent safe mode status
@@ -215,9 +231,16 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
 
   const analysisStatus = getAnalysisStatus();
 
-  // Calculate progress percentage
-  const progressPercentage = analysisLogs.length > 0 && analysisLogs[0].total_chunks_analyzed > 0
-    ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100
+  // Calculate progress percentage - use real-time data when analyzing
+  const progressPercentage = isAnalyzing && totalChunksInAnalysis > 0
+    ? (progressChunks / totalChunksInAnalysis) * 100
+    : (analysisLogs.length > 0 && analysisLogs[0].total_chunks_analyzed > 0
+      ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100
+      : 0);
+
+  // Estimate remaining time (assuming ~10 chunks per second)
+  const estimatedRemainingMinutes = isAnalyzing && totalChunksInAnalysis > 0
+    ? Math.ceil((totalChunksInAnalysis - progressChunks) / 10 / 60)
     : 0;
 
   // Get coverage badge variant
@@ -273,9 +296,19 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
             <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
             <AlertTitle className="text-blue-900 dark:text-blue-100">Analisi Knowledge Base in Corso</AlertTitle>
-            <AlertDescription className="text-blue-800 dark:text-blue-200">
-              Sto analizzando {analysisLogs[0]?.progress_chunks_analyzed || 0} di {stats.totalChunks} chunk ({progressPercentage.toFixed(1)}%)
-              <Progress value={progressPercentage} className="mt-2 h-2" />
+            <AlertDescription className="space-y-2 text-blue-800 dark:text-blue-200">
+              <div className="flex justify-between items-center">
+                <span className="font-mono text-lg">
+                  {progressChunks}/{totalChunksInAnalysis} chunk
+                </span>
+                <span className="font-semibold">{progressPercentage.toFixed(1)}%</span>
+              </div>
+              <Progress value={progressPercentage} className="h-3" />
+              {estimatedRemainingMinutes > 0 && (
+                <p className="text-xs mt-1">
+                  ⏱️ Tempo stimato rimanente: ~{estimatedRemainingMinutes} minut{estimatedRemainingMinutes === 1 ? 'o' : 'i'}
+                </p>
+              )}
             </AlertDescription>
           </Alert>
         )}
@@ -365,23 +398,29 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             </div>
 
             {/* Progress Section - Only show when analyzing */}
-            {isAnalyzing && analysisLogs.length > 0 && (
-              <div className="p-4 border rounded-lg bg-muted/50 space-y-3 animate-pulse">
+            {isAnalyzing && totalChunksInAnalysis > 0 && (
+              <div className="p-4 border rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin text-primary" />
                     <span className="font-semibold">Analisi in Corso</span>
                   </div>
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-sm font-mono text-muted-foreground">
                     {progressPercentage.toFixed(1)}% completato
                   </span>
                 </div>
                 <div className="space-y-2">
                   <Progress value={progressPercentage} className="h-4" />
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-bold text-3xl">{analysisLogs[0].progress_chunks_analyzed || 0}</span>
-                    <span className="text-muted-foreground">/ {stats.totalChunks} chunk</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-3xl tabular-nums">{progressChunks}</span>
+                    <span className="text-muted-foreground">/ {totalChunksInAnalysis} chunk</span>
                   </div>
+                  {estimatedRemainingMinutes > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Clock className="h-4 w-4" />
+                      <span>Tempo stimato: ~{estimatedRemainingMinutes} minut{estimatedRemainingMinutes === 1 ? 'o' : 'i'}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
