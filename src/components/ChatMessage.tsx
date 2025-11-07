@@ -36,7 +36,7 @@ export const ChatMessage = ({
   llmProvider
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false); // I messaggi partono espansi
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [hasLocalOverride, setHasLocalOverride] = useState(false);
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -160,7 +160,12 @@ export const ChatMessage = ({
   const isUser = role === "user";
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
-  const shouldBeCollapsed = hasLocalOverride ? isCollapsed : (forceExpanded !== undefined ? !forceExpanded : isCollapsed);
+  
+  // Determina lo stato di collasso: se forceExpanded è definito, ha priorità
+  const shouldBeCollapsed = forceExpanded !== undefined 
+    ? (hasLocalOverride ? isCollapsed : !forceExpanded)  // Se c'è forceExpanded, usa quello (a meno che non ci sia override locale)
+    : isCollapsed;  // Altrimenti usa lo stato locale
+  
   const previewLength = 500;
 
   // System messages have special rendering
