@@ -160,7 +160,7 @@ export const ChatMessage = ({
   const isUser = role === "user";
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
-  const shouldBeCollapsed = isCollapsed;
+  const shouldBeCollapsed = hasLocalOverride ? isCollapsed : (forceExpanded !== undefined ? !forceExpanded : isCollapsed);
   const previewLength = 500;
 
   // System messages have special rendering
