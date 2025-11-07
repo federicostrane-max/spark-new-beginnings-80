@@ -537,36 +537,42 @@ export default function MultiAgentConsultant() {
               );
               
               // Setup realtime subscription to monitor background completion
-              const messageId = lastMessageId;
-              if (messageId) {
-                console.log(`📡 Setting up realtime subscription for message ${messageId}`);
-                const channel = supabase
-                  .channel(`message-${messageId}`)
-                  .on(
-                    'postgres_changes',
-                    {
-                      event: 'UPDATE',
-                      schema: 'public',
-                      table: 'agent_messages',
-                      filter: `id=eq.${messageId}`
-                    },
-                    (payload: any) => {
-                      console.log('📨 Background update received:', payload.new.content.length, 'chars');
-                      setMessages((prev) => 
-                        prev.map((m) =>
-                          m.id === assistantId ? { ...m, content: payload.new.content, llm_provider: payload.new.llm_provider } : m
-                        )
-                      );
-                    }
-                  )
-                  .subscribe();
-                
-                // Cleanup subscription after 10 minutes
-                setTimeout(() => {
-                  console.log('🔌 Cleaning up realtime subscription');
-                  supabase.removeChannel(channel);
-                }, 600000);
-              }
+              // Use assistantId as fallback if lastMessageId is not set yet
+              const messageId = lastMessageId || assistantId;
+              console.log(`📡 Setting up realtime subscription for message ${messageId}`);
+              
+              const channel = supabase
+                .channel(`message-${messageId}`)
+                .on(
+                  'postgres_changes',
+                  {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'agent_messages',
+                    filter: `id=eq.${messageId}`
+                  },
+                  (payload: any) => {
+                    console.log('📨 Background update received:', payload.new.content.length, 'chars');
+                    setMessages((prev) => 
+                      prev.map((m) =>
+                        m.id === assistantId ? { 
+                          ...m, 
+                          content: payload.new.content, 
+                          llm_provider: payload.new.llm_provider 
+                        } : m
+                      )
+                    );
+                  }
+                )
+                .subscribe((status) => {
+                  console.log('📡 Realtime subscription status:', status);
+                });
+              
+              // Cleanup subscription after 10 minutes
+              setTimeout(() => {
+                console.log('🔌 Cleaning up realtime subscription');
+                supabase.removeChannel(channel);
+              }, 600000);
               
               // Close stream, Realtime will handle updates now
               clearTimeout(timeout);
