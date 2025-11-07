@@ -214,75 +214,36 @@ async function requestContinuation(
 }
 
 /**
- * Auto-continuation system with intelligent retry
+ * Triggers async continuation via dedicated edge function (fire-and-forget)
  */
-async function ensureCompleteResponse(
+async function triggerAsyncContinuation(
+  supabaseClient: any,
+  messageId: string,
+  conversationId: string,
+  currentContent: string,
+  agentId: string,
   messages: Message[],
   systemPrompt: string,
-  initialContent: string,
-  deepseekApiKey: string,
-  requestId: string,
-  sendSSE: (data: string) => Promise<void>,
-  maxAttempts: number = 3
-): Promise<ContinuationResult> {
-  let fullContent = initialContent;
-  let attempts = 0;
+  requestId: string
+): Promise<void> {
+  console.log(`🚀 [REQ-${requestId}] Triggering async continuation for message ${messageId}...`);
   
-  console.log(`🤖 [REQ-${requestId}] Starting auto-continuation check...`);
-  console.log(`📊 [REQ-${requestId}] Initial content length: ${initialContent.length} chars`);
-  
-  while (attempts < maxAttempts) {
-    const incomplete = isResponseIncomplete(fullContent);
-    
-    if (!incomplete) {
-      console.log(`✅ [REQ-${requestId}] Response is complete after ${attempts} continuation(s)`);
-      return {
-        isComplete: true,
-        content: fullContent,
-        attempts
-      };
+  // Fire-and-forget: non aspetta il risultato
+  supabaseClient.functions.invoke('continue-deepseek-response', {
+    body: {
+      messageId,
+      conversationId,
+      currentContent,
+      agentId,
+      messages,
+      systemPrompt,
+      requestId
     }
-    
-    attempts++;
-    console.log(`⚠️ [REQ-${requestId}] Response incomplete. Attempt ${attempts}/${maxAttempts}`);
-    
-    // Send continuation notification to client
-    await sendSSE(JSON.stringify({ 
-      type: 'continuation', 
-      attempt: attempts,
-      maxAttempts
-    }));
-    
-    try {
-      const continuation = await requestContinuation(
-        messages,
-        systemPrompt,
-        fullContent,
-        deepseekApiKey,
-        requestId,
-        sendSSE
-      );
-      
-      fullContent += continuation;
-      console.log(`📈 [REQ-${requestId}] New total length: ${fullContent.length} chars`);
-      
-    } catch (error) {
-      console.error(`❌ [REQ-${requestId}] Continuation attempt ${attempts} failed:`, error);
-      // Continue with what we have if continuation fails
-      break;
-    }
-  }
+  }).catch((err: any) => {
+    console.error(`❌ [REQ-${requestId}] Failed to trigger continuation:`, err);
+  });
   
-  const finalIncomplete = isResponseIncomplete(fullContent);
-  if (finalIncomplete) {
-    console.log(`⚠️ [REQ-${requestId}] Response still incomplete after ${maxAttempts} attempts`);
-  }
-  
-  return {
-    isComplete: !finalIncomplete,
-    content: fullContent,
-    attempts
-  };
+  console.log(`✅ [REQ-${requestId}] Continuation triggered (running in background)`);
 }
 
 // ============================================
@@ -4437,12 +4398,20 @@ ${agent.system_prompt}${knowledgeContext}`;
             throw error;
           }
 
-          // ========== AUTO-CONTINUATION FOR DEEPSEEK ==========
+          // ========== AUTO-CONTINUATION FOR DEEPSEEK (ASYNC) ==========
           if (llmProvider === 'deepseek' && DEEPSEEK_API_KEY) {
             console.log(`🔄 [REQ-${requestId}] Checking if DeepSeek response needs continuation...`);
             
-            try {
-              const continuationResult = await ensureCompleteResponse(
+            if (isResponseIncomplete(fullResponse)) {
+              console.log(`⚠️ [REQ-${requestId}] Response incomplete, triggering async continuation...`);
+              
+              // Trigger async continuation (fire-and-forget)
+              await triggerAsyncContinuation(
+                supabase,
+                placeholderMsg.id,
+                conversation.id,
+                fullResponse,
+                agent.id,
                 anthropicMessages.map(m => ({
                   role: m.role as 'user' | 'assistant',
                   content: Array.isArray(m.content) 
@@ -4450,33 +4419,16 @@ ${agent.system_prompt}${knowledgeContext}`;
                     : m.content
                 })),
                 enhancedSystemPrompt,
-                fullResponse,
-                DEEPSEEK_API_KEY,
-                requestId,
-                sendSSE,
-                3 // Max 3 continuation attempts
+                requestId
               );
               
-              if (continuationResult.attempts > 0) {
-                console.log(`🔄 [REQ-${requestId}] Applied ${continuationResult.attempts} continuation(s)`);
-                console.log(`📊 [REQ-${requestId}] Final length: ${continuationResult.content.length} chars (was ${fullResponse.length})`);
-                fullResponse = continuationResult.content;
-                
-                // Update DB with completed response
-                await supabase
-                  .from('agent_messages')
-                  .update({ content: fullResponse })
-                  .eq('id', placeholderMsg.id);
-              } else {
-                console.log(`✅ [REQ-${requestId}] No continuation needed, response was complete`);
-              }
-              
-              if (!continuationResult.isComplete) {
-                console.log(`⚠️ [REQ-${requestId}] WARNING: Response may still be incomplete after ${continuationResult.attempts} attempts`);
-              }
-            } catch (continuationError) {
-              console.error(`❌ [REQ-${requestId}] Auto-continuation failed:`, continuationError);
-              // Continue with original response if continuation fails
+              // Send notification to client
+              await sendSSE(JSON.stringify({
+                type: 'continuation_triggered',
+                message: '⚡ Risposta incompleta rilevata. Continuazione in background...'
+              }));
+            } else {
+              console.log(`✅ [REQ-${requestId}] Response is complete, no continuation needed`);
             }
           }
 

@@ -75,3 +75,7 @@ verify_jwt = false
 
 [functions.update-task-requirements]
 verify_jwt = false
+
+[functions.continue-deepseek-response]
+verify_jwt = false
+timeout = 600
