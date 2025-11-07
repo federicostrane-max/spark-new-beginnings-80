@@ -164,11 +164,11 @@ export const ChatMessage = ({
   
   const previewLength = 500;
   
-  // CRITICAL FIX: forceExpanded deve SEMPRE avere la precedenza assoluta
-  // Ignoriamo completamente hasLocalOverride quando forceExpanded è definito
-  const shouldBeCollapsed = forceExpanded !== undefined 
-    ? !forceExpanded  // forceExpanded ha SEMPRE la priorità
-    : (hasLocalOverride ? isCollapsed : false);  // Altrimenti rispetta l'override locale
+  // FIXED: L'override manuale dell'utente ha la massima priorità
+  // Il comando globale (forceExpanded) viene applicato solo se l'utente non ha fatto override
+  const shouldBeCollapsed = hasLocalOverride
+    ? isCollapsed  // La scelta manuale dell'utente ha priorità assoluta
+    : (forceExpanded !== undefined ? !forceExpanded : false);  // Altrimenti usa forceExpanded se disponibile
 
   // System messages have special rendering
   if (isSystem) {
