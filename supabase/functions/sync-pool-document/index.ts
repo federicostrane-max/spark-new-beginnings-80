@@ -239,17 +239,27 @@ serve(async (req) => {
     if (downloadError || !fileData) {
       console.error('[sync-pool-document] Download error:', downloadError);
       
-      // Mark document as having a missing/inaccessible file
+      // Mark sync as failed in agent_document_links
       await supabase
-        .from('knowledge_documents')
+        .from('agent_document_links')
         .update({ 
-          processing_status: 'error',
-          validation_status: 'rejected',
-          validation_reason: `Failed to download file: ${downloadError?.message || 'File not found'}. The file may have been moved or deleted.`
+          sync_status: 'failed',
+          sync_completed_at: new Date().toISOString(),
+          sync_error: `File not accessible: ${downloadError?.message || 'File not found in storage'}`
         })
-        .eq('id', documentId);
+        .eq('document_id', documentId)
+        .eq('agent_id', agentId);
       
-      throw new Error(`Failed to download PDF: ${downloadError?.message || 'File not found'}`);
+      // Return error response instead of throwing
+      return new Response(
+        JSON.stringify({ 
+          error: 'File not accessible',
+          message: `PDF file not found in storage at path: ${cleanPath}. The document may need to be re-uploaded.`,
+          documentId,
+          agentId,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Use extract-pdf-text edge function with documentId
