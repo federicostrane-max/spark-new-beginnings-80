@@ -161,10 +161,10 @@ export const ChatMessage = ({
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
-  // Determina lo stato di collasso: se forceExpanded è definito, ha priorità
-  const shouldBeCollapsed = forceExpanded !== undefined 
-    ? (hasLocalOverride ? isCollapsed : !forceExpanded)  // Se c'è forceExpanded, usa quello (a meno che non ci sia override locale)
-    : isCollapsed;  // Altrimenti usa lo stato locale
+  // FIXED: Determina lo stato di collasso dando priorità assoluta a forceExpanded quando definito
+  const shouldBeCollapsed = hasLocalOverride 
+    ? isCollapsed  // Se l'utente ha cliccato espandi/collassa, rispetta la sua scelta
+    : (forceExpanded !== undefined ? !forceExpanded : isCollapsed);  // Altrimenti usa forceExpanded se disponibile
   
   const previewLength = 500;
 
