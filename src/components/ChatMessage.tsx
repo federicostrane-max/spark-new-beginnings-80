@@ -207,6 +207,13 @@ export const ChatMessage = ({
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
+  // 🔍 Diagnostica: Log cambiamenti di isStreaming
+  useEffect(() => {
+    if (!isUser) {
+      console.log(`🎬 [Message ${id.slice(0,8)}] isStreaming changed to: ${isStreaming}, content: ${content.length} chars`);
+    }
+  }, [isStreaming, id, isUser, content.length]);
+  
   const COLLAPSE_THRESHOLD = 1000;
   const isExpanded = isManuallyExpanded ?? (justReceivedLongContent ? true : forceExpanded) ?? true;
   

@@ -466,11 +466,15 @@ export default function MultiAgentConsultant() {
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
     
     setStreamingConversationId(conversationId);
+    
+    // 🔍 Dichiarazione variabili per cleanup (accessibili da catch/finally)
+    let timeout: NodeJS.Timeout | undefined;
+    let stallDetectionInterval: NodeJS.Timeout | undefined;
 
     try {
       // Create abort controller with 6 minute timeout (slightly longer than edge function)
       const controller = new AbortController();
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
         controller.abort();
         console.error('Request timeout after 6 minutes');
       }, 360000);
@@ -509,8 +513,23 @@ export default function MultiAgentConsultant() {
       let accumulatedText = "";
       let buffer = "";
       let lastMessageId = "";
+      
+      // 🔍 Diagnostica SSE: tracking timestamp e stalli
+      let lastChunkTime = Date.now();
+      let chunkCount = 0;
+      let stallDetectionInterval: NodeJS.Timeout;
 
       if (!reader) throw new Error("No reader");
+      
+      // 🔍 Avviare monitoraggio stalli
+      stallDetectionInterval = setInterval(() => {
+        const timeSinceLastChunk = Date.now() - lastChunkTime;
+        if (timeSinceLastChunk > 10000) { // 10 secondi senza chunk
+          console.warn(`⚠️ SSE stalled! No chunks for ${timeSinceLastChunk}ms`);
+          console.warn(`   Last content length: ${accumulatedText.length}`);
+          console.warn(`   Total chunks received: ${chunkCount}`);
+        }
+      }, 5000); // Check ogni 5 secondi
 
       const setupRealtimeSubscription = (messageId: string) => {
         console.log(`📡 Setting up realtime for message ${messageId.slice(0, 8)}`);
@@ -597,9 +616,12 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "content" && parsed.text) {
               accumulatedText += parsed.text;
+              chunkCount++; // 🔍 Incrementa contatore chunk
+              lastChunkTime = Date.now(); // 🔍 Aggiorna timestamp ultimo chunk
               
-              if (accumulatedText.length % 1000 === 0) {
-                console.log(`📊 Accumulated ${accumulatedText.length} chars`);
+              // 🔍 Log più frequente per diagnosi (ogni 500 caratteri)
+              if (accumulatedText.length % 500 === 0) {
+                console.log(`📊 [${new Date().toISOString()}] Accumulated ${accumulatedText.length} chars (chunk #${chunkCount})`);
               }
               
               setMessages((prev) => 
@@ -612,6 +634,7 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "switching_to_background") {
               console.log("⏰ Switching to background - accumulated:", accumulatedText.length, "chars");
+              clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
               accumulatedText = parsed.message;
               
               setMessages((prev) => 
@@ -631,6 +654,7 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "complete") {
               console.log("✅ Streaming complete");
+              clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
               
               if (parsed.llmProvider) {
                 console.log('🤖 LLM Provider:', parsed.llmProvider.toUpperCase());
@@ -662,8 +686,17 @@ export default function MultiAgentConsultant() {
       }
     } catch (error: any) {
       console.error("Error sending message:", error);
+      if (stallDetectionInterval) {
+        clearInterval(stallDetectionInterval); // 🔍 Cleanup in caso di errore
+      }
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
     } finally {
+      if (stallDetectionInterval) {
+        clearInterval(stallDetectionInterval); // 🔍 Cleanup garantito
+      }
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       setStreamingConversationId(null);
     }
   };
