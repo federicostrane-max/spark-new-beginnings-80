@@ -5,6 +5,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Input validation helpers
+function validateUUID(value: string, fieldName: string): void {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(value)) {
+    throw new Error(`Invalid ${fieldName}: must be a valid UUID`);
+  }
+}
+
+function validateMessageLength(message: string): void {
+  const MAX_MESSAGE_LENGTH = 50000;
+  if (message.length > MAX_MESSAGE_LENGTH) {
+    throw new Error(`Message too long: maximum ${MAX_MESSAGE_LENGTH} characters allowed`);
+  }
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -1865,6 +1880,18 @@ Deno.serve(async (req) => {
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
     const { conversationId, message, agentSlug, attachments } = requestBody;
+    
+    // Validate inputs
+    validateMessageLength(message);
+    if (conversationId) {
+      validateUUID(conversationId, 'conversationId');
+    }
+    if (!agentSlug || typeof agentSlug !== 'string' || agentSlug.length > 100) {
+      throw new Error('Invalid agentSlug: must be a string with max 100 characters');
+    }
+    if (attachments && (!Array.isArray(attachments) || attachments.length > 10)) {
+      throw new Error('Invalid attachments: must be an array with max 10 items');
+    }
 
     // Detailed request logging
     console.log('🆔 [REQ-' + requestId + '] New request received');

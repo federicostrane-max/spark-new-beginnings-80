@@ -7,6 +7,53 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Input validation helpers
+function validateUrl(url: string): void {
+  const MAX_URL_LENGTH = 2048;
+  
+  if (!url || typeof url !== 'string') {
+    throw new Error('URL is required and must be a string');
+  }
+  
+  if (url.length > MAX_URL_LENGTH) {
+    throw new Error(`URL too long: maximum ${MAX_URL_LENGTH} characters allowed`);
+  }
+  
+  // Basic URL format validation
+  try {
+    const urlObj = new URL(url);
+    
+    // Block potentially dangerous protocols
+    if (!['http:', 'https:'].includes(urlObj.protocol)) {
+      throw new Error('Only HTTP and HTTPS protocols are allowed');
+    }
+    
+    // Block internal/private IPs
+    const hostname = urlObj.hostname.toLowerCase();
+    if (
+      hostname === 'localhost' ||
+      hostname.startsWith('127.') ||
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      hostname === '::1' ||
+      hostname.match(/^169\.254\./)
+    ) {
+      throw new Error('Access to internal/private IPs is not allowed');
+    }
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw new Error('Invalid URL format');
+    }
+    throw e;
+  }
+}
+
+function validateStringLength(value: string | undefined, fieldName: string, maxLength: number): void {
+  if (value && value.length > maxLength) {
+    throw new Error(`${fieldName} too long: maximum ${maxLength} characters allowed`);
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -14,14 +61,14 @@ serve(async (req) => {
 
   try {
     const { url: originalUrl, search_query, expected_title, expected_author } = await req.json();
+    
+    // Validate inputs
+    validateUrl(originalUrl);
+    validateStringLength(search_query, 'search_query', 500);
+    validateStringLength(expected_title, 'expected_title', 300);
+    validateStringLength(expected_author, 'expected_author', 200);
+    
     let url = originalUrl; // Mutable for extraction flow
-    
-    console.log('[download-pdf-tool] ========== START ==========');
-    console.log('[download-pdf-tool] Input:', JSON.stringify({ url, search_query }).slice(0, 200));
-    
-    if (!url) {
-      throw new Error('URL is required');
-    }
 
     // Initialize Supabase early for duplicate check
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;

@@ -19,6 +19,20 @@ interface AIAnalysis {
   complexity_level: 'basic' | 'intermediate' | 'advanced';
 }
 
+// Input validation helpers
+function validateUUID(value: string, fieldName: string): void {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!value || !uuidRegex.test(value)) {
+    throw new Error(`Invalid ${fieldName}: must be a valid UUID`);
+  }
+}
+
+function validateTextLength(text: string | undefined, fieldName: string, maxLength: number): void {
+  if (text && text.length > maxLength) {
+    throw new Error(`${fieldName} too long: maximum ${maxLength} characters allowed`);
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -32,6 +46,14 @@ serve(async (req) => {
 
   try {
     const { documentId, fullText: providedFullText, retryCount = 0 }: ProcessRequest = await req.json();
+    
+    // Validate inputs
+    validateUUID(documentId, 'documentId');
+    validateTextLength(providedFullText, 'fullText', 10000000); // 10MB max
+    
+    if (typeof retryCount !== 'number' || retryCount < 0 || retryCount > 5) {
+      throw new Error('Invalid retryCount: must be a number between 0 and 5');
+    }
 
     console.log(`[process-document] ========== START ==========`);
     console.log(`[process-document] Input:`, JSON.stringify({

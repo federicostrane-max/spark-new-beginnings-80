@@ -1,81 +1,81 @@
 project_id = "vjeafbnkycxfzpxwkifw"
 
 [functions.agent-chat]
-verify_jwt = false
+verify_jwt = true
 timeout = 3600
 
 [functions.agent-chat-demo]
-verify_jwt = false
+verify_jwt = true
 
 [functions.transcribe-audio]
-verify_jwt = false
+verify_jwt = true
 
 [functions.text-to-speech]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ocr-image]
-verify_jwt = false
+verify_jwt = true
 
 [functions.process-chunks]
-verify_jwt = false
+verify_jwt = true
 
 [functions.semantic-search]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-embedding]
-verify_jwt = false
+verify_jwt = true
 
 [functions.validate-document]
-verify_jwt = false
+verify_jwt = true
 
 [functions.process-document]
-verify_jwt = false
+verify_jwt = true
 
 [functions.sync-pool-document]
-verify_jwt = false
+verify_jwt = true
 
 [functions.download-pdf-tool]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-presentation-structure]
-verify_jwt = false
+verify_jwt = true
 
 [functions.deepseek-chat]
-verify_jwt = false
+verify_jwt = true
 
 [functions.migrate-agent-pdfs-to-pool]
-verify_jwt = false
+verify_jwt = true
 
 [functions.upload-pdf-to-pool]
-verify_jwt = false
+verify_jwt = true
 
 [functions.upload-pdf-to-shared-pool]
 verify_jwt = true
 
 [functions.book-discovery]
-verify_jwt = false
+verify_jwt = true
 
 [functions.pdf-search-with-validation]
-verify_jwt = false
+verify_jwt = true
 
 [functions.metadata-extractor]
-verify_jwt = false
+verify_jwt = true
 
 [functions.auto-maintenance]
-verify_jwt = false
+verify_jwt = true
 
 [functions.extract-task-requirements]
-verify_jwt = false
+verify_jwt = true
 
 [functions.analyze-knowledge-alignment]
-verify_jwt = false
+verify_jwt = true
 
 [functions.restore-removed-chunks]
-verify_jwt = false
+verify_jwt = true
 
 [functions.update-task-requirements]
-verify_jwt = false
+verify_jwt = true
 
 [functions.continue-deepseek-response]
-verify_jwt = false
+verify_jwt = true
 timeout = 600
