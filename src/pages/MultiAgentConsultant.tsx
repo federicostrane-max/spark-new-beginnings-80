@@ -393,6 +393,7 @@ export default function MultiAgentConsultant() {
       if (convError) throw convError;
       setCurrentConversation(conv);
 
+      // Force fresh data by using maybeSingle and refetching
       const { data: msgs, error: msgsError } = await supabase
         .from("agent_messages")
         .select("*")
@@ -400,6 +401,14 @@ export default function MultiAgentConsultant() {
         .order("created_at");
 
       if (msgsError) throw msgsError;
+      
+      // Log message lengths for debugging
+      console.log('📥 Loaded messages:', msgs.map(m => ({
+        id: m.id,
+        role: m.role,
+        contentLength: m.content?.length || 0,
+        contentPreview: m.content?.substring(0, 100) || ''
+      })));
       
       // Log LLM providers for debugging
       const llmProviders = msgs.filter(m => m.llm_provider).map(m => ({
