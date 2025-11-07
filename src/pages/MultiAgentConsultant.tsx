@@ -267,22 +267,25 @@ export default function MultiAgentConsultant() {
           filter: `conversation_id=eq.${currentConversation.id}`
         },
         async (payload) => {
-          console.log('📨 Realtime notification received for message:', payload.new.id);
+          console.log('📨 Realtime notification for message:', payload.new.id);
           
-          // CRITICAL FIX: Reload full message from database instead of using realtime payload
-          // Realtime has payload size limits and truncates large messages
-          const { data: fullMessage, error } = await supabase
-            .from('agent_messages')
-            .select('*')
-            .eq('id', payload.new.id)
-            .single();
+          // CRITICAL FIX: Use RPC to bypass Supabase JS client payload size limits
+          const { data: fullMessageData, error } = await supabase.rpc('get_full_message_content', {
+            p_message_id: payload.new.id
+          });
           
           if (error) {
-            console.error('❌ Error reloading message:', error);
+            console.error('❌ Error loading full message via RPC:', error);
             return;
           }
           
-          console.log('✅ Reloaded full message:', fullMessage.id, 'length:', fullMessage.content?.length);
+          if (!fullMessageData || fullMessageData.length === 0) {
+            console.error('❌ No data returned from RPC');
+            return;
+          }
+          
+          const fullMessage = fullMessageData[0];
+          console.log('✅ Loaded via RPC:', fullMessage.id, 'length:', fullMessage.content?.length);
           
           setMessages(prev => 
             prev.map(msg => 
@@ -409,42 +412,46 @@ export default function MultiAgentConsultant() {
       if (convError) throw convError;
       setCurrentConversation(conv);
 
-      // Force fresh data by using maybeSingle and refetching
+      // Load basic message metadata first (IDs, roles, small content)
       const { data: msgs, error: msgsError } = await supabase
         .from("agent_messages")
-        .select("*")
+        .select("id, role, conversation_id, created_at, llm_provider")
         .eq("conversation_id", conversationId)
         .order("created_at");
 
       if (msgsError) throw msgsError;
       
-      // CRITICAL DEBUG: Log exactly what we get from database
-      console.log('🔍 [LOAD] Loaded', msgs?.length, 'messages from database');
-      msgs?.forEach((msg, idx) => {
-        if (msg.role === 'assistant') {
-          console.log(`📝 [LOAD] Message ${idx}: ID=${msg.id.slice(0, 8)}, length=${msg.content?.length || 0}, preview="${msg.content?.substring(0, 50)}..."`);
-        }
-      });
+      console.log('🔍 [LOAD] Loaded', msgs?.length, 'message metadata');
       
-      // Log message lengths for debugging
-      console.log('📥 Loaded messages:', msgs.map(m => ({
-        id: m.id,
-        role: m.role,
-        contentLength: m.content?.length || 0,
-        contentPreview: m.content?.substring(0, 100) || ''
+      // Load full content for each message using RPC to bypass payload limits
+      const fullMessages = await Promise.all(
+        msgs.map(async (msg) => {
+          const { data: fullData, error: rpcError } = await supabase.rpc('get_full_message_content', {
+            p_message_id: msg.id
+          });
+          
+          if (rpcError) {
+            console.error(`❌ [LOAD] Error loading message ${msg.id}:`, rpcError);
+            return { ...msg, content: '' };
+          }
+          
+          if (!fullData || fullData.length === 0) {
+            console.error(`❌ [LOAD] No data for message ${msg.id}`);
+            return { ...msg, content: '' };
+          }
+          
+          const fullMsg = fullData[0];
+          console.log(`✅ [LOAD] Message ${msg.id.slice(0, 8)}: ${fullMsg.content?.length || 0} chars`);
+          return fullMsg;
+        })
+      );
+      
+      setMessages(fullMessages.map((m) => ({ 
+        id: m.id, 
+        role: m.role as "user" | "assistant", 
+        content: m.content, 
+        llm_provider: m.llm_provider 
       })));
-      
-      // Log LLM providers for debugging
-      const llmProviders = msgs.filter(m => m.llm_provider).map(m => ({
-        role: m.role,
-        provider: m.llm_provider,
-        messagePreview: m.content.substring(0, 50)
-      }));
-      if (llmProviders.length > 0) {
-        console.log('💡 LLM Providers in conversation:', llmProviders);
-      }
-      
-      setMessages(msgs.map((m) => ({ id: m.id, role: m.role as "user" | "assistant", content: m.content, llm_provider: m.llm_provider })));
       
       // Force scroll to last message after loading
       setTimeout(() => {

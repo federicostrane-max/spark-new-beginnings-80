@@ -1393,6 +1393,17 @@ export type Database = {
           summary: string
         }[]
       }
+      get_full_message_content: {
+        Args: { p_message_id: string }
+        Returns: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          llm_provider: string
+          role: string
+        }[]
+      }
       get_or_create_conversation: {
         Args: { p_agent_id: string; p_user_id: string }
         Returns: string
