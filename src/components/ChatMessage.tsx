@@ -301,16 +301,36 @@ export const ChatMessage = ({
     }
   }, [visibleChunks, markdownChunks.length, isStreaming]);
   
-  // Reset visible chunks when markdown chunks change
+  // Reset visible chunks ONLY when streaming ends or content changes significantly
+  // Avoid resetting during streaming to prevent infinite loops
+  const prevIsStreamingRef = useRef(isStreaming);
+  const prevContentLengthRef = useRef(content.length);
+  
   useEffect(() => {
-    const initialVisible = markdownChunks.length > 5 ? 3 : markdownChunks.length;
-    setVisibleChunks(initialVisible);
+    const wasStreaming = prevIsStreamingRef.current;
+    const prevContentLength = prevContentLengthRef.current;
     
-    console.log(`🔄 [ChatMessage ${id.slice(0,8)}] Resetting visible chunks`, {
-      totalChunks: markdownChunks.length,
-      initialVisible
-    });
-  }, [markdownChunks.length, id]);
+    // Only reset when:
+    // 1. Streaming just ended (was streaming, now not streaming)
+    // 2. Content changed significantly when NOT streaming (e.g., user expanded/collapsed)
+    const streamingJustEnded = wasStreaming && !isStreaming;
+    const contentChangedWhileNotStreaming = !isStreaming && Math.abs(content.length - prevContentLength) > 100;
+    
+    if (streamingJustEnded || contentChangedWhileNotStreaming) {
+      const initialVisible = markdownChunks.length > 5 ? 3 : markdownChunks.length;
+      setVisibleChunks(initialVisible);
+      
+      console.log(`🔄 [ChatMessage ${id.slice(0,8)}] Resetting visible chunks`, {
+        totalChunks: markdownChunks.length,
+        initialVisible,
+        reason: streamingJustEnded ? 'streaming ended' : 'content changed',
+        contentLength: content.length
+      });
+    }
+    
+    prevIsStreamingRef.current = isStreaming;
+    prevContentLengthRef.current = content.length;
+  }, [isStreaming, content.length, markdownChunks.length, id]);
   
   // Log progress of progressive rendering
   useEffect(() => {
