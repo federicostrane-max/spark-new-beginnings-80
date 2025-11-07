@@ -252,6 +252,36 @@ export default function MultiAgentConsultant() {
     }
   }, [session?.user?.id, agentUpdateTrigger]);
 
+  // Realtime subscription for message updates from background processing
+  useEffect(() => {
+    if (!currentConversation?.id) return;
+
+    const channel = supabase
+      .channel(`agent_messages:${currentConversation.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'agent_messages',
+          filter: `conversation_id=eq.${currentConversation.id}`
+        },
+        (payload) => {
+          console.log('📨 Realtime message update:', payload.new);
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === payload.new.id ? payload.new as Message : msg
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentConversation?.id]);
+
   // Auto-select agent from URL parameter when returning from presentation
   useEffect(() => {
     const urlAgentId = searchParams.get('agentId');
