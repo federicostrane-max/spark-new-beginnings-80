@@ -1707,6 +1707,136 @@ ${completed.length > 0 ? '✨ I PDF validati sono ora disponibili nella knowledg
   }
 }
 
+// ============================================
+// LONG RESPONSE HANDLER (Background Processing)
+// ============================================
+
+async function handleLongResponse(
+  supabaseClient: any,
+  conversationId: string,
+  agentId: string,
+  userId: string,
+  messageId: string,
+  llmProvider: string,
+  initialChunk: string,
+  continueGeneration: () => AsyncGenerator<string>
+) {
+  console.log('🚀 [LONG RESPONSE] Switching to background processing');
+  console.log(`   Conversation: ${conversationId}`);
+  console.log(`   Message: ${messageId}`);
+  console.log(`   Initial chunk: ${initialChunk.length} chars`);
+  
+  // 1. Create record in agent_long_responses
+  const { data: longResponse, error: insertError } = await supabaseClient
+    .from('agent_long_responses')
+    .insert({
+      conversation_id: conversationId,
+      agent_id: agentId,
+      user_id: userId,
+      message_id: messageId,
+      llm_provider: llmProvider,
+      status: 'generating',
+      response_chunks: [{
+        chunk: initialChunk,
+        timestamp: new Date().toISOString(),
+        char_count: initialChunk.length
+      }],
+      total_characters: initialChunk.length,
+      current_chunk_index: 0
+    })
+    .select()
+    .single();
+  
+  if (insertError) {
+    console.error('❌ Failed to create long response record:', insertError);
+    throw insertError;
+  }
+  
+  console.log('✅ Long response record created:', longResponse.id);
+  
+  // 2. Continue generation in background
+  const backgroundTask = async () => {
+    try {
+      let fullResponse = initialChunk;
+      const chunks: any[] = [{
+        chunk: initialChunk,
+        timestamp: new Date().toISOString(),
+        char_count: initialChunk.length
+      }];
+      
+      let lastUpdateLength = initialChunk.length;
+      
+      for await (const chunk of continueGeneration()) {
+        fullResponse += chunk;
+        chunks.push({
+          chunk,
+          timestamp: new Date().toISOString(),
+          char_count: chunk.length
+        });
+        
+        // Save every 2000 characters for efficiency
+        if (fullResponse.length - lastUpdateLength >= 2000) {
+          await supabaseClient
+            .from('agent_long_responses')
+            .update({
+              response_chunks: chunks,
+              total_characters: fullResponse.length,
+              current_chunk_index: chunks.length - 1
+            })
+            .eq('id', longResponse.id);
+          
+          lastUpdateLength = fullResponse.length;
+          console.log(`📊 [BACKGROUND] Saved chunk ${chunks.length}, total: ${fullResponse.length} chars`);
+        }
+      }
+      
+      // 3. Completion
+      const endTime = new Date();
+      const generationTime = Math.floor((endTime.getTime() - new Date(longResponse.started_at).getTime()) / 1000);
+      
+      await supabaseClient
+        .from('agent_long_responses')
+        .update({
+          status: 'completed',
+          response_chunks: chunks,
+          total_characters: fullResponse.length,
+          current_chunk_index: chunks.length - 1,
+          completed_at: endTime.toISOString(),
+          generation_time_seconds: generationTime
+        })
+        .eq('id', longResponse.id);
+      
+      // 4. Update final message
+      await supabaseClient
+        .from('agent_messages')
+        .update({
+          content: fullResponse,
+          llm_provider: llmProvider
+        })
+        .eq('id', messageId);
+      
+      console.log(`✅ [BACKGROUND] Generation completed: ${fullResponse.length} chars in ${generationTime}s`);
+      
+    } catch (error) {
+      console.error('❌ [BACKGROUND] Generation failed:', error);
+      
+      await supabaseClient
+        .from('agent_long_responses')
+        .update({
+          status: 'failed',
+          error_message: error instanceof Error ? error.message : 'Unknown error',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', longResponse.id);
+    }
+  };
+  
+  // Execute in background (using Deno API for background tasks)
+  (globalThis as any).EdgeRuntime?.waitUntil(backgroundTask()) || backgroundTask();
+  
+  return longResponse;
+}
+
 Deno.serve(async (req) => {
   // Generate unique request ID for tracking
   const requestId = crypto.randomUUID().substring(0, 8);
@@ -3219,9 +3349,80 @@ ${agent.system_prompt}${knowledgeContext}`;
             console.log('📡 Keep-alive sent');
           }, 15000);
 
+          const TIMEOUT_THRESHOLD = 100000; // 100 seconds
+          const MIN_CHARS_FOR_BACKGROUND = 5000;
+
           try {
             while (true) {
               const { done, value } = await reader.read();
+              
+              // CHECK TIMEOUT - Switch to background if needed
+              const elapsed = Date.now() - requestStartTime;
+              if (elapsed > TIMEOUT_THRESHOLD && fullResponse.length > MIN_CHARS_FOR_BACKGROUND) {
+                console.log(`⏰ [REQ-${requestId}] TIMEOUT APPROACHING (${elapsed}ms elapsed, ${fullResponse.length} chars), switching to background...`);
+                
+                // Send switching notice to client
+                const switchNotice = {
+                  type: 'switching_to_background',
+                  message: fullResponse,
+                  notice: 'Response is long, continuing in background...'
+                };
+                sendSSE(JSON.stringify(switchNotice));
+                
+                // Create generator for remaining chunks
+                const continueGen = async function*() {
+                  // Continue reading from current position
+                  while (true) {
+                    const { done: innerDone, value: innerValue } = await reader.read();
+                    if (innerDone) break;
+                    
+                    const chunk = decoder.decode(innerValue, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                      if (!line.trim() || line.startsWith(':')) continue;
+                      if (!line.startsWith('data: ')) continue;
+                      
+                      const data = line.slice(6);
+                      if (data === '[DONE]') continue;
+                      
+                      try {
+                        const parsed = JSON.parse(data);
+                        
+                        if (llmProvider === 'anthropic') {
+                          if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                            yield parsed.delta.text;
+                          }
+                        } else if (llmProvider === 'deepseek') {
+                          if (parsed.choices?.[0]?.delta?.content) {
+                            yield parsed.choices[0].delta.content;
+                          }
+                        }
+                      } catch (e) {
+                        // Ignore parse errors
+                      }
+                    }
+                  }
+                };
+                
+                // Start background processing
+                await handleLongResponse(
+                  supabase,
+                  conversation.id,
+                  agent.id,
+                  user.id,
+                  placeholderMsg.id,
+                  llmProvider,
+                  fullResponse,
+                  continueGen
+                );
+                
+                // Close current stream
+                clearInterval(keepAliveInterval);
+                closeStream();
+                return;
+              }
+              
               if (done) {
                 const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
                 console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);

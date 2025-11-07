@@ -74,6 +74,12 @@ export default function MultiAgentConsultant() {
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
   const [unsyncedDocsCount, setUnsyncedDocsCount] = useState(0);
   const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
+  const [activeLongResponse, setActiveLongResponse] = useState<string | null>(null);
+  const [backgroundProgress, setBackgroundProgress] = useState<{
+    totalChars: number;
+    chunks: number;
+    status: string;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
 
@@ -111,6 +117,72 @@ export default function MultiAgentConsultant() {
       }
     }
   }, [streamingConversationId, messages, preGenerateAudio]);
+
+  // Realtime subscription for long responses
+  useEffect(() => {
+    if (!currentConversation?.id) return;
+    
+    console.log('[REALTIME] Setting up long response subscription for conversation:', currentConversation.id);
+    
+    const channel = supabase
+      .channel(`long-response-${currentConversation.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'agent_long_responses',
+          filter: `conversation_id=eq.${currentConversation.id}`
+        },
+        (payload) => {
+          console.log('📡 [REALTIME] Long response update:', payload.eventType, payload.new);
+          
+          if (payload.eventType === 'INSERT') {
+            setActiveLongResponse(payload.new.id);
+            setBackgroundProgress({
+              totalChars: payload.new.total_characters,
+              chunks: payload.new.current_chunk_index,
+              status: payload.new.status
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            const data = payload.new;
+            setBackgroundProgress({
+              totalChars: data.total_characters,
+              chunks: data.current_chunk_index,
+              status: data.status
+            });
+            
+            // Update message in real-time
+            if (data.status === 'generating' || data.status === 'completed') {
+              const fullText = data.response_chunks
+                .map((c: any) => c.chunk)
+                .join('');
+              
+              setMessages(prev => prev.map(msg => 
+                msg.id === data.message_id
+                  ? { ...msg, content: fullText }
+                  : msg
+              ));
+            }
+            
+            // Cleanup when completed
+            if (data.status === 'completed' || data.status === 'failed') {
+              setTimeout(() => {
+                setActiveLongResponse(null);
+                setBackgroundProgress(null);
+              }, 3000);
+            }
+          }
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      console.log('[REALTIME] Cleaning up long response subscription');
+      supabase.removeChannel(channel);
+    };
+  }, [currentConversation?.id]);
+
 
   // Reload messages when returning to the app
   useEffect(() => {
@@ -427,6 +499,20 @@ export default function MultiAgentConsultant() {
             if (parsed.type === "message_start") {
               console.log("📨 Message started:", parsed.messageId);
               lastMessageId = parsed.messageId;
+            } else if (parsed.type === "switching_to_background") {
+              // Response is switching to background processing
+              console.log("⏰ Switching to background processing");
+              accumulatedText = parsed.message;
+              
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: accumulatedText } : m
+                )
+              );
+              
+              // Close EventSource, Realtime will handle updates now
+              reader.cancel();
+              break;
             } else if (parsed.type === "content" && parsed.text) {
               accumulatedText += parsed.text;
               setMessages((prev) => 
@@ -808,6 +894,24 @@ export default function MultiAgentConsultant() {
                 />
               </div>
             </div>
+
+            {/* Long Response Progress Indicator */}
+            {backgroundProgress && activeLongResponse && (
+              <div className="fixed bottom-20 right-4 bg-primary text-primary-foreground px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 max-w-xs">
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                <div className="text-sm">
+                  <div className="font-medium">
+                    {backgroundProgress.status === 'generating' 
+                      ? 'Generating long response...' 
+                      : 'Response completed!'}
+                  </div>
+                  <div className="text-xs opacity-80">
+                    {backgroundProgress.totalChars.toLocaleString()} characters
+                    {backgroundProgress.status === 'generating' && ' (updating in real-time)'}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex h-full items-center justify-center p-4">
