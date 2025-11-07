@@ -43,6 +43,9 @@ export const ChatMessage = ({
   const [isLongPressing, setIsLongPressing] = useState(false);
   const justEnteredSelectionMode = useRef(false);
   const navigate = useNavigate();
+  
+  // State for progressive chunk rendering
+  const [visibleChunks, setVisibleChunks] = useState(3);
 
   // Get LLM provider badge info
   const getLLMBadge = () => {
@@ -232,7 +235,7 @@ export const ChatMessage = ({
   };
   
   const PREVIEW_THRESHOLD = 800;
-  const MARKDOWN_CHUNK_THRESHOLD = 7000;
+  const MARKDOWN_CHUNK_THRESHOLD = 10000;
   const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
   const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
   
@@ -249,7 +252,7 @@ export const ChatMessage = ({
       willSplit: true
     });
     
-    const chunks = splitMarkdownIntelligently(displayContent, 5000);
+    const chunks = splitMarkdownIntelligently(displayContent, 10000);
     
     const elapsed = performance.now() - startTime;
     console.log(`✅ [ChatMessage ${id.slice(0,8)}] Chunking completed in ${elapsed.toFixed(2)}ms`, {
@@ -287,6 +290,40 @@ export const ChatMessage = ({
     );
   };
   
+  // Progressive chunk loading - load 2 chunks at a time with 50ms delay
+  useEffect(() => {
+    if (visibleChunks < markdownChunks.length && !isStreaming) {
+      const timeoutId = setTimeout(() => {
+        setVisibleChunks(prev => Math.min(prev + 2, markdownChunks.length));
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [visibleChunks, markdownChunks.length, isStreaming]);
+  
+  // Reset visible chunks when markdown chunks change
+  useEffect(() => {
+    const initialVisible = markdownChunks.length > 5 ? 3 : markdownChunks.length;
+    setVisibleChunks(initialVisible);
+    
+    console.log(`🔄 [ChatMessage ${id.slice(0,8)}] Resetting visible chunks`, {
+      totalChunks: markdownChunks.length,
+      initialVisible
+    });
+  }, [markdownChunks.length, id]);
+  
+  // Log progress of progressive rendering
+  useEffect(() => {
+    if (markdownChunks.length > 1) {
+      console.log(`📦 [ChatMessage ${id.slice(0,8)}] Progressive rendering`, {
+        visibleChunks,
+        totalChunks: markdownChunks.length,
+        progress: `${((visibleChunks / markdownChunks.length) * 100).toFixed(1)}%`,
+        isComplete: visibleChunks >= markdownChunks.length
+      });
+    }
+  }, [visibleChunks, markdownChunks.length, id]);
+  
   // Log dettagliato ad ogni render
   useEffect(() => {
     const renderTime = new Date().toISOString();
@@ -297,9 +334,10 @@ export const ChatMessage = ({
       'Is streaming': isStreaming,
       'Should show preview': shouldShowPreview,
       'Chunk count': markdownChunks.length,
+      'Visible chunks': visibleChunks,
       'Will use chunked rendering': displayContent.length > MARKDOWN_CHUNK_THRESHOLD
     });
-  }, [content.length, displayContent.length, isExpanded, isStreaming, markdownChunks.length, shouldShowPreview, id]);
+  }, [content.length, displayContent.length, isExpanded, isStreaming, markdownChunks.length, visibleChunks, shouldShowPreview, id]);
 
   // System messages have special rendering
   if (isSystem) {
@@ -376,22 +414,42 @@ export const ChatMessage = ({
             
             {displayContent.length > MARKDOWN_CHUNK_THRESHOLD ? (
               <>
-                {markdownChunks.map((chunk, idx) => (
+                {markdownChunks.slice(0, visibleChunks).map((chunk, idx) => (
                   <div key={idx}>
                     <ChunkedMarkdown chunk={chunk} index={idx} total={markdownChunks.length} />
-                    {idx < markdownChunks.length - 1 && (
+                    {idx < visibleChunks - 1 && (
                       <div className="my-1 h-px bg-gradient-to-r from-transparent via-border to-transparent opacity-30" />
                     )}
                   </div>
                 ))}
-                <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
-                  ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri, {markdownChunks.length} sezioni)
-                  {!isStreaming && content.length !== displayContent.length && (
-                    <span className="ml-1 text-orange-600">
-                      • {(content.length - displayContent.length).toLocaleString('it-IT')} caratteri ancora da mostrare
-                    </span>
-                  )}
-                </div>
+                
+                {/* Progress indicator when still loading chunks */}
+                {visibleChunks < markdownChunks.length && (
+                  <div className="mt-3 px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-lg animate-pulse">
+                    <div className="flex items-center justify-between text-xs text-blue-600 mb-2">
+                      <span className="font-medium">⏳ Caricamento sezioni...</span>
+                      <span className="font-mono">{visibleChunks}/{markdownChunks.length}</span>
+                    </div>
+                    <div className="h-1.5 bg-blue-500/20 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                        style={{ width: `${(visibleChunks / markdownChunks.length) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {/* Info badge when fully loaded */}
+                {visibleChunks >= markdownChunks.length && (
+                  <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
+                    ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri, {markdownChunks.length} sezioni)
+                    {!isStreaming && content.length !== displayContent.length && (
+                      <span className="ml-1 text-orange-600">
+                        • {(content.length - displayContent.length).toLocaleString('it-IT')} caratteri ancora da mostrare
+                      </span>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
