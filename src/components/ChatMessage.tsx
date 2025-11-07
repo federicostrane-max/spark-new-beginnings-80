@@ -59,6 +59,7 @@ export const ChatMessage = ({
 
   const llmBadge = getLLMBadge();
 
+  // Reset local state when forceExpanded changes
   useEffect(() => {
     if (forceExpanded !== undefined) {
       setHasLocalOverride(false);
@@ -163,22 +164,11 @@ export const ChatMessage = ({
   
   const previewLength = 500;
   
-  // DEBUG: Logga i valori per capire il problema
-  console.log('ChatMessage DEBUG:', {
-    id,
-    forceExpanded,
-    hasLocalOverride,
-    isCollapsed,
-    contentLength: content.length,
-    previewLength
-  });
-  
-  // FIXED: Determina lo stato di collasso dando priorità assoluta a forceExpanded quando definito
-  const shouldBeCollapsed = hasLocalOverride 
-    ? isCollapsed  // Se l'utente ha cliccato espandi/collassa, rispetta la sua scelta
-    : (forceExpanded !== undefined ? !forceExpanded : isCollapsed);  // Altrimenti usa forceExpanded se disponibile
-  
-  console.log('shouldBeCollapsed:', shouldBeCollapsed);
+  // CRITICAL FIX: forceExpanded deve SEMPRE avere la precedenza assoluta
+  // Ignoriamo completamente hasLocalOverride quando forceExpanded è definito
+  const shouldBeCollapsed = forceExpanded !== undefined 
+    ? !forceExpanded  // forceExpanded ha SEMPRE la priorità
+    : (hasLocalOverride ? isCollapsed : false);  // Altrimenti rispetta l'override locale
 
   // System messages have special rendering
   if (isSystem) {
