@@ -192,32 +192,21 @@ export const ChatMessage = ({
   const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
   const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
   
-  // DEBUG: log esplicito per capire lo stato iniziale (SOLO al mount)
+  // DEBUG: log per capire troncamenti
   useEffect(() => {
     if (content.length > 5000) {
-      console.log(`[ChatMessage ${id.slice(0,8)}] STATO INIZIALE`, {
-        'Messaggio è espanso?': isExpanded ? '✅ SÌ (tutto visibile)' : '❌ NO (preview)',
-        'forceExpanded': forceExpanded,
-        'isManuallyExpanded': isManuallyExpanded,
-        'contentLength': content.length,
-        'displayContentLength': displayContent.length,
+      console.log(`🔍 [ChatMessage ${id.slice(0,8)}]`, {
+        'isExpanded': isExpanded ? '✅ ESPANSO' : '❌ COLLAPSED',
+        'Content originale': content.length,
+        'Display dopo logica': displayContent.length,
+        'Differenza (nascosti)': content.length - displayContent.length,
         'shouldShowPreview': shouldShowPreview,
-        'Caratteri nascosti': content.length - displayContent.length
+        'Inizio content': content.substring(0, 50),
+        'Fine content (ultimi 100 char)': content.substring(content.length - 100),
+        'Fine displayContent (ultimi 100 char)': displayContent.substring(displayContent.length - 100)
       });
     }
-  }, []); // Esegui SOLO al mount iniziale
-  
-  // DEBUG: log continuo per monitorare cambiamenti di stato
-  useEffect(() => {
-    if (content.length > 5000) {
-      console.log(`[ChatMessage ${id.slice(0,8)}] AGGIORNAMENTO`, {
-        isExpanded,
-        forceExpanded,
-        isManuallyExpanded,
-        displayContentLength: displayContent.length
-      });
-    }
-  }, [content.length, forceExpanded, isManuallyExpanded, isExpanded, shouldShowPreview, displayContent.length, id]);
+  }, [isExpanded, content.length, displayContent.length, shouldShowPreview, id]);
 
   // System messages have special rendering
   if (isSystem) {
