@@ -17,6 +17,12 @@ interface Attachment {
   extracted_text?: string;
 }
 
+interface ContinuationResult {
+  isComplete: boolean;
+  content: string;
+  attempts: number;
+}
+
 interface UserIntent {
   type: 'SEARCH_REQUEST' | 'DOWNLOAD_COMMAND' | 'FILTER_REQUEST' | 'SEMANTIC_QUESTION' | 'UNKNOWN';
   topic?: string;
@@ -40,6 +46,247 @@ interface SearchResult {
 
 // ============================================
 // DETERMINISTIC WORKFLOW HELPERS
+// ============================================
+
+// ============================================
+// AUTO-CONTINUATION SYSTEM
+// ============================================
+
+/**
+ * Detects if a response is incomplete based on various indicators
+ */
+function isResponseIncomplete(content: string): boolean {
+  const trimmed = content.trim();
+  
+  // Check 1: Ends with incomplete code block
+  const codeBlockStarts = (trimmed.match(/```/g) || []).length;
+  if (codeBlockStarts % 2 !== 0) {
+    console.log('🔍 [INCOMPLETE] Detected unclosed code block');
+    return true;
+  }
+  
+  // Check 2: Ends with incomplete Python/JS code patterns
+  const incompleteCodePatterns = [
+    /for\s+\w+\s+in\s+\w+:\s*$/,  // Python for loop without body
+    /def\s+\w+\([^)]*\):\s*$/,     // Python function def without body
+    /if\s+[^:]+:\s*$/,             // Python if without body
+    /class\s+\w+.*:\s*$/,          // Python class without body
+    /\{\s*$/,                      // Opening brace without content
+    /function\s+\w+\([^)]*\)\s*\{\s*$/,  // JS function without body
+    /=>\s*\{\s*$/,                 // Arrow function without body
+  ];
+  
+  for (const pattern of incompleteCodePatterns) {
+    if (pattern.test(trimmed)) {
+      console.log('🔍 [INCOMPLETE] Detected incomplete code pattern:', pattern);
+      return true;
+    }
+  }
+  
+  // Check 3: Ends with incomplete sentence indicators
+  const incompleteSentencePatterns = [
+    /,\s*$/,           // Ends with comma
+    /:\s*$/,           // Ends with colon (but not in code block)
+    /\(\s*$/,          // Unclosed parenthesis
+    /\[\s*$/,          // Unclosed bracket
+  ];
+  
+  // Only check sentence patterns if not in a code block context
+  const lastLine = trimmed.split('\n').slice(-1)[0];
+  if (!lastLine.includes('```')) {
+    for (const pattern of incompleteSentencePatterns) {
+      if (pattern.test(trimmed)) {
+        console.log('🔍 [INCOMPLETE] Detected incomplete sentence:', pattern);
+        return true;
+      }
+    }
+  }
+  
+  // Check 4: Very abrupt endings (content length check)
+  // If the response is less than expected minimum and doesn't end with punctuation
+  const endsWithProperPunctuation = /[.!?]\s*$/.test(trimmed);
+  const hasMinimumLength = content.length > 100;
+  
+  if (hasMinimumLength && !endsWithProperPunctuation && !trimmed.endsWith('```')) {
+    console.log('🔍 [INCOMPLETE] No proper ending punctuation');
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Requests DeepSeek to continue from where it left off
+ */
+async function requestContinuation(
+  messages: Message[],
+  systemPrompt: string,
+  previousContent: string,
+  deepseekApiKey: string,
+  requestId: string,
+  sendSSE: (data: string) => Promise<void>
+): Promise<string> {
+  console.log(`🔄 [REQ-${requestId}] Requesting continuation from DeepSeek...`);
+  
+  // Build continuation prompt
+  const continuationMessages: Message[] = [
+    ...messages,
+    {
+      role: 'assistant',
+      content: previousContent
+    },
+    {
+      role: 'user',
+      content: 'Please continue exactly from where you left off. Do not repeat what you already wrote, just continue the response.'
+    }
+  ];
+  
+  const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${deepseekApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...continuationMessages
+      ],
+      temperature: 0.7,
+      max_tokens: 4000,
+      stream: true
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`DeepSeek continuation failed: ${response.status}`);
+  }
+
+  let continuationContent = '';
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No reader available');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim() || line.startsWith(':')) continue;
+        if (!line.startsWith('data: ')) continue;
+
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.choices?.[0]?.delta?.content) {
+            const chunk = parsed.choices[0].delta.content;
+            continuationContent += chunk;
+            
+            // Stream the continuation to client
+            await sendSSE(JSON.stringify({ 
+              type: 'chunk', 
+              content: chunk,
+              isContinuation: true 
+            }));
+          }
+        } catch (e) {
+          console.error('Error parsing continuation chunk:', e);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`❌ [REQ-${requestId}] Continuation streaming error:`, error);
+    throw error;
+  }
+
+  console.log(`✅ [REQ-${requestId}] Continuation received: ${continuationContent.length} chars`);
+  return continuationContent;
+}
+
+/**
+ * Auto-continuation system with intelligent retry
+ */
+async function ensureCompleteResponse(
+  messages: Message[],
+  systemPrompt: string,
+  initialContent: string,
+  deepseekApiKey: string,
+  requestId: string,
+  sendSSE: (data: string) => Promise<void>,
+  maxAttempts: number = 3
+): Promise<ContinuationResult> {
+  let fullContent = initialContent;
+  let attempts = 0;
+  
+  console.log(`🤖 [REQ-${requestId}] Starting auto-continuation check...`);
+  console.log(`📊 [REQ-${requestId}] Initial content length: ${initialContent.length} chars`);
+  
+  while (attempts < maxAttempts) {
+    const incomplete = isResponseIncomplete(fullContent);
+    
+    if (!incomplete) {
+      console.log(`✅ [REQ-${requestId}] Response is complete after ${attempts} continuation(s)`);
+      return {
+        isComplete: true,
+        content: fullContent,
+        attempts
+      };
+    }
+    
+    attempts++;
+    console.log(`⚠️ [REQ-${requestId}] Response incomplete. Attempt ${attempts}/${maxAttempts}`);
+    
+    // Send continuation notification to client
+    await sendSSE(JSON.stringify({ 
+      type: 'continuation', 
+      attempt: attempts,
+      maxAttempts
+    }));
+    
+    try {
+      const continuation = await requestContinuation(
+        messages,
+        systemPrompt,
+        fullContent,
+        deepseekApiKey,
+        requestId,
+        sendSSE
+      );
+      
+      fullContent += continuation;
+      console.log(`📈 [REQ-${requestId}] New total length: ${fullContent.length} chars`);
+      
+    } catch (error) {
+      console.error(`❌ [REQ-${requestId}] Continuation attempt ${attempts} failed:`, error);
+      // Continue with what we have if continuation fails
+      break;
+    }
+  }
+  
+  const finalIncomplete = isResponseIncomplete(fullContent);
+  if (finalIncomplete) {
+    console.log(`⚠️ [REQ-${requestId}] Response still incomplete after ${maxAttempts} attempts`);
+  }
+  
+  return {
+    isComplete: !finalIncomplete,
+    content: fullContent,
+    attempts
+  };
+}
+
+// ============================================
+// INTENT PARSING
 // ============================================
 
 function parseKnowledgeSearchIntent(message: string): UserIntent {
@@ -4188,6 +4435,49 @@ ${agent.system_prompt}${knowledgeContext}`;
                 .eq('id', placeholderMsg.id);
             }
             throw error;
+          }
+
+          // ========== AUTO-CONTINUATION FOR DEEPSEEK ==========
+          if (llmProvider === 'deepseek' && DEEPSEEK_API_KEY) {
+            console.log(`🔄 [REQ-${requestId}] Checking if DeepSeek response needs continuation...`);
+            
+            try {
+              const continuationResult = await ensureCompleteResponse(
+                anthropicMessages.map(m => ({
+                  role: m.role as 'user' | 'assistant',
+                  content: Array.isArray(m.content) 
+                    ? m.content.map(c => typeof c === 'string' ? c : c.text || '').join('\n')
+                    : m.content
+                })),
+                enhancedSystemPrompt,
+                fullResponse,
+                DEEPSEEK_API_KEY,
+                requestId,
+                sendSSE,
+                3 // Max 3 continuation attempts
+              );
+              
+              if (continuationResult.attempts > 0) {
+                console.log(`🔄 [REQ-${requestId}] Applied ${continuationResult.attempts} continuation(s)`);
+                console.log(`📊 [REQ-${requestId}] Final length: ${continuationResult.content.length} chars (was ${fullResponse.length})`);
+                fullResponse = continuationResult.content;
+                
+                // Update DB with completed response
+                await supabase
+                  .from('agent_messages')
+                  .update({ content: fullResponse })
+                  .eq('id', placeholderMsg.id);
+              } else {
+                console.log(`✅ [REQ-${requestId}] No continuation needed, response was complete`);
+              }
+              
+              if (!continuationResult.isComplete) {
+                console.log(`⚠️ [REQ-${requestId}] WARNING: Response may still be incomplete after ${continuationResult.attempts} attempts`);
+              }
+            } catch (continuationError) {
+              console.error(`❌ [REQ-${requestId}] Auto-continuation failed:`, continuationError);
+              // Continue with original response if continuation fails
+            }
           }
 
           // Final update to DB
