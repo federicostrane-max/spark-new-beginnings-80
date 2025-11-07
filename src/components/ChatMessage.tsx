@@ -274,30 +274,13 @@ export const ChatMessage = ({
           </div>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-visible [&_pre]:max-h-none [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
-            {/* Fallback a plain text per contenuti molto lunghi (>15.000 caratteri) */}
-            {displayContent.length > 15000 ? (
-              <>
-                {/* Rendering chunked per evitare limiti del browser */}
-                {(() => {
-                  const CHUNK_SIZE = 5000;
-                  const chunks: string[] = [];
-                  for (let i = 0; i < displayContent.length; i += CHUNK_SIZE) {
-                    chunks.push(displayContent.slice(i, i + CHUNK_SIZE));
-                  }
-                  return chunks.map((chunk, idx) => (
-                    <div key={idx} className="whitespace-pre-wrap break-words font-mono text-sm leading-relaxed">
-                      {chunk}
-                    </div>
-                  ));
-                })()}
-                <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
-                  ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri in {Math.ceil(displayContent.length / 5000)} parti) - Rendering ottimizzato
-                </div>
-              </>
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {displayContent}
-              </ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {displayContent}
+            </ReactMarkdown>
+            {displayContent.length > 15000 && (
+              <div className="mt-2 px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-600">
+                ℹ️ Messaggio lungo ({displayContent.length.toLocaleString('it-IT')} caratteri)
+              </div>
             )}
             
             {shouldShowPreview && (
