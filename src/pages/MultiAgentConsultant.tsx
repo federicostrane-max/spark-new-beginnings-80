@@ -502,6 +502,8 @@ export default function MultiAgentConsultant() {
         throw new Error(errorData.error || "Failed to get response");
       }
 
+      console.log("🚀 Starting SSE stream for message:", assistantId.slice(0, 8));
+      
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = "";
@@ -510,151 +512,148 @@ export default function MultiAgentConsultant() {
 
       if (!reader) throw new Error("No reader");
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          // Process any remaining buffer
-          if (buffer.trim()) {
-            const remainingLines = buffer.split("\n");
-            for (const line of remainingLines) {
-              if (!line.trim() || line.startsWith(":")) continue;
-              if (!line.startsWith("data: ")) continue;
-              const data = line.slice(6);
-              if (data === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.type === "content" && parsed.text) {
-                  accumulatedText += parsed.text;
-                  setMessages((prev) => 
-                    prev.map((m) =>
-                      m.id === assistantId ? { ...m, content: accumulatedText } : m
-                    )
-                  );
-                } else if (parsed.type === "message_start") {
-                  lastMessageId = parsed.messageId;
-                } else if (parsed.type === "complete") {
-                  if (parsed.conversationId && !currentConversation) {
-                    setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: (text || accumulatedText || "Chat").slice(0, 50) });
-                  }
-                }
-              } catch (e) {
-                // Ignore parse errors in final flush
+      const setupRealtimeSubscription = (messageId: string) => {
+        console.log(`📡 Setting up realtime for message ${messageId.slice(0, 8)}`);
+        
+        const channel = supabase
+          .channel(`message-${messageId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'agent_messages',
+              filter: `id=eq.${messageId}`
+            },
+            (payload: any) => {
+              console.log('📨 Realtime update:', payload.new.id.slice(0, 8));
+              console.log('   Content length:', payload.new.content.length);
+              
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId 
+                    ? { 
+                        ...m, 
+                        content: payload.new.content,
+                        llm_provider: payload.new.llm_provider 
+                      } 
+                    : m
+                )
+              );
+              
+              if (payload.new.content) {
+                preGenerateAudio(assistantId, payload.new.content);
               }
             }
-          }
-          break;
-        }
+          )
+          .subscribe((status) => {
+            console.log('📡 Realtime status:', status);
+          });
+        
+        setTimeout(() => {
+          console.log('🔌 Cleaning up realtime subscription');
+          supabase.removeChannel(channel);
+        }, 600000);
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        
-        // Keep the last incomplete line in the buffer
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          // Skip empty lines, comments, and keep-alive messages
-          if (!line.trim() || line.startsWith(":")) continue;
-          
-          // Only process lines that start with "data: "
-          if (!line.startsWith("data: ")) continue;
-
-          const data = line.slice(6);
-          
-          // Skip completion markers
-          if (data === "[DONE]") continue;
-          
-          // Skip empty data or keep-alive messages
-          if (!data.trim() || data.trim() === '"keep-alive"' || data.trim() === 'keep-alive') continue;
-
           try {
-            const parsed = JSON.parse(data);
+            if (!line.trim() || 
+                line.startsWith(":") || 
+                !line.startsWith("data: ")) {
+              continue;
+            }
+
+            const dataStr = line.slice(6).trim();
+
+            if (dataStr === "[DONE]" || 
+                dataStr === "keep-alive" || 
+                dataStr === '"keep-alive"') {
+              continue;
+            }
+
+            let parsed;
+            try {
+              parsed = JSON.parse(dataStr);
+            } catch (e) {
+              console.warn("⚠️ Skipping invalid JSON:", dataStr.slice(0, 50));
+              continue;
+            }
 
             if (parsed.type === "message_start") {
-              console.log("📨 Message started:", parsed.messageId);
               lastMessageId = parsed.messageId;
+              console.log("📨 Message started:", lastMessageId.slice(0, 8));
+              
+            } else if (parsed.type === "content" && parsed.text) {
+              accumulatedText += parsed.text;
+              
+              if (accumulatedText.length % 1000 === 0) {
+                console.log(`📊 Accumulated ${accumulatedText.length} chars`);
+              }
+              
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId 
+                    ? { ...m, content: accumulatedText } 
+                    : m
+                )
+              );
+              
             } else if (parsed.type === "switching_to_background") {
-              // Response is switching to background processing
-              console.log("⏰ Switching to background processing");
+              console.log("⏰ Switching to background - accumulated:", accumulatedText.length, "chars");
               accumulatedText = parsed.message;
               
               setMessages((prev) => 
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulatedText } : m
+                  m.id === assistantId 
+                    ? { ...m, content: accumulatedText } 
+                    : m
                 )
               );
               
-              // Setup realtime subscription to monitor background completion
-              // Use assistantId as fallback if lastMessageId is not set yet
               const messageId = lastMessageId || assistantId;
-              console.log(`📡 Setting up realtime subscription for message ${messageId}`);
+              setupRealtimeSubscription(messageId);
               
-              const channel = supabase
-                .channel(`message-${messageId}`)
-                .on(
-                  'postgres_changes',
-                  {
-                    event: 'UPDATE',
-                    schema: 'public',
-                    table: 'agent_messages',
-                    filter: `id=eq.${messageId}`
-                  },
-                  (payload: any) => {
-                    console.log('📨 Background update received:', payload.new.content.length, 'chars');
-                    setMessages((prev) => 
-                      prev.map((m) =>
-                        m.id === assistantId ? { 
-                          ...m, 
-                          content: payload.new.content, 
-                          llm_provider: payload.new.llm_provider 
-                        } : m
-                      )
-                    );
-                  }
-                )
-                .subscribe((status) => {
-                  console.log('📡 Realtime subscription status:', status);
-                });
-              
-              // Cleanup subscription after 10 minutes
-              setTimeout(() => {
-                console.log('🔌 Cleaning up realtime subscription');
-                supabase.removeChannel(channel);
-              }, 600000);
-              
-              // Close stream, Realtime will handle updates now
               clearTimeout(timeout);
               reader.cancel();
               break;
-            } else if (parsed.type === "content" && parsed.text) {
-              accumulatedText += parsed.text;
-              setMessages((prev) => 
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulatedText } : m
-                )
-              );
+              
             } else if (parsed.type === "complete") {
               console.log("✅ Streaming complete");
               
-              // Log LLM provider info
               if (parsed.llmProvider) {
-                console.log('🤖 LLM Provider used:', parsed.llmProvider.toUpperCase());
-                // Update message with LLM provider
+                console.log('🤖 LLM Provider:', parsed.llmProvider.toUpperCase());
                 setMessages((prev) => 
                   prev.map((m) =>
-                    m.id === assistantId ? { ...m, llm_provider: parsed.llmProvider } : m
+                    m.id === assistantId 
+                      ? { ...m, llm_provider: parsed.llmProvider } 
+                      : m
                   )
                 );
               }
               
               if (parsed.conversationId && !currentConversation) {
-                setCurrentConversation({ id: parsed.conversationId, agent_id: currentAgent.id, title: (text || accumulatedText || "Chat").slice(0, 50) });
+                setCurrentConversation({
+                  id: parsed.conversationId,
+                  agent_id: currentAgent.id,
+                  title: (text || accumulatedText || "Chat").slice(0, 50)
+                });
               }
+              
             } else if (parsed.type === "error") {
-              const errorMsg = parsed.error || parsed.message || "Unknown error";
-              throw new Error(errorMsg);
+              throw new Error(parsed.error || "Unknown error");
             }
           } catch (e) {
-            console.error("Error parsing SSE:", e);
+            console.warn("⚠️ Error processing line:", e);
+            continue;
           }
         }
       }

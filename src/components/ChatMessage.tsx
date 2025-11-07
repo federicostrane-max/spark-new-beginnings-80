@@ -159,81 +159,13 @@ export const ChatMessage = ({
   const isSystem = role === "system";
   const isTTSPlaying = currentMessageId === id && status === 'playing';
   
-  // Logica semplice e chiara: override manuale > forceExpanded > default espanso
-  const isExpanded = isManuallyExpanded !== null 
-    ? isManuallyExpanded  // Override manuale ha priorità assoluta
-    : (forceExpanded ?? true);  // Default: espanso se forceExpanded non è definito
+  const COLLAPSE_THRESHOLD = 1000;
+  const isExpanded = isManuallyExpanded ?? forceExpanded ?? true;
   
-  // Preview intelligente: SOLO 2-3 paragrafi con massimo 1000 caratteri
-  const getPreviewContent = (text: string): string => {
-    const paragraphs = text.split('\n\n').filter(p => p.trim());
-    
-    // Se ci sono 2 o meno paragrafi, mostra tutto
-    if (paragraphs.length <= 2) return text;
-    
-    // Mostra SOLO i primi 2 paragrafi come preview
-    const preview = paragraphs.slice(0, 2).join('\n\n');
-    
-    // Se i primi 2 paragrafi sono troppo lunghi (> 1500 caratteri),
-    // taglia a 1000 caratteri esatti con ellipsis
-    if (preview.length > 1500) {
-      return text.substring(0, 1000) + '...';
-    }
-    
-    // Se l'anteprima è corta (< 500 caratteri), aggiungi il 3° paragrafo
-    if (preview.length < 500 && paragraphs.length > 2) {
-      return paragraphs.slice(0, 3).join('\n\n');
-    }
-    
-    return preview;
-  };
-  
-  // Funzione per dividere intelligentemente il markdown in chunk
-  const splitMarkdownIntelligently = (markdown: string, maxChunkSize: number = 5000): string[] => {
-    if (markdown.length <= maxChunkSize) return [markdown];
-    
-    const chunks: string[] = [];
-    let currentPos = 0;
-    
-    while (currentPos < markdown.length) {
-      let chunkEnd = Math.min(currentPos + maxChunkSize, markdown.length);
-      
-      // Se non siamo alla fine, cerca un buon punto di divisione
-      if (chunkEnd < markdown.length) {
-        // Cerca il punto di divisione più vicino in questo ordine:
-        // 1. Fine di un code block (```)
-        // 2. Fine di un paragrafo (\n\n)
-        // 3. Fine di una riga (\n)
-        // 4. Spazio
-        
-        const searchArea = markdown.substring(currentPos, Math.min(chunkEnd + 500, markdown.length));
-        
-        const codeBlockEnd = searchArea.indexOf('\n```\n');
-        const doubleNewline = searchArea.indexOf('\n\n');
-        const singleNewline = searchArea.lastIndexOf('\n');
-        const space = searchArea.lastIndexOf(' ');
-        
-        if (codeBlockEnd !== -1 && codeBlockEnd < 500) {
-          chunkEnd = currentPos + codeBlockEnd + 4;
-        } else if (doubleNewline !== -1) {
-          chunkEnd = currentPos + doubleNewline + 2;
-        } else if (singleNewline !== -1) {
-          chunkEnd = currentPos + singleNewline + 1;
-        } else if (space !== -1) {
-          chunkEnd = currentPos + space + 1;
-        }
-      }
-      
-      chunks.push(markdown.substring(currentPos, chunkEnd));
-      currentPos = chunkEnd;
-    }
-    
-    return chunks;
-  };
-  
-  const PREVIEW_THRESHOLD = 800;
-  const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
-  const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
+  const shouldCollapse = !isExpanded && content.length > COLLAPSE_THRESHOLD;
+  const displayContent = shouldCollapse 
+    ? content.slice(0, COLLAPSE_THRESHOLD) + "..."
+    : content;
   
 
   // System messages have special rendering
@@ -294,23 +226,18 @@ export const ChatMessage = ({
         {isUser ? (
           <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere select-none">
             {displayContent}
-            {shouldShowPreview && (
-              <div className="mt-2 text-xs opacity-70">
-                ... ({content.length - displayContent.length} caratteri nascosti)
-              </div>
-            )}
           </div>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-none [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-visible [&_pre]:max-h-none [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {displayContent}
             </ReactMarkdown>
-            
-            {shouldShowPreview && (
-              <div className="mt-2 text-xs opacity-70">
-                ... ({content.length - displayContent.length} caratteri nascosti)
-              </div>
-            )}
+          </div>
+        )}
+        
+        {shouldCollapse && (
+          <div className="mt-2 text-xs opacity-70">
+            ... ({content.length - COLLAPSE_THRESHOLD} caratteri nascosti)
           </div>
         )}
 
@@ -334,20 +261,10 @@ export const ChatMessage = ({
           </div>
         )}
 
-        {/* Badge per streaming in modalità collapsed */}
-        {isStreaming && shouldShowPreview && (
-          <div className="flex items-center gap-2 mt-2 px-2 py-1 bg-primary/10 rounded-md">
-            <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-            <span className="text-xs font-medium text-primary">
-              Continua a scrivere... (clicca Mostra tutto per vedere)
-            </span>
-          </div>
-        )}
 
         {content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
-            {/* Bottone Espandi/Collassa - visibile anche durante streaming */}
-            {content.length > PREVIEW_THRESHOLD && (
+            {content.length > COLLAPSE_THRESHOLD && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -355,8 +272,7 @@ export const ChatMessage = ({
                 onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  // Toggle: se era null (default), diventa !isExpanded, altrimenti toggle
-                  setIsManuallyExpanded(prev => prev === null ? !isExpanded : !prev);
+                  setIsManuallyExpanded(!isExpanded);
                 }}
                 className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
               >
