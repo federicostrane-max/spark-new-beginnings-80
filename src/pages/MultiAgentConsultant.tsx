@@ -266,11 +266,27 @@ export default function MultiAgentConsultant() {
           table: 'agent_messages',
           filter: `conversation_id=eq.${currentConversation.id}`
         },
-        (payload) => {
-          console.log('📨 Realtime message update:', payload.new);
+        async (payload) => {
+          console.log('📨 Realtime notification received for message:', payload.new.id);
+          
+          // CRITICAL FIX: Reload full message from database instead of using realtime payload
+          // Realtime has payload size limits and truncates large messages
+          const { data: fullMessage, error } = await supabase
+            .from('agent_messages')
+            .select('*')
+            .eq('id', payload.new.id)
+            .single();
+          
+          if (error) {
+            console.error('❌ Error reloading message:', error);
+            return;
+          }
+          
+          console.log('✅ Reloaded full message:', fullMessage.id, 'length:', fullMessage.content?.length);
+          
           setMessages(prev => 
             prev.map(msg => 
-              msg.id === payload.new.id ? payload.new as Message : msg
+              msg.id === fullMessage.id ? fullMessage as Message : msg
             )
           );
         }
