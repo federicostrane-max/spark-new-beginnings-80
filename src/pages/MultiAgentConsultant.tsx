@@ -167,6 +167,24 @@ export default function MultiAgentConsultant() {
             
             // Cleanup when completed
             if (data.status === 'completed' || data.status === 'failed') {
+              // Reload the final message from database to ensure we have the complete content
+              (async () => {
+                const { data: finalMessage, error: messageError } = await supabase
+                  .from('agent_messages')
+                  .select('*')
+                  .eq('id', data.message_id)
+                  .single();
+                
+                if (!messageError && finalMessage) {
+                  console.log(`✅ [REALTIME] Loaded final message: ${finalMessage.content.length} chars`);
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === data.message_id
+                      ? { ...msg, content: finalMessage.content, llm_provider: finalMessage.llm_provider }
+                      : msg
+                  ));
+                }
+              })();
+              
               setTimeout(() => {
                 setActiveLongResponse(null);
                 setBackgroundProgress(null);
