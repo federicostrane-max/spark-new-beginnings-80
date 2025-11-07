@@ -88,14 +88,31 @@ export const useAgentHealth = (agentIds: string[]) => {
 
     setIsLoading(true);
     try {
-      const results = await Promise.all(
-        agentIds.map(id => checkAgentHealth(id))
-      );
-
+      // ✅ Process agents sequentially to avoid overloading edge functions
       const newHealthMap = new Map<string, AgentHealthStatus>();
-      results.forEach(status => {
-        newHealthMap.set(status.agentId, status);
-      });
+      
+      for (const agentId of agentIds) {
+        try {
+          const status = await checkAgentHealth(agentId);
+          newHealthMap.set(status.agentId, status);
+          
+          // Add 500ms delay between checks to prevent BOOT_ERROR
+          if (agentId !== agentIds[agentIds.length - 1]) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          logger.error('agent-operation', `Failed to check health for agent ${agentId}`, error, { agentId });
+          // Continue with next agent even if one fails
+          newHealthMap.set(agentId, {
+            agentId,
+            hasIssues: true,
+            unsyncedCount: 0,
+            errorCount: 1,
+            warningCount: 0,
+            lastChecked: new Date()
+          });
+        }
+      }
 
       setHealthStatus(newHealthMap);
       logger.info('agent-operation', `Health check completed for ${agentIds.length} agents`);
