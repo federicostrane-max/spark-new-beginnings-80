@@ -164,37 +164,56 @@ export const ChatMessage = ({
     ? isManuallyExpanded  // Override manuale ha priorità assoluta
     : (forceExpanded ?? true);  // Default: espanso se forceExpanded non è definito
   
-  // Preview intelligente: primi 5-8 paragrafi con soglia più alta
+  // Preview intelligente: SOLO 2-3 paragrafi con massimo 1000 caratteri
   const getPreviewContent = (text: string): string => {
     const paragraphs = text.split('\n\n').filter(p => p.trim());
     
-    // Se ci sono 5 o meno paragrafi, mostra tutto
-    if (paragraphs.length <= 5) return text;
+    // Se ci sono 2 o meno paragrafi, mostra tutto
+    if (paragraphs.length <= 2) return text;
     
-    // Mostra i primi 5 paragrafi come preview
-    const preview = paragraphs.slice(0, 5).join('\n\n');
+    // Mostra SOLO i primi 2 paragrafi come preview
+    const preview = paragraphs.slice(0, 2).join('\n\n');
     
-    // Se l'anteprima è comunque corta (< 2000 caratteri), aggiungi altri paragrafi
-    if (preview.length < 2000 && paragraphs.length > 5) {
-      return paragraphs.slice(0, 8).join('\n\n');
+    // Se i primi 2 paragrafi sono troppo lunghi (> 1500 caratteri),
+    // taglia a 1000 caratteri esatti con ellipsis
+    if (preview.length > 1500) {
+      return text.substring(0, 1000) + '...';
+    }
+    
+    // Se l'anteprima è corta (< 500 caratteri), aggiungi il 3° paragrafo
+    if (preview.length < 500 && paragraphs.length > 2) {
+      return paragraphs.slice(0, 3).join('\n\n');
     }
     
     return preview;
   };
   
-  const PREVIEW_THRESHOLD = 2000;
+  const PREVIEW_THRESHOLD = 800;
   const shouldShowPreview = !isExpanded && content.length > PREVIEW_THRESHOLD;
   const displayContent = shouldShowPreview ? getPreviewContent(content) : content;
   
-  // DEBUG: rimuovere dopo aver risolto
+  // DEBUG: log esplicito per capire lo stato iniziale (SOLO al mount)
   useEffect(() => {
     if (content.length > 5000) {
-      console.log(`[ChatMessage ${id.slice(0,8)}]`, {
-        contentLength: content.length,
+      console.log(`[ChatMessage ${id.slice(0,8)}] STATO INIZIALE`, {
+        'Messaggio è espanso?': isExpanded ? '✅ SÌ (tutto visibile)' : '❌ NO (preview)',
+        'forceExpanded': forceExpanded,
+        'isManuallyExpanded': isManuallyExpanded,
+        'contentLength': content.length,
+        'displayContentLength': displayContent.length,
+        'shouldShowPreview': shouldShowPreview,
+        'Caratteri nascosti': content.length - displayContent.length
+      });
+    }
+  }, []); // Esegui SOLO al mount iniziale
+  
+  // DEBUG: log continuo per monitorare cambiamenti di stato
+  useEffect(() => {
+    if (content.length > 5000) {
+      console.log(`[ChatMessage ${id.slice(0,8)}] AGGIORNAMENTO`, {
+        isExpanded,
         forceExpanded,
         isManuallyExpanded,
-        isExpanded,
-        shouldShowPreview,
         displayContentLength: displayContent.length
       });
     }
@@ -331,7 +350,7 @@ export const ChatMessage = ({
                 ) : (
                   <>
                     <ChevronUp className="h-3 w-3" />
-                    <span className="text-xs">Mostra meno</span>
+                    <span className="text-xs">Mostra meno (nascondi ~{Math.max(0, content.length - 1000).toLocaleString('it-IT')} caratteri)</span>
                   </>
                 )}
               </Button>
