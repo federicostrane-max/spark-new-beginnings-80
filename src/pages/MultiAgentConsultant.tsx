@@ -563,8 +563,8 @@ export default function MultiAgentConsultant() {
           // Skip completion markers
           if (data === "[DONE]") continue;
           
-          // Skip empty data or keep-alive
-          if (!data.trim()) continue;
+          // Skip empty data or keep-alive messages
+          if (!data.trim() || data.trim() === '"keep-alive"' || data.trim() === 'keep-alive') continue;
 
           try {
             const parsed = JSON.parse(data);
