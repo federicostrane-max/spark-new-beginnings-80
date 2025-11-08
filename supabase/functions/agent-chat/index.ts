@@ -14,7 +14,7 @@ function validateUUID(value: string, fieldName: string): void {
 }
 
 function validateMessageLength(message: string): void {
-  const MAX_MESSAGE_LENGTH = 50000;
+  const MAX_MESSAGE_LENGTH = 200000;
   if (message.length > MAX_MESSAGE_LENGTH) {
     throw new Error(`Message too long: maximum ${MAX_MESSAGE_LENGTH} characters allowed`);
   }
