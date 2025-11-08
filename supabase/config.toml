@@ -1,14 +1,5 @@
 project_id = "vjeafbnkycxfzpxwkifw"
 
-[functions.visual-debug]
-verify_jwt = false
-
-[functions.analyze-screenshot]
-verify_jwt = true
-
-[functions.ai-agent-debug]
-verify_jwt = false
-
 [functions.agent-chat]
 verify_jwt = true
 timeout = 3600
