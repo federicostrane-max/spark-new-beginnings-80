@@ -283,8 +283,8 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
                   )}
                 </TabsTrigger>
               </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.core_concepts}</p>
+              <TooltipContent className="max-w-sm">
+                <p className="text-sm">{CATEGORY_DESCRIPTIONS.core_concepts}</p>
               </TooltipContent>
             </Tooltip>
             
@@ -299,8 +299,8 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
                   )}
                 </TabsTrigger>
               </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.procedural}</p>
+              <TooltipContent className="max-w-sm">
+                <p className="text-sm">{CATEGORY_DESCRIPTIONS.procedural}</p>
               </TooltipContent>
             </Tooltip>
             
@@ -315,8 +315,8 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
                   )}
                 </TabsTrigger>
               </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.decision}</p>
+              <TooltipContent className="max-w-sm">
+                <p className="text-sm">{CATEGORY_DESCRIPTIONS.decision}</p>
               </TooltipContent>
             </Tooltip>
             
@@ -331,8 +331,8 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
                   )}
                 </TabsTrigger>
               </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.vocabulary}</p>
+              <TooltipContent className="max-w-sm">
+                <p className="text-sm">{CATEGORY_DESCRIPTIONS.vocabulary}</p>
               </TooltipContent>
             </Tooltip>
           </TabsList>
