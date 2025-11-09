@@ -14,7 +14,7 @@ serve(async (req) => {
 
   try {
     // Increment this to force re-extraction with updated filters
-    const FILTER_VERSION = 'v2';
+    const FILTER_VERSION = 'v3';
     
     const { agentId } = await req.json();
 
@@ -170,33 +170,54 @@ Return ONLY valid JSON in this exact format:
       }
     }
 
-    // Filter out generic terms from domain_vocabulary
+    // Filter out generic terms from domain_vocabulary - VERY AGGRESSIVE FILTER
     const GENERIC_TERMS = [
-      'citazione', 'contesto', 'fonte', 'knowledge base', 'fatto documentato',
-      'posizione riferimento', 'verifica interna', 'estrazione', 'interpretazione',
-      'limitazione', 'protocollo', 'struttura', 'infanzia', 'formazione',
+      // Italian generic terms
+      'citazione', 'contesto', 'fonte', 'fatto', 'riferimento', 'verifica',
+      'estrazione', 'interpretazione', 'limitazione', 'protocollo', 'struttura',
+      'infanzia', 'formazione', 'biografia', 'documento', 'informazione',
+      'conoscenza', 'base', 'dati', 'sistema', 'processo', 'metodo',
+      'analisi', 'valutazione', 'controllo', 'gestione', 'documentazione',
+      'posizione', 'interno', 'esterno', 'generale', 'specifico',
+      // English generic terms
       'citation', 'context', 'source', 'fact', 'reference', 'verification',
       'extraction', 'interpretation', 'limitation', 'protocol', 'structure',
-      'biography', 'biografia', 'document', 'documento', 'information', 'informazione'
+      'childhood', 'formation', 'biography', 'document', 'information',
+      'knowledge', 'base', 'data', 'system', 'process', 'method',
+      'analysis', 'evaluation', 'control', 'management', 'documentation',
+      'position', 'internal', 'external', 'general', 'specific',
+      // Knowledge management terms
+      'knowledge base', 'fatto documentato', 'database', 'metadata',
+      'chunk', 'embedding', 'vector', 'search', 'query', 'retrieval'
     ];
 
     if (extracted.domain_vocabulary) {
       const originalCount = extracted.domain_vocabulary.length;
       extracted.domain_vocabulary = extracted.domain_vocabulary.filter(
         (term: string) => {
-          const lowerTerm = term.toLowerCase();
-          // Remove if it's a generic term
-          if (GENERIC_TERMS.some(generic => lowerTerm.includes(generic))) {
+          const lowerTerm = term.toLowerCase().trim();
+          
+          // Remove if empty
+          if (!lowerTerm) return false;
+          
+          // Remove if too short (likely generic)
+          if (lowerTerm.length < 5) return false;
+          
+          // Remove if it's a generic term (exact match or contains)
+          if (GENERIC_TERMS.some(generic => lowerTerm === generic || lowerTerm.includes(generic))) {
+            console.log(`[extract-task-requirements] Filtering out generic term: ${term}`);
             return false;
           }
-          // Remove if it's too short (likely generic)
-          if (term.length < 4) {
-            return false;
-          }
+          
+          // Remove if it's all lowercase common words (likely generic)
+          const commonWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+          if (commonWords.some(word => lowerTerm === word)) return false;
+          
           return true;
         }
       );
       console.log(`[extract-task-requirements] Filtered domain vocabulary: ${originalCount} -> ${extracted.domain_vocabulary.length} terms`);
+      console.log(`[extract-task-requirements] Remaining terms:`, extracted.domain_vocabulary);
     }
 
     // Upsert requirements with filter version to force re-extraction when filter changes
