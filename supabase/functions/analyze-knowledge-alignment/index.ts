@@ -305,7 +305,8 @@ Return ONLY valid JSON:
         }));
 
         // Update progress after each mini-batch
-        const totalAnalyzed = startOffset + analyzedChunkIds.size + Math.min(i + maxConcurrent, chunksToAnalyze.length);
+        const chunksAnalyzedThisBatch = Math.min(i + maxConcurrent, chunksToAnalyze.length);
+        const totalAnalyzed = startOffset + chunksAnalyzedThisBatch;
         await supabase
           .from('alignment_analysis_log')
           .update({ progress_chunks_analyzed: totalAnalyzed })
@@ -317,6 +318,7 @@ Return ONLY valid JSON:
 
     // Calculate if more batches are needed
     const currentProgress = startOffset + (chunks?.length || 0);
+    console.log(`[analyze-alignment] Progress: ${currentProgress}/${totalChunks} chunks analyzed`);
     const moreBatchesNeeded = currentProgress < (totalChunks || 0);
 
     // Identify chunks for removal
