@@ -90,11 +90,12 @@ export const AgentsSidebar = ({
         {
           event: '*',
           schema: 'public',
-          table: 'agents',
-          filter: 'active=eq.true'
+          table: 'agents'
+          // NO FILTER - we need to capture DELETE events too
         },
         (payload) => {
-          console.log('[AgentsSidebar] Realtime agent change:', payload.eventType, payload.new);
+          console.log('[AgentsSidebar] Realtime agent change:', payload.eventType, payload);
+          // Reload agents on any change (INSERT, UPDATE, DELETE)
           loadAgents();
         }
       )
