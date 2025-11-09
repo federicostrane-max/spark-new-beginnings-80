@@ -99,15 +99,16 @@ Extract and categorize the following:
    - Return as array of objects: {pattern: string, criteria: string[]}
 
 4. **Domain Vocabulary**: ONLY domain-specific terms, proper nouns, specialized terminology unique to this agent's subject area
-   - INCLUDE: Names of people, places, events, organizations, specialized technical terms, domain-specific jargon
-   - EXCLUDE: Generic terms that any LLM already knows (e.g., "context", "citation", "fact", "knowledge base", "source", "reference")
-   - EXCLUDE: Common words and general concepts
-   - Focus on terms that would require specialized knowledge to understand
+   - INCLUDE ONLY: Names of people, places, events, organizations, specialized technical terms, domain-specific jargon
+   - EXCLUDE ALL: Generic terms that any LLM already knows (e.g., "context", "citation", "fact", "knowledge base", "source", "reference", "methodology", "protocol", "structure")
+   - EXCLUDE ALL: Common words and general concepts
+   - EXCLUDE ALL: Meta-terms about knowledge management or information processing
+   - Focus ONLY on terms that would require specialized knowledge to understand
    - Return as array of strings
    
    Example for a biography agent about Che Guevara:
-   - CORRECT: ["Sierra Maestra", "La Higuera", "Revolución Cubana", "Foco guerrillero", "Ejército Rebelde"]
-   - WRONG: ["citazione", "contesto", "fonte", "biografia", "documento"]
+   - CORRECT: ["Sierra Maestra", "La Higuera", "Revolución Cubana", "Foco guerrillero", "Ejército Rebelde", "Movimento 26 de Julio"]
+   - WRONG: ["citazione", "contesto", "fonte", "biografia", "documento", "knowledge base", "fatto documentato", "protocollo"]
 
 Return ONLY valid JSON in this exact format:
 {
