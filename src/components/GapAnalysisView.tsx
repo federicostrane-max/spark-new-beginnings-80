@@ -158,6 +158,7 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
         {hasMore && (
           <div className="flex justify-center pt-2">
             <Button 
+              type="button"
               variant="outline" 
               onClick={() => setShowAll(!showAll)}
               className="w-full md:w-auto"
@@ -254,11 +255,11 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
       </Card>
 
       {/* Recommendations */}
-      {gapAnalysis.recommendations && gapAnalysis.recommendations.length > 0 && (
+      {gapAnalysis.recommendations && gapAnalysis.recommendations.filter(rec => rec && rec.trim() !== '' && rec !== '--').length > 0 && (
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4">Raccomandazioni AI</h3>
           <ul className="space-y-2">
-            {gapAnalysis.recommendations.map((rec, index) => (
+            {gapAnalysis.recommendations.filter(rec => rec && rec.trim() !== '' && rec !== '--').map((rec, index) => (
               <li key={index} className="flex items-start gap-2">
                 <Lightbulb className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                 <span className="text-sm">{rec}</span>
