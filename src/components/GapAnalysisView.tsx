@@ -31,15 +31,16 @@ interface GapAnalysis {
 
 interface GapAnalysisViewProps {
   agentId: string;
+  refreshTrigger?: number;
 }
 
-export default function GapAnalysisView({ agentId }: GapAnalysisViewProps) {
+export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysisViewProps) {
   const [gapAnalysis, setGapAnalysis] = useState<GapAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     fetchGapAnalysis();
-  }, [agentId]);
+  }, [agentId, refreshTrigger]);
 
   const fetchGapAnalysis = async () => {
     setIsLoading(true);

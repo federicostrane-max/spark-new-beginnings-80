@@ -52,6 +52,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [progressChunks, setProgressChunks] = useState(0);
   const [totalChunksInAnalysis, setTotalChunksInAnalysis] = useState(0);
   const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false);
+  const [gapAnalysisRefresh, setGapAnalysisRefresh] = useState(0);
   const [stats, setStats] = useState({
     totalChunks: 0,
     removedChunks: 0,
@@ -229,7 +230,11 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
 
       if (error) throw error;
       
-      toast.success('Analisi gap completata! Passa al tab "Gap Mancanti" per vedere i risultati.');
+      toast.success('Analisi gap completata! I risultati sono ora visibili nel tab "Gap Mancanti".');
+      
+      // Trigger refresh del GapAnalysisView
+      setGapAnalysisRefresh(prev => prev + 1);
+      
     } catch (error: any) {
       console.error('Gap analysis error:', error);
       toast.error('Errore durante l\'analisi dei gap');
@@ -544,7 +549,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
               </div>
             </CardHeader>
             <CardContent>
-              <GapAnalysisView agentId={agentId} />
+              <GapAnalysisView agentId={agentId} refreshTrigger={gapAnalysisRefresh} />
             </CardContent>
           </Card>
         </TabsContent>
