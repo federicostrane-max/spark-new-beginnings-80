@@ -52,14 +52,17 @@ serve(async (req) => {
 
     console.log('[extract-task-requirements] Prompt hash:', promptHash);
 
-    // Check if requirements already exist with same hash
+    // Check if requirements already exist with same hash and filter version
+    const FILTER_VERSION = 'v2'; // Increment this to force re-extraction with updated filters
+    
     const { data: existing, error: existingError } = await supabase
       .from('agent_task_requirements')
       .select('*')
       .eq('agent_id', agentId)
       .single();
 
-    if (existing && existing.system_prompt_hash === promptHash) {
+    const expectedModel = `openai/gpt-5-mini-${FILTER_VERSION}`;
+    if (existing && existing.system_prompt_hash === promptHash && existing.extraction_model === expectedModel) {
       console.log('[extract-task-requirements] Requirements up to date');
       return new Response(
         JSON.stringify({
@@ -194,7 +197,9 @@ Return ONLY valid JSON in this exact format:
       console.log(`[extract-task-requirements] Filtered domain vocabulary: ${originalCount} -> ${extracted.domain_vocabulary.length} terms`);
     }
 
-    // Upsert requirements
+    // Upsert requirements with filter version to force re-extraction when filter changes
+    const FILTER_VERSION = 'v2'; // Increment this to force re-extraction with updated filters
+    
     const { data: requirement, error: upsertError } = await supabase
       .from('agent_task_requirements')
       .upsert({
@@ -203,7 +208,7 @@ Return ONLY valid JSON in this exact format:
         procedural_knowledge: extracted.procedural_knowledge || [],
         decision_patterns: extracted.decision_patterns || [],
         domain_vocabulary: extracted.domain_vocabulary || [],
-        extraction_model: 'openai/gpt-5-mini',
+        extraction_model: `openai/gpt-5-mini-${FILTER_VERSION}`,
         system_prompt_hash: promptHash,
         extracted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
