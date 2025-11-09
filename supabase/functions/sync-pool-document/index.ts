@@ -129,11 +129,11 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 4: Copy ALL existing chunks for this document
+    // STEP 4: Copy ALL existing chunks for this document (including shared pool chunks with agent_id = NULL)
     // ========================================
     console.log('[sync-pool-document] Looking for existing chunks (any agent or shared pool)...');
     
-    // First check if ANY chunks exist for this document
+    // First check if ANY chunks exist for this document (including shared pool)
     const { data: sampleChunks, error: sampleError } = await supabase
       .from('agent_knowledge')
       .select('id')
@@ -146,9 +146,10 @@ serve(async (req) => {
     }
 
     if (sampleChunks && sampleChunks.length > 0) {
-      console.log('[sync-pool-document] Document has chunks, fetching ALL for copy...');
+      console.log('[sync-pool-document] Document has chunks, fetching ALL for copy (including shared pool)...');
       
-      // Fetch ALL chunks for this document (from any source)
+      // Fetch ALL chunks for this document (from shared pool or any agent)
+      // This includes chunks with agent_id = NULL (shared pool) and chunks from other agents
       const { data: allChunks, error: allChunksError } = await supabase
         .from('agent_knowledge')
         .select('document_name, content, category, summary, embedding')
