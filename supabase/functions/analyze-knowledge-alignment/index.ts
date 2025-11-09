@@ -25,7 +25,12 @@ const CONFIG = {
   },
   batch_processing: {
     batch_size: 100, // Process 100 chunks per batch to avoid timeout
-    max_concurrent: 15, // Concurrent AI calls per batch
+    max_concurrent: 10, // Reduced concurrent AI calls to avoid rate limiting
+  },
+  retry: {
+    max_attempts: 3,
+    initial_delay_ms: 1000,
+    max_delay_ms: 10000,
   },
 };
 
@@ -203,14 +208,9 @@ serve(async (req) => {
     console.log('[analyze-alignment] Already analyzed:', analyzedChunkIds.size, 'chunks');
     console.log('[analyze-alignment] Need to analyze:', chunksToAnalyze.length, 'chunks');
 
-    // Analyze chunks in batches
-    if (chunksToAnalyze.length > 0) {
-      for (let i = 0; i < chunksToAnalyze.length; i += maxConcurrent) {
-        const batch = chunksToAnalyze.slice(i, i + maxConcurrent);
-        
-        await Promise.all(batch.map(async (chunk) => {
-          try {
-            const analysisPrompt = `Analyze this knowledge chunk against the agent's task requirements.
+    // Helper function to call AI with retry logic
+    const callAIWithRetry = async (chunk: any, attempt = 1): Promise<any> => {
+      const analysisPrompt = `Analyze this knowledge chunk against the agent's task requirements.
 
 Task Requirements:
 ${JSON.stringify(requirements, null, 2)}
@@ -235,41 +235,82 @@ Return ONLY valid JSON:
   "reasoning": "brief explanation"
 }`;
 
-            const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                model: 'openai/gpt-5-mini',
-                messages: [
-                  { role: 'system', content: 'You are an expert at analyzing knowledge relevance. Return only valid JSON.' },
-                  { role: 'user', content: analysisPrompt }
-                ],
-              }),
-            });
+      try {
+        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'openai/gpt-5-mini',
+            messages: [
+              { role: 'system', content: 'You are an expert at analyzing knowledge relevance. Return only valid JSON.' },
+              { role: 'user', content: analysisPrompt }
+            ],
+          }),
+        });
 
-            if (!aiResponse.ok) {
-              console.error('[analyze-alignment] AI error for chunk:', chunk.id);
-              return;
-            }
+        if (!aiResponse.ok) {
+          const errorText = await aiResponse.text();
+          
+          // Check if we should retry
+          if (attempt < CONFIG.retry.max_attempts && (aiResponse.status === 429 || aiResponse.status >= 500)) {
+            const delay = Math.min(
+              CONFIG.retry.initial_delay_ms * Math.pow(2, attempt - 1),
+              CONFIG.retry.max_delay_ms
+            );
+            console.log(`[analyze-alignment] Retry ${attempt}/${CONFIG.retry.max_attempts} for chunk ${chunk.id} after ${delay}ms (status: ${aiResponse.status})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return callAIWithRetry(chunk, attempt + 1);
+          }
+          
+          throw new Error(`AI API error (${aiResponse.status}): ${errorText}`);
+        }
 
-            const aiData = await aiResponse.json();
-            let scores;
-            try {
-              const content = aiData.choices[0].message.content;
-              scores = JSON.parse(content);
-            } catch {
-              const content = aiData.choices[0].message.content;
-              const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
-              if (jsonMatch) {
-                scores = JSON.parse(jsonMatch[1]);
-              } else {
-                console.error('[analyze-alignment] Failed to parse scores for chunk:', chunk.id);
-                return;
-              }
-            }
+        const aiData = await aiResponse.json();
+        let scores;
+        try {
+          const content = aiData.choices[0].message.content;
+          scores = JSON.parse(content);
+        } catch {
+          const content = aiData.choices[0].message.content;
+          const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+          if (jsonMatch) {
+            scores = JSON.parse(jsonMatch[1]);
+          } else {
+            throw new Error('Failed to parse AI response JSON');
+          }
+        }
+
+        return scores;
+      } catch (error: any) {
+        if (attempt < CONFIG.retry.max_attempts) {
+          const delay = Math.min(
+            CONFIG.retry.initial_delay_ms * Math.pow(2, attempt - 1),
+            CONFIG.retry.max_delay_ms
+          );
+          console.log(`[analyze-alignment] Retry ${attempt}/${CONFIG.retry.max_attempts} for chunk ${chunk.id} after ${delay}ms (error: ${error?.message || 'Unknown'})`);
+
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return callAIWithRetry(chunk, attempt + 1);
+        }
+        throw error;
+      }
+    };
+
+    // Analyze chunks in batches with improved error handling
+    let successCount = 0;
+    let errorCount = 0;
+    
+    if (chunksToAnalyze.length > 0) {
+      for (let i = 0; i < chunksToAnalyze.length; i += maxConcurrent) {
+        const batch = chunksToAnalyze.slice(i, i + maxConcurrent);
+        console.log(`[analyze-alignment] Processing batch ${Math.floor(i / maxConcurrent) + 1}, chunks ${i + 1}-${i + batch.length}/${chunksToAnalyze.length}`);
+        
+        const results = await Promise.allSettled(batch.map(async (chunk) => {
+          try {
+            const scores = await callAIWithRetry(chunk);
 
             // Calculate final score
             const finalScore = 
@@ -298,15 +339,27 @@ Return ONLY valid JSON:
               });
 
             chunkScores.push({ chunk_id: chunk.id, final_score: finalScore });
+            successCount++;
+            
+          } catch (error: any) {
+            console.error('[analyze-alignment] Failed to analyze chunk after retries:', chunk.id, error?.message || 'Unknown error');
 
-          } catch (error) {
-            console.error('[analyze-alignment] Error analyzing chunk:', chunk.id, error);
+            errorCount++;
+            throw error;
           }
         }));
 
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Log batch results
+        const batchSuccess = results.filter(r => r.status === 'fulfilled').length;
+        const batchErrors = results.filter(r => r.status === 'rejected').length;
+        console.log(`[analyze-alignment] Batch completed: ${batchSuccess} success, ${batchErrors} errors`);
+
+        // Add delay between batches to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
+    
+    console.log(`[analyze-alignment] Total results: ${successCount} success, ${errorCount} errors`);
 
     // Calculate if more batches are needed
     const currentProgress = startOffset + (chunks?.length || 0);
