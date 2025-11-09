@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/integrations/supabase/client';
 import { AlertCircle, CheckCircle, AlertTriangle, Lightbulb, TrendingDown } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -33,6 +34,13 @@ interface GapAnalysisViewProps {
   agentId: string;
   refreshTrigger?: number;
 }
+
+const CATEGORY_DESCRIPTIONS = {
+  core_concepts: "Concetti fondamentali e teorici che l'agente deve comprendere (es. definizioni, principi, modelli concettuali)",
+  procedural: "Conoscenze procedurali e operazionali: come fare le cose passo-passo (es. workflow, algoritmi, best practices)",
+  decision: "Pattern decisionali e criteri di scelta: quando e come prendere decisioni specifiche (es. regole condizionali, strategie di problem-solving)",
+  vocabulary: "Terminologia specifica del dominio: parole chiave, acronimi, nomenclatura tecnica che l'agente deve riconoscere e utilizzare correttamente"
+};
 
 export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysisViewProps) {
   const [gapAnalysis, setGapAnalysis] = useState<GapAnalysis | null>(null);
@@ -251,40 +259,73 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
 
       {/* Gap Details by Category */}
       <Tabs defaultValue="core_concepts" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="core_concepts" className="text-xs md:text-sm">
-            Core Concepts
-            {gapAnalysis.missing_core_concepts.length > 0 && (
-              <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
-                {gapAnalysis.missing_core_concepts.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="procedural" className="text-xs md:text-sm">
-            Procedure
-            {gapAnalysis.missing_procedural_knowledge.length > 0 && (
-              <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
-                {gapAnalysis.missing_procedural_knowledge.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="decision" className="text-xs md:text-sm">
-            Decisioni
-            {gapAnalysis.missing_decision_patterns.length > 0 && (
-              <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
-                {gapAnalysis.missing_decision_patterns.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="vocabulary" className="text-xs md:text-sm">
-            Vocabolario
-            {gapAnalysis.missing_domain_vocabulary.length > 0 && (
-              <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
-                {gapAnalysis.missing_domain_vocabulary.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+        <TooltipProvider>
+          <TabsList className="grid w-full grid-cols-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TabsTrigger value="core_concepts" className="text-xs md:text-sm">
+                  Core Concepts
+                  {gapAnalysis.missing_core_concepts.length > 0 && (
+                    <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
+                      {gapAnalysis.missing_core_concepts.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.core_concepts}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TabsTrigger value="procedural" className="text-xs md:text-sm">
+                  Procedure
+                  {gapAnalysis.missing_procedural_knowledge.length > 0 && (
+                    <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
+                      {gapAnalysis.missing_procedural_knowledge.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.procedural}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TabsTrigger value="decision" className="text-xs md:text-sm">
+                  Decisioni
+                  {gapAnalysis.missing_decision_patterns.length > 0 && (
+                    <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
+                      {gapAnalysis.missing_decision_patterns.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.decision}</p>
+              </TooltipContent>
+            </Tooltip>
+            
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <TabsTrigger value="vocabulary" className="text-xs md:text-sm">
+                  Vocabolario
+                  {gapAnalysis.missing_domain_vocabulary.length > 0 && (
+                    <Badge variant="destructive" className="ml-2 h-5 w-5 p-0 text-xs">
+                      {gapAnalysis.missing_domain_vocabulary.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="max-w-xs text-sm">{CATEGORY_DESCRIPTIONS.vocabulary}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TabsList>
+        </TooltipProvider>
 
         <TabsContent value="core_concepts" className="mt-6">
           {renderGapItems(
