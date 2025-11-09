@@ -51,6 +51,17 @@ serve(async (req) => {
     console.log(`[Gap Analysis] ========== STARTING ==========`);
     console.log(`[Gap Analysis] Agent: ${agentId}`);
 
+    // STEP 1: Fetch agent info for context (Opzione A)
+    const { data: agentInfo, error: agentError } = await supabase
+      .from('agents')
+      .select('id, name, description')
+      .eq('id', agentId)
+      .single();
+
+    if (agentError) {
+      console.error('Error fetching agent info:', agentError);
+    }
+
     // 1. Fetch agent task requirements
     const { data: requirements, error: reqError } = await supabase
       .from('agent_task_requirements')
@@ -86,6 +97,15 @@ serve(async (req) => {
     const totalChunks = chunks?.length || 0;
     console.log(`[Gap Analysis] Total chunks: ${totalChunks}, Scored chunks: ${scores?.length || 0}`);
 
+    // STEP 2: Calculate existing documents list (Opzione A)
+    const existingDocs = chunks 
+      ? Array.from(new Set(chunks.map(c => c.document_name)))
+          .filter(Boolean)
+          .slice(0, 10) // Top 10 documents
+      : [];
+
+    console.log(`[Gap Analysis] Agent: "${agentInfo?.name || 'Unknown'}", Documents: ${existingDocs.length}`);
+
     // 4. Analyze gaps for each category
     console.log(`[Gap Analysis] Starting category analysis...`);
     
@@ -95,12 +115,16 @@ serve(async (req) => {
       throw new Error('Analysis timeout - partial results saved');
     }
     
+    // STEP 3: Pass agentInfo and existingDocs to analyzeCategory
     const missingCoreConcepts = await analyzeCategory(
       requirements.core_concepts,
       scores || [],
       chunks || [],
       'core_concepts',
-      lovableApiKey
+      lovableApiKey,
+      supabase,
+      agentInfo,
+      existingDocs
     );
 
     if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
@@ -113,7 +137,10 @@ serve(async (req) => {
       scores || [],
       chunks || [],
       'procedural_knowledge',
-      lovableApiKey
+      lovableApiKey,
+      supabase,
+      agentInfo,
+      existingDocs
     );
 
     if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
@@ -126,7 +153,10 @@ serve(async (req) => {
       scores || [],
       chunks || [],
       'decision_patterns',
-      lovableApiKey
+      lovableApiKey,
+      supabase,
+      agentInfo,
+      existingDocs
     );
 
     if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
@@ -139,7 +169,10 @@ serve(async (req) => {
       scores || [],
       chunks || [],
       'domain_vocabulary',
-      lovableApiKey
+      lovableApiKey,
+      supabase,
+      agentInfo,
+      existingDocs
     );
 
     console.log(`[Gap Analysis] ✅ All category analysis completed`);
@@ -220,12 +253,16 @@ serve(async (req) => {
   }
 });
 
+// STEP 4: Update analyzeCategory signature
 async function analyzeCategory(
   items: any[] | null,
   scores: any[],
   chunks: any[],
   categoryName: string,
-  lovableApiKey: string
+  lovableApiKey: string,
+  supabase: any,
+  agentInfo: any,
+  existingDocs: string[]
 ): Promise<GapItem[]> {
   if (!items || items.length === 0) return [];
 
@@ -278,110 +315,169 @@ async function analyzeCategory(
   // Sort by gap_percentage (most critical first)
   gaps.sort((a, b) => b.gap_percentage - a.gap_percentage);
 
-  // PASS 2: Generate AI suggestions for top 5 critical gaps
-  const MAX_AI_SUGGESTIONS = 5;
-  const topGaps = gaps.slice(0, MAX_AI_SUGGESTIONS);
-  const remainingGaps = gaps.slice(MAX_AI_SUGGESTIONS);
+  // STEP 5: Generate AI suggestions ONLY for critical gaps (≥50%)
+  const criticalGaps = gaps.filter(g => g.gap_percentage >= 50);
+  console.log(`[Gap Analysis] ${categoryName}: ${criticalGaps.length} critical gaps (≥50%)`);
 
-  console.log(`[Gap Analysis] ${categoryName}: Generating AI suggestions for top ${topGaps.length} gaps`);
-
-  // Process AI suggestions in batches of 3 (parallel)
-  const BATCH_SIZE = 3;
-  for (let i = 0; i < topGaps.length; i += BATCH_SIZE) {
-    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(topGaps.length / BATCH_SIZE);
-    console.log(`[Gap Analysis] ${categoryName}: Processing AI batch ${batchNumber}/${totalBatches}`);
+  if (criticalGaps.length > 0) {
+    const topCritical = criticalGaps.slice(0, 5); // Top 5 critical gaps
+    console.log(`[Gap Analysis] Generating AI suggestions for top ${topCritical.length} gaps`);
     
-    const batch = topGaps.slice(i, i + BATCH_SIZE);
-    await Promise.all(
-      batch.map(async gap => {
-        gap.suggestion = await generateGapSuggestion(gap.item, categoryName, chunks, lovableApiKey, 'high');
-      })
-    );
-    
-    console.log(`[Gap Analysis] ${categoryName}: Completed AI batch ${batchNumber}/${totalBatches}`);
+    // Process AI suggestions in batches of 3 (parallel)
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < topCritical.length; i += BATCH_SIZE) {
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(topCritical.length / BATCH_SIZE);
+      console.log(`[Gap Analysis] ${categoryName}: Processing AI batch ${batchNumber}/${totalBatches}`);
+      
+      const batch = topCritical.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async gap => {
+          gap.suggestion = await generateGapSuggestion(
+            gap.item, 
+            categoryName, 
+            chunks, 
+            lovableApiKey, 
+            'high',
+            supabase,
+            agentInfo,
+            existingDocs
+          );
+        })
+      );
+      
+      console.log(`[Gap Analysis] ${categoryName}: Completed AI batch ${batchNumber}/${totalBatches}`);
+    }
   }
 
-  // Generic suggestions for remaining gaps
-  remainingGaps.forEach(gap => {
-    gap.suggestion = `Aggiungi documentazione specifica su "${gap.item}" per migliorare la copertura al ${Math.round(gap.required_coverage * 100)}%.`;
-  });
-
+  // Non-critical gaps (<50%) keep empty suggestion
   const elapsedTime = Date.now() - startTime;
   console.log(`[Gap Analysis] ${categoryName}: Completed in ${elapsedTime}ms`);
 
-  return [...topGaps, ...remainingGaps];
+  return gaps;
 }
 
+// STEP 6 & 7: Semantic search + enriched AI context
 async function generateGapSuggestion(
   itemText: string,
   categoryName: string,
   chunks: any[],
   lovableApiKey: string,
-  priority: 'high' | 'normal' = 'high'
+  priority: 'high' | 'normal' = 'high',
+  supabase: any,
+  agentInfo: any,
+  existingDocs: string[]
 ): Promise<string> {
   try {
-    // Use faster model and fewer tokens for normal priority
     const model = priority === 'high' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
     const maxTokens = priority === 'high' ? 120 : 80;
 
-    // Create better context with actual chunk content
-    const relevantChunks = chunks
-      .filter(c => c.content?.toLowerCase().includes(itemText.toLowerCase()))
-      .slice(0, 3);
-
-    const contextSummary = relevantChunks.length > 0
-      ? relevantChunks.map(c => `${c.document_name}: "${c.content.substring(0, 200)}..."`).join('\n')
-      : `Nessun chunk esistente tratta direttamente "${itemText}"`;
-
-    const prompt = `Elemento mancante nel KB: "${itemText}" (categoria: ${categoryName})
-
-Elenca SOLO i 2-3 documenti/risorse specifiche da aggiungere al knowledge base.
-Formato richiesto: lista puntata senza introduzioni.
-Ogni voce deve essere una risorsa concreta e specifica.
-
-Contesto esistente: ${contextSummary}`;
-
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: 'Sei un knowledge manager. Rispondi SOLO con liste puntate concise in italiano, senza introduzioni o spiegazioni.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: maxTokens
-      })
+    // === SEMANTIC SEARCH (Opzione B) ===
+    // Generate embedding for gap item
+    const { data: embeddingData, error: embError } = await supabase.functions.invoke('generate-embedding', {
+      body: { text: itemText }
     });
 
-    if (!response.ok) {
-      console.error('AI API error:', await response.text());
-      return '• Aggiungi documentazione specifica su questo argomento';
+    let contextSummary: string;
+
+    if (embError || !embeddingData?.embedding) {
+      console.error(`Failed to generate embedding for "${itemText}":`, embError);
+      // Fallback to exact match
+      const relevantChunks = chunks
+        .filter(c => c.content?.toLowerCase().includes(itemText.toLowerCase()))
+        .slice(0, 5);
+      
+      contextSummary = relevantChunks.length > 0
+        ? relevantChunks.map(c => `${c.document_name}: "${c.content.substring(0, 150)}..."`).join('\n')
+        : `Nessun chunk esistente tratta direttamente "${itemText}"`;
+    } else {
+      // Use semantic search to find relevant chunks
+      const { data: matches, error: matchError } = await supabase.rpc('match_documents', {
+        query_embedding: embeddingData.embedding,
+        filter_agent_id: agentInfo?.id || null,
+        match_threshold: 0.3, // Lower threshold for broader matches
+        match_count: 5
+      });
+
+      if (matchError) {
+        console.error('Semantic search error:', matchError);
+      }
+
+      // Build context from semantic matches
+      contextSummary = matches && matches.length > 0
+        ? matches.map((m: any) => `${m.document_name}: "${m.content.substring(0, 150)}..." (relevance: ${(m.similarity * 100).toFixed(0)}%)`).join('\n')
+        : `Nessun documento esistente tratta argomenti correlati a "${itemText}"`;
     }
 
-    const data = await response.json();
-    let suggestion = data.choices?.[0]?.message?.content || '• Aggiungi documentazione specifica su questo argomento';
-    
-    // Remove conversational intros like "Assolutamente! Ecco...", "Certamente!", etc.
-    suggestion = suggestion
-      .replace(/^(Assolutamente!?|Certamente!?|Ecco|Certo|Perfetto)[^\n]*/i, '')
-      .replace(/^[^•\-\*1-9]+(?=[•\-\*1-9])/m, '')
-      .trim();
-    
-    // If empty after cleanup, provide default
-    if (!suggestion) {
-      suggestion = '• Aggiungi documentazione specifica su questo argomento';
-    }
-    
-    return suggestion;
-  } catch (error) {
-    console.error('Error generating suggestion:', error);
-    return 'Aggiungi documentazione specifica su questo argomento.';
+    return await generateAIPrompt(itemText, categoryName, contextSummary, agentInfo, existingDocs, model, maxTokens, lovableApiKey);
+
+  } catch (error: any) {
+    console.error('Error generating gap suggestion:', error);
+    return ''; // Return empty for failed suggestions
   }
+}
+
+// New function to generate AI prompt with agent context (Opzione A)
+async function generateAIPrompt(
+  itemText: string,
+  categoryName: string,
+  contextSummary: string,
+  agentInfo: any,
+  existingDocs: string[],
+  model: string,
+  maxTokens: number,
+  lovableApiKey: string
+): Promise<string> {
+  
+  // === CONTEXT ENRICHMENT (Opzione A) ===
+  const agentContext = agentInfo 
+    ? `\n**Agente:** "${agentInfo.name}"\n**Dominio:** ${agentInfo.description || 'Non specificato'}`
+    : '';
+  
+  const docsContext = existingDocs.length > 0
+    ? `\n**Documenti già nel KB:** ${existingDocs.slice(0, 5).join(', ')}`
+    : '\n**KB attualmente vuoto**';
+
+  const prompt = `Elemento mancante nel KB: "${itemText}" (categoria: ${categoryName})${agentContext}${docsContext}
+
+Elenca SOLO i 2-3 documenti/risorse specifiche da aggiungere al knowledge base per questo agente.
+Formato richiesto: lista puntata senza introduzioni.
+Ogni voce deve essere una risorsa concreta e specifica, coerente con il dominio dell'agente.
+
+Contesto chunks esistenti:
+${contextSummary}`;
+
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${lovableApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: 'Sei un knowledge manager. Rispondi SOLO con liste puntate concise in italiano, senza introduzioni o spiegazioni. Le tue risposte devono essere coerenti con il dominio specifico dell\'agente.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: maxTokens
+    })
+  });
+
+  if (!response.ok) {
+    console.error('AI API error:', await response.text());
+    return '';
+  }
+
+  const data = await response.json();
+  let suggestion = data.choices?.[0]?.message?.content || '';
+  
+  // Remove conversational intros
+  suggestion = suggestion
+    .replace(/^(Assolutamente!?|Certamente!?|Ecco|Certo|Perfetto)[^\n]*/i, '')
+    .replace(/^[^•\-\*1-9]+(?=[•\-\*1-9])/m, '')
+    .trim();
+  
+  return suggestion || '';
 }
 
 async function generateRecommendations(
