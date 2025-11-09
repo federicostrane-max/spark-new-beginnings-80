@@ -95,6 +95,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         .from('alignment_analysis_log')
         .select('progress_chunks_analyzed, total_chunks_analyzed')
         .eq('agent_id', agentId)
+        .is('completed_at', null)
         .order('started_at', { ascending: false })
         .limit(1)
         .single();
