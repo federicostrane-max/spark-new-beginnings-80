@@ -371,7 +371,7 @@ async function generateGapSuggestion(
 ): Promise<string> {
   try {
     const model = priority === 'high' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
-    const maxTokens = priority === 'high' ? 120 : 80;
+    const maxTokens = priority === 'high' ? 300 : 180;
 
     // === SEMANTIC SEARCH (Opzione B) ===
     // Generate embedding for gap item
