@@ -295,7 +295,8 @@ async function analyzeCategory(
       ? 1.0 
       : highScoreCount / minChunksNeeded;
     const requiredCoverage = 0.3; // 30% minimum coverage
-    const gapPercentage = Math.max(0, (requiredCoverage - currentCoverage) * 100);
+    const coverageRatio = currentCoverage / requiredCoverage;
+    const gapPercentage = Math.max(0, Math.min(100, (1 - coverageRatio) * 100));
 
     // If gap is significant, add to gaps list (without AI suggestion yet)
     if (currentCoverage < requiredCoverage) {
