@@ -91,9 +91,10 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         .limit(1)
         .single();
 
-      if (log) {
-        setProgressChunks(log.progress_chunks_analyzed || 0);
-        setTotalChunksInAnalysis(log.total_chunks_analyzed || 0);
+        if (log) {
+          setProgressChunks(log.progress_chunks_analyzed || 0);
+          // Non usiamo log.total_chunks_analyzed perché rappresenta il batch size (1000),
+          // non il totale reale dei chunk. Usiamo stats.totalChunks invece.
       }
 
       fetchData();
@@ -149,11 +150,13 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           ? (scores.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / scores.length) * 100
           : latest.concept_coverage_percentage || 0;
 
-        setStats({
-          totalChunks: latest.total_chunks_analyzed,
-          removedChunks: latest.chunks_auto_removed,
-          conceptCoverage: realCoverage,
-        });
+      // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
+      // rappresenta il batch size (1000), non il totale reale dei chunk
+      setStats(prev => ({
+        ...prev,
+        removedChunks: latest.chunks_auto_removed,
+        conceptCoverage: realCoverage,
+      }));
       }
     }
 
@@ -178,6 +181,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
 
     if (count !== null) {
       setStats(prev => ({ ...prev, totalChunks: count }));
+      // Settiamo anche totalChunksInAnalysis per il calcolo del progresso durante l'analisi
+      setTotalChunksInAnalysis(count);
     }
   };
 
@@ -259,8 +264,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   // Calculate progress percentage - use real-time data when analyzing
   const progressPercentage = isAnalyzing && totalChunksInAnalysis > 0
     ? (progressChunks / totalChunksInAnalysis) * 100
-    : (analysisLogs.length > 0 && analysisLogs[0].total_chunks_analyzed > 0
-      ? ((analysisLogs[0].progress_chunks_analyzed || 0) / analysisLogs[0].total_chunks_analyzed) * 100
+    : (analysisLogs.length > 0 && stats.totalChunks > 0
+      ? ((analysisLogs[0].progress_chunks_analyzed || 0) / stats.totalChunks) * 100
       : 0);
 
   // Estimate remaining time (assuming ~10 chunks per second)
