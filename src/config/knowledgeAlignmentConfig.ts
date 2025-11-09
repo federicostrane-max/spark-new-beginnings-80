@@ -40,5 +40,7 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
     min_chunks_for_coverage: 3, // At least 3 relevant chunks = 100% coverage
     auto_trigger: true, // Auto-trigger after alignment analysis
     ai_suggestions: true, // Generate AI suggestions for gaps
+    max_ai_suggestions_per_category: 5, // Limit detailed AI suggestions to top 5 gaps per category
+    use_fast_model_for_bulk: true, // Use faster AI model for non-critical suggestions
   },
 } as const;

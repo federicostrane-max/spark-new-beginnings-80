@@ -33,6 +33,9 @@ serve(async (req) => {
   }
 
   try {
+    const executionStartTime = Date.now();
+    const MAX_EXECUTION_TIME = 50000; // 50 seconds (leave 10s buffer for Edge Function timeout)
+    
     const { agentId } = await req.json();
     
     if (!agentId) {
@@ -45,7 +48,8 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log(`[Gap Analysis] Starting for agent ${agentId}`);
+    console.log(`[Gap Analysis] ========== STARTING ==========`);
+    console.log(`[Gap Analysis] Agent: ${agentId}`);
 
     // 1. Fetch agent task requirements
     const { data: requirements, error: reqError } = await supabase
@@ -83,6 +87,14 @@ serve(async (req) => {
     console.log(`[Gap Analysis] Total chunks: ${totalChunks}, Scored chunks: ${scores?.length || 0}`);
 
     // 4. Analyze gaps for each category
+    console.log(`[Gap Analysis] Starting category analysis...`);
+    
+    // Check for timeout before each category
+    if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
+      console.warn('[Gap Analysis] ⚠️ Approaching timeout, saving partial results');
+      throw new Error('Analysis timeout - partial results saved');
+    }
+    
     const missingCoreConcepts = await analyzeCategory(
       requirements.core_concepts,
       scores || [],
@@ -90,6 +102,11 @@ serve(async (req) => {
       'core_concepts',
       lovableApiKey
     );
+
+    if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
+      console.warn('[Gap Analysis] ⚠️ Timeout after core concepts analysis');
+      throw new Error('Analysis timeout after core concepts');
+    }
 
     const missingProcedural = await analyzeCategory(
       requirements.procedural_knowledge,
@@ -99,6 +116,11 @@ serve(async (req) => {
       lovableApiKey
     );
 
+    if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
+      console.warn('[Gap Analysis] ⚠️ Timeout after procedural analysis');
+      throw new Error('Analysis timeout after procedural');
+    }
+
     const missingDecisionPatterns = await analyzeCategory(
       requirements.decision_patterns,
       scores || [],
@@ -107,6 +129,11 @@ serve(async (req) => {
       lovableApiKey
     );
 
+    if (Date.now() - executionStartTime > MAX_EXECUTION_TIME) {
+      console.warn('[Gap Analysis] ⚠️ Timeout after decision patterns analysis');
+      throw new Error('Analysis timeout after decision patterns');
+    }
+
     const missingVocabulary = await analyzeCategory(
       requirements.domain_vocabulary,
       scores || [],
@@ -114,6 +141,8 @@ serve(async (req) => {
       'domain_vocabulary',
       lovableApiKey
     );
+
+    console.log(`[Gap Analysis] ✅ All category analysis completed`);
 
     // 5. Calculate overall gap score
     const allGaps = [
@@ -168,9 +197,15 @@ serve(async (req) => {
 
     if (insertError) {
       console.error('Error saving gap analysis:', insertError);
+    } else {
+      console.log(`[Gap Analysis] ✅ Results saved to database`);
     }
 
-    console.log(`[Gap Analysis] Completed. Overall gap score: ${overallGapScore.toFixed(2)}`);
+    const totalExecutionTime = Date.now() - executionStartTime;
+    console.log(`[Gap Analysis] ========== COMPLETED ==========`);
+    console.log(`[Gap Analysis] Overall gap score: ${overallGapScore.toFixed(2)}`);
+    console.log(`[Gap Analysis] Total execution time: ${totalExecutionTime}ms`);
+    console.log(`[Gap Analysis] Total gaps found: ${allGaps.length}`);
 
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -194,9 +229,11 @@ async function analyzeCategory(
 ): Promise<GapItem[]> {
   if (!items || items.length === 0) return [];
 
+  console.log(`[Gap Analysis] Processing ${categoryName}: ${items.length} items`);
+  const startTime = Date.now();
   const gaps: GapItem[] = [];
-  const totalChunks = chunks.length;
 
+  // PASS 1: Identify ALL gaps without AI suggestions
   for (const item of items) {
     const itemText = typeof item === 'string' ? item : (item.name || item.term || item.title || '');
     if (!itemText) continue;
@@ -215,42 +252,80 @@ async function analyzeCategory(
       return s.final_relevance_score > 0.5;
     }).length;
 
-    // FIX: Coverage should be based on number of relevant chunks, not total chunks
-    // If we have at least 3 chunks covering this concept, it's 100% covered
+    // Coverage based on minimum chunks needed
     const minChunksNeeded = 3;
     const currentCoverage = highScoreCount >= minChunksNeeded 
       ? 1.0 
       : highScoreCount / minChunksNeeded;
-    const requiredCoverage = 0.3; // 30% minimum coverage (at least 1 chunk)
+    const requiredCoverage = 0.3; // 30% minimum coverage
     const gapPercentage = Math.max(0, (requiredCoverage - currentCoverage) * 100);
 
-    // If gap is significant (coverage < 30%), add to gaps list
+    // If gap is significant, add to gaps list (without AI suggestion yet)
     if (currentCoverage < requiredCoverage) {
-      // Generate AI suggestion for this specific gap
-      const suggestion = await generateGapSuggestion(itemText, categoryName, chunks, lovableApiKey);
-
       gaps.push({
         item: itemText,
         description: typeof item === 'object' ? (item.description || item.definition) : undefined,
         current_coverage: Math.round(currentCoverage * 100) / 100,
         required_coverage: requiredCoverage,
         gap_percentage: Math.round(gapPercentage),
-        suggestion
+        suggestion: '' // Placeholder
       });
     }
   }
 
-  return gaps;
+  console.log(`[Gap Analysis] ${categoryName}: Found ${gaps.length} gaps`);
+
+  // Sort by gap_percentage (most critical first)
+  gaps.sort((a, b) => b.gap_percentage - a.gap_percentage);
+
+  // PASS 2: Generate AI suggestions for top 5 critical gaps
+  const MAX_AI_SUGGESTIONS = 5;
+  const topGaps = gaps.slice(0, MAX_AI_SUGGESTIONS);
+  const remainingGaps = gaps.slice(MAX_AI_SUGGESTIONS);
+
+  console.log(`[Gap Analysis] ${categoryName}: Generating AI suggestions for top ${topGaps.length} gaps`);
+
+  // Process AI suggestions in batches of 3 (parallel)
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < topGaps.length; i += BATCH_SIZE) {
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(topGaps.length / BATCH_SIZE);
+    console.log(`[Gap Analysis] ${categoryName}: Processing AI batch ${batchNumber}/${totalBatches}`);
+    
+    const batch = topGaps.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      batch.map(async gap => {
+        gap.suggestion = await generateGapSuggestion(gap.item, categoryName, chunks, lovableApiKey, 'high');
+      })
+    );
+    
+    console.log(`[Gap Analysis] ${categoryName}: Completed AI batch ${batchNumber}/${totalBatches}`);
+  }
+
+  // Generic suggestions for remaining gaps
+  remainingGaps.forEach(gap => {
+    gap.suggestion = `Aggiungi documentazione specifica su "${gap.item}" per migliorare la copertura al ${Math.round(gap.required_coverage * 100)}%.`;
+  });
+
+  const elapsedTime = Date.now() - startTime;
+  console.log(`[Gap Analysis] ${categoryName}: Completed in ${elapsedTime}ms`);
+
+  return [...topGaps, ...remainingGaps];
 }
 
 async function generateGapSuggestion(
   itemText: string,
   categoryName: string,
   chunks: any[],
-  lovableApiKey: string
+  lovableApiKey: string,
+  priority: 'high' | 'normal' = 'high'
 ): Promise<string> {
   try {
-    // FIX: Create better context with actual chunk content, not just document names
+    // Use faster model and fewer tokens for normal priority
+    const model = priority === 'high' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
+    const maxTokens = priority === 'high' ? 300 : 150;
+
+    // Create better context with actual chunk content
     const relevantChunks = chunks
       .filter(c => c.content?.toLowerCase().includes(itemText.toLowerCase()))
       .slice(0, 3);
@@ -277,12 +352,12 @@ Sii chiaro, completo e non tagliare le frasi a metà.`;
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model,
         messages: [
           { role: 'system', content: 'Sei un esperto di knowledge management. Fornisci suggerimenti pratici e specifici in italiano.' },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 300 // FIX: Increased from 200 to prevent truncation
+        max_tokens: maxTokens
       })
     });
 
