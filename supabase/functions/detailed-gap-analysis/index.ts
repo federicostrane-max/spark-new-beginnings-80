@@ -321,11 +321,11 @@ async function analyzeCategory(
   console.log(`[Gap Analysis] ${categoryName}: ${criticalGaps.length} critical gaps (≥50%)`);
 
   if (criticalGaps.length > 0) {
-    const topCritical = criticalGaps.slice(0, 5); // Top 5 critical gaps
-    console.log(`[Gap Analysis] Generating AI suggestions for top ${topCritical.length} gaps`);
+    const topCritical = criticalGaps; // ALL critical gaps
+    console.log(`[Gap Analysis] Generating AI suggestions for ${topCritical.length} critical gaps`);
     
-    // Process AI suggestions in batches of 3 (parallel)
-    const BATCH_SIZE = 3;
+    // Process AI suggestions in batches of 5 (parallel)
+    const BATCH_SIZE = 5;
     for (let i = 0; i < topCritical.length; i += BATCH_SIZE) {
       const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
       const totalBatches = Math.ceil(topCritical.length / BATCH_SIZE);
