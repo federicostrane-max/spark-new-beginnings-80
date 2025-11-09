@@ -508,6 +508,7 @@ export type Database = {
       agents: {
         Row: {
           active: boolean | null
+          ai_model: string | null
           avatar: string | null
           created_at: string | null
           description: string
@@ -521,6 +522,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean | null
+          ai_model?: string | null
           avatar?: string | null
           created_at?: string | null
           description: string
@@ -534,6 +536,7 @@ export type Database = {
         }
         Update: {
           active?: boolean | null
+          ai_model?: string | null
           avatar?: string | null
           created_at?: string | null
           description?: string

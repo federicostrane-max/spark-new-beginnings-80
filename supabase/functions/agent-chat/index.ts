@@ -2277,7 +2277,11 @@ Deno.serve(async (req) => {
 
     // Determine which LLM provider to use
     const llmProvider = agent.llm_provider || 'anthropic';
+    const aiModel = agent.ai_model || null;
     console.log('🤖 Using LLM Provider:', llmProvider);
+    if (aiModel) {
+      console.log('🎯 Using AI Model:', aiModel);
+    }
 
     // Get and validate API keys based on provider
     let ANTHROPIC_API_KEY: string | undefined;
@@ -3257,8 +3261,9 @@ ${agent.system_prompt}${knowledgeContext}`;
               
             } else if (llmProvider === 'openrouter') {
               // OpenRouter implementation (streaming) - access to 100+ models
+              const selectedModel = aiModel || 'deepseek/deepseek-chat'; // Use agent's model or default
               console.log('🚀 ROUTING TO OPENROUTER');
-              console.log(`   Model: deepseek/deepseek-chat (default)`);
+              console.log(`   Model: ${selectedModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
               const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
@@ -3275,7 +3280,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                   'X-Title': 'Multi-Agent Consultant',
                 },
                 body: JSON.stringify({
-                  model: 'deepseek/deepseek-chat', // Default model - can be customized per agent
+                  model: selectedModel,
                   messages: [
                     { role: 'system', content: enhancedSystemPrompt },
                     ...anthropicMessages

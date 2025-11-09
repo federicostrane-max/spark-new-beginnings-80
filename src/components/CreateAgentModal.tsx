@@ -31,6 +31,7 @@ interface Agent {
   avatar: string | null;
   system_prompt: string;
   llm_provider?: string;
+  ai_model?: string;
 }
 
 interface CreateAgentModalProps {
@@ -47,6 +48,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [llmProvider, setLlmProvider] = useState("anthropic");
+  const [aiModel, setAiModel] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -62,6 +64,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
       setLlmProvider(editingAgent.llm_provider || "anthropic");
+      setAiModel(editingAgent.ai_model || "");
       previousPromptRef.current = editingAgent.system_prompt;
     } else if (!open) {
       // Reset quando il modale si chiude
@@ -69,6 +72,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setDescription("");
       setSystemPrompt("");
       setLlmProvider("anthropic");
+      setAiModel("");
       isEditingRef.current = false;
       previousPromptRef.current = "";
     }
@@ -104,6 +108,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             description,
             system_prompt: systemPrompt,
             llm_provider: llmProvider,
+            ai_model: aiModel || null,
           })
           .eq("id", editingAgent.id)
           .select()
@@ -151,6 +156,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             description,
             system_prompt: systemPrompt,
             llm_provider: llmProvider,
+            ai_model: aiModel || null,
             avatar: null,
             active: true,
             user_id: user.id
@@ -576,6 +582,81 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               Choose which AI model will power this agent
             </p>
           </div>
+
+          {/* OpenRouter Model Selection */}
+          {llmProvider === 'openrouter' && (
+            <div>
+              <Label htmlFor="aiModel">AI Model *</Label>
+              <Select 
+                value={aiModel} 
+                onValueChange={setAiModel}
+                disabled={loading}
+              >
+                <SelectTrigger id="aiModel">
+                  <SelectValue placeholder="Select a model" />
+                </SelectTrigger>
+                <SelectContent className="bg-background z-50">
+                  <SelectItem value="deepseek/deepseek-chat">
+                    <div className="flex flex-col">
+                      <span className="font-medium">DeepSeek Chat</span>
+                      <span className="text-xs text-muted-foreground">Cost-effective, excellent reasoning</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="moonshot/kimi-k1.5">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Kimi K1.5</span>
+                      <span className="text-xs text-muted-foreground">Long context, multilingual</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="anthropic/claude-3.5-sonnet">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Claude 3.5 Sonnet</span>
+                      <span className="text-xs text-muted-foreground">Advanced reasoning, high quality</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="anthropic/claude-3-opus">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Claude 3 Opus</span>
+                      <span className="text-xs text-muted-foreground">Most capable, slower</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="openai/gpt-4-turbo">
+                    <div className="flex flex-col">
+                      <span className="font-medium">GPT-4 Turbo</span>
+                      <span className="text-xs text-muted-foreground">Latest GPT-4, 128K context</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="openai/gpt-4o">
+                    <div className="flex flex-col">
+                      <span className="font-medium">GPT-4o</span>
+                      <span className="text-xs text-muted-foreground">Faster GPT-4 variant</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="google/gemini-pro-1.5">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini 1.5 Pro</span>
+                      <span className="text-xs text-muted-foreground">Google's best, 2M context</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="meta-llama/llama-3.1-70b-instruct">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Llama 3.1 70B</span>
+                      <span className="text-xs text-muted-foreground">Open-source, powerful</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="perplexity/llama-3.1-sonar-large-128k-online">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Perplexity Sonar Large (Online)</span>
+                      <span className="text-xs text-muted-foreground">Web search built-in</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Select the specific AI model to use via OpenRouter
+              </p>
+            </div>
+          )}
 
           {/* System Prompt */}
           <div>
