@@ -595,7 +595,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 <SelectTrigger id="aiModel">
                   <SelectValue placeholder="Select a model" />
                 </SelectTrigger>
-                <SelectContent className="bg-background z-50">
+                <SelectContent className="bg-background z-50 max-h-[300px] overflow-y-auto">
                   <SelectItem value="deepseek/deepseek-chat">
                     <div className="flex flex-col">
                       <span className="font-medium">DeepSeek Chat</span>
@@ -646,7 +646,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                   </SelectItem>
                   <SelectItem value="perplexity/llama-3.1-sonar-large-128k-online">
                     <div className="flex flex-col">
-                      <span className="font-medium">Perplexity Sonar Large (Online)</span>
+                      <span className="font-medium">Perplexity Sonar (Online)</span>
                       <span className="text-xs text-muted-foreground">Web search built-in</span>
                     </div>
                   </SelectItem>
