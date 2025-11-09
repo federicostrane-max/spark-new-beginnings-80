@@ -371,7 +371,7 @@ async function generateGapSuggestion(
 ): Promise<string> {
   try {
     const model = priority === 'high' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
-    const maxTokens = priority === 'high' ? 300 : 180;
+    const maxTokens = priority === 'high' ? 500 : 250;
 
     // === SEMANTIC SEARCH (Opzione B) ===
     // Generate embedding for gap item
@@ -446,18 +446,16 @@ async function generateAIPrompt(
 **Contesto esistente:**
 ${contextSummary}
 
-**TASK:** Identifica 2-3 aspetti specifici MANCANTI su "${itemText}" che questo agente dovrebbe conoscere.
-Per ogni aspetto, descrivi COSA MANCA nel dettaglio (non suggerire libri o risorse generiche).
+**TASK:** Identifica 2-3 aspetti specifici MANCANTI su "${itemText}".
 
-**Formato richiesto:** Lista puntata. Ogni punto deve iniziare con "Manca..." e specificare:
-- Quale aspetto/concetto specifico non è coperto
-- Perché è rilevante per questo agente
-- Cosa dovrebbe essere cercato/documentato
+**Formato richiesto (CONCISO - max 30 parole per punto):**
+• Manca [cosa] - rilevante perché [motivo breve]
+• Manca [cosa] - rilevante perché [motivo breve]
 
 **Esempio di output corretto:**
-• Manca descrizione dei protocolli di comunicazione tra agenti nel contesto di task distribuiti
-• Manca spiegazione delle strategie di risoluzione conflitti quando più agenti competono per risorse condivise
-• Manca documentazione su pattern architetturali per coordinamento gerarchico vs peer-to-peer`;
+• Manca descrizione protocolli comunicazione (message passing, blackboard) nel contesto multi-agente
+• Manca spiegazione pattern coordinamento per task distribuiti tra agenti
+• Manca documentazione strategie risoluzione conflitti quando agenti competono per risorse`;
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
@@ -468,7 +466,7 @@ Per ogni aspetto, descrivi COSA MANCA nel dettaglio (non suggerire libri o risor
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: 'Sei un analista di knowledge base. Il tuo compito è identificare gap specifici nelle conoscenze di un agente AI. Rispondi SOLO con liste puntate che iniziano con "Manca..." seguita da una descrizione dettagliata e specifica. Non suggerire mai libri, corsi o risorse generiche. Sii concreto e actionable.' },
+        { role: 'system', content: 'Sei un analista di knowledge base. Identifica gap specifici nelle conoscenze di un agente AI. Rispondi SOLO con liste puntate che iniziano con "Manca..." seguita da UNA FRASE BREVE (max 30 parole). Sii conciso, specifico e actionable. No libri, no risorse generiche.' },
         { role: 'user', content: prompt }
       ],
       max_tokens: maxTokens
