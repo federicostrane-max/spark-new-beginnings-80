@@ -8,10 +8,11 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw, Target } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
+import GapAnalysisView from './GapAnalysisView';
 
 interface KnowledgeAlignmentDashboardProps {
   agentId: string;
@@ -50,6 +51,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
   const [progressChunks, setProgressChunks] = useState(0);
   const [totalChunksInAnalysis, setTotalChunksInAnalysis] = useState(0);
+  const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false);
   const [stats, setStats] = useState({
     totalChunks: 0,
     removedChunks: 0,
@@ -216,6 +218,24 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       newSelection.add(chunkId);
     }
     setSelectedChunks(newSelection);
+  };
+
+  const handleAnalyzeGaps = async () => {
+    setIsAnalyzingGaps(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('detailed-gap-analysis', {
+        body: { agentId }
+      });
+
+      if (error) throw error;
+      
+      toast.success('Analisi gap completata! Passa al tab "Gap Mancanti" per vedere i risultati.');
+    } catch (error: any) {
+      console.error('Gap analysis error:', error);
+      toast.error('Errore durante l\'analisi dei gap');
+    } finally {
+      setIsAnalyzingGaps(false);
+    }
   };
 
   // Determine analysis status
@@ -493,11 +513,41 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         </Card>
 
       {/* Tabs */}
-      <Tabs defaultValue="removed" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+      <Tabs defaultValue="gaps" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="gaps">
+            <Target className="mr-2 h-4 w-4" />
+            Gap Mancanti
+          </TabsTrigger>
           <TabsTrigger value="removed">Chunk Rimossi ({removedChunks.length})</TabsTrigger>
           <TabsTrigger value="history">Storico Analisi ({analysisLogs.length})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="gaps" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Analisi Gap Dettagliata</CardTitle>
+                  <CardDescription>
+                    Scopri esattamente cosa manca nel knowledge base per ogni categoria di requisiti
+                  </CardDescription>
+                </div>
+                <Button 
+                  onClick={handleAnalyzeGaps}
+                  disabled={isAnalyzingGaps || isAnalyzing}
+                  size="sm"
+                >
+                  <Target className="mr-2 h-4 w-4" />
+                  {isAnalyzingGaps ? 'Analisi in corso...' : 'Analizza Gap Dettagliati'}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <GapAnalysisView agentId={agentId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="removed" className="space-y-4">
           {removedChunks.length === 0 ? (

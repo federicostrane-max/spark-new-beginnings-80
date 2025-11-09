@@ -32,4 +32,12 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
     task_extraction: 'openai/gpt-5-mini', // Fast and economical
     relevance_analysis: 'openai/gpt-5-mini',
   },
+  
+  // Gap Analysis settings
+  gap_analysis: {
+    critical_threshold: 0.3, // Coverage < 30% = critical gap
+    moderate_threshold: 0.5, // Coverage 30-50% = moderate gap
+    auto_trigger: true, // Auto-trigger after alignment analysis
+    ai_suggestions: true, // Generate AI suggestions for gaps
+  },
 } as const;

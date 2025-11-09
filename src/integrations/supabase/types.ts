@@ -854,6 +854,63 @@ export type Database = {
         }
         Relationships: []
       }
+      knowledge_gap_analysis: {
+        Row: {
+          agent_id: string
+          analysis_date: string
+          created_at: string | null
+          id: string
+          missing_core_concepts: Json
+          missing_decision_patterns: Json
+          missing_domain_vocabulary: Json
+          missing_procedural_knowledge: Json
+          overall_gap_score: number
+          recommendations: Json | null
+          requirement_id: string
+        }
+        Insert: {
+          agent_id: string
+          analysis_date?: string
+          created_at?: string | null
+          id?: string
+          missing_core_concepts?: Json
+          missing_decision_patterns?: Json
+          missing_domain_vocabulary?: Json
+          missing_procedural_knowledge?: Json
+          overall_gap_score: number
+          recommendations?: Json | null
+          requirement_id: string
+        }
+        Update: {
+          agent_id?: string
+          analysis_date?: string
+          created_at?: string | null
+          id?: string
+          missing_core_concepts?: Json
+          missing_decision_patterns?: Json
+          missing_domain_vocabulary?: Json
+          missing_procedural_knowledge?: Json
+          overall_gap_score?: number
+          recommendations?: Json | null
+          requirement_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_gap_analysis_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_gap_analysis_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "agent_task_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       knowledge_relevance_scores: {
         Row: {
           agent_id: string

@@ -79,3 +79,6 @@ verify_jwt = true
 [functions.continue-deepseek-response]
 verify_jwt = true
 timeout = 600
+
+[functions.detailed-gap-analysis]
+verify_jwt = true
