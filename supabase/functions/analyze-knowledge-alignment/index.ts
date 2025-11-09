@@ -304,14 +304,6 @@ Return ONLY valid JSON:
           }
         }));
 
-        // Update progress after each mini-batch
-        const chunksAnalyzedThisBatch = Math.min(i + maxConcurrent, chunksToAnalyze.length);
-        const totalAnalyzed = startOffset + chunksAnalyzedThisBatch;
-        await supabase
-          .from('alignment_analysis_log')
-          .update({ progress_chunks_analyzed: totalAnalyzed })
-          .eq('id', analysisLog.id);
-
         await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
