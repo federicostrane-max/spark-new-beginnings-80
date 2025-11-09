@@ -102,9 +102,14 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
             <div className="flex items-start gap-3">
               {getGapIcon(gap.gap_percentage)}
               <div className="flex-1 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <h4 className="font-medium">{gap.item}</h4>
-                  {getGapBadge(gap.gap_percentage)}
+                  <div className="flex gap-2">
+                    {gap.current_coverage === 0 && (
+                      <Badge variant="destructive">Non presente nel KB</Badge>
+                    )}
+                    {getGapBadge(gap.gap_percentage)}
+                  </div>
                 </div>
                 
                 {gap.description && (
@@ -113,15 +118,19 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
                 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Coverage attuale</span>
-                    <span>{Math.round(gap.current_coverage * 100)}%</span>
+                    <span>
+                      {gap.current_coverage === 0 
+                        ? "Nessun chunk trovato" 
+                        : `Copertura: ${Math.round(gap.current_coverage * 100)}% (minimo richiesto: ${Math.round(gap.required_coverage * 100)}%)`
+                      }
+                    </span>
                   </div>
                   <Progress value={gap.current_coverage * 100} className="h-2" />
                 </div>
 
                 <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-md">
                   <Lightbulb className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
-                  <p className="text-sm">{gap.suggestion}</p>
+                  <p className="text-sm whitespace-pre-wrap break-words">{gap.suggestion}</p>
                 </div>
               </div>
             </div>

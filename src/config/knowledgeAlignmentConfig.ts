@@ -37,6 +37,7 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
   gap_analysis: {
     critical_threshold: 0.3, // Coverage < 30% = critical gap
     moderate_threshold: 0.5, // Coverage 30-50% = moderate gap
+    min_chunks_for_coverage: 3, // At least 3 relevant chunks = 100% coverage
     auto_trigger: true, // Auto-trigger after alignment analysis
     ai_suggestions: true, // Generate AI suggestions for gaps
   },

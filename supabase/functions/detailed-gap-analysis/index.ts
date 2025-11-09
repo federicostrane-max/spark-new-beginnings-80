@@ -215,8 +215,13 @@ async function analyzeCategory(
       return s.final_relevance_score > 0.5;
     }).length;
 
-    const currentCoverage = totalChunks > 0 ? highScoreCount / totalChunks : 0;
-    const requiredCoverage = 0.3; // 30% minimum coverage
+    // FIX: Coverage should be based on number of relevant chunks, not total chunks
+    // If we have at least 3 chunks covering this concept, it's 100% covered
+    const minChunksNeeded = 3;
+    const currentCoverage = highScoreCount >= minChunksNeeded 
+      ? 1.0 
+      : highScoreCount / minChunksNeeded;
+    const requiredCoverage = 0.3; // 30% minimum coverage (at least 1 chunk)
     const gapPercentage = Math.max(0, (requiredCoverage - currentCoverage) * 100);
 
     // If gap is significant (coverage < 30%), add to gaps list
@@ -245,16 +250,25 @@ async function generateGapSuggestion(
   lovableApiKey: string
 ): Promise<string> {
   try {
-    // Create context from existing chunks
-    const chunkSummary = chunks.slice(0, 5).map(c => c.document_name).join(', ');
+    // FIX: Create better context with actual chunk content, not just document names
+    const relevantChunks = chunks
+      .filter(c => c.content?.toLowerCase().includes(itemText.toLowerCase()))
+      .slice(0, 3);
+
+    const contextSummary = relevantChunks.length > 0
+      ? relevantChunks.map(c => `${c.document_name}: "${c.content.substring(0, 200)}..."`).join('\n')
+      : `Nessun chunk esistente tratta direttamente "${itemText}"`;
 
     const prompt = `Analizza questo gap nel knowledge base:
-    
-Categoria: ${categoryName}
-Elemento mancante: ${itemText}
-Documenti esistenti: ${chunkSummary}
 
-Suggerisci in italiano 2-3 documenti/topic specifici da aggiungere per colmare questo gap. Sii conciso e specifico.`;
+**Categoria:** ${categoryName}
+**Elemento mancante:** ${itemText}
+**Contesto attuale:**
+${contextSummary}
+
+Fornisci 2-3 suggerimenti SPECIFICI e CONCRETI in italiano per colmare questo gap. 
+Indica esattamente quali documenti, guide o risorse devono essere aggiunte.
+Sii chiaro, completo e non tagliare le frasi a metà.`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -265,10 +279,10 @@ Suggerisci in italiano 2-3 documenti/topic specifici da aggiungere per colmare q
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'Sei un esperto di knowledge management. Fornisci suggerimenti pratici e specifici.' },
+          { role: 'system', content: 'Sei un esperto di knowledge management. Fornisci suggerimenti pratici e specifici in italiano.' },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 200
+        max_tokens: 300 // FIX: Increased from 200 to prevent truncation
       })
     });
 
@@ -278,7 +292,14 @@ Suggerisci in italiano 2-3 documenti/topic specifici da aggiungere per colmare q
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || 'Aggiungi documentazione specifica su questo argomento.';
+    let suggestion = data.choices?.[0]?.message?.content || 'Aggiungi documentazione specifica su questo argomento.';
+    
+    // Handle potential truncation
+    if (suggestion && !suggestion.match(/[.!?]$/)) {
+      suggestion += '...';
+    }
+    
+    return suggestion;
   } catch (error) {
     console.error('Error generating suggestion:', error);
     return 'Aggiungi documentazione specifica su questo argomento.';
@@ -324,7 +345,7 @@ Genera raccomandazioni concrete in italiano per colmare questi gap, ordinate per
           { role: 'system', content: 'Sei un esperto di knowledge management. Fornisci raccomandazioni pratiche e actionable.' },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 500
+        max_tokens: 800 // FIX: Increased from 500 to prevent truncation
       })
     });
 
