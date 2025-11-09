@@ -272,7 +272,26 @@ async function analyzeCategory(
 
   // PASS 1: Identify ALL gaps without AI suggestions
   for (const item of items) {
-    const itemText = typeof item === 'string' ? item : (item.name || item.term || item.title || '');
+    // Extract text based on category structure
+    let itemText = '';
+    
+    if (typeof item === 'string') {
+      // domain_vocabulary are simple strings
+      itemText = item;
+    } else if (typeof item === 'object') {
+      // Extract based on known structure for each category
+      if (categoryName === 'core_concepts') {
+        itemText = item.concept || '';
+      } else if (categoryName === 'procedural_knowledge') {
+        itemText = item.process || '';
+      } else if (categoryName === 'decision_patterns') {
+        itemText = item.pattern || '';
+      } else {
+        // Fallback to generic fields
+        itemText = item.name || item.term || item.title || item.concept || item.process || item.pattern || '';
+      }
+    }
+    
     if (!itemText) continue;
 
     // Calculate coverage: count chunks with high scores for this item
@@ -302,7 +321,9 @@ async function analyzeCategory(
     if (currentCoverage < requiredCoverage) {
       gaps.push({
         item: itemText,
-        description: typeof item === 'object' ? (item.description || item.definition) : undefined,
+        description: typeof item === 'object' 
+          ? (item.description || item.definition || item.importance || JSON.stringify(item.steps?.slice(0,2)) || JSON.stringify(item.criteria?.slice(0,2)) || undefined)
+          : undefined,
         current_coverage: Math.round(currentCoverage * 100) / 100,
         required_coverage: requiredCoverage,
         gap_percentage: Math.round(gapPercentage),
