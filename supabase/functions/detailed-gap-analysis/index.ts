@@ -439,14 +439,25 @@ async function generateAIPrompt(
     ? `\n**Documenti già nel KB:** ${existingDocs.slice(0, 5).join(', ')}`
     : '\n**KB attualmente vuoto**';
 
-  const prompt = `Elemento mancante nel KB: "${itemText}" (categoria: ${categoryName})${agentContext}${docsContext}
+  const prompt = `Analizza il gap nel knowledge base dell'agente.
 
-Elenca SOLO i 2-3 documenti/risorse specifiche da aggiungere al knowledge base per questo agente.
-Formato richiesto: lista puntata senza introduzioni.
-Ogni voce deve essere una risorsa concreta e specifica, coerente con il dominio dell'agente.
+**Gap identificato:** "${itemText}" (categoria: ${categoryName})${agentContext}${docsContext}
 
-Contesto chunks esistenti:
-${contextSummary}`;
+**Contesto esistente:**
+${contextSummary}
+
+**TASK:** Identifica 2-3 aspetti specifici MANCANTI su "${itemText}" che questo agente dovrebbe conoscere.
+Per ogni aspetto, descrivi COSA MANCA nel dettaglio (non suggerire libri o risorse generiche).
+
+**Formato richiesto:** Lista puntata. Ogni punto deve iniziare con "Manca..." e specificare:
+- Quale aspetto/concetto specifico non è coperto
+- Perché è rilevante per questo agente
+- Cosa dovrebbe essere cercato/documentato
+
+**Esempio di output corretto:**
+• Manca descrizione dei protocolli di comunicazione tra agenti nel contesto di task distribuiti
+• Manca spiegazione delle strategie di risoluzione conflitti quando più agenti competono per risorse condivise
+• Manca documentazione su pattern architetturali per coordinamento gerarchico vs peer-to-peer`;
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
@@ -457,7 +468,7 @@ ${contextSummary}`;
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: 'Sei un knowledge manager. Rispondi SOLO con liste puntate concise in italiano, senza introduzioni o spiegazioni. Le tue risposte devono essere coerenti con il dominio specifico dell\'agente.' },
+        { role: 'system', content: 'Sei un analista di knowledge base. Il tuo compito è identificare gap specifici nelle conoscenze di un agente AI. Rispondi SOLO con liste puntate che iniziano con "Manca..." seguita da una descrizione dettagliata e specifica. Non suggerire mai libri, corsi o risorse generiche. Sii concreto e actionable.' },
         { role: 'user', content: prompt }
       ],
       max_tokens: maxTokens
