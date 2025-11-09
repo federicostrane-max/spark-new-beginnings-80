@@ -196,17 +196,23 @@ serve(async (req) => {
     const chunkScores: Array<{ chunk_id: string; final_score: number }> = [];
     const maxConcurrent = CONFIG.batch_processing.max_concurrent;
 
-    // Resume logic: Check which chunks already have scores
-    const { data: existingScores } = await supabase
-      .from('knowledge_relevance_scores')
-      .select('chunk_id')
-      .eq('requirement_id', requirements.id);
+    // Resume logic: Check which chunks already have scores (skip if force reanalysis)
+    let chunksToAnalyze = chunks || [];
+    
+    if (!forceReanalysis) {
+      const { data: existingScores } = await supabase
+        .from('knowledge_relevance_scores')
+        .select('chunk_id')
+        .eq('requirement_id', requirements.id);
 
-    const analyzedChunkIds = new Set(existingScores?.map(s => s.chunk_id) || []);
-    const chunksToAnalyze = chunks?.filter(c => !analyzedChunkIds.has(c.id)) || [];
+      const analyzedChunkIds = new Set(existingScores?.map(s => s.chunk_id) || []);
+      chunksToAnalyze = chunks?.filter(c => !analyzedChunkIds.has(c.id)) || [];
 
-    console.log('[analyze-alignment] Already analyzed:', analyzedChunkIds.size, 'chunks');
-    console.log('[analyze-alignment] Need to analyze:', chunksToAnalyze.length, 'chunks');
+      console.log('[analyze-alignment] Already analyzed:', analyzedChunkIds.size, 'chunks');
+      console.log('[analyze-alignment] Need to analyze:', chunksToAnalyze.length, 'chunks');
+    } else {
+      console.log('[analyze-alignment] Force reanalysis: analyzing all', chunksToAnalyze.length, 'chunks in batch');
+    }
 
     // Helper function to call AI with retry logic
     const callAIWithRetry = async (chunk: any, attempt = 1): Promise<any> => {
