@@ -564,6 +564,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                     <span className="text-xs text-muted-foreground">Versatile, widely supported</span>
                   </div>
                 </SelectItem>
+                <SelectItem value="openrouter">
+                  <div className="flex flex-col">
+                    <span className="font-medium">OpenRouter</span>
+                    <span className="text-xs text-muted-foreground">Access to 100+ models (GPT, Claude, Gemini, Kimi, etc.)</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground mt-1">

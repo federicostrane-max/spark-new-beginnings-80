@@ -3255,6 +3255,37 @@ ${agent.system_prompt}${knowledgeContext}`;
                 signal: controller.signal
               });
               
+            } else if (llmProvider === 'openrouter') {
+              // OpenRouter implementation (streaming) - access to 100+ models
+              console.log('🚀 ROUTING TO OPENROUTER');
+              console.log(`   Model: deepseek/deepseek-chat (default)`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
+              
+              const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+              if (!OPENROUTER_API_KEY) {
+                throw new Error('OPENROUTER_API_KEY is required but not set');
+              }
+              
+              response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                  'HTTP-Referer': 'https://lovable.dev',
+                  'X-Title': 'Multi-Agent Consultant',
+                },
+                body: JSON.stringify({
+                  model: 'deepseek/deepseek-chat', // Default model - can be customized per agent
+                  messages: [
+                    { role: 'system', content: enhancedSystemPrompt },
+                    ...anthropicMessages
+                  ],
+                  temperature: 0.7,
+                  stream: true
+                }),
+                signal: controller.signal
+              });
+              
             } else {
               // Default: Anthropic
               console.log('🚀 ROUTING TO ANTHROPIC');
