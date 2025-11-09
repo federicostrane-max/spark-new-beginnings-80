@@ -347,16 +347,42 @@ export default function MultiAgentConsultant() {
   }, [session?.user?.id]);
 
   const handleAgentCreated = useCallback((newAgent: Agent) => {
-    // Auto-select the newly created agent
+    console.log('[MultiAgentConsultant] handleAgentCreated called:', newAgent.name, newAgent.id);
+    
+    // First trigger sidebar refresh
+    setAgentUpdateTrigger(prev => {
+      const newValue = prev + 1;
+      console.log('[MultiAgentConsultant] agentUpdateTrigger incremented to:', newValue);
+      return newValue;
+    });
+    
+    // Then auto-select the newly created agent
     handleSelectAgent(newAgent);
-    console.log(`${newAgent.name} created/updated successfully`);
+    console.log(`[MultiAgentConsultant] ${newAgent.name} created/updated successfully`);
     setEditingAgent(null);
-    // Trigger sidebar refresh
-    setAgentUpdateTrigger(prev => prev + 1);
+    
     // Recheck unsynced docs
     if (newAgent?.id) {
       checkUnsyncedDocs(newAgent.id);
     }
+    
+    // Fallback: verify agent appears in list after 2 seconds
+    setTimeout(() => {
+      supabase
+        .from('agents')
+        .select('id, name')
+        .eq('id', newAgent.id)
+        .eq('active', true)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (!error && data) {
+            console.log('[MultiAgentConsultant] Agent verified in DB:', data.name);
+          } else {
+            console.error('[MultiAgentConsultant] Agent not found in DB, reloading page...');
+            window.location.reload();
+          }
+        });
+    }, 2000);
   }, [handleSelectAgent]);
 
   const handleDeleteAgent = async (agentId: string) => {

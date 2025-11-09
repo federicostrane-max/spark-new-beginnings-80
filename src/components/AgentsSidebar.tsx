@@ -71,11 +71,45 @@ export const AgentsSidebar = ({
   // Reload agents when agentUpdateTrigger changes
   useEffect(() => {
     if (agentUpdateTrigger !== undefined && agentUpdateTrigger > 0) {
-      loadAgents();
+      console.log('[AgentsSidebar] agentUpdateTrigger changed:', agentUpdateTrigger);
+      // Add small delay to ensure DB write is complete
+      setTimeout(() => {
+        loadAgents();
+      }, 200);
     }
   }, [agentUpdateTrigger]);
 
+  // Realtime subscription for agents table
+  useEffect(() => {
+    console.log('[AgentsSidebar] Setting up realtime subscription');
+    
+    const channel = supabase
+      .channel('agents-sidebar-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'agents',
+          filter: 'active=eq.true'
+        },
+        (payload) => {
+          console.log('[AgentsSidebar] Realtime agent change:', payload.eventType, payload.new);
+          loadAgents();
+        }
+      )
+      .subscribe((status) => {
+        console.log('[AgentsSidebar] Subscription status:', status);
+      });
+
+    return () => {
+      console.log('[AgentsSidebar] Cleaning up subscription');
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   const loadAgents = async () => {
+    console.log('[AgentsSidebar] Loading agents...');
     // Add a small delay before showing loading state to prevent flashing
     const loadingTimeout = setTimeout(() => setLoading(true), 300);
     
@@ -87,9 +121,10 @@ export const AgentsSidebar = ({
         .order("created_at", { ascending: false });
 
       if (error) throw error;
+      console.log('[AgentsSidebar] Loaded', data?.length || 0, 'agents');
       setAgents(data || []);
     } catch (error: any) {
-      console.error("Error loading agents:", error);
+      console.error("[AgentsSidebar] Error loading agents:", error);
     } finally {
       clearTimeout(loadingTimeout);
       setLoading(false);

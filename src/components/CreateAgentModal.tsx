@@ -166,18 +166,22 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
         if (error) throw error;
 
-        console.log("Agent created successfully");
+        console.log("[CreateAgentModal] Agent created successfully:", data);
         
-        // Force a more reliable refresh with a small delay
+        // Callback FIRST to trigger parent updates
+        onSuccess(data);
+        
+        // Then close modal and reset form with a delay to ensure UI updates
         setTimeout(() => {
-          onSuccess(data);
           onOpenChange(false);
           
           // Reset form
           setName("");
           setDescription("");
           setSystemPrompt("");
-        }, 100);
+          
+          console.log("[CreateAgentModal] Modal closed, agent should appear in sidebar");
+        }, 150);
       }
     } catch (error: any) {
       console.error(`Error ${editingAgent ? 'updating' : 'creating'} agent:`, error);
