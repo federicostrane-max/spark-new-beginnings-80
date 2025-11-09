@@ -503,7 +503,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                     <TooltipTrigger>
                       <Info className="h-3 w-3" />
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-xs">
+                    <TooltipContent className="max-w-md">
                       <p className="font-semibold mb-1">Qualità Media Knowledge Base</p>
                       <p className="text-xs">Misura quanto ciascun chunk esistente copre i concetti richiesti. Un valore basso indica che i chunk nel KB coprono solo parzialmente i task requirements, anche se numericamente presenti.</p>
                     </TooltipContent>
