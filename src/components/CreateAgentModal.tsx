@@ -100,6 +100,13 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           await savePromptToHistory(editingAgent.id, previousPromptRef.current);
         }
 
+        console.log("[CreateAgentModal] Updating agent:", {
+          id: editingAgent.id,
+          name,
+          newPromptLength: systemPrompt.length,
+          oldPromptLength: previousPromptRef.current.length
+        });
+
         // Update existing agent
         const { data, error } = await supabase
           .from("agents")
@@ -114,16 +121,58 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           .select()
           .single();
 
-        if (error) throw error;
+        if (error) {
+          console.error("[CreateAgentModal] Error updating agent:", error);
+          toast.error("Errore durante il salvataggio dell'agente");
+          throw error;
+        }
 
-        console.log("Agent updated successfully");
-        previousPromptRef.current = systemPrompt; // Update ref after save
+        if (!data) {
+          console.error("[CreateAgentModal] No data returned from update");
+          toast.error("Errore: nessun dato tornato dal database");
+          throw new Error("No data returned from update");
+        }
+
+        console.log("[CreateAgentModal] Agent updated, verifying data:", {
+          id: data.id,
+          name: data.name,
+          promptLength: data.system_prompt?.length,
+          promptMatches: data.system_prompt === systemPrompt
+        });
+
+        // Verify the update was successful
+        if (data.system_prompt !== systemPrompt) {
+          console.error("[CreateAgentModal] Prompt mismatch after update!");
+          toast.error("Errore: il prompt non è stato salvato correttamente");
+          throw new Error("Prompt mismatch after update");
+        }
+
+        // Double-check by reading from database
+        const { data: verifyData, error: verifyError } = await supabase
+          .from("agents")
+          .select("system_prompt")
+          .eq("id", editingAgent.id)
+          .single();
+
+        if (verifyError) {
+          console.error("[CreateAgentModal] Error verifying update:", verifyError);
+          toast.error("Errore durante la verifica del salvataggio");
+          throw verifyError;
+        }
+
+        if (verifyData.system_prompt !== systemPrompt) {
+          console.error("[CreateAgentModal] Database verification failed! Prompt not saved correctly");
+          toast.error("Errore: il prompt non è stato salvato nel database");
+          throw new Error("Database verification failed");
+        }
+
+        console.log("[CreateAgentModal] ✅ Agent updated and verified successfully");
+        previousPromptRef.current = systemPrompt; // Update ref after successful save
+        toast.success("Agente aggiornato con successo!");
         
-        // Force a more reliable refresh by calling onSuccess with updated data
-        setTimeout(() => {
-          onSuccess(data);
-          onOpenChange(false);
-        }, 100);
+        // Call onSuccess immediately (no delay)
+        onSuccess(data);
+        onOpenChange(false);
       } else {
         // Create new agent
         // Auto-generate slug
