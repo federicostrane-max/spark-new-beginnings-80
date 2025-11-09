@@ -37,6 +37,10 @@ interface GapAnalysisViewProps {
 export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysisViewProps) {
   const [gapAnalysis, setGapAnalysis] = useState<GapAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showAllConcepts, setShowAllConcepts] = useState(false);
+  const [showAllProcedural, setShowAllProcedural] = useState(false);
+  const [showAllDecision, setShowAllDecision] = useState(false);
+  const [showAllVocabulary, setShowAllVocabulary] = useState(false);
 
   useEffect(() => {
     fetchGapAnalysis();
@@ -85,7 +89,7 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
     return <Badge variant="secondary">Minore</Badge>;
   };
 
-  const renderGapItems = (items: GapItem[], emptyMessage: string) => {
+  const renderGapItems = (items: GapItem[], emptyMessage: string, showAll: boolean, setShowAll: (value: boolean) => void) => {
     if (!items || items.length === 0) {
       return (
         <Alert>
@@ -95,9 +99,15 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
       );
     }
 
+    // Sort by gap_percentage descending (most critical first)
+    const sortedItems = [...items].sort((a, b) => b.gap_percentage - a.gap_percentage);
+    const criticalThreshold = 10;
+    const displayItems = showAll ? sortedItems : sortedItems.slice(0, criticalThreshold);
+    const hasMore = sortedItems.length > criticalThreshold;
+
     return (
       <div className="space-y-4">
-        {items.map((gap, index) => (
+        {displayItems.map((gap, index) => (
           <Card key={index} className="p-4">
             <div className="flex items-start gap-3">
               {getGapIcon(gap.gap_percentage)}
@@ -136,6 +146,21 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
             </div>
           </Card>
         ))}
+        
+        {hasMore && (
+          <div className="flex justify-center pt-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowAll(!showAll)}
+              className="w-full md:w-auto"
+            >
+              {showAll 
+                ? `Mostra solo gap critici (top ${criticalThreshold})` 
+                : `Mostra tutti i ${sortedItems.length} gap`
+              }
+            </Button>
+          </div>
+        )}
       </div>
     );
   };
@@ -264,28 +289,36 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
         <TabsContent value="core_concepts" className="mt-6">
           {renderGapItems(
             gapAnalysis.missing_core_concepts,
-            "Tutti i core concepts sono ben coperti dal knowledge base!"
+            "Tutti i core concepts sono ben coperti dal knowledge base!",
+            showAllConcepts,
+            setShowAllConcepts
           )}
         </TabsContent>
 
         <TabsContent value="procedural" className="mt-6">
           {renderGapItems(
             gapAnalysis.missing_procedural_knowledge,
-            "Tutte le procedure sono ben documentate nel knowledge base!"
+            "Tutte le procedure sono ben documentate nel knowledge base!",
+            showAllProcedural,
+            setShowAllProcedural
           )}
         </TabsContent>
 
         <TabsContent value="decision" className="mt-6">
           {renderGapItems(
             gapAnalysis.missing_decision_patterns,
-            "Tutti i decision patterns sono presenti nel knowledge base!"
+            "Tutti i decision patterns sono presenti nel knowledge base!",
+            showAllDecision,
+            setShowAllDecision
           )}
         </TabsContent>
 
         <TabsContent value="vocabulary" className="mt-6">
           {renderGapItems(
             gapAnalysis.missing_domain_vocabulary,
-            "Tutto il vocabolario di dominio è coperto nel knowledge base!"
+            "Tutto il vocabolario di dominio è coperto nel knowledge base!",
+            showAllVocabulary,
+            setShowAllVocabulary
           )}
         </TabsContent>
       </Tabs>
