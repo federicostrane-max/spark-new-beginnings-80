@@ -143,12 +143,16 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
             }
           });
 
+          console.log('Edge function response:', { data, error });
+
           if (error) {
-            throw new Error(`Upload failed: ${error.message}`);
+            console.error('Edge function error:', error);
+            throw new Error(`Upload fallito: ${error.message}`);
           }
           
           if (!data?.success) {
-            throw new Error(`Upload failed: ${data?.error || 'Unknown error'}`);
+            console.error('Edge function returned failure:', data);
+            throw new Error(`Upload fallito: ${data?.error || 'Errore sconosciuto'}`);
           }
           
           console.log(`✓ ${file.name} uploaded - ${data.chunksProcessed} chunks created, document ID: ${data.documentId}`);
