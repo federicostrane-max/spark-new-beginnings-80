@@ -323,7 +323,7 @@ async function generateGapSuggestion(
   try {
     // Use faster model and fewer tokens for normal priority
     const model = priority === 'high' ? 'google/gemini-2.5-flash' : 'google/gemini-2.5-flash-lite';
-    const maxTokens = priority === 'high' ? 300 : 150;
+    const maxTokens = priority === 'high' ? 120 : 80;
 
     // Create better context with actual chunk content
     const relevantChunks = chunks
@@ -334,16 +334,13 @@ async function generateGapSuggestion(
       ? relevantChunks.map(c => `${c.document_name}: "${c.content.substring(0, 200)}..."`).join('\n')
       : `Nessun chunk esistente tratta direttamente "${itemText}"`;
 
-    const prompt = `Analizza questo gap nel knowledge base:
+    const prompt = `Elemento mancante nel KB: "${itemText}" (categoria: ${categoryName})
 
-**Categoria:** ${categoryName}
-**Elemento mancante:** ${itemText}
-**Contesto attuale:**
-${contextSummary}
+Elenca SOLO i 2-3 documenti/risorse specifiche da aggiungere al knowledge base.
+Formato richiesto: lista puntata senza introduzioni.
+Ogni voce deve essere una risorsa concreta e specifica.
 
-Fornisci 2-3 suggerimenti SPECIFICI e CONCRETI in italiano per colmare questo gap. 
-Indica esattamente quali documenti, guide o risorse devono essere aggiunte.
-Sii chiaro, completo e non tagliare le frasi a metà.`;
+Contesto esistente: ${contextSummary}`;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -354,7 +351,7 @@ Sii chiaro, completo e non tagliare le frasi a metà.`;
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: 'Sei un esperto di knowledge management. Fornisci suggerimenti pratici e specifici in italiano.' },
+          { role: 'system', content: 'Sei un knowledge manager. Rispondi SOLO con liste puntate concise in italiano, senza introduzioni o spiegazioni.' },
           { role: 'user', content: prompt }
         ],
         max_tokens: maxTokens
@@ -363,15 +360,21 @@ Sii chiaro, completo e non tagliare le frasi a metà.`;
 
     if (!response.ok) {
       console.error('AI API error:', await response.text());
-      return 'Aggiungi documentazione specifica su questo argomento.';
+      return '• Aggiungi documentazione specifica su questo argomento';
     }
 
     const data = await response.json();
-    let suggestion = data.choices?.[0]?.message?.content || 'Aggiungi documentazione specifica su questo argomento.';
+    let suggestion = data.choices?.[0]?.message?.content || '• Aggiungi documentazione specifica su questo argomento';
     
-    // Handle potential truncation
-    if (suggestion && !suggestion.match(/[.!?]$/)) {
-      suggestion += '...';
+    // Remove conversational intros like "Assolutamente! Ecco...", "Certamente!", etc.
+    suggestion = suggestion
+      .replace(/^(Assolutamente!?|Certamente!?|Ecco|Certo|Perfetto)[^\n]*/i, '')
+      .replace(/^[^•\-\*1-9]+(?=[•\-\*1-9])/m, '')
+      .trim();
+    
+    // If empty after cleanup, provide default
+    if (!suggestion) {
+      suggestion = '• Aggiungi documentazione specifica su questo argomento';
     }
     
     return suggestion;
