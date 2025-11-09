@@ -13,6 +13,9 @@ serve(async (req) => {
   }
 
   try {
+    // Increment this to force re-extraction with updated filters
+    const FILTER_VERSION = 'v2';
+    
     const { agentId } = await req.json();
 
     if (!agentId) {
@@ -53,7 +56,6 @@ serve(async (req) => {
     console.log('[extract-task-requirements] Prompt hash:', promptHash);
 
     // Check if requirements already exist with same hash and filter version
-    const FILTER_VERSION = 'v2'; // Increment this to force re-extraction with updated filters
     
     const { data: existing, error: existingError } = await supabase
       .from('agent_task_requirements')
@@ -198,8 +200,6 @@ Return ONLY valid JSON in this exact format:
     }
 
     // Upsert requirements with filter version to force re-extraction when filter changes
-    const FILTER_VERSION = 'v2'; // Increment this to force re-extraction with updated filters
-    
     const { data: requirement, error: upsertError } = await supabase
       .from('agent_task_requirements')
       .upsert({
