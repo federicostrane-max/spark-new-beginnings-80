@@ -77,6 +77,14 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     fetchData();
   }, [agentId]);
 
+  // Reset progress when analysis starts
+  useEffect(() => {
+    if (isAnalyzing) {
+      console.log('[KnowledgeAlignmentDashboard] Analisi iniziata, reset progress');
+      setProgressChunks(0);
+    }
+  }, [isAnalyzing]);
+
   // Poll for updates when analyzing - fetch progress from DB
   useEffect(() => {
     if (!isAnalyzing) return;
