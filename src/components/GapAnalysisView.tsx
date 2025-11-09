@@ -6,7 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/integrations/supabase/client';
-import { AlertCircle, CheckCircle, AlertTriangle, Lightbulb, TrendingDown } from 'lucide-react';
+import { AlertCircle, CheckCircle, AlertTriangle, Lightbulb, TrendingDown, Info } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface GapItem {
@@ -234,7 +234,18 @@ export default function GapAnalysisView({ agentId, refreshTrigger }: GapAnalysis
 
           <div className="space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Gap Score Complessivo</span>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Gap Score Complessivo</span>
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Info className="h-3 w-3 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <p className="font-semibold mb-1">Percentuale Requisiti con Gap</p>
+                    <p className="text-xs">Indica quanti task requirements dell'agente hanno gap significativi (copertura insufficiente). Un valore alto significa che molti requisiti necessitano di più documentazione nella knowledge base.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
               <span className="font-medium">{Math.round(gapAnalysis.overall_gap_score * 100)}%</span>
             </div>
             <Progress value={gapAnalysis.overall_gap_score * 100} className="h-2" />
