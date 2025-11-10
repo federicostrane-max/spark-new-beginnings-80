@@ -364,11 +364,6 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
     
     console.log(`[analyze-alignment] Total results: ${successCount} success, ${errorCount} errors`);
 
-    // Calculate if more batches are needed
-    const currentProgress = startOffset + (chunks?.length || 0);
-    console.log(`[analyze-alignment] Progress: ${currentProgress}/${totalChunks} chunks analyzed`);
-    const moreBatchesNeeded = currentProgress < (totalChunks || 0);
-
     // Identify chunks for removal
     const chunksToRemove = chunkScores.filter(s => s.final_score < CONFIG.auto_removal.threshold);
     console.log('[analyze-alignment] Chunks flagged for removal:', chunksToRemove.length);
@@ -480,6 +475,10 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
     const realProgress = actualAnalyzedCount || 0;
     console.log(`[analyze-alignment] Real progress from DB: ${realProgress}/${totalChunks} chunks`);
 
+    // Calculate if more batches are needed based on real progress
+    const moreBatchesNeeded = realProgress < (totalChunks || 0);
+    console.log(`[analyze-alignment] Batch status: ${realProgress}/${totalChunks}, more needed: ${moreBatchesNeeded}`);
+
     // Update analysis log with real progress
     const updateData: any = {
       chunks_flagged_for_removal: chunksToRemove.length,
@@ -494,6 +493,7 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
     if (!moreBatchesNeeded) {
       updateData.completed_at = new Date().toISOString();
       updateData.duration_ms = Date.now() - new Date(analysisLog.started_at).getTime();
+      console.log('[analyze-alignment] ✅ Analysis fully completed - all batches processed');
     }
 
     await supabase
@@ -502,7 +502,7 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
       .eq('id', analysisLog.id);
 
     const statusMessage = moreBatchesNeeded 
-      ? `Batch completed: ${currentProgress}/${totalChunks} chunks`
+      ? `Batch completed: ${realProgress}/${totalChunks} chunks`
       : 'Analysis completed';
     
     console.log('[analyze-alignment]', statusMessage);
@@ -514,10 +514,10 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
         safe_mode_active: safeModeActive,
         batch_completed: true,
         chunks_analyzed_this_batch: chunks?.length || 0,
-        total_progress: currentProgress,
+        total_progress: realProgress,
         total_chunks: totalChunks || 0,
         more_batches_needed: moreBatchesNeeded,
-        next_batch_offset: currentProgress,
+        next_batch_offset: realProgress,
         chunks_flagged_for_removal: chunksToRemove.length,
         chunks_auto_removed: chunksAutoRemoved,
         requires_manual_approval: requiresManualApproval,
