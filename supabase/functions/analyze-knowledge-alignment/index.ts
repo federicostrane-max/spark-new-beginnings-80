@@ -344,6 +344,19 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
         const batchErrors = results.filter(r => r.status === 'rejected').length;
         console.log(`[analyze-alignment] Batch completed: ${batchSuccess} success, ${batchErrors} errors`);
 
+        // Update progress in real-time after each mini-batch
+        const { count: currentAnalyzedCount } = await supabase
+          .from('knowledge_relevance_scores')
+          .select('*', { count: 'exact', head: true })
+          .eq('requirement_id', requirements.id);
+
+        await supabase
+          .from('alignment_analysis_log')
+          .update({ progress_chunks_analyzed: currentAnalyzedCount || 0 })
+          .eq('id', analysisLog.id);
+
+        console.log(`[analyze-alignment] Progress updated: ${currentAnalyzedCount}/${totalChunks} chunks`);
+
         // Reduced delay between batches for faster overall processing
         await new Promise(resolve => setTimeout(resolve, 50));
       }
