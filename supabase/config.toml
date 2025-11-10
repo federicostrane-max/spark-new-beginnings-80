@@ -19,6 +19,15 @@ verify_jwt = true
 [functions.process-chunks]
 verify_jwt = true
 
+[functions.retry-failed-documents]
+verify_jwt = true
+
+[functions.search-and-acquire-pdfs]
+verify_jwt = true
+
+[functions.search-pool-documents]
+verify_jwt = true
+
 [functions.semantic-search]
 verify_jwt = true
 

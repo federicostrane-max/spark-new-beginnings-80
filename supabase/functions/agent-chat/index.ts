@@ -3048,6 +3048,34 @@ ${agent.system_prompt}${knowledgeContext}`;
             });
           }
           
+          // Add search_and_acquire_pdfs tool only for Book Search Expert
+          if (agent.slug === 'book-search-expert-copy') {
+            tools.push({
+              name: 'search_and_acquire_pdfs',
+              description: 'Automatically discovers books on a topic, finds their PDFs, validates them, and adds them to the knowledge pool. This is a complete workflow that: 1) Discovers relevant books, 2) Searches for verified PDF downloads, 3) Checks for duplicates, 4) Downloads and validates PDFs, 5) Automatically adds validated PDFs to the pool. Use this when the user wants to find and acquire PDF books on a specific topic.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  topic: {
+                    type: 'string',
+                    description: 'The topic to search for (e.g., "machine learning", "quantum physics", "medieval history")'
+                  },
+                  maxBooks: {
+                    type: 'number',
+                    description: 'Maximum number of books to discover (default 5, max 10)',
+                    default: 5
+                  },
+                  maxResultsPerBook: {
+                    type: 'number',
+                    description: 'Maximum PDFs to find per book (default 2, max 5)',
+                    default: 2
+                  }
+                },
+                required: ['topic']
+              }
+            });
+          }
+          
           // Add collaboration tools for all agents
           tools.push({
             name: 'web_search',
@@ -3590,6 +3618,73 @@ ${agent.system_prompt}${knowledgeContext}`;
                         } else {
                           console.log('✅ Download successful:', downloadData);
                           toolResult = downloadData;
+                        }
+                      }
+                      
+                      if (toolUseName === 'search_and_acquire_pdfs') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: search_and_acquire_pdfs`);
+                        console.log('   Topic:', toolInput.topic);
+                        console.log('   Max books:', toolInput.maxBooks || 5);
+                        console.log('   Max PDFs per book:', toolInput.maxResultsPerBook || 2);
+                        
+                        try {
+                          const { data: acquireData, error: acquireError } = await supabase.functions.invoke(
+                            'search-and-acquire-pdfs',
+                            {
+                              body: {
+                                topic: toolInput.topic,
+                                maxBooks: toolInput.maxBooks || 5,
+                                maxResultsPerBook: toolInput.maxResultsPerBook || 2
+                              }
+                            }
+                          );
+                          
+                          if (acquireError) {
+                            console.error('❌ Search and acquire error:', acquireError);
+                            toolResult = { success: false, error: acquireError.message };
+                            
+                            const errorText = `\n\n❌ Errore durante la ricerca e acquisizione PDF: ${acquireError.message}\n\n`;
+                            fullResponse += errorText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else {
+                            console.log('✅ Search and acquire completed:', acquireData);
+                            toolResult = acquireData;
+                            
+                            // Format results for user
+                            let resultText = `\n\n📚 **Ricerca e acquisizione PDF completata per: "${toolInput.topic}"**\n\n`;
+                            resultText += `📖 Libri trovati: ${acquireData.books_discovered}\n`;
+                            resultText += `🔎 PDF verificati: ${acquireData.pdfs_found}\n`;
+                            resultText += `📥 PDF in coda per validazione: ${acquireData.pdfs_queued}\n`;
+                            resultText += `♻️ PDF già esistenti: ${acquireData.pdfs_already_existing}\n`;
+                            if (acquireData.pdfs_failed > 0) {
+                              resultText += `❌ PDF falliti: ${acquireData.pdfs_failed}\n`;
+                            }
+                            resultText += `\n`;
+                            
+                            if (acquireData.details && acquireData.details.length > 0) {
+                              resultText += `**Dettagli:**\n\n`;
+                              acquireData.details.forEach((detail: any, idx: number) => {
+                                const statusEmoji = detail.status === 'queued' ? '📥' : detail.status === 'existing' ? '♻️' : '❌';
+                                resultText += `${statusEmoji} **${detail.book_title}** by ${detail.book_authors}\n`;
+                                resultText += `   Status: ${detail.message}\n`;
+                                resultText += `   URL: ${detail.pdf_url.slice(0, 80)}...\n\n`;
+                              });
+                            }
+                            
+                            resultText += `\nI PDF in coda verranno automaticamente validati e aggiunti alla pool se rilevanti.\n\n`;
+                            
+                            fullResponse += resultText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
+                          }
+                        } catch (error) {
+                          console.error('❌ Search and acquire error:', error);
+                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                          toolResult = { success: false, error: errorMessage };
+                          
+                          const errorText = `\n\n❌ Errore durante la ricerca e acquisizione: ${errorMessage}\n\n`;
+                          fullResponse += errorText;
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         }
                       }
                       
