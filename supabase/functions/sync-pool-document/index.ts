@@ -222,19 +222,18 @@ serve(async (req) => {
     // ========================================
     // STEP 5: FALLBACK - Download and extract text from PDF
     // ========================================
-    console.log(`[sync-pool-document] Downloading PDF from bucket: knowledge-pdfs, path: ${poolDoc.file_path}`);
     
-    // Remove bucket name if it's included in the path
-    let cleanPath = poolDoc.file_path;
-    if (cleanPath.startsWith('knowledge-pdfs/')) {
-      cleanPath = cleanPath.replace('knowledge-pdfs/', '');
-    }
+    // Extract bucket name and clean path from file_path
+    // Path format can be: "bucket-name/file.pdf" or just "file.pdf"
+    const pathParts = poolDoc.file_path.split('/');
+    const bucketName = pathParts.length > 1 ? pathParts[0] : 'knowledge-pdfs';
+    const cleanPath = pathParts.length > 1 ? pathParts.slice(1).join('/') : poolDoc.file_path;
     
-    console.log(`[sync-pool-document] Clean path: ${cleanPath}`);
+    console.log(`[sync-pool-document] Downloading PDF from bucket: ${bucketName}, path: ${cleanPath}`);
     
     const { data: fileData, error: downloadError } = await supabase
       .storage
-      .from('knowledge-pdfs')
+      .from(bucketName)
       .download(cleanPath);
 
     if (downloadError || !fileData) {
@@ -255,9 +254,11 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'File not accessible',
-          message: `PDF file not found in storage at path: ${cleanPath}. The document may need to be re-uploaded.`,
+          message: `PDF file not found in storage bucket "${bucketName}" at path: ${cleanPath}. The document may need to be re-uploaded.`,
           documentId,
           agentId,
+          bucket: bucketName,
+          path: cleanPath
         }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
