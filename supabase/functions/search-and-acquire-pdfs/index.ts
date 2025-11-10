@@ -138,9 +138,27 @@ serve(async (req) => {
     console.log(`🔍 [SEARCH & ACQUIRE] Starting direct PDF search for: "${topic}"`);
     console.log(`   Max results: ${maxBooks}`);
     
+    // Get auth info first
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: {
+        headers: {
+          authorization: authHeader
+        }
+      }
+    });
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('Unauthorized');
+    }
     
     const result: AcquisitionResult = {
       success: true,
@@ -151,19 +169,6 @@ serve(async (req) => {
       found_pdfs: [],
       message: ''
     };
-    
-    // Get auth info
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
-    
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user } } = await supabase.auth.getUser(token);
-    
-    if (!user) {
-      throw new Error('Unauthorized');
-    }
     
     // Get agent_id
     const { data: agentData } = await supabase
