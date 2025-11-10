@@ -3651,8 +3651,8 @@ ${agent.system_prompt}${knowledgeContext}`;
                             console.log('✅ Search and acquire completed:', acquireData);
                             toolResult = acquireData;
                             
-                            // Format results for user
-                            let resultText = `\n\n📚 **Ricerca e acquisizione PDF completata per: "${toolInput.topic}"**\n\n`;
+                            // Format initial results (immediate feedback)
+                            let resultText = `\n\n📚 **Ricerca e acquisizione PDF avviata per: "${toolInput.topic}"**\n\n`;
                             resultText += `📖 Libri trovati: ${acquireData.books_discovered}\n`;
                             resultText += `🔎 PDF verificati: ${acquireData.pdfs_found}\n`;
                             resultText += `📥 PDF in coda per validazione: ${acquireData.pdfs_queued}\n`;
@@ -3663,19 +3663,109 @@ ${agent.system_prompt}${knowledgeContext}`;
                             resultText += `\n`;
                             
                             if (acquireData.details && acquireData.details.length > 0) {
-                              resultText += `**Dettagli:**\n\n`;
+                              resultText += `**PDF trovati:**\n\n`;
                               acquireData.details.forEach((detail: any, idx: number) => {
                                 const statusEmoji = detail.status === 'queued' ? '📥' : detail.status === 'existing' ? '♻️' : '❌';
                                 resultText += `${statusEmoji} **${detail.book_title}** by ${detail.book_authors}\n`;
-                                resultText += `   Status: ${detail.message}\n`;
-                                resultText += `   URL: ${detail.pdf_url.slice(0, 80)}...\n\n`;
+                                resultText += `   ${detail.message}\n\n`;
                               });
                             }
                             
-                            resultText += `\nI PDF in coda verranno automaticamente validati e aggiunti alla pool se rilevanti.\n\n`;
+                            resultText += `\n⏳ Validazione in corso... riceverai un aggiornamento tra pochi secondi.\n\n`;
                             
                             fullResponse += resultText;
                             await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
+                            
+                            // Save the initial message
+                            await supabase
+                              .from('agent_messages')
+                              .update({ content: fullResponse })
+                              .eq('id', placeholderMsg.id);
+                            
+                            // Complete the stream
+                            await sendSSE(JSON.stringify({ 
+                              type: 'complete', 
+                              conversationId: conversation.id 
+                            }));
+                            await closeStream();
+                            
+                            // ASYNC: Wait for validation and post deterministic results
+                            (async () => {
+                              try {
+                                console.log('⏳ [ASYNC] Waiting 5 seconds for validation to complete...');
+                                await new Promise(resolve => setTimeout(resolve, 5000));
+                                
+                                // Query validation results
+                                const { data: queuedDocs } = await supabase
+                                  .from('pdf_download_queue')
+                                  .select('expected_title, expected_author, status, validation_result, error_message, document_id')
+                                  .eq('conversation_id', conversationId)
+                                  .in('status', ['completed', 'rejected', 'processing', 'validating'])
+                                  .order('created_at', { ascending: false })
+                                  .limit(20);
+                                
+                                if (!queuedDocs || queuedDocs.length === 0) {
+                                  console.log('ℹ️ [ASYNC] No queued documents found');
+                                  return;
+                                }
+                                
+                                // Format deterministic results message
+                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione: "${toolInput.topic}"\n\n`;
+                                
+                                const validated = queuedDocs.filter(d => d.status === 'completed');
+                                const rejected = queuedDocs.filter(d => d.status === 'rejected');
+                                const processing = queuedDocs.filter(d => d.status === 'processing' || d.status === 'validating');
+                                
+                                feedbackMsg += `✅ **Validati e aggiunti alla pool**: ${validated.length}\n`;
+                                feedbackMsg += `❌ **Rifiutati**: ${rejected.length}\n`;
+                                if (processing.length > 0) {
+                                  feedbackMsg += `⏳ **Ancora in elaborazione**: ${processing.length}\n`;
+                                }
+                                feedbackMsg += `\n`;
+                                
+                                if (validated.length > 0) {
+                                  feedbackMsg += `### ✅ PDF Aggiunti alla Pool\n\n`;
+                                  validated.forEach((doc: any) => {
+                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author}\n`;
+                                  });
+                                  feedbackMsg += `\n`;
+                                }
+                                
+                                if (rejected.length > 0) {
+                                  feedbackMsg += `### ❌ PDF Rifiutati (non rilevanti)\n\n`;
+                                  rejected.forEach((doc: any) => {
+                                    const validationResult = doc.validation_result || {};
+                                    const motivazione = validationResult.motivazione || doc.error_message || 'Non rilevante per il topic';
+                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author}\n`;
+                                    feedbackMsg += `  _Motivo: ${motivazione}_\n\n`;
+                                  });
+                                }
+                                
+                                if (processing.length > 0) {
+                                  feedbackMsg += `### ⏳ In Elaborazione\n\n`;
+                                  feedbackMsg += `${processing.length} PDF sono ancora in fase di validazione. Riceveranno un ulteriore aggiornamento quando sarà completato.\n\n`;
+                                }
+                                
+                                feedbackMsg += `---\n\n`;
+                                
+                                // Insert deterministic feedback message
+                                await supabase
+                                  .from('agent_messages')
+                                  .insert({
+                                    conversation_id: conversation.id,
+                                    role: 'assistant',
+                                    content: feedbackMsg,
+                                    llm_provider: llmProvider
+                                  });
+                                
+                                console.log('✅ [ASYNC] Validation feedback posted to chat');
+                              } catch (asyncError) {
+                                console.error('❌ [ASYNC] Error posting validation feedback:', asyncError);
+                              }
+                            })();
+                            
+                            // Exit early - don't continue with AI generation
+                            return;
                           }
                         } catch (error) {
                           console.error('❌ Search and acquire error:', error);
