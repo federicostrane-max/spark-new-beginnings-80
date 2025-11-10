@@ -82,3 +82,9 @@ timeout = 600
 
 [functions.detailed-gap-analysis]
 verify_jwt = true
+
+[functions.web-scrape]
+verify_jwt = true
+
+[functions.web-search]
+verify_jwt = true
