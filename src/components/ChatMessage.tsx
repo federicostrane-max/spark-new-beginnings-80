@@ -156,36 +156,51 @@ export const ChatMessage = ({
   };
 
   const touchStartY = useRef(0);
+  const mouseStartY = useRef(0);
   const hasMoved = useRef(false);
 
   const handleLongPressStart = (e: React.TouchEvent | React.MouseEvent) => {
     if (selectionMode) return;
     
-    // Track initial touch position to detect scrolling
+    // Track initial position to detect scrolling/dragging
     if ('touches' in e) {
       touchStartY.current = e.touches[0].clientY;
+      hasMoved.current = false;
+    } else if ('clientY' in e) {
+      mouseStartY.current = e.clientY;
       hasMoved.current = false;
     }
     
     setIsLongPressing(true);
     longPressTimer.current = setTimeout(() => {
-      // Only trigger long press if user hasn't scrolled
+      // Only trigger long press if user hasn't moved
       if (!hasMoved.current && onLongPress) {
         onLongPress();
-        justEnteredSelectionMode.current = true; // Set flag to prevent immediate deselection
+        justEnteredSelectionMode.current = true;
         // Vibrazione per feedback tattile (se disponibile)
         if (navigator.vibrate) {
           navigator.vibrate(50);
         }
       }
       setIsLongPressing(false);
-    }, 800); // Reduced from 1200ms to 800ms for better UX
+    }, 800);
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
     // Detect if user is scrolling
     if (touchStartY.current) {
       const deltaY = Math.abs(e.touches[0].clientY - touchStartY.current);
+      if (deltaY > 10) { // 10px threshold
+        hasMoved.current = true;
+        handleLongPressEnd();
+      }
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    // Detect if user is dragging
+    if (mouseStartY.current) {
+      const deltaY = Math.abs(e.clientY - mouseStartY.current);
       if (deltaY > 10) { // 10px threshold
         hasMoved.current = true;
         handleLongPressEnd();
@@ -261,6 +276,7 @@ export const ChatMessage = ({
       onTouchMove={!selectionMode ? handleTouchMove : undefined}
       onTouchCancel={handleLongPressEnd}
       onMouseDown={!selectionMode ? handleLongPressStart : undefined}
+      onMouseMove={!selectionMode ? handleMouseMove : undefined}
       onMouseUp={handleLongPressEnd}
       onMouseLeave={handleLongPressEnd}
     >

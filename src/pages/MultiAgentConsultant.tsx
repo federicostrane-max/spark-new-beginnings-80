@@ -86,22 +86,22 @@ export default function MultiAgentConsultant() {
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
   const agentHealth = useAgentHealth(agents.map(a => a.id));
 
-  // Intelligent auto-scroll
+  // Intelligent auto-scroll - solo quando l'utente è vicino al fondo
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     
+    // Aggiorna lo stato solo in base alla posizione corrente dello scroll
     setIsUserAtBottom(distanceFromBottom < 50);
     
+    // Cancella eventuali timeout precedenti
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
-    scrollTimeoutRef.current = setTimeout(() => {
-      setIsUserAtBottom(true);
-    }, 3000);
   };
 
   useEffect(() => {
+    // Auto-scroll solo se l'utente è vicino al fondo E non sta attivamente scrollando
     if (isUserAtBottom && !streamingConversationId) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
@@ -455,10 +455,13 @@ export default function MultiAgentConsultant() {
       
       setMessages(mappedMessages);
       
-      // Force scroll to last message after loading
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-      }, 100);
+      // Scroll automatico solo se è la prima volta che si carica la conversazione
+      // Altrimenti l'utente potrebbe essere nel mezzo della lettura
+      if (mappedMessages.length > 0 && !messages.length) {
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+        }, 100);
+      }
     } catch (error: any) {
       console.error("Error loading conversation:", error);
     } finally {
