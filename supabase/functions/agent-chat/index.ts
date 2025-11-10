@@ -2893,7 +2893,6 @@ ${agent.system_prompt}${knowledgeContext}`;
             tools.push({
               name: 'search_and_acquire_pdfs',
               description: 'Automatically discovers books on a topic, finds their PDFs, validates them, and adds them to the knowledge pool. This is a complete workflow that: 1) Discovers relevant books, 2) Searches for verified PDF downloads, 3) Checks for duplicates, 4) Downloads and validates PDFs, 5) Automatically adds validated PDFs to the pool. Use this when the user wants to find and acquire PDF books on a specific topic.',
-              requires_approval: true,
               input_schema: {
                 type: 'object',
                 properties: {
