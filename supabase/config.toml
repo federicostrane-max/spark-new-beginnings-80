@@ -97,3 +97,6 @@ verify_jwt = true
 
 [functions.web-search]
 verify_jwt = true
+
+[functions.process-pdf-queue]
+verify_jwt = true

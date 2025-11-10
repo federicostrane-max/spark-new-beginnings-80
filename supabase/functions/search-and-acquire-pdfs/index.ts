@@ -103,8 +103,46 @@ serve(async (req) => {
       );
     }
     
-    // STEP 3: Check for duplicates and download
-    console.log(`📥 [STEP 3] Processing ${pdfs.length} PDFs (checking duplicates + downloading)`);
+    // STEP 3: Check for duplicates and queue downloads
+    console.log(`📥 [STEP 3] Processing ${pdfs.length} PDFs (checking duplicates + queueing)`);
+    
+    // Get agent_id and conversation_id from request
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      throw new Error('No authorization header');
+    }
+    
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user } } = await supabase.auth.getUser(token);
+    
+    if (!user) {
+      throw new Error('Unauthorized');
+    }
+    
+    // Get agent_id from first active agent (or we could pass it in the request)
+    const { data: agentData } = await supabase
+      .from('agents')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('active', true)
+      .limit(1)
+      .single();
+    
+    if (!agentData) {
+      throw new Error('No active agent found');
+    }
+    
+    const agentId = agentData.id;
+    
+    // Get or create conversation
+    const { data: conversationId } = await supabase.rpc('get_or_create_conversation', {
+      p_user_id: user.id,
+      p_agent_id: agentId
+    });
+    
+    if (!conversationId) {
+      throw new Error('Failed to get conversation');
+    }
     
     for (const pdf of pdfs) {
       console.log(`\n🔄 Processing: ${pdf.bookTitle} by ${pdf.bookAuthors}`);
@@ -131,45 +169,61 @@ serve(async (req) => {
           continue;
         }
         
-        // Not a duplicate - proceed with download
-        console.log(`   📥 Queueing download...`);
+        // Check if already in queue
+        const { data: existingQueue } = await supabase
+          .from('pdf_download_queue')
+          .select('id, status')
+          .eq('url', pdf.pdfUrl)
+          .eq('conversation_id', conversationId)
+          .maybeSingle();
         
-        const { data: downloadData, error: downloadError } = await supabase.functions.invoke(
-          'download-pdf-tool',
-          {
-            body: {
-              url: pdf.pdfUrl,
-              search_query: topic,
-              expected_title: pdf.bookTitle,
-              expected_author: pdf.bookAuthors
-            }
-          }
-        );
-        
-        if (downloadError) {
-          console.error(`   ❌ Download failed:`, downloadError);
-          result.pdfs_failed++;
-          result.details.push({
-            book_title: pdf.bookTitle,
-            book_authors: pdf.bookAuthors,
-            pdf_url: pdf.pdfUrl,
-            status: 'failed',
-            message: `Download failed: ${downloadError.message || 'Unknown error'}`
-          });
-        } else {
-          console.log(`   ✅ Queued for processing`);
+        if (existingQueue) {
+          console.log(`   ⏳ Already in queue: ${existingQueue.status}`);
           result.pdfs_queued++;
           result.details.push({
             book_title: pdf.bookTitle,
             book_authors: pdf.bookAuthors,
             pdf_url: pdf.pdfUrl,
             status: 'queued',
-            message: 'Successfully queued for validation and processing'
+            message: `Already in download queue: ${existingQueue.status}`
           });
+          continue;
         }
         
-        // Rate limiting between downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Add to download queue
+        const { error: queueError } = await supabase
+          .from('pdf_download_queue')
+          .insert({
+            url: pdf.pdfUrl,
+            search_query: topic,
+            expected_title: pdf.bookTitle,
+            expected_author: pdf.bookAuthors,
+            agent_id: agentId,
+            conversation_id: conversationId,
+            status: 'pending'
+          });
+        
+        if (queueError) {
+          console.error(`   ❌ Failed to queue:`, queueError);
+          result.pdfs_failed++;
+          result.details.push({
+            book_title: pdf.bookTitle,
+            book_authors: pdf.bookAuthors,
+            pdf_url: pdf.pdfUrl,
+            status: 'failed',
+            message: `Failed to queue: ${queueError.message}`
+          });
+        } else {
+          console.log(`   ✅ Queued for download`);
+          result.pdfs_queued++;
+          result.details.push({
+            book_title: pdf.bookTitle,
+            book_authors: pdf.bookAuthors,
+            pdf_url: pdf.pdfUrl,
+            status: 'queued',
+            message: 'Successfully queued for download'
+          });
+        }
         
       } catch (error) {
         console.error(`   ❌ Error processing PDF:`, error);
@@ -183,6 +237,14 @@ serve(async (req) => {
         });
       }
     }
+    
+    // Start background processing
+    console.log('🚀 Starting background PDF processing...');
+    supabase.functions.invoke('process-pdf-queue', {
+      body: { conversationId }
+    }).catch(err => {
+      console.error('Failed to invoke background processor:', err);
+    });
     
     console.log(`\n✅ [SEARCH & ACQUIRE] Completed!`);
     console.log(`   📚 Books discovered: ${result.books_discovered}`);
