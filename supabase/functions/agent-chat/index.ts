@@ -2431,7 +2431,6 @@ Deno.serve(async (req) => {
           console.log('Messages:', JSON.stringify(anthropicMessages, null, 2));
 
           // Deterministic workflow removed - agent now uses AI tool calling
-          let workflowHandled = false; // Default: no workflow handled the request
           
           // ========================================
           // DETECT "MODIFICA PROMPT @AGENT" COMMAND
@@ -2739,20 +2738,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
             console.log('ℹ️ [MENTIONS] No @ mentions detected, proceeding normally');
           }
           
-          
-          // If workflow didn't handle it, proceed with normal AI call
-          if (workflowHandled) {
-            console.log('✅ [WORKFLOW] Request handled deterministically, AI call skipped');
-            return;
-          } else {
-            console.log('🤖 [WORKFLOW] Workflow not handled, proceeding with AI call for semantic processing');
-            if (agent.slug === 'knowledge-search-expert') {
-              console.log('⚠️ [WORKFLOW] Message NOT handled by automated workflow for Knowledge Search Expert');
-              console.log(`   Intent detected: ${userIntent?.type || 'UNKNOWN'}`);
-              console.log(`   Message: ${message.slice(0, 200)}`);
-              console.log('   → Passing to AI for semantic analysis');
-            }
-          }
+          console.log('🤖 [AI] Proceeding with AI tool calling for request processing');
           
           // ========================================
           // KNOWLEDGE BASE: Retrieve relevant context

@@ -11,6 +11,7 @@ import Presentation from "./pages/Presentation";
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
 import UpdateChePrompt from "./pages/UpdateChePrompt";
+import UpdateDocumentFinderPrompt from "./pages/UpdateDocumentFinderPrompt";
 import NotFound from "./pages/NotFound";
 
 
@@ -73,6 +74,14 @@ const App = () => {
                 element={
                   <ProtectedRoute>
                     <UpdateChePrompt />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/update-document-finder-prompt"
+                element={
+                  <ProtectedRoute>
+                    <UpdateDocumentFinderPrompt />
                   </ProtectedRoute>
                 }
               />
