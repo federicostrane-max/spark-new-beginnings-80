@@ -3597,76 +3597,60 @@ ${agent.system_prompt}${knowledgeContext}`;
                         toolCallCount++;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: web_search`);
                         console.log('   Query:', toolInput.query);
-                        console.log('   Num results:', toolInput.num_results || 5);
-                        
-                        const numResults = Math.min(toolInput.num_results || 5, 10);
+                        console.log('   Num results:', toolInput.num_results);
+                        console.log('   Scrape results:', toolInput.scrape_results);
                         
                         try {
-                          const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
-                          const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+                          const { data: searchData, error: searchError } = await supabase.functions.invoke(
+                            'web-search',
+                            {
+                              body: {
+                                query: toolInput.query,
+                                numResults: toolInput.num_results || 5,
+                                scrapeResults: toolInput.scrape_results || false
+                              }
+                            }
+                          );
                           
-                          if (!apiKey || !searchEngineId) {
-                            console.error('❌ Missing Google Custom Search credentials');
-                            toolResult = { success: false, error: 'Google Custom Search not configured' };
+                          if (searchError) {
+                            console.error('❌ Search error:', searchError);
+                            toolResult = { success: false, error: searchError.message };
                             
-                            const errorText = `\n\n❌ Errore: ricerca web non configurata.\n\n`;
+                            const errorText = `\n\n❌ Errore durante la ricerca web: ${searchError.message}\n\n`;
+                            fullResponse += errorText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else if (!searchData.success) {
+                            console.error('❌ Search failed:', searchData.error);
+                            toolResult = { success: false, error: searchData.error };
+                            
+                            const errorText = `\n\n❌ Errore nella ricerca: ${searchData.error}\n\n`;
                             fullResponse += errorText;
                             await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
-                            const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(toolInput.query)}&num=${numResults}`;
+                            const results = searchData.results || [];
+                            console.log(`✅ Found ${results.length} results via ScrapingBee`);
                             
-                            const searchResponse = await fetch(url);
+                            toolResult = {
+                              success: true,
+                              query: toolInput.query,
+                              results_count: results.length,
+                              total_results: searchData.totalResults,
+                              results: results
+                            };
                             
-                            if (!searchResponse.ok) {
-                              const errorText = await searchResponse.text();
-                              console.error('❌ Google API Error:', searchResponse.status, errorText);
-                              toolResult = { success: false, error: `Google Search failed: ${searchResponse.status}` };
-                              
-                              const errorMsg = `\n\n❌ Errore nella ricerca: ${searchResponse.status}\n\n`;
-                              fullResponse += errorMsg;
-                              await sendSSE(JSON.stringify({ type: 'content', text: errorMsg }));
-                            } else {
-                              const data = await searchResponse.json();
-                              
-                              if (!data.items || data.items.length === 0) {
-                                console.log('ℹ️ No results found');
-                                toolResult = {
-                                  success: true,
-                                  query: toolInput.query,
-                                  results_count: 0,
-                                  results: []
-                                };
-                                
-                                const noResultsText = `\n\n📭 Nessun risultato trovato per: "${toolInput.query}"\n\n`;
-                                fullResponse += noResultsText;
-                                await sendSSE(JSON.stringify({ type: 'content', text: noResultsText }));
-                              } else {
-                                const results = data.items.map((item: any) => ({
-                                  title: item.title,
-                                  url: item.link,
-                                  snippet: item.snippet,
-                                  displayLink: item.displayLink
-                                }));
-                                
-                                console.log(`✅ Found ${results.length} results`);
-                                toolResult = {
-                                  success: true,
-                                  query: toolInput.query,
-                                  results_count: results.length,
-                                  results: results
-                                };
-                                
-                                // Aggiungi risultati nella risposta
-                                let searchText = `\n\n🔍 **Risultati ricerca per**: "${toolInput.query}"\n\n`;
-                                results.forEach((r: any, idx: number) => {
-                                  searchText += `**${idx + 1}. ${r.title}**\n`;
-                                  searchText += `   ${r.snippet}\n`;
-                                  searchText += `   🔗 [${r.displayLink}](${r.url})\n\n`;
-                                });
-                                fullResponse += searchText;
-                                await sendSSE(JSON.stringify({ type: 'content', text: searchText }));
+                            // Aggiungi risultati nella risposta
+                            let searchText = `\n\n🔍 **Risultati ricerca per**: "${toolInput.query}" (${searchData.totalResults} totali)\n\n`;
+                            results.forEach((r: any, idx: number) => {
+                              searchText += `**${idx + 1}. ${r.title}**\n`;
+                              searchText += `   ${r.snippet}\n`;
+                              searchText += `   🔗 ${r.url}\n`;
+                              if (r.scrapedContent) {
+                                searchText += `   📄 ${r.scrapedContent.slice(0, 200)}...\n`;
                               }
-                            }
+                              searchText += `\n`;
+                            });
+                            fullResponse += searchText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: searchText }));
                           }
                         } catch (error) {
                           console.error('❌ Web search error:', error);
