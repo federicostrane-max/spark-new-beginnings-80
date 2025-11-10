@@ -9,23 +9,122 @@ const corsHeaders = {
 interface SearchAndAcquireRequest {
   topic: string;
   maxBooks?: number;
-  maxResultsPerBook?: number;
+}
+
+interface PDFResult {
+  title: string;
+  url: string;
+  source: string;
+  snippet?: string;
+  credibilityScore: number;
 }
 
 interface AcquisitionResult {
   success: boolean;
-  books_discovered: number;
   pdfs_found: number;
   pdfs_queued: number;
   pdfs_already_existing: number;
   pdfs_failed: number;
-  details: Array<{
-    book_title: string;
-    book_authors: string;
-    pdf_url: string;
+  found_pdfs: Array<{
+    title: string;
+    url: string;
+    source: string;
     status: 'queued' | 'existing' | 'failed';
-    message: string;
   }>;
+  message: string;
+}
+
+// Blacklist domains that require login or are unreliable
+const BLACKLIST_DOMAINS = [
+  'scribd.com',
+  'academia.edu',
+  'researchgate.net',
+  'chegg.com',
+  'coursehero.com',
+  'jstor.org'
+];
+
+async function validatePdfUrl(url: string, title: string): Promise<{
+  valid: boolean;
+  contentType?: string;
+  fileSize?: number;
+  credibilityScore?: number;
+}> {
+  try {
+    const domain = new URL(url).hostname;
+    
+    // Check blacklist
+    if (BLACKLIST_DOMAINS.some(d => domain.includes(d))) {
+      console.log(`    ⛔ Blacklisted domain: ${domain}`);
+      return { valid: false };
+    }
+    
+    // HEAD request with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+    
+    const response = await fetch(url, { 
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    const contentType = response.headers.get('content-type') || '';
+    
+    if (!contentType.includes('application/pdf')) {
+      console.log(`    ❌ Not a PDF: ${contentType}`);
+      return { valid: false };
+    }
+    
+    const fileSize = parseInt(response.headers.get('content-length') || '0');
+    
+    // Check size (min 100KB, max 100MB)
+    if (fileSize > 0 && (fileSize < 100000 || fileSize > 100000000)) {
+      console.log(`    ⚠️ Size out of range: ${(fileSize / 1024 / 1024).toFixed(1)}MB`);
+      return { valid: false };
+    }
+    
+    // Calculate credibility score
+    let credibilityScore = 3; // Default
+    
+    if (domain.endsWith('.edu')) credibilityScore = 10;
+    else if (domain.includes('arxiv')) credibilityScore = 9;
+    else if (['springer.com', 'ieee.org', 'acm.org', 'nature.com', 'science.org'].some(d => domain.includes(d))) {
+      credibilityScore = 8;
+    }
+    else if (['oreilly.com', 'manning.com', 'packtpub.com'].some(d => domain.includes(d))) {
+      credibilityScore = 6;
+    }
+    
+    // Boost if title matches URL
+    const urlLower = url.toLowerCase();
+    const titleWords = title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const matchingWords = titleWords.filter(word => urlLower.includes(word));
+    
+    if (matchingWords.length >= 2) {
+      credibilityScore = Math.min(10, credibilityScore + 2);
+      console.log(`    🎯 Title match boost: +2 → ${credibilityScore}`);
+    }
+    
+    console.log(`    ✅ Valid PDF: ${(fileSize / 1024 / 1024).toFixed(1)}MB, score: ${credibilityScore}`);
+    
+    return {
+      valid: true,
+      contentType,
+      fileSize,
+      credibilityScore
+    };
+    
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') {
+      console.log(`    ⏱️ Timeout`);
+    } else {
+      console.log(`    ❌ Validation error: ${(error as Error).message}`);
+    }
+    return { valid: false };
+  }
 }
 
 serve(async (req) => {
@@ -34,10 +133,10 @@ serve(async (req) => {
   }
 
   try {
-    const { topic, maxBooks = 5, maxResultsPerBook = 2 }: SearchAndAcquireRequest = await req.json();
+    const { topic, maxBooks = 10 }: SearchAndAcquireRequest = await req.json();
     
-    console.log(`🔍 [SEARCH & ACQUIRE] Starting for topic: "${topic}"`);
-    console.log(`   Max books: ${maxBooks}, Max PDFs per book: ${maxResultsPerBook}`);
+    console.log(`🔍 [SEARCH & ACQUIRE] Starting direct PDF search for: "${topic}"`);
+    console.log(`   Max results: ${maxBooks}`);
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -45,68 +144,15 @@ serve(async (req) => {
     
     const result: AcquisitionResult = {
       success: true,
-      books_discovered: 0,
       pdfs_found: 0,
       pdfs_queued: 0,
       pdfs_already_existing: 0,
       pdfs_failed: 0,
-      details: []
+      found_pdfs: [],
+      message: ''
     };
     
-    // STEP 1: Book Discovery
-    console.log(`📚 [STEP 1] Discovering books on topic: ${topic}`);
-    
-    const { data: discoveryData, error: discoveryError } = await supabase.functions.invoke(
-      'book-discovery',
-      { body: { topic, maxBooks } }
-    );
-    
-    if (discoveryError || !discoveryData?.books || discoveryData.books.length === 0) {
-      console.error('❌ Book discovery failed:', discoveryError);
-      result.success = false;
-      return new Response(
-        JSON.stringify({ ...result, error: 'Failed to discover books' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    const books = discoveryData.books;
-    result.books_discovered = books.length;
-    console.log(`✅ [STEP 1] Discovered ${books.length} books`);
-    
-    // STEP 2: PDF Search & Validation
-    console.log(`🔎 [STEP 2] Searching for PDFs for ${books.length} books`);
-    
-    const { data: pdfData, error: pdfError } = await supabase.functions.invoke(
-      'pdf-search-with-validation',
-      { body: { books, maxResultsPerBook, maxUrlsToCheck: 15 } }
-    );
-    
-    if (pdfError || !pdfData?.pdfs) {
-      console.error('❌ PDF search failed:', pdfError);
-      result.success = false;
-      return new Response(
-        JSON.stringify({ ...result, error: 'Failed to search for PDFs' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    const pdfs = pdfData.pdfs;
-    result.pdfs_found = pdfs.length;
-    console.log(`✅ [STEP 2] Found ${pdfs.length} verified PDFs`);
-    
-    if (pdfs.length === 0) {
-      console.log('ℹ️ No PDFs found - completing early');
-      return new Response(
-        JSON.stringify(result),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    // STEP 3: Check for duplicates and queue downloads
-    console.log(`📥 [STEP 3] Processing ${pdfs.length} PDFs (checking duplicates + queueing)`);
-    
-    // Get agent_id and conversation_id from request
+    // Get auth info
     const authHeader = req.headers.get('authorization');
     if (!authHeader) {
       throw new Error('No authorization header');
@@ -119,7 +165,7 @@ serve(async (req) => {
       throw new Error('Unauthorized');
     }
     
-    // Get agent_id from first active agent (or we could pass it in the request)
+    // Get agent_id
     const { data: agentData } = await supabase
       .from('agents')
       .select('id')
@@ -144,27 +190,101 @@ serve(async (req) => {
       throw new Error('Failed to get conversation');
     }
     
-    for (const pdf of pdfs) {
-      console.log(`\n🔄 Processing: ${pdf.bookTitle} by ${pdf.bookAuthors}`);
-      console.log(`   URL: ${pdf.pdfUrl}`);
+    // STEP 1: Direct PDF search on SerpAPI
+    console.log(`📚 [STEP 1] Direct SerpAPI search with filetype:pdf`);
+    
+    const apiKey = Deno.env.get('SERPAPI_API_KEY');
+    if (!apiKey) {
+      throw new Error('Missing SerpAPI API key');
+    }
+    
+    const searchQuery = `"${topic}" filetype:pdf`;
+    const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks}&hl=en&lr=lang_en`;
+    
+    console.log(`🔎 Query: ${searchQuery}`);
+    
+    const searchResponse = await fetch(searchUrl);
+    
+    if (!searchResponse.ok) {
+      throw new Error(`SerpAPI request failed: ${searchResponse.status}`);
+    }
+    
+    const searchData = await searchResponse.json();
+    
+    if (!searchData.organic_results || searchData.organic_results.length === 0) {
+      console.log('ℹ️ No PDF results found');
+      result.message = `No PDFs found for topic: ${topic}`;
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const organicResults = searchData.organic_results;
+    console.log(`✅ Found ${organicResults.length} results from Google`);
+    
+    // STEP 2: Light validation + deduplication + queueing
+    console.log(`🔄 [STEP 2] Validating and queueing PDFs`);
+    
+    const validatedPdfs: PDFResult[] = [];
+    
+    for (let i = 0; i < organicResults.length; i++) {
+      const item = organicResults[i];
+      const url = item.link;
+      const title = item.title || 'Unknown Title';
+      const snippet = item.snippet || '';
       
+      console.log(`\n📄 [${i + 1}/${organicResults.length}] ${title}`);
+      console.log(`   URL: ${url.slice(0, 80)}...`);
+      
+      // Light validation
+      const validation = await validatePdfUrl(url, title);
+      
+      if (!validation.valid) {
+        result.pdfs_failed++;
+        continue;
+      }
+      
+      validatedPdfs.push({
+        title,
+        url,
+        source: new URL(url).hostname,
+        snippet,
+        credibilityScore: validation.credibilityScore || 3
+      });
+    }
+    
+    result.pdfs_found = validatedPdfs.length;
+    console.log(`\n✅ [STEP 2] Validated ${validatedPdfs.length} PDFs`);
+    
+    if (validatedPdfs.length === 0) {
+      result.message = `Found ${organicResults.length} results but none passed validation`;
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // STEP 3: Check duplicates and queue
+    console.log(`\n📥 [STEP 3] Checking duplicates and queueing`);
+    
+    for (const pdf of validatedPdfs) {
       try {
-        // Check if PDF already exists in knowledge base
+        // Check if already in knowledge base
         const { data: existingDoc } = await supabase
           .from('knowledge_documents')
           .select('id, file_name')
-          .eq('source_url', pdf.pdfUrl)
+          .eq('source_url', pdf.url)
           .maybeSingle();
         
         if (existingDoc) {
           console.log(`   ✅ Already exists: ${existingDoc.file_name}`);
           result.pdfs_already_existing++;
-          result.details.push({
-            book_title: pdf.bookTitle,
-            book_authors: pdf.bookAuthors,
-            pdf_url: pdf.pdfUrl,
-            status: 'existing',
-            message: `Already in knowledge base: ${existingDoc.file_name}`
+          result.found_pdfs.push({
+            title: pdf.title,
+            url: pdf.url,
+            source: pdf.source,
+            status: 'existing'
           });
           continue;
         }
@@ -173,81 +293,80 @@ serve(async (req) => {
         const { data: existingQueue } = await supabase
           .from('pdf_download_queue')
           .select('id, status')
-          .eq('url', pdf.pdfUrl)
+          .eq('url', pdf.url)
           .eq('conversation_id', conversationId)
           .maybeSingle();
         
         if (existingQueue) {
-          console.log(`   ⏳ Already in queue: ${existingQueue.status}`);
+          console.log(`   ⏳ Already queued: ${existingQueue.status}`);
           result.pdfs_queued++;
-          result.details.push({
-            book_title: pdf.bookTitle,
-            book_authors: pdf.bookAuthors,
-            pdf_url: pdf.pdfUrl,
-            status: 'queued',
-            message: `Already in download queue: ${existingQueue.status}`
+          result.found_pdfs.push({
+            title: pdf.title,
+            url: pdf.url,
+            source: pdf.source,
+            status: 'queued'
           });
           continue;
         }
         
-        // Add to download queue
+        // Add to queue
         const { error: queueError } = await supabase
           .from('pdf_download_queue')
           .insert({
-            url: pdf.pdfUrl,
+            url: pdf.url,
             search_query: topic,
-            expected_title: pdf.bookTitle,
-            expected_author: pdf.bookAuthors,
+            expected_title: pdf.title,
             agent_id: agentId,
             conversation_id: conversationId,
+            source: pdf.source,
             status: 'pending'
           });
         
         if (queueError) {
           console.error(`   ❌ Failed to queue:`, queueError);
           result.pdfs_failed++;
-          result.details.push({
-            book_title: pdf.bookTitle,
-            book_authors: pdf.bookAuthors,
-            pdf_url: pdf.pdfUrl,
-            status: 'failed',
-            message: `Failed to queue: ${queueError.message}`
+          result.found_pdfs.push({
+            title: pdf.title,
+            url: pdf.url,
+            source: pdf.source,
+            status: 'failed'
           });
         } else {
           console.log(`   ✅ Queued for download`);
           result.pdfs_queued++;
-          result.details.push({
-            book_title: pdf.bookTitle,
-            book_authors: pdf.bookAuthors,
-            pdf_url: pdf.pdfUrl,
-            status: 'queued',
-            message: 'Successfully queued for download'
+          result.found_pdfs.push({
+            title: pdf.title,
+            url: pdf.url,
+            source: pdf.source,
+            status: 'queued'
           });
         }
         
       } catch (error) {
         console.error(`   ❌ Error processing PDF:`, error);
         result.pdfs_failed++;
-        result.details.push({
-          book_title: pdf.bookTitle,
-          book_authors: pdf.bookAuthors,
-          pdf_url: pdf.pdfUrl,
-          status: 'failed',
-          message: `Processing error: ${error instanceof Error ? error.message : 'Unknown'}`
+        result.found_pdfs.push({
+          title: pdf.title,
+          url: pdf.url,
+          source: pdf.source,
+          status: 'failed'
         });
       }
     }
     
     // Start background processing
-    console.log('🚀 Starting background PDF processing...');
-    supabase.functions.invoke('process-pdf-queue', {
-      body: { conversationId }
-    }).catch(err => {
-      console.error('Failed to invoke background processor:', err);
-    });
+    if (result.pdfs_queued > 0) {
+      console.log(`\n🚀 Starting background PDF download processing...`);
+      supabase.functions.invoke('process-pdf-queue', {
+        body: { conversationId }
+      }).catch(err => {
+        console.error('Failed to invoke background processor:', err);
+      });
+    }
+    
+    result.message = `Found ${result.pdfs_found} PDFs: ${result.pdfs_queued} queued for download, ${result.pdfs_already_existing} already in pool`;
     
     console.log(`\n✅ [SEARCH & ACQUIRE] Completed!`);
-    console.log(`   📚 Books discovered: ${result.books_discovered}`);
     console.log(`   🔎 PDFs found: ${result.pdfs_found}`);
     console.log(`   📥 PDFs queued: ${result.pdfs_queued}`);
     console.log(`   ♻️ Already existing: ${result.pdfs_already_existing}`);
@@ -265,12 +384,12 @@ serve(async (req) => {
       JSON.stringify({ 
         success: false,
         error: errorMessage,
-        books_discovered: 0,
         pdfs_found: 0,
         pdfs_queued: 0,
         pdfs_already_existing: 0,
         pdfs_failed: 0,
-        details: []
+        found_pdfs: [],
+        message: `Error: ${errorMessage}`
       }),
       { 
         status: 500,

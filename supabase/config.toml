@@ -61,12 +61,6 @@ verify_jwt = true
 [functions.upload-pdf-to-shared-pool]
 verify_jwt = true
 
-[functions.book-discovery]
-verify_jwt = true
-
-[functions.pdf-search-with-validation]
-verify_jwt = true
-
 [functions.metadata-extractor]
 verify_jwt = true
 
