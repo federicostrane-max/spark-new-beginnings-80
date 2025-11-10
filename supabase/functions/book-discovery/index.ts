@@ -45,7 +45,7 @@ serve(async (req) => {
     for (const query of discoveryQueries) {
       console.log(`🔍 Discovery query: ${query}`);
       
-      const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10`;
+      const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10&hl=en&lr=lang_en`;
       
       const response = await fetch(url);
       

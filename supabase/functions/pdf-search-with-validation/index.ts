@@ -66,6 +66,15 @@ async function verifyPdfUrl(url: string, bookTitle: string): Promise<{
       return { success: false };
     }
     
+    // Check file size - minimum ~500KB for ~30 pages
+    const fileSize = parseInt(response.headers.get('content-length') || '0');
+    const MIN_FILE_SIZE = 500000; // 500KB minimum (~30 pages)
+    
+    if (fileSize > 0 && fileSize < MIN_FILE_SIZE) {
+      console.log(`    ⚠️ File too small: ${(fileSize / 1024).toFixed(0)}KB (min 500KB required)`);
+      return { success: false };
+    }
+    
     // Check paywall indicators
     const isPaywall = 
       response.headers.get('x-paywall') ||
@@ -102,7 +111,7 @@ async function verifyPdfUrl(url: string, bookTitle: string): Promise<{
       success: true,
       metadata: {
         contentType,
-        fileSize: parseInt(response.headers.get('content-length') || '0'),
+        fileSize,
         domain,
         credibilityScore
       }
@@ -155,7 +164,7 @@ serve(async (req) => {
         console.log(`  🔍 Query: ${query}`);
         
         try {
-          const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10`;
+          const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10&hl=en&lr=lang_en`;
           
           const response = await fetch(url);
           

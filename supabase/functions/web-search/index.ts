@@ -39,8 +39,8 @@ serve(async (req) => {
 
     console.log(`[WebSearch] Searching for: ${query}`);
 
-    // Build SerpAPI URL
-    const searchUrl = `https://serpapi.com/search?api_key=${serpApiKey}&q=${encodeURIComponent(query)}&num=${numResults}`;
+    // Build SerpAPI URL with English language filters
+    const searchUrl = `https://serpapi.com/search?api_key=${serpApiKey}&q=${encodeURIComponent(query)}&num=${numResults}&hl=en&lr=lang_en`;
 
     const searchResponse = await fetch(searchUrl);
 
