@@ -125,11 +125,10 @@ serve(async (req) => {
     
     console.log(`🔍 [PDF VALIDATION] Starting for ${books.length} books`);
     
-    const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
-    const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+    const apiKey = Deno.env.get('SERPAPI_API_KEY');
     
-    if (!apiKey || !searchEngineId) {
-      console.error('❌ [PDF VALIDATION] Missing Google Custom Search credentials');
+    if (!apiKey) {
+      console.error('❌ [PDF VALIDATION] Missing SerpAPI credentials');
       return new Response(
         JSON.stringify({ pdfs: [], error: 'Missing API credentials' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -156,7 +155,7 @@ serve(async (req) => {
         console.log(`  🔍 Query: ${query}`);
         
         try {
-          const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&num=10`;
+          const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10`;
           
           const response = await fetch(url);
           
@@ -167,16 +166,16 @@ serve(async (req) => {
           
           const data = await response.json();
           
-          if (!data.items || data.items.length === 0) {
+          if (!data.organic_results || data.organic_results.length === 0) {
             console.log(`  ℹ️ No results for query`);
             continue;
           }
           
           // Check up to maxUrlsToCheck URLs
-          const urlsToCheck = Math.min(data.items.length, maxUrlsToCheck);
+          const urlsToCheck = Math.min(data.organic_results.length, maxUrlsToCheck);
           
           for (let i = 0; i < urlsToCheck; i++) {
-            const item = data.items[i];
+            const item = data.organic_results[i];
             const pdfUrl = item.link;
             
             // Skip if already found

@@ -26,12 +26,11 @@ serve(async (req) => {
 
   try {
     const { query, numResults = 5, scrapeResults = false }: SearchRequest = await req.json();
-    const googleApiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
-    const googleSearchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+    const serpApiKey = Deno.env.get('SERPAPI_API_KEY');
     const scrapingBeeApiKey = Deno.env.get('SCRAPINGBEE_API_KEY');
 
-    if (!googleApiKey || !googleSearchEngineId) {
-      throw new Error('Google Custom Search API credentials not configured');
+    if (!serpApiKey) {
+      throw new Error('SerpAPI credentials not configured');
     }
 
     if (!query) {
@@ -40,22 +39,22 @@ serve(async (req) => {
 
     console.log(`[WebSearch] Searching for: ${query}`);
 
-    // Build Google Custom Search API URL
-    const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleSearchEngineId}&q=${encodeURIComponent(query)}&num=${numResults}`;
+    // Build SerpAPI URL
+    const searchUrl = `https://serpapi.com/search?api_key=${serpApiKey}&q=${encodeURIComponent(query)}&num=${numResults}`;
 
     const searchResponse = await fetch(searchUrl);
 
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
-      console.error('[WebSearch] Google API error:', searchResponse.status, errorText);
-      throw new Error(`Google Search API error: ${searchResponse.status}`);
+      console.error('[WebSearch] SerpAPI error:', searchResponse.status, errorText);
+      throw new Error(`SerpAPI error: ${searchResponse.status}`);
     }
 
     const searchData = await searchResponse.json();
     const results: SearchResult[] = [];
 
-    if (searchData.items && searchData.items.length > 0) {
-      for (const item of searchData.items) {
+    if (searchData.organic_results && searchData.organic_results.length > 0) {
+      for (const item of searchData.organic_results) {
         const result: SearchResult = {
           title: item.title,
           url: item.link,

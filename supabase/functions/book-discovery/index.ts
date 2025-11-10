@@ -27,11 +27,10 @@ serve(async (req) => {
     
     console.log(`📚 [BOOK DISCOVERY] Starting for topic: "${topic}", maxBooks: ${maxBooks}`);
     
-    const apiKey = Deno.env.get('GOOGLE_CUSTOM_SEARCH_API_KEY');
-    const searchEngineId = Deno.env.get('GOOGLE_SEARCH_ENGINE_ID');
+    const apiKey = Deno.env.get('SERPAPI_API_KEY');
     
-    if (!apiKey || !searchEngineId) {
-      throw new Error('Missing Google Custom Search credentials');
+    if (!apiKey) {
+      throw new Error('Missing SerpAPI API key');
     }
     
     // Phase 1: Execute 3 discovery queries
@@ -46,7 +45,7 @@ serve(async (req) => {
     for (const query of discoveryQueries) {
       console.log(`🔍 Discovery query: ${query}`);
       
-      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(query)}&num=10`;
+      const url = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(query)}&num=10`;
       
       const response = await fetch(url);
       
@@ -57,11 +56,11 @@ serve(async (req) => {
       
       const data = await response.json();
       
-      if (!data.items) continue;
+      if (!data.organic_results) continue;
       
       // Parse results to extract book titles and authors
-      for (const item of data.items) {
-        const text = `${item.title} ${item.snippet}`;
+      for (const item of data.organic_results) {
+        const text = `${item.title} ${item.snippet || ''}`;
         
         // Pattern 1: "Title by Author"
         const pattern1 = /([A-Z][^:]+?)\s+by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/g;
@@ -100,7 +99,7 @@ serve(async (req) => {
           }
           
           // Position scoring (top 3 results)
-          const position = data.items.indexOf(item);
+          const position = data.organic_results.indexOf(item);
           if (position < 3) book.relevanceScore += 3;
           
           book.sourceUrls.push(item.link);
