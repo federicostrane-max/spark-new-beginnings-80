@@ -24,8 +24,8 @@ const CONFIG = {
     vocabulary_alignment: 0.15,
   },
   batch_processing: {
-    batch_size: 100, // Process 100 chunks per batch to avoid timeout
-    max_concurrent: 10, // Reduced concurrent AI calls to avoid rate limiting
+    batch_size: 200, // Increased from 100 to reduce total batches needed
+    max_concurrent: 15, // Increased from 10 for faster parallel processing
   },
   retry: {
     max_attempts: 3,
@@ -216,30 +216,14 @@ serve(async (req) => {
 
     // Helper function to call AI with retry logic
     const callAIWithRetry = async (chunk: any, attempt = 1): Promise<any> => {
-      const analysisPrompt = `Analyze this knowledge chunk against the agent's task requirements.
+      const analysisPrompt = `Analyze chunk vs requirements.
 
-Task Requirements:
-${JSON.stringify(requirements, null, 2)}
+Requirements: ${JSON.stringify(requirements, null, 2)}
+Chunk: ${chunk.content.substring(0, 500)}...
+Category: ${chunk.category}
 
-Knowledge Chunk:
-- Content: ${chunk.content.substring(0, 1000)}${chunk.content.length > 1000 ? '...' : ''}
-- Category: ${chunk.category}
-- Summary: ${chunk.summary || 'N/A'}
-
-Rate relevance (0.0-1.0) for:
-- semantic_relevance: How semantically related is this to core concepts?
-- concept_coverage: Does it cover key concepts needed?
-- procedural_match: Does it support workflows/processes?
-- vocabulary_alignment: Does it use domain vocabulary?
-
-Return ONLY valid JSON:
-{
-  "semantic_relevance": 0.0-1.0,
-  "concept_coverage": 0.0-1.0,
-  "procedural_match": 0.0-1.0,
-  "vocabulary_alignment": 0.0-1.0,
-  "reasoning": "brief explanation"
-}`;
+Rate 0.0-1.0: semantic_relevance, concept_coverage, procedural_match, vocabulary_alignment
+JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_match": 0.0, "vocabulary_alignment": 0.0, "reasoning": "brief"}`;
 
       try {
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -360,8 +344,8 @@ Return ONLY valid JSON:
         const batchErrors = results.filter(r => r.status === 'rejected').length;
         console.log(`[analyze-alignment] Batch completed: ${batchSuccess} success, ${batchErrors} errors`);
 
-        // Add delay between batches to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Reduced delay between batches for faster overall processing
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
     

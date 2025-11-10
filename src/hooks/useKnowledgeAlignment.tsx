@@ -103,11 +103,16 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     }
 
     setIsAnalyzing(true);
-    toast.info('Aggiornamento knowledge base in corso...');
+    
+    // Show loading toast with progress
+    const progressToastId = 'analysis-progress';
+    toast.loading('Inizializzazione analisi...', { id: progressToastId, duration: Infinity });
 
     try {
       // Step 1: Extract new requirements
       console.log('[useKnowledgeAlignment] Extracting task requirements');
+      toast.loading('Estrazione requisiti in corso...', { id: progressToastId, duration: Infinity });
+      
       const { data: extractData, error: extractError } = await supabase.functions.invoke(
         'extract-task-requirements',
         { body: { agentId } }
@@ -117,37 +122,69 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       console.log('[useKnowledgeAlignment] Requirements extracted:', extractData);
 
-      // Step 2: Analyze alignment in batches
+      // Step 2: Analyze alignment in batches with retry logic
       console.log('[useKnowledgeAlignment] Starting batch analysis');
       let moreBatchesNeeded = true;
       let totalAnalyzed = 0;
       let totalChunks = 0;
       let batchCount = 0;
       let lastAnalysisData = null;
+      const MAX_RETRIES = 3;
 
       while (moreBatchesNeeded) {
         batchCount++;
-        console.log(`[useKnowledgeAlignment] Processing batch #${batchCount}`);
+        let retries = 0;
+        let batchSuccess = false;
         
-        const { data: analysisData, error: analysisError } = await supabase.functions.invoke(
-          'analyze-knowledge-alignment',
-          { body: { agentId, forceReanalysis: true } }
-        );
+        console.log(`[useKnowledgeAlignment] Processing batch #${batchCount}`);
+        toast.loading(`Analisi batch #${batchCount}...`, { id: progressToastId, duration: Infinity });
 
-        if (analysisError) throw analysisError;
+        // Retry loop for individual batches
+        while (!batchSuccess && retries < MAX_RETRIES) {
+          try {
+            const { data: analysisData, error: analysisError } = await supabase.functions.invoke(
+              'analyze-knowledge-alignment',
+              { body: { agentId, forceReanalysis: true } }
+            );
 
-        totalAnalyzed = analysisData.total_progress;
-        totalChunks = analysisData.total_chunks;
-        moreBatchesNeeded = analysisData.more_batches_needed;
-        lastAnalysisData = analysisData;
+            if (analysisError) throw analysisError;
 
-        console.log(`[useKnowledgeAlignment] Batch ${batchCount} completed: ${totalAnalyzed}/${totalChunks} chunks (${((totalAnalyzed/totalChunks)*100).toFixed(1)}%)`);
+            totalAnalyzed = analysisData.total_progress;
+            totalChunks = analysisData.total_chunks;
+            moreBatchesNeeded = analysisData.more_batches_needed;
+            lastAnalysisData = analysisData;
+            batchSuccess = true;
+
+            const percentage = totalChunks > 0 ? ((totalAnalyzed / totalChunks) * 100).toFixed(1) : '0';
+            console.log(`[useKnowledgeAlignment] Batch ${batchCount} completed: ${totalAnalyzed}/${totalChunks} chunks (${percentage}%)`);
+            
+            toast.loading(`Analisi in corso: ${totalAnalyzed}/${totalChunks} chunks (${percentage}%)`, { 
+              id: progressToastId, 
+              duration: Infinity 
+            });
+
+          } catch (error: any) {
+            retries++;
+            console.error(`[useKnowledgeAlignment] Batch ${batchCount} failed (attempt ${retries}/${MAX_RETRIES}):`, error);
+            
+            if (retries >= MAX_RETRIES) {
+              throw new Error(`Batch ${batchCount} failed after ${MAX_RETRIES} attempts: ${error.message}`);
+            }
+            
+            // Wait before retrying
+            toast.loading(`Ritentativo ${retries}/${MAX_RETRIES}...`, { id: progressToastId, duration: Infinity });
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+        }
 
         // Brief pause between batches
         if (moreBatchesNeeded) {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
+      
+      // Dismiss loading toast
+      toast.dismiss(progressToastId);
 
       console.log('[useKnowledgeAlignment] All batches completed!');
       
