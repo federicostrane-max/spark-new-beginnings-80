@@ -10,6 +10,7 @@ import DocumentPool from "./pages/DocumentPool";
 import Presentation from "./pages/Presentation";
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
+import UpdateChePrompt from "./pages/UpdateChePrompt";
 import NotFound from "./pages/NotFound";
 
 
@@ -64,6 +65,14 @@ const App = () => {
                 element={
                   <ProtectedRoute>
                     <Admin />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/update-che-prompt"
+                element={
+                  <ProtectedRoute>
+                    <UpdateChePrompt />
                   </ProtectedRoute>
                 }
               />

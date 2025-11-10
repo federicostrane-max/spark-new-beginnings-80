@@ -26,3 +26,19 @@ export async function updateAgentPrompt(agentSlugOrId: string, newSystemPrompt: 
     }
   });
 }
+
+// Helper to force knowledge alignment analysis
+export async function forceAlignmentAnalysis(agentId: string) {
+  // Extract requirements
+  await supabase.functions.invoke('extract-task-requirements', {
+    body: { agentId }
+  });
+  
+  // Analyze alignment with force flag
+  return supabase.functions.invoke('analyze-knowledge-alignment', {
+    body: { 
+      agentId,
+      forceReanalysis: true
+    }
+  });
+}
