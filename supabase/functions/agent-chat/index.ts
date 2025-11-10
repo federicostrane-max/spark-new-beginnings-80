@@ -3048,8 +3048,8 @@ ${agent.system_prompt}${knowledgeContext}`;
             });
           }
           
-          // Add search_and_acquire_pdfs tool only for Book Search Expert
-          if (agent.slug === 'book-search-expert-copy') {
+          // Add search_and_acquire_pdfs tool for both Book Search Expert agents
+          if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
             tools.push({
               name: 'search_and_acquire_pdfs',
               description: 'Automatically discovers books on a topic, finds their PDFs, validates them, and adds them to the knowledge pool. This is a complete workflow that: 1) Discovers relevant books, 2) Searches for verified PDF downloads, 3) Checks for duplicates, 4) Downloads and validates PDFs, 5) Automatically adds validated PDFs to the pool. Use this when the user wants to find and acquire PDF books on a specific topic.',
