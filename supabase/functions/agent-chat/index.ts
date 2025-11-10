@@ -2431,6 +2431,7 @@ Deno.serve(async (req) => {
           console.log('Messages:', JSON.stringify(anthropicMessages, null, 2));
 
           // Deterministic workflow removed - agent now uses AI tool calling
+          let workflowHandled = false; // Default: no workflow handled the request
           
           // ========================================
           // DETECT "MODIFICA PROMPT @AGENT" COMMAND
