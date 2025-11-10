@@ -183,14 +183,14 @@ export const ChatMessage = ({
         }
       }
       setIsLongPressing(false);
-    }, 800);
+    }, 1200); // Aumentato da 800ms a 1200ms
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Detect if user is scrolling
+    // Detect if user is scrolling - soglia aumentata per evitare selezioni accidentali
     if (touchStartY.current) {
       const deltaY = Math.abs(e.touches[0].clientY - touchStartY.current);
-      if (deltaY > 10) { // 10px threshold
+      if (deltaY > 50) { // Aumentato da 10px a 50px
         hasMoved.current = true;
         handleLongPressEnd();
       }
@@ -198,10 +198,10 @@ export const ChatMessage = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Detect if user is dragging
+    // Detect if user is dragging - soglia aumentata per evitare selezioni accidentali
     if (mouseStartY.current) {
       const deltaY = Math.abs(e.clientY - mouseStartY.current);
-      if (deltaY > 10) { // 10px threshold
+      if (deltaY > 50) { // Aumentato da 10px a 50px
         hasMoved.current = true;
         handleLongPressEnd();
       }
