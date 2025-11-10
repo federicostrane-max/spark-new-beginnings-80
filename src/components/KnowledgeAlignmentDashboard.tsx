@@ -86,31 +86,37 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   }, [isAnalyzing]);
 
   // Poll for updates when analyzing - fetch progress from DB
+  // Continue polling for 5 minutes after completion to catch final status
   useEffect(() => {
     if (!isAnalyzing) return;
 
     const interval = setInterval(async () => {
-      // Fetch latest analysis log for real-time progress
+      // Fetch latest analysis log - include completed analyses from last 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
       const { data: log } = await supabase
         .from('alignment_analysis_log')
-        .select('progress_chunks_analyzed, total_chunks_analyzed')
+        .select('progress_chunks_analyzed, total_chunks_analyzed, completed_at')
         .eq('agent_id', agentId)
-        .is('completed_at', null)
+        .or(`completed_at.is.null,completed_at.gte.${fiveMinutesAgo}`)
         .order('started_at', { ascending: false })
         .limit(1)
         .single();
 
-        if (log) {
-          setProgressChunks(log.progress_chunks_analyzed || 0);
-          // Non usiamo log.total_chunks_analyzed perché rappresenta il batch size (1000),
-          // non il totale reale dei chunk. Usiamo stats.totalChunks invece.
+      if (log) {
+        setProgressChunks(log.progress_chunks_analyzed || 0);
+        
+        // If analysis just completed, show success toast
+        if (log.completed_at && progressChunks !== log.progress_chunks_analyzed) {
+          toast.success(`Analisi completata! ${log.progress_chunks_analyzed} chunks analizzati.`);
+        }
       }
 
       fetchData();
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [isAnalyzing, agentId]);
+  }, [isAnalyzing, agentId, progressChunks]);
 
   const fetchData = async () => {
     // Fetch agent safe mode status
@@ -317,15 +323,27 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             </AlertTitle>
             <AlertDescription className="flex items-center justify-between text-red-800 dark:text-red-200">
               <span>L'ultima analisi non è stata completata. Puoi riprovare ora.</span>
-              <Button 
-                onClick={forceAnalysis}
-                size="sm"
-                variant="destructive"
-                className="ml-4"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Riavvia Analisi
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  onClick={() => {
+                    fetchData();
+                    toast.info('Stato aggiornato');
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Ricarica Stato
+                </Button>
+                <Button 
+                  onClick={forceAnalysis}
+                  size="sm"
+                  variant="destructive"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Riavvia Analisi
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         )}

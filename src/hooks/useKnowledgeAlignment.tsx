@@ -43,6 +43,8 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       if (data) {
         setLastAnalysis(new Date(data.started_at));
+        
+        // Consider completed if completed_at is set, regardless of chunk counts
         setLastAnalysisStatus(data.completed_at ? 'completed' : 'incomplete');
         
         // Check cooldown
