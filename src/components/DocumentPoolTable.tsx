@@ -64,6 +64,7 @@ interface KnowledgeDocument {
   processing_status: string;
   ai_summary: string;
   text_length: number;
+  page_count?: number;
   created_at: string;
   agent_names: string[];
   agents_count: number;
@@ -139,6 +140,7 @@ export const DocumentPoolTable = () => {
           processing_status: doc.processing_status,
           ai_summary: doc.ai_summary,
           text_length: doc.text_length,
+          page_count: doc.page_count,
           created_at: doc.created_at,
           agent_names: agentNames,
           agents_count: agentNames.length,
@@ -516,10 +518,11 @@ export const DocumentPoolTable = () => {
                       aria-label="Seleziona tutti"
                     />
                   </TableHead>
-                  <TableHead className="w-[30%]">File</TableHead>
-                  <TableHead className="w-[15%]">Status</TableHead>
-                  <TableHead className="w-[20%]">Agenti Assegnati</TableHead>
-                  <TableHead className="w-[15%]">Creato</TableHead>
+                  <TableHead className="w-[25%]">File</TableHead>
+                  <TableHead className="w-[12%]">Status</TableHead>
+                  <TableHead className="w-[10%]">Pagine</TableHead>
+                  <TableHead className="w-[18%]">Agenti Assegnati</TableHead>
+                  <TableHead className="w-[12%]">Creato</TableHead>
                   <TableHead className="w-[15%] text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
@@ -575,6 +578,13 @@ export const DocumentPoolTable = () => {
                           </>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {doc.page_count ? (
+                        <span className="font-medium">{doc.page_count}</span>
+                      ) : (
+                        <span className="text-muted-foreground">N/A</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">

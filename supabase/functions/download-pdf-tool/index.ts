@@ -482,6 +482,53 @@ serve(async (req) => {
     const pdfBlob = await pdfResponse.blob();
     const pdfArrayBuffer = await pdfBlob.arrayBuffer();
     
+    // ===== PDF PAGE COUNT VALIDATION =====
+    let pageCount: number;
+    try {
+      // Import pdf-lib dynamically
+      const { PDFDocument } = await import('https://esm.sh/pdf-lib@1.17.1');
+      
+      // Load and count pages
+      const pdfDoc = await PDFDocument.load(pdfArrayBuffer);
+      pageCount = pdfDoc.getPageCount();
+      
+      console.log(`📄 PDF has ${pageCount} pages`);
+      
+      // FILTER: Reject if < 30 pages
+      if (pageCount < 30) {
+        await supabase
+          .from('pdf_download_queue')
+          .update({
+            status: 'failed',
+            error_message: `Documento troppo breve: ${pageCount} pagine (minimo 30)`,
+            completed_at: new Date().toISOString()
+          })
+          .eq('url', originalUrl);
+        
+        throw new Error(`PDF too short: ${pageCount} pages (minimum 30 required)`);
+      }
+    } catch (error) {
+      // If it's our "too short" error, propagate it
+      if (error instanceof Error && error.message.includes('too short')) {
+        throw error;
+      }
+      
+      // If it's a PDF reading error (corrupted/protected), reject
+      console.error('❌ Cannot read PDF (corrupted/protected):', error);
+      
+      await supabase
+        .from('pdf_download_queue')
+        .update({
+          status: 'failed',
+          error_message: 'PDF corrotto o protetto: impossibile leggere il contenuto',
+          completed_at: new Date().toISOString()
+        })
+        .eq('url', originalUrl);
+      
+      throw new Error('PDF corrupted or protected - cannot read content');
+    }
+    // ===== END PAGE COUNT VALIDATION =====
+    
     // Extract filename from URL or generate one
     const urlPath = new URL(url).pathname;
     const fileName = urlPath.split('/').pop() || `document_${Date.now()}.pdf`;
@@ -513,6 +560,7 @@ serve(async (req) => {
         source_url: url,
         search_query: search_query || null,
         file_size_bytes: pdfArrayBuffer.byteLength,
+        page_count: pageCount, // Add page count
         validation_status: 'validating', // Start with validating status
         processing_status: 'downloaded'
       })

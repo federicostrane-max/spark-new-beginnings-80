@@ -804,6 +804,7 @@ export type Database = {
           file_size_bytes: number | null
           id: string
           keywords: string[] | null
+          page_count: number | null
           processed_at: string | null
           processing_status: string
           search_query: string | null
@@ -824,6 +825,7 @@ export type Database = {
           file_size_bytes?: number | null
           id?: string
           keywords?: string[] | null
+          page_count?: number | null
           processed_at?: string | null
           processing_status?: string
           search_query?: string | null
@@ -844,6 +846,7 @@ export type Database = {
           file_size_bytes?: number | null
           id?: string
           keywords?: string[] | null
+          page_count?: number | null
           processed_at?: string | null
           processing_status?: string
           search_query?: string | null
