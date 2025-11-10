@@ -3063,9 +3063,39 @@ ${agent.system_prompt}${knowledgeContext}`;
                   type: 'number',
                   description: 'Number of results to return (1-10, default 5)',
                   default: 5
+                },
+                scrape_results: {
+                  type: 'boolean',
+                  description: 'Whether to scrape full content from each result (default false)',
+                  default: false
                 }
               },
               required: ['query']
+            }
+          });
+          
+          tools.push({
+            name: 'web_scrape',
+            description: 'Scrape content from a specific web page URL. Returns both HTML and cleaned text content. Use this when you need to extract detailed information from a particular website.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                url: {
+                  type: 'string',
+                  description: 'The URL of the web page to scrape'
+                },
+                render_js: {
+                  type: 'boolean',
+                  description: 'Whether to render JavaScript on the page (default true)',
+                  default: true
+                },
+                block_ads: {
+                  type: 'boolean',
+                  description: 'Whether to block ads (default true)',
+                  default: true
+                }
+              },
+              required: ['url']
             }
           });
           
@@ -3644,6 +3674,50 @@ ${agent.system_prompt}${knowledgeContext}`;
                           toolResult = { success: false, error: errorMessage };
                           
                           const errorText = `\n\n❌ Errore durante la ricerca web: ${errorMessage}\n\n`;
+                          fullResponse += errorText;
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        }
+                      }
+                      
+                      if (toolUseName === 'web_scrape') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: web_scrape`);
+                        console.log('   URL:', toolInput.url);
+                        
+                        try {
+                          const { data: scrapeData, error: scrapeError } = await supabase.functions.invoke(
+                            'web-scrape',
+                            {
+                              body: {
+                                url: toolInput.url,
+                                renderJs: toolInput.render_js !== false,
+                                blockAds: toolInput.block_ads !== false
+                              }
+                            }
+                          );
+                          
+                          if (scrapeError) {
+                            console.error('❌ Scrape error:', scrapeError);
+                            toolResult = { success: false, error: scrapeError.message };
+                            
+                            const errorText = `\n\n❌ Errore durante lo scraping di ${toolInput.url}\n\n`;
+                            fullResponse += errorText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else {
+                            console.log(`✅ Successfully scraped ${toolInput.url}`);
+                            toolResult = scrapeData;
+                            
+                            // Aggiungi contenuto estratto nella risposta
+                            const scrapedText = `\n\n📄 **Contenuto estratto da**: ${toolInput.url}\n\n${scrapeData.textContent.slice(0, 1000)}${scrapeData.textContent.length > 1000 ? '...' : ''}\n\n`;
+                            fullResponse += scrapedText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: scrapedText }));
+                          }
+                        } catch (error) {
+                          console.error('❌ Web scrape error:', error);
+                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                          toolResult = { success: false, error: errorMessage };
+                          
+                          const errorText = `\n\n❌ Errore durante lo scraping: ${errorMessage}\n\n`;
                           fullResponse += errorText;
                           await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         }
