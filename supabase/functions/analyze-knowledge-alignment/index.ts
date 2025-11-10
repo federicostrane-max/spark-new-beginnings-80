@@ -24,8 +24,8 @@ const CONFIG = {
     vocabulary_alignment: 0.15,
   },
   batch_processing: {
-    batch_size: 200, // Increased from 100 to reduce total batches needed
-    max_concurrent: 15, // Increased from 10 for faster parallel processing
+    batch_size: 100, // Reduced to 100 to stay under 150s timeout
+    max_concurrent: 20, // Increased to 20 to compensate
   },
   retry: {
     max_attempts: 3,
@@ -458,14 +458,23 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
       .map(([category, _]) => category)
       .slice(0, 5);
 
-    // Update analysis log
+    // Count actual chunks analyzed (saved in DB)
+    const { count: actualAnalyzedCount } = await supabase
+      .from('knowledge_relevance_scores')
+      .select('*', { count: 'exact', head: true })
+      .eq('requirement_id', requirements.id);
+
+    const realProgress = actualAnalyzedCount || 0;
+    console.log(`[analyze-alignment] Real progress from DB: ${realProgress}/${totalChunks} chunks`);
+
+    // Update analysis log with real progress
     const updateData: any = {
       chunks_flagged_for_removal: chunksToRemove.length,
+      progress_chunks_analyzed: realProgress, // Use real DB count instead of estimated
       chunks_auto_removed: chunksAutoRemoved,
       concept_coverage_percentage: avgConceptCoverage,
       identified_gaps: gaps,
       surplus_categories: surplus,
-      progress_chunks_analyzed: currentProgress,
     };
 
     // Mark as completed only if all batches are done

@@ -8,6 +8,17 @@ interface UseKnowledgeAlignmentProps {
   enabled?: boolean;
 }
 
+// Helper function to add timeout to edge function calls
+const invokeWithTimeout = async (functionName: string, body: any, timeoutMs: number) => {
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Client timeout exceeded')), timeoutMs)
+  );
+  
+  const invokePromise = supabase.functions.invoke(functionName, { body });
+  
+  return Promise.race([invokePromise, timeoutPromise]) as Promise<any>;
+};
+
 export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeAlignmentProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [lastAnalysis, setLastAnalysis] = useState<Date | null>(null);
@@ -142,9 +153,10 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
         // Retry loop for individual batches
         while (!batchSuccess && retries < MAX_RETRIES) {
           try {
-            const { data: analysisData, error: analysisError } = await supabase.functions.invoke(
+            const { data: analysisData, error: analysisError } = await invokeWithTimeout(
               'analyze-knowledge-alignment',
-              { body: { agentId, forceReanalysis: true } }
+              { agentId, forceReanalysis: true },
+              180000 // 3 minutes client-side timeout
             );
 
             if (analysisError) throw analysisError;
