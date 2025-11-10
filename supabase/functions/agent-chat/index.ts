@@ -2437,62 +2437,75 @@ Deno.serve(async (req) => {
           let workflowResponse = '';
           let userIntent: UserIntent | undefined; // Declare it here for logging later
           
-          if (agent.slug === 'knowledge-search-expert' || agent.slug === 'knowledge-search-expert-copy') {
-            console.log('🤖 [WORKFLOW] Knowledge Search Expert detected, checking intent...');
+          if (agent.slug === 'book-serach-expert' || agent.slug === 'knowledge-search-expert' || agent.slug === 'knowledge-search-expert-copy') {
+            console.log('🤖 [DETERMINISTIC WORKFLOW] Book Search Expert detected, checking intent...');
             userIntent = parseKnowledgeSearchIntent(message); // Assign to the outer variable
-            console.log('🤖 [WORKFLOW] Intent result:', userIntent);
+            console.log('🤖 [DETERMINISTIC WORKFLOW] Intent result:', userIntent);
             
             if (userIntent.type === 'SEARCH_REQUEST' && userIntent.topic) {
-              console.log('🔍 [WORKFLOW] Handling SEARCH_REQUEST automatically');
-              console.log('📊 [WORKFLOW] Requested count:', userIntent.count);
+              console.log('🔍 [DETERMINISTIC WORKFLOW] SEARCH_REQUEST detected - calling search-and-acquire-pdfs automatically');
+              console.log('📊 [DETERMINISTIC WORKFLOW] Topic:', userIntent.topic);
+              console.log('📊 [DETERMINISTIC WORKFLOW] Requested count:', userIntent.count);
               workflowHandled = true;
               
-              // Execute ENHANCED search with full metadata extraction
+              // Call search-and-acquire-pdfs edge function automatically
               try {
-                const googleResults = await executeEnhancedSearch(userIntent.topic, userIntent.count || 10, supabase);
+                workflowResponse = '🔍 **Ricerca e acquisizione automatica avviata**\n\n';
+                workflowResponse += `Sto cercando e scaricando automaticamente ${userIntent.count || 5} libri/documenti su: **${userIntent.topic}**\n\n`;
+                workflowResponse += '⏳ **Fase 1**: Ricerca libri...\n';
                 
-                // PHASE 1.5: Enrich with Repository APIs (arXiv, PubMed, CORE)
-                console.log('🔌 [WORKFLOW] Enriching with repository APIs...');
-                const searchResults = await enrichWithRepositoryAPIs(googleResults, userIntent.topic);
-                console.log(`✅ [WORKFLOW] Enrichment complete: ${searchResults.length} results (was ${googleResults.length})`);
+                await sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
                 
-                // Save results to database cache (INCLUDING NEW FIELDS)
-                console.log(`💾 [CACHE] Saving ${searchResults.length} results to database`);
-                const cacheInserts = searchResults.map(r => ({
-                  conversation_id: conversation.id,
-                  result_number: r.number,
-                  title: r.title,
-                  authors: r.authors,
-                  year: r.year,
-                  source: r.source,
-                  url: r.url,
-                  source_type: r.source_type,
-                  credibility_score: r.credibilityScore,
-                  verified: r.verified,
-                  file_size_bytes: r.file_size_bytes
-                }));
+                // Call search-and-acquire-pdfs function
+                console.log('🚀 [DETERMINISTIC] Invoking search-and-acquire-pdfs...');
+                const { data: acquisitionResult, error: acquisitionError } = await supabase.functions.invoke(
+                  'search-and-acquire-pdfs',
+                  {
+                    body: {
+                      topic: userIntent.topic,
+                      maxBooks: Math.min(userIntent.count || 5, 20), // Limit to 20 books max
+                      maxResultsPerBook: 3 // 3 PDF results per book
+                    }
+                  }
+                );
                 
-                // Delete old cache for this conversation first
-                await supabase
-                  .from('search_results_cache')
-                  .delete()
-                  .eq('conversation_id', conversation.id);
-                
-                // Insert new cache
-                const { error: cacheError } = await supabase
-                  .from('search_results_cache')
-                  .insert(cacheInserts);
-                
-                if (cacheError) {
-                  console.error('⚠️ [CACHE] Failed to save to database:', cacheError);
-                } else {
-                  console.log('✅ [CACHE] Results saved to database successfully');
+                if (acquisitionError) {
+                  console.error('❌ [DETERMINISTIC] search-and-acquire-pdfs failed:', acquisitionError);
+                  throw acquisitionError;
                 }
                 
-                workflowResponse = formatSearchResults(searchResults, userIntent.topic, userIntent.count);
+                console.log('✅ [DETERMINISTIC] search-and-acquire-pdfs completed:', acquisitionResult);
                 
-                // Send formatted results to user
-                await sendSSE(JSON.stringify({ type: 'content', text: workflowResponse }));
+                // Format results
+                const updateText = '\n\n✅ **Ricerca completata!**\n\n';
+                await sendSSE(JSON.stringify({ type: 'content', text: updateText }));
+                workflowResponse += updateText;
+                
+                if (acquisitionResult.success) {
+                  let resultsText = `📚 **Libri trovati**: ${acquisitionResult.booksDiscovered}\n`;
+                  resultsText += `📄 **PDF totali trovati**: ${acquisitionResult.pdfsFound}\n\n`;
+                  
+                  if (acquisitionResult.results && acquisitionResult.results.length > 0) {
+                    resultsText += '### Documenti in coda per download:\n\n';
+                    acquisitionResult.results.forEach((result: any, idx: number) => {
+                      resultsText += `${idx + 1}. **${result.title}**\n`;
+                      if (result.authors) resultsText += `   - Autori: ${result.authors}\n`;
+                      resultsText += `   - Status: ${result.status === 'queued' ? '⏳ In coda' : result.status === 'existing' ? '✅ Già presente' : '❌ Fallito'}\n`;
+                      if (result.url) resultsText += `   - URL: ${result.url.slice(0, 80)}...\n`;
+                      resultsText += '\n';
+                    });
+                    
+                    resultsText += `\n💡 I documenti sono stati messi in coda e verranno processati automaticamente.\n`;
+                  }
+                  
+                  await sendSSE(JSON.stringify({ type: 'content', text: resultsText }));
+                  workflowResponse += resultsText;
+                } else {
+                  const errorText = `\n❌ Errore durante la ricerca: ${acquisitionResult.error || 'Errore sconosciuto'}\n`;
+                  await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                  workflowResponse += errorText;
+                }
+                
                 fullResponse = workflowResponse;
                 
                 // Save to DB
@@ -2509,7 +2522,11 @@ Deno.serve(async (req) => {
                 await closeStream();
                 return; // Exit early, no AI call needed
               } catch (searchError) {
-                console.error('Search error:', searchError);
+                console.error('❌ [DETERMINISTIC] Error during automatic search:', searchError);
+                const errorMsg = '\n\n❌ **Errore durante la ricerca automatica**\n\nProvo a passare all\'AI per analisi semantica...\n\n';
+                await sendSSE(JSON.stringify({ type: 'content', text: errorMsg }));
+                workflowResponse += errorMsg;
+                fullResponse = workflowResponse;
                 workflowHandled = false; // Fall back to AI
               }
             }
