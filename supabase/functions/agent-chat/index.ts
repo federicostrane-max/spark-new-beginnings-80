@@ -3723,18 +3723,17 @@ ${agent.system_prompt}${knowledgeContext}`;
                             }));
                             await closeStream();
                             
-                            // ASYNC: Wait for validation and post deterministic results
+                            // ASYNC: Wait for validation and post detailed deterministic results
                             (async () => {
                               try {
-                                console.log('⏳ [ASYNC] Waiting 5 seconds for validation to complete...');
-                                await new Promise(resolve => setTimeout(resolve, 5000));
+                                console.log('⏳ [ASYNC] Waiting 60 seconds for validation to complete...');
+                                await new Promise(resolve => setTimeout(resolve, 60000));
                                 
-                                // Query validation results
+                                // Query validation results from pdf_download_queue
                                 const { data: queuedDocs } = await supabase
                                   .from('pdf_download_queue')
-                                  .select('expected_title, expected_author, status, validation_result, error_message, document_id')
+                                  .select('id, expected_title, expected_author, status, validation_result, error_message, error_category, document_id, download_url')
                                   .eq('conversation_id', conversationId)
-                                  .in('status', ['completed', 'rejected', 'processing', 'validating'])
                                   .order('created_at', { ascending: false })
                                   .limit(20);
                                 
@@ -3743,47 +3742,133 @@ ${agent.system_prompt}${knowledgeContext}`;
                                   return;
                                 }
                                 
-                                // Format deterministic results message
-                                const topicLabel = toolInput.topic || 'PDF selezionati';
-                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione\n\n`;
+                                // Get knowledge documents for detailed info
+                                const documentIds = queuedDocs.filter(d => d.document_id).map(d => d.document_id);
+                                let knowledgeDocs: any[] = [];
                                 
-                                const validated = queuedDocs.filter(d => d.status === 'completed');
-                                const rejected = queuedDocs.filter(d => d.status === 'rejected');
-                                const processing = queuedDocs.filter(d => d.status === 'processing' || d.status === 'validating');
-                                
-                                feedbackMsg += `✅ **Validati e aggiunti alla pool**: ${validated.length}\n`;
-                                feedbackMsg += `❌ **Rifiutati**: ${rejected.length}\n`;
-                                if (processing.length > 0) {
-                                  feedbackMsg += `⏳ **Ancora in elaborazione**: ${processing.length}\n`;
+                                if (documentIds.length > 0) {
+                                  const { data: kDocs } = await supabase
+                                    .from('knowledge_documents')
+                                    .select('id, title, page_count, file_size_mb, complexity_level, validation_status, summary')
+                                    .in('id', documentIds);
+                                  
+                                  if (kDocs) knowledgeDocs = kDocs;
                                 }
-                                feedbackMsg += `\n`;
                                 
+                                // Format detailed results message
+                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione Dettagliati\n\n`;
+                                
+                                const validated: any[] = [];
+                                const rejected: any[] = [];
+                                const failed: any[] = [];
+                                const processing: any[] = [];
+                                
+                                // Categorize results with detailed info
+                                for (const doc of queuedDocs) {
+                                  const knowledgeDoc = knowledgeDocs.find(kd => kd.id === doc.document_id);
+                                  
+                                  if (doc.status === 'completed' && knowledgeDoc?.validation_status === 'validated') {
+                                    validated.push({ ...doc, knowledge: knowledgeDoc });
+                                  } else if (doc.status === 'rejected') {
+                                    rejected.push(doc);
+                                  } else if (doc.status === 'failed') {
+                                    failed.push(doc);
+                                  } else {
+                                    processing.push(doc);
+                                  }
+                                }
+                                
+                                // Summary
+                                feedbackMsg += `**Riepilogo:** ${validated.length} validati ✅ | ${rejected.length} rifiutati 🚫 | ${failed.length} falliti ❌ | ${processing.length} in elaborazione ⏳\n\n`;
+                                
+                                // Validated PDFs with details
                                 if (validated.length > 0) {
-                                  feedbackMsg += `### ✅ PDF Aggiunti alla Pool\n\n`;
+                                  feedbackMsg += `### ✅ PDF Validati e Aggiunti alla Pool (${validated.length})\n\n`;
                                   validated.forEach((doc: any) => {
-                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author}\n`;
+                                    const pages = doc.knowledge?.page_count ? ` | ${doc.knowledge.page_count} pagine` : '';
+                                    const size = doc.knowledge?.file_size_mb ? ` | ${doc.knowledge.file_size_mb.toFixed(1)} MB` : '';
+                                    const complexity = doc.knowledge?.complexity_level ? ` | ${doc.knowledge.complexity_level}` : '';
+                                    
+                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}${pages}${size}${complexity}\n`;
+                                    
+                                    if (doc.knowledge?.summary) {
+                                      const shortSummary = doc.knowledge.summary.substring(0, 150);
+                                      feedbackMsg += `  _${shortSummary}${doc.knowledge.summary.length > 150 ? '...' : ''}_\n`;
+                                    }
+                                    feedbackMsg += `\n`;
                                   });
-                                  feedbackMsg += `\n`;
                                 }
                                 
+                                // Failed PDFs with detailed errors
+                                if (failed.length > 0) {
+                                  feedbackMsg += `### ❌ PDF Falliti (${failed.length})\n\n`;
+                                  failed.forEach((doc: any) => {
+                                    let errorDetail = '';
+                                    
+                                    if (doc.error_message) {
+                                      const errMsg = doc.error_message.toLowerCase();
+                                      
+                                      if (errMsg.includes('timeout') || errMsg.includes('timed out') || errMsg.includes('deadline')) {
+                                        errorDetail = '⏱️ **Timeout** - Il download ha richiesto troppo tempo';
+                                      } else if (errMsg.includes('404') || errMsg.includes('not found')) {
+                                        errorDetail = '🔍 **File non trovato (404)** - Il PDF non esiste più o l\'URL è errato';
+                                      } else if (errMsg.includes('403') || errMsg.includes('forbidden')) {
+                                        errorDetail = '🔒 **Accesso negato (403)** - Il server richiede autenticazione';
+                                      } else if (errMsg.includes('401') || errMsg.includes('unauthorized')) {
+                                        errorDetail = '🔑 **Non autorizzato (401)** - Credenziali richieste';
+                                      } else if (errMsg.includes('too large') || errMsg.includes('size limit') || errMsg.includes('50mb')) {
+                                        errorDetail = '📦 **File troppo grande** - Superati i limiti di dimensione (max 50MB)';
+                                      } else if (errMsg.includes('network') || errMsg.includes('connection') || errMsg.includes('econnrefused')) {
+                                        errorDetail = '🌐 **Errore di rete** - Impossibile raggiungere il server';
+                                      } else if (errMsg.includes('invalid pdf') || errMsg.includes('corrupt')) {
+                                        errorDetail = '📄 **PDF corrotto** - Il file non è un PDF valido';
+                                      } else if (errMsg.includes('extraction') || errMsg.includes('text extraction')) {
+                                        errorDetail = '📝 **Errore estrazione testo** - Impossibile estrarre il contenuto';
+                                      } else if (doc.error_category) {
+                                        errorDetail = `⚠️ **${doc.error_category}**`;
+                                      } else {
+                                        errorDetail = `⚠️ ${doc.error_message.substring(0, 120)}${doc.error_message.length > 120 ? '...' : ''}`;
+                                      }
+                                    } else {
+                                      errorDetail = '❓ **Errore sconosciuto** - Nessun dettaglio disponibile';
+                                    }
+                                    
+                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}\n`;
+                                    feedbackMsg += `  ${errorDetail}\n`;
+                                    if (doc.download_url) {
+                                      feedbackMsg += `  _URL: ${doc.download_url.substring(0, 80)}..._\n`;
+                                    }
+                                    feedbackMsg += `\n`;
+                                  });
+                                }
+                                
+                                // Rejected PDFs (not relevant)
                                 if (rejected.length > 0) {
-                                  feedbackMsg += `### ❌ PDF Rifiutati (non rilevanti)\n\n`;
+                                  feedbackMsg += `### 🚫 PDF Rifiutati (non rilevanti) (${rejected.length})\n\n`;
                                   rejected.forEach((doc: any) => {
                                     const validationResult = doc.validation_result || {};
-                                    const motivazione = validationResult.motivazione || doc.error_message || 'Non rilevante per il topic';
-                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author}\n`;
+                                    const motivazione = validationResult.motivazione || doc.error_message || 'Non rilevante per il topic di ricerca';
+                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}\n`;
                                     feedbackMsg += `  _Motivo: ${motivazione}_\n\n`;
                                   });
                                 }
                                 
+                                // Still processing
                                 if (processing.length > 0) {
-                                  feedbackMsg += `### ⏳ In Elaborazione\n\n`;
-                                  feedbackMsg += `${processing.length} PDF sono ancora in fase di validazione. Riceveranno un ulteriore aggiornamento quando sarà completato.\n\n`;
+                                  feedbackMsg += `### ⏳ In Elaborazione (${processing.length})\n\n`;
+                                  processing.forEach((doc: any) => {
+                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author} (${doc.status})\n`;
+                                  });
+                                  feedbackMsg += `\n_Questi PDF sono ancora in fase di validazione. Potrebbero richiedere più tempo._\n\n`;
                                 }
                                 
                                 feedbackMsg += `---\n\n`;
                                 
-                                // Insert deterministic feedback message
+                                if (validated.length > 0) {
+                                  feedbackMsg += `✨ I **${validated.length} PDF validati** sono ora disponibili nel pool documenti e possono essere assegnati agli agenti.\n\n`;
+                                }
+                                
+                                // Insert detailed feedback message
                                 await supabase
                                   .from('agent_messages')
                                   .insert({
@@ -3793,7 +3878,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                                     llm_provider: llmProvider
                                   });
                                 
-                                console.log('✅ [ASYNC] Validation feedback posted to chat');
+                                console.log('✅ [ASYNC] Detailed validation feedback posted to chat');
                               } catch (asyncError) {
                                 console.error('❌ [ASYNC] Error posting validation feedback:', asyncError);
                               }
