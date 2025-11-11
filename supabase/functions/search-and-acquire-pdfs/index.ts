@@ -139,26 +139,33 @@ serve(async (req) => {
     console.log(`   Max results: ${maxBooks}`);
     
     // Get auth info first
-    const authHeader = req.headers.get('authorization');
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
     if (!authHeader) {
+      console.error('[search-and-acquire-pdfs] Missing authorization header');
       throw new Error('No authorization header');
     }
     
+    // Extract JWT token from "Bearer <token>"
+    const token = authHeader.replace('Bearer ', '').trim();
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      global: {
-        headers: {
-          authorization: authHeader
-        }
-      }
-    });
+    const supabase = createClient(supabaseUrl, supabaseKey);
     
-    const { data: { user } } = await supabase.auth.getUser();
+    // Get user using the explicit token
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError) {
+      console.error('[search-and-acquire-pdfs] Auth error:', authError);
+      throw new Error('Unauthorized: ' + authError.message);
+    }
     
     if (!user) {
-      throw new Error('Unauthorized');
+      console.error('[search-and-acquire-pdfs] No user found from token');
+      throw new Error('Unauthorized: No user found');
     }
+    
+    console.log('[search-and-acquire-pdfs] User authenticated:', user.id);
     
     const result: AcquisitionResult = {
       success: true,
