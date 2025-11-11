@@ -2884,42 +2884,29 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // Add tool-specific override for Book Search Expert
           let toolOverride = '';
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 CRITICAL TOOL SELECTION RULES 🚨
+            toolOverride = `\n\n🚨 PDF SEARCH WORKFLOW - FOLLOW EXACTLY 🚨
 
-READ THE CONVERSATION HISTORY CAREFULLY BEFORE CHOOSING A TOOL!
+STEP 1 - Initial Request:
+User says: "cerca LLM"
+You call: propose_pdf_search_query { "originalTopic": "LLM textbook handbook", "variantIndex": 0 }
+Result: System shows "LLM textbook handbook PDF" to user
+→ WAIT for user response
 
-RULE 1: Use propose_pdf_search_query ONLY when:
-- User makes a NEW search request ("cerca...", "trova libri su...", "voglio PDF su...")
-- User asks for a DIFFERENT topic than before
-- User explicitly says "prova un'altra query" or "cerca qualcos'altro"
-- You have NOT already proposed a query for this topic
+STEP 2 - User Confirms (ANY positive response):
+User says: "ok" OR "va bene" OR "sì" OR "procedi" OR "perfetto" OR "d'accordo"
+You call: search_pdf_with_query { "searchQuery": "LLM textbook handbook PDF", "maxResults": 5 }
+Result: You get {success: true, pdfs: [...], total: 5}
+→ YOU respond: "Ho trovato 5 PDF: 1. xxx, 2. yyy... Vuoi scaricarli?"
 
-RULE 2: Use search_pdf_with_query when:
-- User confirms a previously proposed query
-- User says: "ok", "va bene", "sì", "procedi", "vai", "yes", "perfetto", "esatto", "d'accordo"
-- You see in conversation history that you already called propose_pdf_search_query
-- The proposed query was shown to user (message ends with "PDF")
-- DO NOT propose again - just SEARCH with the query!
+STEP 3 - User Confirms Download:
+User says: "sì" OR "scarica" OR "ok"
+You call: search_and_acquire_pdfs { "search_query": "LLM textbook handbook PDF", "maxBooks": 5 }
 
-RULE 3: Use search_and_acquire_pdfs when:
-- User confirms they want to download the PDFs you found
-- You already called search_pdf_with_query and showed results
-
-WORKFLOW EXAMPLE:
-User: "cerca LLM prompt engineering"
-You: [Call propose_pdf_search_query with "LLM prompting textbook"] → System shows "LLM prompting PDF"
----
-User: "ok" ← IF YOU SEE THIS AFTER A PROPOSAL
-You: [Call search_pdf_with_query with searchQuery: "LLM prompting PDF"]
-System returns: {pdfs: [...], total: 5}
-You respond: "Ho trovato 5 PDF:\n1. xxx\n2. yyy\n...\nVuoi scaricarli? O provo un'altra query?"
----
-User: "sì scarica"
-You: [Call search_and_acquire_pdfs]
-
-CRITICAL: Look at conversation history! If you already proposed a query and user says "ok", DO NOT propose again - SEARCH IMMEDIATELY!
-
-This OVERRIDES all previous instructions.
+CRITICAL RULES:
+- After propose_pdf_search_query, if user says ANYTHING positive → call search_pdf_with_query
+- NEVER ask "Vuoi quindi che ricerco..." - Just call the tool!
+- The tool result tells you exactly what to do next (check next_step field)
+- Read conversation history: if you see propose_pdf_search_query was called, and user confirms, call search_pdf_with_query
 
 This OVERRIDES all previous instructions.\n\n`;
           }
@@ -3639,7 +3626,10 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                           variantIndex,
                           totalVariants: variants.length,
                           hasMore: variantIndex < variants.length - 1,
-                          note: 'Query already displayed to user. Wait for user confirmation.'
+                          next_step: `CRITICAL: When user confirms (says "ok", "va bene", "sì", "procedi", etc.), you MUST call search_pdf_with_query with these exact parameters:
+  - searchQuery: "${cleanQuery}"
+  - maxResults: 5-10
+  DO NOT ask again, DO NOT propose another query. Just call search_pdf_with_query immediately.`
                         };
                       }
                       
