@@ -3610,8 +3610,8 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                         const variantIndex = toolInput.variantIndex || 0;
                         const proposedQuery = variants[variantIndex] || variants[0];
                         
-                        // ✅ SISTEMA INVIA SUBITO LA QUERY PULITA (solo originalTopic + " PDF")
-                        const cleanQuery = toolInput.originalTopic + " PDF";
+                        // ✅ Usa la variante generata, non sempre la stessa!
+                        const cleanQuery = proposedQuery;
                         
                         // Invia solo la query pulita (skipAgentResponse è già true da content_block_start)
                         await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery + '\n\n' }));
