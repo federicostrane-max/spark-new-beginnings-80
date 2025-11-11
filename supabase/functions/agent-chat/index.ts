@@ -3508,6 +3508,12 @@ ${agent.system_prompt}${knowledgeContext}`;
                   if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
                     toolUseId = parsed.content_block.id;
                     toolUseName = parsed.content_block.name;
+                    
+                    // ✅ Se il tool è propose_pdf_search_query, blocca SUBITO l'output dell'agente
+                    if (toolUseName === 'propose_pdf_search_query') {
+                      skipAgentResponse = true;
+                      console.log(`🚫 [REQ-${requestId}] Blocking agent response for propose_pdf_search_query`);
+                    }
                     toolUseInputJson = '';
                     console.log('🔧 Tool use started:', toolUseName);
                   }
@@ -3568,10 +3574,10 @@ ${agent.system_prompt}${knowledgeContext}`;
                         // ✅ SISTEMA INVIA SUBITO LA QUERY PULITA (solo originalTopic + " PDF")
                         const cleanQuery = toolInput.originalTopic + " PDF";
                         
-                        fullResponse += cleanQuery;
+                        // Invia solo la query pulita (skipAgentResponse è già true da content_block_start)
                         await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery }));
                         
-                        // ✅ BLOCCA l'agente dal mandare la sua versione
+                        // Il flag è già true, ma confermiamo
                         skipAgentResponse = true;
                         
                         // Tool result minimale - l'agente non deve scrivere altro
@@ -4656,6 +4662,8 @@ ${agent.system_prompt}${knowledgeContext}`;
                     if (!skipAgentResponse) {
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                    } else {
+                      console.log(`🚫 [REQ-${requestId}] Blocked agent text: "${newText}"`);
                     }
                     
                     // Log progress every 500 chars
