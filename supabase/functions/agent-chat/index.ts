@@ -4874,15 +4874,114 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 }
               }
             }
-            const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
-            console.log('================================================================================');
-            console.log(`📊 [REQ-${requestId}] Request statistics:`);
-            console.log('   Total duration:', totalDuration + 's');
-            console.log('   Response length:', fullResponse.length, 'chars');
-            console.log('   Chunks processed:', chunkCount);
-            console.log('   Tools called:', toolCallCount);
-            console.log('   LLM Provider:', llmProvider.toUpperCase());
-            console.log('================================================================================');
+          const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
+          console.log('================================================================================');
+          console.log(`📊 [REQ-${requestId}] Request statistics:`);
+          console.log('   Total duration:', totalDuration + 's');
+          console.log('   Response length:', fullResponse.length, 'chars');
+          console.log('   Chunks processed:', chunkCount);
+          console.log('   Tools called:', toolCallCount);
+          console.log('   LLM Provider:', llmProvider.toUpperCase());
+          console.log('   Needs continuation:', needsToolResultContinuation);
+          console.log('================================================================================');
+          
+          // ========== TOOL RESULT CONTINUATION FOR ANTHROPIC ==========
+          if (needsToolResultContinuation && llmProvider === 'anthropic') {
+            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Anthropic...`);
+            console.log(`   Current anthropicMessages length: ${anthropicMessages.length}`);
+            
+            try {
+              // Make second API call with tool results
+              const continueResponse = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-api-key': ANTHROPIC_API_KEY!,
+                  'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                  model: 'claude-sonnet-4-20250514',
+                  max_tokens: 4000,
+                  system: enhancedSystemPrompt,
+                  messages: anthropicMessages,
+                  stream: true,
+                }),
+              });
+              
+              if (!continueResponse.ok) {
+                const errorText = await continueResponse.text();
+                console.error(`❌ [REQ-${requestId}] Anthropic continuation error:`, errorText);
+                throw new Error(`Anthropic API error: ${continueResponse.status} ${errorText}`);
+              }
+              
+              // Stream the continuation response
+              const reader2 = continueResponse.body?.getReader();
+              if (!reader2) throw new Error('No readable stream in continuation');
+              
+              const decoder2 = new TextDecoder();
+              let buffer2 = '';
+              let continuationChunks = 0;
+              
+              console.log(`📡 [REQ-${requestId}] Streaming continuation response...`);
+              
+              while (true) {
+                const { done, value } = await reader2.read();
+                
+                if (done) {
+                  console.log(`✅ [REQ-${requestId}] Continuation stream ended. Chunks: ${continuationChunks}`);
+                  break;
+                }
+                
+                buffer2 += decoder2.decode(value, { stream: true });
+                const lines = buffer2.split('\n');
+                buffer2 = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  if (!line.startsWith('data: ')) continue;
+                  
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    continuationChunks++;
+                    
+                    // Handle text content from continuation
+                    if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+                      const newText = parsed.delta.text;
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      // Auto-save during continuation
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 3000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    
+                    if (parsed.type === 'message_stop') {
+                      console.log(`🏁 [REQ-${requestId}] Continuation message_stop received`);
+                    }
+                  } catch (e) {
+                    console.error('Parse error in continuation:', e);
+                  }
+                }
+              }
+              
+              console.log(`✅ [REQ-${requestId}] Tool result continuation completed. Final response: ${fullResponse.length} chars`);
+              
+            } catch (error) {
+              console.error(`❌ [REQ-${requestId}] Error during tool result continuation:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              fullResponse += errorText;
+              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+            }
+          }
             
             // VALIDATION: Detect simulated downloads (hallucination detection)
             if (agent.slug.includes('knowledge-search-expert') && toolCallCount === 0) {
