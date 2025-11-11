@@ -7,8 +7,13 @@ const corsHeaders = {
 };
 
 interface SearchAndAcquireRequest {
-  topic: string;
+  topic?: string;
   maxBooks?: number;
+  pdfsToDownload?: Array<{
+    title: string;
+    url: string;
+    source: string;
+  }>;
 }
 
 interface PDFResult {
@@ -277,8 +282,8 @@ serve(async (req) => {
       );
     }
     
-    // STEP 3: Check duplicates and queue
-    console.log(`\n📥 [STEP 3] Checking duplicates and queueing`);
+    // Check duplicates and queue for download
+    console.log(`\n📥 Checking duplicates and queueing for download...`);
     
     for (const pdf of validatedPdfs) {
       try {
@@ -322,11 +327,12 @@ serve(async (req) => {
         }
         
         // Add to queue
+        const searchQuery = topic || `User selected: ${pdf.title}`;
         const { error: queueError } = await supabase
           .from('pdf_download_queue')
           .insert({
             url: pdf.url,
-            search_query: topic,
+            search_query: searchQuery,
             expected_title: pdf.title,
             agent_id: agentId,
             conversation_id: conversationId,

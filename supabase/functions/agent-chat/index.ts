@@ -3683,26 +3683,29 @@ ${agent.system_prompt}${knowledgeContext}`;
                             toolResult = acquireData;
                             
                             // Format initial results (immediate feedback)
-            let resultText = `\n\n🔍 **Ricerca e acquisizione PDF avviata per: "${toolInput.topic}"**\n\n`;
-            resultText += `📊 Libri trovati: ${acquireData.pdfs_found}\n`;
-            resultText += `🔎 PDF verificati: ${acquireData.pdfs_found}\n`;
-            resultText += `👍 PDF in coda per validazione: ${acquireData.pdfs_queued}\n`;
-            resultText += `🔄 PDF già esistenti: ${acquireData.pdfs_already_existing}\n`;
-            if (acquireData.pdfs_failed > 0) {
-              resultText += `❌ PDF falliti: ${acquireData.pdfs_failed}\n`;
-            }
-            resultText += `\n`;
+                            const topicOrPdfs = toolInput.topic || `${toolInput.pdfsToDownload?.length} PDF selezionati`;
+                            let resultText = `\n\n📦 **Acquisizione PDF avviata**\n\n`;
+                            resultText += `📚 PDF trovati: ${acquireData.pdfs_found}\n`;
+                            resultText += `📥 PDF in coda per download: ${acquireData.pdfs_queued}\n`;
+                            resultText += `♻️ PDF già esistenti nel pool: ${acquireData.pdfs_already_existing}\n`;
+                            if (acquireData.pdfs_failed > 0) {
+                              resultText += `❌ PDF non processabili: ${acquireData.pdfs_failed}\n`;
+                            }
+                            resultText += `\n`;
 
-            if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
-              resultText += `**PDF trovati:**\n\n`;
-              acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
-                const statusEmoji = pdf.status === 'queued' ? '📥' : pdf.status === 'existing' ? '♻️' : '❌';
-                resultText += `${statusEmoji} **${pdf.title}**\n`;
-                resultText += `   ${pdf.source}\n\n`;
-              });
-            }
+                            if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
+                              resultText += `**Dettagli PDF:**\n\n`;
+                              acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
+                                const statusEmoji = pdf.status === 'queued' ? '📥' : pdf.status === 'existing' ? '♻️' : '❌';
+                                const statusText = pdf.status === 'queued' ? 'In download' : 
+                                                 pdf.status === 'existing' ? 'Già presente' : 'Fallito';
+                                resultText += `${idx + 1}. ${statusEmoji} **${pdf.title}**\n`;
+                                resultText += `   📍 ${pdf.source}\n`;
+                                resultText += `   📊 Stato: ${statusText}\n\n`;
+                              });
+                            }
                             
-                            resultText += `\n⏳ Validazione in corso... riceverai un aggiornamento tra pochi secondi.\n\n`;
+                            resultText += `\n⏳ **Download e validazione in corso...** Riceverai un aggiornamento quando i PDF saranno validati e aggiunti al pool.\n\n`;
                             
                             fullResponse += resultText;
                             await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
@@ -3741,7 +3744,8 @@ ${agent.system_prompt}${knowledgeContext}`;
                                 }
                                 
                                 // Format deterministic results message
-                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione: "${toolInput.topic}"\n\n`;
+                                const topicLabel = toolInput.topic || 'PDF selezionati';
+                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione\n\n`;
                                 
                                 const validated = queuedDocs.filter(d => d.status === 'completed');
                                 const rejected = queuedDocs.filter(d => d.status === 'rejected');
