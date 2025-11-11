@@ -174,7 +174,7 @@ export default function MultiAgentConsultant() {
           }
         }
       )
-      // Subscribe to agent_messages for direct background updates
+      // Subscribe to agent_messages for all message updates
       .on(
         'postgres_changes',
         {
@@ -187,19 +187,22 @@ export default function MultiAgentConsultant() {
           console.log('📡 [REALTIME] Message change:', payload.eventType, payload.new);
           const msg = payload.new as Message;
           
-          if (msg.role === 'assistant') {
-            if (payload.eventType === 'INSERT') {
-              // Add new message if it doesn't exist
-              setMessages(prev => {
-                const exists = prev.some(m => m.id === msg.id);
-                return exists ? prev : [...prev, msg];
-              });
-            } else if (payload.eventType === 'UPDATE') {
-              // Update existing message
-              setMessages(prev => prev.map(m => 
-                m.id === msg.id ? { ...m, content: msg.content } : m
-              ));
-            }
+          if (payload.eventType === 'INSERT') {
+            // Add new message if it doesn't exist (prevents duplicates)
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === msg.id);
+              if (exists) {
+                console.log('⚠️ [REALTIME] Message already exists, skipping:', msg.id);
+                return prev;
+              }
+              console.log('✅ [REALTIME] Adding new message:', msg.id);
+              return [...prev, msg];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            // Update existing message
+            setMessages(prev => prev.map(m => 
+              m.id === msg.id ? { ...m, content: msg.content } : m
+            ));
           }
         }
       )
@@ -259,46 +262,8 @@ export default function MultiAgentConsultant() {
     }
   }, [session?.user?.id, agentUpdateTrigger]);
 
-  // Realtime subscription for message updates
-  useEffect(() => {
-    if (!currentConversation?.id) return;
-
-    const channel = supabase
-      .channel(`agent_messages:${currentConversation.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'agent_messages',
-          filter: `conversation_id=eq.${currentConversation.id}`
-        },
-        (payload) => {
-          const updatedMessage = payload.new as Message;
-          console.log('📨 Realtime change:', payload.eventType, updatedMessage.id);
-          
-          if (payload.eventType === 'INSERT') {
-            // Add new message if it doesn't exist
-            setMessages(prev => {
-              const exists = prev.some(m => m.id === updatedMessage.id);
-              return exists ? prev : [...prev, updatedMessage];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            // Update existing message
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === updatedMessage.id ? updatedMessage : msg
-              )
-            );
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentConversation?.id]);
+  // NOTE: Realtime subscription for messages is handled in the unified subscription above (lines 122-214)
+  // This section has been removed to prevent duplicate message handling
 
   // Auto-select agent from URL parameter when returning from presentation
   useEffect(() => {
