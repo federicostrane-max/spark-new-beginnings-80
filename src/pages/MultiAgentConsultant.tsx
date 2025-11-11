@@ -196,6 +196,21 @@ export default function MultiAgentConsultant() {
               loadConversation(currentConversation.id);
               return; // Don't add this system message to the UI
             }
+
+            // 📄 Check for PDF validation notification
+            if (msg.role === 'system' && msg.content?.startsWith('__PDF_VALIDATED__')) {
+              console.log('✅ [REALTIME] PDF validated notification received');
+              try {
+                const data = JSON.parse(msg.content.replace('__PDF_VALIDATED__', ''));
+                toast.success(`PDF validato: ${data.title}`, {
+                  description: "Il documento è ora disponibile nel pool",
+                  duration: 5000,
+                });
+              } catch (e) {
+                console.error('Failed to parse PDF validation data:', e);
+              }
+              return; // Don't add this system message to the UI
+            }
             
             // Add new message if it doesn't exist (prevents duplicates)
             setMessages(prev => {

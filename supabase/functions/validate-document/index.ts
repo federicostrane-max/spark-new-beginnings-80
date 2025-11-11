@@ -526,7 +526,7 @@ Se confidence < 70, considera il documento NON rilevante.`;
     // STEP 4C: Update pdf_download_queue if this download was queued
     const { data: queueEntry } = await supabase
       .from('pdf_download_queue')
-      .select('id')
+      .select('id, conversation_id')
       .eq('document_id', documentId)
       .single();
 
@@ -544,6 +544,33 @@ Se confidence < 70, considera il documento NON rilevante.`;
       if (queueError) {
         console.warn('[validate-document] ⚠️ Failed to update queue entry:', queueError);
         // Non-fatal, continue
+      }
+
+      // STEP 4D: Send real-time notification to user
+      if (queueEntry.conversation_id) {
+        console.log(`[validate-document] 📬 Sending validation notification to conversation ${queueEntry.conversation_id.slice(0, 8)}...`);
+        try {
+          const { data: docData } = await supabase
+            .from('knowledge_documents')
+            .select('file_name')
+            .eq('id', documentId)
+            .single();
+
+          await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: queueEntry.conversation_id,
+              role: 'system',
+              content: `__PDF_VALIDATED__${JSON.stringify({
+                title: docData?.file_name || 'Unknown Document',
+                documentId: documentId
+              })}`
+            });
+          console.log('[validate-document] ✓ Notification sent successfully');
+        } catch (notifError) {
+          console.warn('[validate-document] ⚠️ Failed to send notification:', notifError);
+          // Non-fatal, continue
+        }
       }
     }
 
