@@ -133,17 +133,20 @@ serve(async (req) => {
     // ========================================
     console.log('[sync-pool-document] Looking for existing chunks (any agent or shared pool)...');
     
-    // First check if ANY chunks exist for this document (including shared pool)
+    // First check if ANY chunks exist for this document (including shared pool AND other agents)
     const { data: sampleChunks, error: sampleError } = await supabase
       .from('agent_knowledge')
       .select('id')
       .eq('pool_document_id', documentId)
+      .or('agent_id.is.null,agent_id.not.is.null') // Include both shared pool (null) and assigned chunks
       .limit(1);
 
     if (sampleError) {
       console.error('[sync-pool-document] Error checking for chunks:', sampleError);
       throw sampleError;
     }
+
+    console.log(`[sync-pool-document] Sample chunks found: ${sampleChunks?.length || 0}`);
 
     if (sampleChunks && sampleChunks.length > 0) {
       console.log('[sync-pool-document] Document has chunks, fetching ALL for copy (including shared pool)...');
@@ -153,7 +156,9 @@ serve(async (req) => {
       const { data: allChunks, error: allChunksError } = await supabase
         .from('agent_knowledge')
         .select('document_name, content, category, summary, embedding')
-        .eq('pool_document_id', documentId);
+        .eq('pool_document_id', documentId)
+        .or('agent_id.is.null,agent_id.not.is.null') // Explicitly include all chunks
+        .limit(10000); // Safety limit
 
       if (allChunksError) {
         console.error('[sync-pool-document] Error fetching all chunks:', allChunksError);
@@ -217,159 +222,39 @@ serve(async (req) => {
       });
     }
 
-    console.log('[sync-pool-document] No existing chunks found, falling back to PDF processing...');
-
     // ========================================
-    // STEP 5: FALLBACK - Download and extract text from PDF
+    // STEP 5: NO CHUNKS FOUND - This is a critical error
     // ========================================
+    console.log('[sync-pool-document] ❌ No existing chunks found for this document!');
+    console.log(`[sync-pool-document] Document ID: ${documentId}`);
+    console.log(`[sync-pool-document] File path in DB: ${poolDoc.file_path}`);
     
-    // Extract bucket name and clean path from file_path
-    // Path format can be: "bucket-name/file.pdf" or just "file.pdf"
-    const pathParts = poolDoc.file_path.split('/');
-    const bucketName = pathParts.length > 1 ? pathParts[0] : 'knowledge-pdfs';
-    const cleanPath = pathParts.length > 1 ? pathParts.slice(1).join('/') : poolDoc.file_path;
+    // This means the document record exists but chunks were never created
+    // OR chunks were deleted. The document needs to be re-processed from scratch.
     
-    console.log(`[sync-pool-document] Downloading PDF from bucket: ${bucketName}, path: ${cleanPath}`);
-    
-    const { data: fileData, error: downloadError } = await supabase
-      .storage
-      .from(bucketName)
-      .download(cleanPath);
-
-    if (downloadError || !fileData) {
-      console.error('[sync-pool-document] Download error:', downloadError);
-      
-      // Mark sync as failed in agent_document_links
-      await supabase
-        .from('agent_document_links')
-        .update({ 
-          sync_status: 'failed',
-          sync_completed_at: new Date().toISOString(),
-          sync_error: `File not accessible: ${downloadError?.message || 'File not found in storage'}`
-        })
-        .eq('document_id', documentId)
-        .eq('agent_id', agentId);
-      
-      // Return error response instead of throwing
-      return new Response(
-        JSON.stringify({ 
-          error: 'File not accessible',
-          message: `PDF file not found in storage bucket "${bucketName}" at path: ${cleanPath}. The document may need to be re-uploaded.`,
-          documentId,
-          agentId,
-          bucket: bucketName,
-          path: cleanPath
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Use extract-pdf-text edge function with documentId
-    console.log('[sync-pool-document] Extracting text from PDF...');
-    
-    const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
-      body: { 
-        documentId: documentId
-      }
-    });
-
-    if (extractError) {
-      console.error('[sync-pool-document] Text extraction failed:', extractError);
-      throw new Error(`Text extraction failed: ${extractError.message}`);
-    }
-
-    const fullText = extractData?.text || '';
-
-    if (!fullText || fullText.trim().length < 100) {
-      throw new Error(`Extracted text too short or empty (${fullText.length} chars). PDF may be scanned or corrupted.`);
-    }
-
-    console.log(`[sync-pool-document] Extracted ${fullText.length} characters`);
-
-    // ========================================
-    // STEP 6: Chunk the text
-    // ========================================
-    const chunks = chunkText(fullText, 1000, 200);
-    console.log(`[sync-pool-document] Created ${chunks.length} chunks`);
-
-    // ========================================
-    // STEP 7: Generate embeddings and insert chunks
-    // ========================================
-    const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
-    if (!openAIApiKey) {
-      throw new Error('OPENAI_API_KEY not configured');
-    }
-
-    let insertedCount = 0;
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      
-      console.log(`[sync-pool-document] Processing chunk ${i + 1}/${chunks.length}`);
-
-      // Generate embedding with newer model
-      const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${openAIApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'text-embedding-3-small',
-          input: chunk,
-        }),
-      });
-
-      if (!embeddingResponse.ok) {
-        console.error(`[sync-pool-document] Failed to generate embedding for chunk ${i + 1}`);
-        continue;
-      }
-
-      const embeddingData = await embeddingResponse.json();
-      const embedding = embeddingData.data[0].embedding;
-
-      // Insert chunk into agent_knowledge
-      const { error: insertError } = await supabase
-        .from('agent_knowledge')
-        .insert({
-          agent_id: agentId,
-          document_name: poolDoc.file_name,
-          content: chunk,
-          category: poolDoc.topics?.[0] || 'General',
-          summary: poolDoc.ai_summary || `Part ${i + 1} of ${poolDoc.file_name}`,
-          embedding: embedding,
-          source_type: 'shared_pool',
-          pool_document_id: documentId,
-        });
-
-      if (insertError) {
-        console.error(`[sync-pool-document] Failed to insert chunk ${i + 1}:`, insertError);
-      } else {
-        insertedCount++;
-      }
-    }
-
-    console.log(`[sync-pool-document] Successfully inserted ${insertedCount}/${chunks.length} chunks`);
-
-    // Mark sync as completed
+    // Mark sync as failed in agent_document_links
     await supabase
       .from('agent_document_links')
-      .update({
-        sync_status: 'completed',
+      .update({ 
+        sync_status: 'failed',
         sync_completed_at: new Date().toISOString(),
-        sync_error: null
+        sync_error: 'Document has no chunks and no source file available. Needs re-upload.'
       })
-      .eq('agent_id', agentId)
-      .eq('document_id', documentId);
-
-    return new Response(JSON.stringify({ 
-      success: true,
-      chunksCount: insertedCount,
-      totalChunks: chunks.length,
-      method: 'processed_pdf'
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+      .eq('document_id', documentId)
+      .eq('agent_id', agentId);
+    
+    // Return clear error message
+    return new Response(
+      JSON.stringify({ 
+        error: 'Document not processable',
+        message: `The document "${poolDoc.file_name}" has no text chunks in the database. This usually happens when:\n\n1. The document was uploaded without processing\n2. The chunks were deleted\n3. Processing failed during upload\n\nSolution: Delete this document from the pool and re-upload it.`,
+        documentId,
+        agentId,
+        fileName: poolDoc.file_name,
+        suggestion: 'Delete and re-upload the document'
+      }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
 
   } catch (error) {
     console.error('[sync-pool-document] Error:', error);
