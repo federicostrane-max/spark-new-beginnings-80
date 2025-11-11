@@ -2041,16 +2041,25 @@ Deno.serve(async (req) => {
     console.log('Processing chat for agent:', agentSlug);
 
     // Get agent details
+    console.log('🔍 Looking for agent with slug:', agentSlug);
     const { data: agent, error: agentError } = await supabase
       .from('agents')
       .select('*')
       .eq('slug', agentSlug)
       .eq('active', true)
-      .single();
+      .maybeSingle();
 
-    if (agentError || !agent) {
+    if (agentError) {
+      console.error('❌ Database error fetching agent:', agentError);
+      throw new Error(`Agent query failed: ${agentError.message}`);
+    }
+    
+    if (!agent) {
+      console.error('❌ Agent not found for slug:', agentSlug);
       throw new Error('Agent not found');
     }
+    
+    console.log('✅ Agent found:', agent.id, agent.name);
 
     console.log('Agent ID for RAG filtering:', agent.id);
 
