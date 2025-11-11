@@ -82,10 +82,13 @@ serve(async (req) => {
   // Assignment is done later by users through the DocumentPool UI.
   // NEVER use 'ai_assigned' assignment type.
 
+  let requestBody: any;
+  let supabase: any;
+  
   try {
     const startTime = Date.now(); // ✅ Track validation start time
     
-    const requestBody = await req.json();
+    requestBody = await req.json();
     const documentId = requestBody.documentId;
     const expected_title = requestBody.expected_title;
     const expected_author = requestBody.expected_author;
@@ -104,7 +107,7 @@ serve(async (req) => {
     // ========================================
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    supabase = createClient(supabaseUrl, supabaseKey);
 
     // Check if already validated or processing
     const { data: docCheck, error: checkError } = await supabase
@@ -571,12 +574,30 @@ Se confidence < 70, considera il documento NON rilevante.`;
     });
 
   } catch (error) {
-    console.error('[validate-document] ❌ ERROR:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown validation error';
+    console.error('[validate-document] ❌ FATAL ERROR');
+    console.error('[validate-document] Document ID:', requestBody?.documentId || 'unknown');
+    console.error('[validate-document] Error:', errorMessage);
     console.error('[validate-document] Stack:', (error as Error).stack);
     console.log('[validate-document] ========== END ERROR ==========');
     
+    // ✅ CRITICAL FIX: Update document status to validation_failed
+    try {
+      if (requestBody?.documentId) {
+        await markValidationFailed(
+          supabase,
+          requestBody.documentId,
+          `Validation exception: ${errorMessage}`,
+          0
+        );
+        console.log('[validate-document] ✓ Document marked as validation_failed');
+      }
+    } catch (updateError) {
+      console.error('[validate-document] ❌ Failed to update error status:', updateError);
+    }
+    
     return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Validation error' 
+      error: errorMessage
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

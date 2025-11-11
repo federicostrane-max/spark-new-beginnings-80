@@ -591,30 +591,47 @@ serve(async (req) => {
       .eq('url', url)
       .eq('search_query', search_query || '');
 
-    // Trigger validation (which will extract text and then call process-document)
+    // Trigger validation with retry mechanism
     console.log('[download-pdf-tool] Triggering validate-document...');
     
-    try {
-      const { data: validationResult, error: validationError } = await supabase.functions.invoke('validate-document', {
-        body: { 
-          documentId: document.id,
-          searchQuery: search_query,
-          expected_title: expected_title,
-          expected_author: expected_author,
-          // Note: extractedText not provided, validate-document will handle PDF extraction
-          fullText: '' // Will be extracted by validate-document if needed
+    let validationSuccess = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[download-pdf-tool] Validation attempt ${attempt}/2...`);
+        
+        const { data: validationResult, error: validationError } = await supabase.functions.invoke('validate-document', {
+          body: { 
+            documentId: document.id,
+            searchQuery: search_query,
+            expected_title: expected_title,
+            expected_author: expected_author,
+            fullText: ''
+          }
+        });
+        
+        if (!validationError) {
+          console.log(`✅ Validation successful on attempt ${attempt}`);
+          validationSuccess = true;
+          break;
         }
-      });
-      
-      if (validationError) {
-        console.error('❌ Validation error:', validationError);
-        // Don't throw - let the document remain in "validating" state for manual retry
-      } else {
-        console.log('✅ Validation triggered successfully for:', document.id);
+        
+        console.warn(`⚠️ Validation attempt ${attempt} failed:`, validationError);
+        
+        if (attempt < 2) {
+          console.log('⏳ Retrying validation in 10s...');
+          await new Promise(resolve => setTimeout(resolve, 10000));
+        }
+      } catch (err) {
+        console.error(`❌ Validation attempt ${attempt} exception:`, err);
+        if (attempt === 2) {
+          console.error('❌ All validation attempts failed');
+          // The validate-document function will handle marking as failed
+        }
       }
-    } catch (err) {
-      console.error('❌ Validation invocation exception:', err);
-      // Don't throw - let the document remain in "validating" state for manual retry
+    }
+    
+    if (!validationSuccess) {
+      console.warn('⚠️ Validation did not succeed after 2 attempts');
     }
 
     console.log('[download-pdf-tool] ========== END SUCCESS ==========');
