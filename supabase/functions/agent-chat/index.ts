@@ -181,8 +181,16 @@ function detectProposedQuery(text: string): string | null {
 
 // Pattern detection for user confirmations
 function isConfirmation(text: string): boolean {
-  const confirmationPatterns = /^(ok|sì|si|yes|va\s+bene|perfetto|esatto|corretto|vai|proceed|d'?accordo)$/i;
-  return confirmationPatterns.test(text.trim());
+  const trimmed = text.trim().toLowerCase();
+  const confirmationWords = ['ok', 'sì', 'si', 'yes', 'va bene', 'perfetto', 'esatto', 'corretto', 'vai', 'proceed', 'accordo', "d'accordo", 'certo', 'assolutamente', 'confermo'];
+  
+  // Check if the trimmed message is exactly one of the confirmation words
+  if (confirmationWords.includes(trimmed)) {
+    return true;
+  }
+  
+  // Also check if message starts with confirmation word (allows trailing punctuation)
+  return confirmationWords.some(word => trimmed === word || trimmed.startsWith(word + ' ') || trimmed.startsWith(word + '.') || trimmed.startsWith(word + '!'));
 }
 
 // Pattern detection for "altra query" requests
