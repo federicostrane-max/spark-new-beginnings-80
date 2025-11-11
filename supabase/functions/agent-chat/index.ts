@@ -4809,6 +4809,18 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       console.log(`🚫 [REQ-${requestId}] Blocked agent text: "${newText}"`);
                     }
                     
+                    // DETERMINISTIC WORKFLOW: DETECT QUERY PROPOSAL IN AGENT RESPONSE
+                    if (isBookSearchExpert && !systemManagedSearch) {
+                      const proposedQuery = detectProposedQuery(fullResponse);
+                      if (proposedQuery && !conversationState.lastProposedQuery) {
+                        console.log(`🎯 [WORKFLOW] Detected proposed query in agent response: "${proposedQuery}"`);
+                        updateConversationState(conversationId, {
+                          lastProposedQuery: proposedQuery,
+                          waitingForConfirmation: true
+                        });
+                      }
+                    }
+                    
                     // Log progress every 500 chars
                     const now = Date.now();
                     if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
