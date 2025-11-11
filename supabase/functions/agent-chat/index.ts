@@ -2884,29 +2884,33 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // Add tool-specific override for Book Search Expert
           let toolOverride = '';
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 PDF SEARCH WORKFLOW - FOLLOW EXACTLY 🚨
+            toolOverride = `\n\n🚨 PDF SEARCH WORKFLOW - SEMPLIFICATO 🚨
 
-STEP 1 - Initial Request:
-User says: "cerca LLM"
-You call: propose_pdf_search_query { "originalTopic": "LLM textbook handbook", "variantIndex": 0 }
-Result: System shows "LLM textbook handbook PDF" to user
-→ WAIT for user response
+STEP 1 - Proponi Query:
+User: "cerca LLM"
+You: "Ti propongo: LLM prompt engineering guide. Va bene o vuoi un'altra query?"
+→ NON chiamare tool, scrivi solo nel testo
 
-STEP 2 - User Confirms (ANY positive response):
-User says: "ok" OR "va bene" OR "sì" OR "procedi" OR "perfetto" OR "d'accordo"
-You call: search_pdf_with_query { "searchQuery": "LLM textbook handbook PDF", "maxResults": 5 }
-Result: You get {success: true, pdfs: [...], total: 5}
-→ YOU respond: "Ho trovato 5 PDF: 1. xxx, 2. yyy... Vuoi scaricarli?"
+STEP 2 - User conferma:
+User: "ok" / "va bene" / "sì"
+You: [Chiama search_pdf_with_query con "LLM prompt engineering guide"]
+System: Aggiunge " PDF" automaticamente
+You: "Ho trovato 5 PDF: 1. xxx, 2. yyy... Vuoi scaricarli? Oppure vuoi che formuli una nuova query?"
 
-STEP 3 - User Confirms Download:
-User says: "sì" OR "scarica" OR "ok"
-You call: search_and_acquire_pdfs { "search_query": "LLM textbook handbook PDF", "maxBooks": 5 }
+STEP 3 - User vuole altra query:
+User: "altra query" / "prova diversa"
+You: "Provo con: LLM fine-tuning handbook. Va bene?"
+→ Torna allo STEP 2
 
-CRITICAL RULES:
-- After propose_pdf_search_query, if user says ANYTHING positive → call search_pdf_with_query
-- NEVER ask "Vuoi quindi che ricerco..." - Just call the tool!
-- The tool result tells you exactly what to do next (check next_step field)
-- Read conversation history: if you see propose_pdf_search_query was called, and user confirms, call search_pdf_with_query
+STEP 4 - User conferma download:
+User: "sì scarica" / "ok"
+You: [Chiama search_and_acquire_pdfs con la stessa query]
+
+REGOLE:
+- Proponi query nel TESTO, non con tool
+- Quando conferma → chiama search_pdf_with_query
+- Se vuole altra query → proponi una DIVERSA nel testo
+- Dopo search → chiedi se vuole scaricare E proponi già nuova query
 
 This OVERRIDES all previous instructions.\n\n`;
           }
@@ -2957,28 +2961,7 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
           
           // Add PDF search tools for both Book Search Expert agents
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            // Tool 1: Propose a search query variant to the user
-            tools.push({
-              name: 'propose_pdf_search_query',
-              description: 'Genera e propone una query di ricerca PDF all\'utente SENZA eseguirla. La query mostrata è IDENTICA a quella che verrà usata per la ricerca. L\'utente potrà approvare, rifiutare o modificare la query. Usa questo PRIMA di search_pdf_with_query per ottenere l\'approvazione dell\'utente.',
-              input_schema: {
-                type: 'object',
-                properties: {
-                  originalTopic: {
-                    type: 'string',
-                    description: 'Il topic originale richiesto dall\'utente (es: "LLM Prompt Engineering")'
-                  },
-                  variantIndex: {
-                    type: 'number',
-                    description: 'Indice della variante di query (0 = più specifica, aumenta per query più generiche). Default: 0',
-                    default: 0
-                  }
-                },
-                required: ['originalTopic']
-              }
-            });
-            
-            // Tool 2: Execute approved search query
+            // Tool: Execute search query (will auto-add " PDF")
             tools.push({
               name: 'search_pdf_with_query',
               description: 'Esegue una ricerca PDF con una query specifica SENZA scaricare i PDF. Mostra solo i risultati. La query usata è ESATTAMENTE quella approvata dall\'utente. Usa questo DOPO che l\'utente ha approvato una query proposta da propose_pdf_search_query.',
@@ -3541,13 +3524,7 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                     toolUseId = parsed.content_block.id;
                     toolUseName = parsed.content_block.name;
                     
-                    // ✅ FASE 1: Blocca output durante proposta query
-                    if (toolUseName === 'propose_pdf_search_query') {
-                      skipAgentResponse = true;
-                      console.log(`🚫 [REQ-${requestId}] Blocking agent response for propose_pdf_search_query`);
-                    }
-                    
-                    // ✅ FASE 2 & 3: Permetti output durante ricerca e download
+                    // Permetti output durante ricerca e download
                     if (toolUseName === 'search_pdf_with_query' || toolUseName === 'search_and_acquire_pdfs') {
                       skipAgentResponse = false;
                       console.log(`✅ [REQ-${requestId}] Allowing agent response for ${toolUseName}`);
@@ -3598,58 +3575,27 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                         }
                       }
                       
-                      // New tool: propose_pdf_search_query
-                      if (toolUseName === 'propose_pdf_search_query') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: propose_pdf_search_query`);
-                        console.log('   Original topic:', toolInput.originalTopic);
-                        console.log('   Variant index:', toolInput.variantIndex || 0);
-                        
-                        // Genera varianti complete
-                        const variants = generateQueryVariants(toolInput.originalTopic);
-                        const variantIndex = toolInput.variantIndex || 0;
-                        const proposedQuery = variants[variantIndex] || variants[0];
-                        
-                        // ✅ Usa la variante generata, non sempre la stessa!
-                        const cleanQuery = proposedQuery;
-                        
-                        // Invia solo la query pulita (skipAgentResponse è già true da content_block_start)
-                        await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery + '\n\n' }));
-                        
-                        // ✅ CRITICO: Imposta fullResponse con la nota di sistema così viene salvato correttamente
-                        fullResponse = `🔍 ${cleanQuery}\n\n[SYSTEM NOTE: Query shown to user. If user confirms with "ok"/"va bene"/"sì", call search_pdf_with_query with searchQuery: "${cleanQuery}" and maxResults: 5-10]`;
-                        
-                        // Il flag è già true, ma confermiamo
-                        skipAgentResponse = true;
-                        
-                        // Tool result minimale - l'agente non deve scrivere altro
-                        toolResult = {
-                          status: 'query_shown_to_user',
-                          proposedQuery,
-                          variantIndex,
-                          totalVariants: variants.length,
-                          hasMore: variantIndex < variants.length - 1,
-                          next_step: `CRITICAL: When user confirms (says "ok", "va bene", "sì", "procedi", etc.), you MUST call search_pdf_with_query with these exact parameters:
-  - searchQuery: "${cleanQuery}"
-  - maxResults: 5-10
-  DO NOT ask again, DO NOT propose another query. Just call search_pdf_with_query immediately.`
-                        };
-                      }
-                      
-                      // New tool: search_pdf_with_query
+                      // Tool: search_pdf_with_query - auto-add " PDF" if needed
                       if (toolUseName === 'search_pdf_with_query') {
                         toolCallCount++;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: search_pdf_with_query`);
-                        console.log('   Search query:', toolInput.searchQuery);
+                        
+                        // ✅ Aggiungi " PDF" automaticamente se non presente
+                        let finalQuery = toolInput.searchQuery;
+                        if (!finalQuery.toLowerCase().includes(' pdf')) {
+                          finalQuery += ' PDF';
+                          console.log(`✅ Auto-added " PDF" to query: "${finalQuery}"`);
+                        }
+                        
+                        console.log('   Search query:', finalQuery);
                         console.log('   Max results:', toolInput.maxResults || 5);
                         
                         try {
-                          // Chiama la nuova funzione edge che SOLO cerca senza scaricare
                           const { data: searchResults, error: searchError } = await supabase.functions.invoke(
                             'search-pdfs-only',
                             {
                               body: {
-                                query: toolInput.searchQuery, // Query ESATTA approvata dall'utente
+                                query: finalQuery,  // ✅ Usa la query con " PDF"
                                 maxResults: toolInput.maxResults || 5
                               }
                             }
@@ -3660,22 +3606,12 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                             toolResult = { success: false, error: searchError.message };
                           } else {
                             console.log('✅ Search completed:', searchResults);
-                            // ✅ Ritorna solo i dati raw, l'agente risponderà liberamente
-                            toolResult = {
-                              success: true,
-                              pdfs: searchResults.pdfs || [],
-                              total: searchResults.total || 0,
-                              query: toolInput.searchQuery
-                            };
+                            toolResult = searchResults;
                           }
-                        } catch (error) {
-                          console.error('❌ Unexpected search error:', error);
-                          const errorMessage = error instanceof Error ? error.message : String(error);
+                        } catch (err) {
+                          console.error('❌ Search error:', err);
+                          const errorMessage = err instanceof Error ? err.message : String(err);
                           toolResult = { success: false, error: errorMessage };
-                          
-                          const errorText = `\n\n❌ Errore imprevisto: ${errorMessage}\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         }
                       }
                       
