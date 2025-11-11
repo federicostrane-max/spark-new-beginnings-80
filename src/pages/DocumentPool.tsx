@@ -26,6 +26,7 @@ export default function DocumentPool() {
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [checkingMigration, setCheckingMigration] = useState(true);
   const [tableKey, setTableKey] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
   
   // Health metrics
   const [healthMetrics, setHealthMetrics] = useState({
@@ -97,6 +98,32 @@ export default function DocumentPool() {
     loadHealthMetrics();
   };
 
+  const handleRetryBlocked = async () => {
+    setIsRetrying(true);
+    try {
+      toast.loading('Avvio validazione PDF bloccati...', { id: 'retry' });
+      
+      const { data, error } = await supabase.functions.invoke('retry-failed-documents');
+      
+      if (error) throw error;
+      
+      toast.success(
+        'Validazione avviata! I PDF verranno processati nei prossimi minuti.',
+        { id: 'retry', duration: 5000 }
+      );
+      
+      setTimeout(() => {
+        loadHealthMetrics();
+        setTableKey(prev => prev + 1);
+      }, 2000);
+    } catch (err: any) {
+      console.error('[Retry Error]', err);
+      toast.error(`Errore: ${err.message}`, { id: 'retry' });
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
   const handleMigration = async () => {
     try {
       setMigrating(true);
@@ -165,26 +192,47 @@ export default function DocumentPool() {
             </div>
           </div>
 
-          {!checkingMigration && needsMigration && (
+          <div className="flex gap-2">
+            {!checkingMigration && needsMigration && (
+              <Button
+                onClick={() => setShowMigrationDialog(true)}
+                disabled={migrating}
+                variant="default"
+                size="lg"
+              >
+                {migrating ? (
+                  <>
+                    <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
+                    Migrazione in corso...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-5 w-5" />
+                    Migra PDF degli Agenti al Pool
+                  </>
+                )}
+              </Button>
+            )}
+            
             <Button
-              onClick={() => setShowMigrationDialog(true)}
-              disabled={migrating}
-              variant="default"
+              onClick={handleRetryBlocked}
+              disabled={isRetrying}
+              variant="secondary"
               size="lg"
             >
-              {migrating ? (
+              {isRetrying ? (
                 <>
                   <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
-                  Migrazione in corso...
+                  Validazione...
                 </>
               ) : (
                 <>
                   <RefreshCw className="mr-2 h-5 w-5" />
-                  Migra PDF degli Agenti al Pool
+                  Riprova PDF Bloccati
                 </>
               )}
             </Button>
-          )}
+          </div>
         </div>
 
         {!checkingMigration && needsMigration && (
