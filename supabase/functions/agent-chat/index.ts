@@ -3495,24 +3495,24 @@ ${agent.system_prompt}${knowledgeContext}`;
                             toolResult = acquireData;
                             
                             // Format initial results (immediate feedback)
-                            let resultText = `\n\n📚 **Ricerca e acquisizione PDF avviata per: "${toolInput.topic}"**\n\n`;
-                            resultText += `📖 Libri trovati: ${acquireData.books_discovered}\n`;
-                            resultText += `🔎 PDF verificati: ${acquireData.pdfs_found}\n`;
-                            resultText += `📥 PDF in coda per validazione: ${acquireData.pdfs_queued}\n`;
-                            resultText += `♻️ PDF già esistenti: ${acquireData.pdfs_already_existing}\n`;
-                            if (acquireData.pdfs_failed > 0) {
-                              resultText += `❌ PDF falliti: ${acquireData.pdfs_failed}\n`;
-                            }
-                            resultText += `\n`;
-                            
-                            if (acquireData.details && acquireData.details.length > 0) {
-                              resultText += `**PDF trovati:**\n\n`;
-                              acquireData.details.forEach((detail: any, idx: number) => {
-                                const statusEmoji = detail.status === 'queued' ? '📥' : detail.status === 'existing' ? '♻️' : '❌';
-                                resultText += `${statusEmoji} **${detail.book_title}** by ${detail.book_authors}\n`;
-                                resultText += `   ${detail.message}\n\n`;
-                              });
-                            }
+            let resultText = `\n\n🔍 **Ricerca e acquisizione PDF avviata per: "${toolInput.topic}"**\n\n`;
+            resultText += `📊 Libri trovati: ${acquireData.pdfs_found}\n`;
+            resultText += `🔎 PDF verificati: ${acquireData.pdfs_found}\n`;
+            resultText += `👍 PDF in coda per validazione: ${acquireData.pdfs_queued}\n`;
+            resultText += `🔄 PDF già esistenti: ${acquireData.pdfs_already_existing}\n`;
+            if (acquireData.pdfs_failed > 0) {
+              resultText += `❌ PDF falliti: ${acquireData.pdfs_failed}\n`;
+            }
+            resultText += `\n`;
+
+            if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
+              resultText += `**PDF trovati:**\n\n`;
+              acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
+                const statusEmoji = pdf.status === 'queued' ? '📥' : pdf.status === 'existing' ? '♻️' : '❌';
+                resultText += `${statusEmoji} **${pdf.title}**\n`;
+                resultText += `   ${pdf.source}\n\n`;
+              });
+            }
                             
                             resultText += `\n⏳ Validazione in corso... riceverai un aggiornamento tra pochi secondi.\n\n`;
                             
