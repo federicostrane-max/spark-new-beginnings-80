@@ -2881,6 +2881,26 @@ Il prompt deve essere pronto all'uso direttamente.`;
             // Continue without knowledge context if query fails
           }
           
+          // Add tool-specific override for Book Search Expert
+          let toolOverride = '';
+          if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
+            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - IGNORE PREVIOUS TEXT RESPONSE INSTRUCTIONS 🚨
+
+MANDATORY TOOL USAGE:
+- NEVER respond with text asking for confirmation
+- NEVER write "Vuoi quindi che ricerco per..." or similar
+- ALWAYS use the propose_pdf_search_query tool IMMEDIATELY when user asks to search
+- Call the tool with originalTopic set to the user's search topic
+- Let the TOOL handle showing the query to the user
+
+Example:
+User: "cerca libri su prompt engineering"
+You: [Call propose_pdf_search_query tool with originalTopic: "prompt engineering textbook"]
+System: [Shows "prompt engineering textbook PDF" to user]
+
+This OVERRIDES any instructions in your system prompt about responding with text.\n\n`;
+          }
+          
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
@@ -2891,7 +2911,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
-${agent.system_prompt}${knowledgeContext}`;
+${toolOverride}${agent.system_prompt}${knowledgeContext}`;
 
           // Add mention instruction if @agent tags were detected
           const enhancedSystemPrompt = mentions.length > 0 
