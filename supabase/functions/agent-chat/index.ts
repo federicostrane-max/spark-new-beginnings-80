@@ -2884,21 +2884,28 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // Add tool-specific override for Book Search Expert
           let toolOverride = '';
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - IGNORE PREVIOUS TEXT RESPONSE INSTRUCTIONS 🚨
+            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - MANDATORY TOOL USAGE 🚨
 
-MANDATORY TOOL USAGE:
-- NEVER respond with text asking for confirmation
-- NEVER write "Vuoi quindi che ricerco per..." or similar
-- ALWAYS use the propose_pdf_search_query tool IMMEDIATELY when user asks to search
-- Call the tool with originalTopic set to the user's search topic
-- Let the TOOL handle showing the query to the user
+STEP 1: COMPOSE AN OPTIMIZED SEARCH QUERY
+- Analyze the user's request
+- Create a better search query by adding keywords like: "textbook", "handbook", "guide", "book", "manual"
+- Make it specific and academic-focused
+- Example: "LLM" → "LLM large language models textbook handbook"
+- Example: "prompt engineering" → "prompt engineering textbook guide"
+
+STEP 2: CALL THE TOOL IMMEDIATELY
+- NEVER respond with text
+- NEVER write "Vuoi quindi che ricerco per..." 
+- ALWAYS call propose_pdf_search_query with your IMPROVED query as originalTopic
+- Set variantIndex to 0
+- Let the TOOL handle showing the query to user
 
 Example:
-User: "cerca libri su prompt engineering"
-You: [Call propose_pdf_search_query tool with originalTopic: "prompt engineering textbook"]
-System: [Shows "prompt engineering textbook PDF" to user]
+User: "cerca libri su LLM"
+You: [Call tool with originalTopic: "LLM large language models textbook handbook"]
+System: [Shows "LLM large language models textbook handbook PDF"]
 
-This OVERRIDES any instructions in your system prompt about responding with text.\n\n`;
+This OVERRIDES all previous text response instructions.\n\n`;
           }
           
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
