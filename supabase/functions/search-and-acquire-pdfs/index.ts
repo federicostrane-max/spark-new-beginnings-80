@@ -138,7 +138,7 @@ serve(async (req) => {
   }
 
   try {
-    const { topic, maxBooks = 10 }: SearchAndAcquireRequest = await req.json();
+    const { topic, maxBooks = 10, pdfsToDownload }: SearchAndAcquireRequest = await req.json();
     
     console.log(`🔍 [SEARCH & ACQUIRE] Starting direct PDF search for: "${topic}"`);
     console.log(`   Max results: ${maxBooks}`);
@@ -207,75 +207,110 @@ serve(async (req) => {
       throw new Error('Failed to get conversation');
     }
     
-    // STEP 1: Direct PDF search on SerpAPI
-    console.log(`📚 [STEP 1] Direct SerpAPI search with filetype:pdf`);
+    let validatedPdfs: PDFResult[] = [];
     
-    const apiKey = Deno.env.get('SERPAPI_API_KEY');
-    if (!apiKey) {
-      throw new Error('Missing SerpAPI API key');
-    }
-    
-    const searchQuery = `"${topic}" PDF`;
-    const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks}&hl=en&lr=lang_en`;
-    
-    console.log(`🔎 Query: ${searchQuery}`);
-    
-    const searchResponse = await fetch(searchUrl);
-    
-    if (!searchResponse.ok) {
-      throw new Error(`SerpAPI request failed: ${searchResponse.status}`);
-    }
-    
-    const searchData = await searchResponse.json();
-    
-    if (!searchData.organic_results || searchData.organic_results.length === 0) {
-      console.log('ℹ️ No PDF results found');
-      result.message = `No PDFs found for topic: ${topic}`;
-      return new Response(
-        JSON.stringify(result),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    const organicResults = searchData.organic_results;
-    console.log(`✅ Found ${organicResults.length} results from Google`);
-    
-    // STEP 2: Light validation + deduplication + queueing
-    console.log(`🔄 [STEP 2] Validating and queueing PDFs`);
-    
-    const validatedPdfs: PDFResult[] = [];
-    
-    for (let i = 0; i < organicResults.length; i++) {
-      const item = organicResults[i];
-      const url = item.link;
-      const title = item.title || 'Unknown Title';
-      const snippet = item.snippet || '';
+    // Check if we have pre-selected PDFs from the agent
+    if (pdfsToDownload && pdfsToDownload.length > 0) {
+      console.log(`📦 [MODE: PRE-SELECTED] Using ${pdfsToDownload.length} pre-selected PDFs from agent`);
       
-      console.log(`\n📄 [${i + 1}/${organicResults.length}] ${title}`);
-      console.log(`   URL: ${url.slice(0, 80)}...`);
-      
-      // Light validation
-      const validation = await validatePdfUrl(url, title);
-      
-      if (!validation.valid) {
-        result.pdfs_failed++;
-        continue;
+      // Use the PDFs directly provided by the agent
+      for (let i = 0; i < pdfsToDownload.length; i++) {
+        const pdf = pdfsToDownload[i];
+        console.log(`\n📄 [${i + 1}/${pdfsToDownload.length}] ${pdf.title}`);
+        console.log(`   URL: ${pdf.url.slice(0, 80)}...`);
+        
+        const validation = await validatePdfUrl(pdf.url, pdf.title);
+        
+        if (!validation.valid) {
+          console.log(`   ❌ Failed validation`);
+          result.pdfs_failed++;
+          continue;
+        }
+        
+        validatedPdfs.push({
+          title: pdf.title,
+          url: pdf.url,
+          source: pdf.source,
+          snippet: '',
+          credibilityScore: validation.credibilityScore || 3
+        });
       }
       
-      validatedPdfs.push({
-        title,
-        url,
-        source: new URL(url).hostname,
-        snippet,
-        credibilityScore: validation.credibilityScore || 3
-      });
+      result.pdfs_found = validatedPdfs.length;
+      console.log(`\n✅ Validated ${validatedPdfs.length} pre-selected PDFs`);
+      
+    } else {
+      // STEP 1: Direct PDF search on SerpAPI (auto-search mode)
+      console.log(`🔍 [MODE: AUTO-SEARCH] Searching via SerpAPI for: "${topic}"`);
+      console.log(`📚 [STEP 1] Direct SerpAPI search with filetype:pdf`);
+      
+      const apiKey = Deno.env.get('SERPAPI_API_KEY');
+      if (!apiKey) {
+        throw new Error('Missing SerpAPI API key');
+      }
+      
+      const searchQuery = `"${topic}" PDF`;
+      const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks}&hl=en&lr=lang_en`;
+      
+      console.log(`🔎 Query: ${searchQuery}`);
+      
+      const searchResponse = await fetch(searchUrl);
+      
+      if (!searchResponse.ok) {
+        throw new Error(`SerpAPI request failed: ${searchResponse.status}`);
+      }
+      
+      const searchData = await searchResponse.json();
+      
+      if (!searchData.organic_results || searchData.organic_results.length === 0) {
+        console.log('ℹ️ No PDF results found');
+        result.message = `No PDFs found for topic: ${topic}`;
+        return new Response(
+          JSON.stringify(result),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      const organicResults = searchData.organic_results;
+      console.log(`✅ Found ${organicResults.length} results from Google`);
+      
+      // STEP 2: Light validation + deduplication + queueing
+      console.log(`🔄 [STEP 2] Validating and queueing PDFs`);
+      
+      for (let i = 0; i < organicResults.length; i++) {
+        const item = organicResults[i];
+        const url = item.link;
+        const title = item.title || 'Unknown Title';
+        const snippet = item.snippet || '';
+        
+        console.log(`\n📄 [${i + 1}/${organicResults.length}] ${title}`);
+        console.log(`   URL: ${url.slice(0, 80)}...`);
+        
+        // Light validation
+        const validation = await validatePdfUrl(url, title);
+        
+        if (!validation.valid) {
+          result.pdfs_failed++;
+          continue;
+        }
+        
+        validatedPdfs.push({
+          title,
+          url,
+          source: new URL(url).hostname,
+          snippet,
+          credibilityScore: validation.credibilityScore || 3
+        });
+      }
+      
+      result.pdfs_found = validatedPdfs.length;
+      console.log(`\n✅ [STEP 2] Validated ${validatedPdfs.length} PDFs`);
     }
     
-    result.pdfs_found = validatedPdfs.length;
-    console.log(`\n✅ [STEP 2] Validated ${validatedPdfs.length} PDFs`);
-    
     if (validatedPdfs.length === 0) {
-      result.message = `Found ${organicResults.length} results but none passed validation`;
+      result.message = pdfsToDownload && pdfsToDownload.length > 0 
+        ? `Pre-selected ${pdfsToDownload.length} PDFs but none passed validation`
+        : `Found results but none passed validation`;
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
