@@ -2126,7 +2126,7 @@ Deno.serve(async (req) => {
 
     // Validate that user message doesn't contain system-generated patterns
     // Skip validation for messages with @tags (meta-discussion about the system)
-    const hasAgentTags = agentTagRegex.test(message);
+    const hasAgentTags = mentionedAgentSlugs.length > 0;
     
     if (!hasAgentTags) {
       const systemPatterns = [
