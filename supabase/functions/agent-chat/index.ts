@@ -2884,39 +2884,42 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // Add tool-specific override for Book Search Expert
           let toolOverride = '';
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - MANDATORY 3-PHASE WORKFLOW 🚨
+            toolOverride = `\n\n🚨 CRITICAL TOOL SELECTION RULES 🚨
 
-PHASE 1: PROPOSE OPTIMIZED QUERY
-- Analyze the user's request
-- Create optimized query adding keywords: "textbook", "handbook", "guide", "book", "manual"
-- Example: "LLM" → "LLM large language models textbook handbook"
-- Call propose_pdf_search_query with IMPROVED query as originalTopic
-- System will show the query, WAIT for user response
-- NEVER respond with text, let the tool show the query
+READ THE CONVERSATION HISTORY CAREFULLY BEFORE CHOOSING A TOOL!
 
-PHASE 2: EXECUTE SEARCH (after ANY positive user response)
-- User might say: "ok", "va bene", "sì", "procedi", "yes", "vai", "d'accordo", etc.
-- Interpret the response - if it's positive consent → call search_pdf_with_query
-- Use searchQuery = EXACT query from phase 1 (the one system showed with "PDF" at end)
-- Set maxResults to 5-10
-- After calling search_pdf_with_query, YOU MUST respond with the results
-- List all PDFs found
-- Ask user if they want to download them
-- Ask if they want to try another search variant
+RULE 1: Use propose_pdf_search_query ONLY when:
+- User makes a NEW search request ("cerca...", "trova libri su...", "voglio PDF su...")
+- User asks for a DIFFERENT topic than before
+- User explicitly says "prova un'altra query" or "cerca qualcos'altro"
+- You have NOT already proposed a query for this topic
 
-PHASE 3: DOWNLOAD (if user confirms)
-- If user confirms download → call search_and_acquire_pdfs
-- Respond naturally about the download progress
+RULE 2: Use search_pdf_with_query when:
+- User confirms a previously proposed query
+- User says: "ok", "va bene", "sì", "procedi", "vai", "yes", "perfetto", "esatto", "d'accordo"
+- You see in conversation history that you already called propose_pdf_search_query
+- The proposed query was shown to user (message ends with "PDF")
+- DO NOT propose again - just SEARCH with the query!
 
-CRITICAL: After calling search_pdf_with_query, YOU respond with the results, NOT the system.
+RULE 3: Use search_and_acquire_pdfs when:
+- User confirms they want to download the PDFs you found
+- You already called search_pdf_with_query and showed results
 
-Example flow:
-User: "cerca LLM"
-You: [Call propose_pdf_search_query with "LLM large language models textbook"]
-System: "LLM large language models textbook PDF"
-User: "va bene procedi"
-You: [Call search_pdf_with_query with searchQuery: "LLM large language models textbook PDF"]
-You: "Ho trovato 5 PDF su LLM:\n1. Deep Learning Book...\n2. ...\nVuoi scaricarli?"
+WORKFLOW EXAMPLE:
+User: "cerca LLM prompt engineering"
+You: [Call propose_pdf_search_query with "LLM prompting textbook"] → System shows "LLM prompting PDF"
+---
+User: "ok" ← IF YOU SEE THIS AFTER A PROPOSAL
+You: [Call search_pdf_with_query with searchQuery: "LLM prompting PDF"]
+System returns: {pdfs: [...], total: 5}
+You respond: "Ho trovato 5 PDF:\n1. xxx\n2. yyy\n...\nVuoi scaricarli? O provo un'altra query?"
+---
+User: "sì scarica"
+You: [Call search_and_acquire_pdfs]
+
+CRITICAL: Look at conversation history! If you already proposed a query and user says "ok", DO NOT propose again - SEARCH IMMEDIATELY!
+
+This OVERRIDES all previous instructions.
 
 This OVERRIDES all previous instructions.\n\n`;
           }
@@ -3537,6 +3540,8 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                   // Handle message start
                   if (parsed.type === 'message_start') {
                     console.log(`📨 [REQ-${requestId}] Anthropic message started`);
+                    console.log(`📜 [REQ-${requestId}] Conversation context (last 3 messages):`, 
+                      JSON.stringify(messages.slice(-3), null, 2));
                   }
                   
                   // Handle content block start
