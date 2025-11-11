@@ -197,17 +197,58 @@ export default function MultiAgentConsultant() {
               return; // Don't add this system message to the UI
             }
 
-            // 📄 Check for PDF validation notification
-            if (msg.role === 'system' && msg.content?.startsWith('__PDF_VALIDATED__')) {
-              console.log('✅ [REALTIME] PDF validated notification received');
+            // 📄 Check for PDF system notifications
+            if (msg.role === 'system' && msg.content?.startsWith('__PDF_')) {
+              console.log('📬 [REALTIME] PDF notification received:', msg.content.slice(0, 30));
+              
               try {
-                const data = JSON.parse(msg.content.replace('__PDF_VALIDATED__', ''));
-                toast.success(`PDF validato: ${data.title}`, {
-                  description: "Il documento è ora disponibile nel pool",
-                  duration: 5000,
-                });
+                // Handle all PDF notification types
+                if (msg.content.startsWith('__PDF_DOWNLOADED__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_DOWNLOADED__', ''));
+                  toast.info(`📥 PDF scaricato: ${data.title}`, {
+                    description: "Validazione in corso...",
+                    duration: 4000,
+                  });
+                } else if (msg.content.startsWith('__PDF_VALIDATED__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_VALIDATED__', ''));
+                  toast.success(`✅ PDF validato: ${data.title}`, {
+                    description: "Elaborazione in corso...",
+                    duration: 4000,
+                  });
+                } else if (msg.content.startsWith('__PDF_READY__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_READY__', ''));
+                  const shortSummary = data.summary?.slice(0, 100) + (data.summary?.length > 100 ? '...' : '');
+                  toast.success(`🎉 PDF pronto: ${data.title}`, {
+                    description: shortSummary || "Il documento è ora disponibile nel pool",
+                    duration: 6000,
+                  });
+                } else if (msg.content.startsWith('__PDF_DOWNLOAD_FAILED__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_DOWNLOAD_FAILED__', ''));
+                  toast.error(`❌ Download fallito: ${data.title}`, {
+                    description: data.reason,
+                    duration: 8000,
+                  });
+                } else if (msg.content.startsWith('__PDF_VALIDATION_FAILED__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_VALIDATION_FAILED__', ''));
+                  toast.error(`❌ Validazione fallita: ${data.title}`, {
+                    description: data.reason,
+                    duration: 8000,
+                  });
+                } else if (msg.content.startsWith('__PDF_VALIDATION_ERROR__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_VALIDATION_ERROR__', ''));
+                  toast.error(`⚠️ Errore di validazione: ${data.title}`, {
+                    description: data.reason,
+                    duration: 8000,
+                  });
+                } else if (msg.content.startsWith('__PDF_PROCESSING_FAILED__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_PROCESSING_FAILED__', ''));
+                  toast.error(`❌ Elaborazione fallita: ${data.title}`, {
+                    description: data.reason,
+                    duration: 8000,
+                  });
+                }
               } catch (e) {
-                console.error('Failed to parse PDF validation data:', e);
+                console.error('Failed to parse PDF notification data:', e);
               }
               return; // Don't add this system message to the UI
             }

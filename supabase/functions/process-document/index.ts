@@ -305,6 +305,38 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       })
       .eq('document_id', documentId);
 
+    // 📬 Send processing complete notification
+    const { data: queueData } = await supabase
+      .from('pdf_download_queue')
+      .select('conversation_id')
+      .eq('document_id', documentId)
+      .maybeSingle();
+
+    if (queueData?.conversation_id) {
+      try {
+        const { data: docData } = await supabase
+          .from('knowledge_documents')
+          .select('file_name')
+          .eq('id', documentId)
+          .single();
+        
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: queueData.conversation_id,
+            role: 'system',
+            content: `__PDF_READY__${JSON.stringify({
+              title: docData?.file_name || 'Unknown Document',
+              documentId: documentId,
+              summary: analysis.summary
+            })}`
+          });
+        console.log('[process-document] ✓ Processing complete notification sent');
+      } catch (notifError) {
+        console.warn('[process-document] ⚠️ Failed to send notification:', notifError);
+      }
+    }
+
     console.log('[process-document] Processing completed successfully!');
     console.log('[process-document] ========== END SUCCESS ==========');
     
@@ -345,6 +377,37 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
           retry_count: retryCount
         })
         .eq('document_id', documentId);
+      
+      // 📬 Send processing failed notification
+      const { data: queueData } = await supabase
+        .from('pdf_download_queue')
+        .select('conversation_id')
+        .eq('document_id', documentId)
+        .maybeSingle();
+      
+      if (queueData?.conversation_id) {
+        try {
+          const { data: docData } = await supabase
+            .from('knowledge_documents')
+            .select('file_name')
+            .eq('id', documentId)
+            .maybeSingle();
+          
+          await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: queueData.conversation_id,
+              role: 'system',
+              content: `__PDF_PROCESSING_FAILED__${JSON.stringify({
+                title: docData?.file_name || 'Unknown Document',
+                reason: error instanceof Error ? error.message : 'Processing error'
+              })}`
+            });
+          console.log('[process-document] ✓ Processing failed notification sent');
+        } catch (notifError) {
+          console.warn('[process-document] ⚠️ Failed to send notification:', notifError);
+        }
+      }
     } catch (dbError) {
       console.error('[process-document] Failed to update error status:', dbError);
     }

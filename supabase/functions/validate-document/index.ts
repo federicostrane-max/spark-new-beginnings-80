@@ -457,9 +457,9 @@ Se confidence < 70, considera il documento NON rilevante.`;
       // Update queue entry if exists
       const { data: queueEntry } = await supabase
         .from('pdf_download_queue')
-        .select('id')
+        .select('id, conversation_id')
         .eq('document_id', documentId)
-        .single();
+        .maybeSingle();
 
       if (queueEntry) {
         await supabase
@@ -471,6 +471,31 @@ Se confidence < 70, considera il documento NON rilevante.`;
             completed_at: new Date().toISOString()
           })
           .eq('id', queueEntry.id);
+        
+        // 📬 Send validation failed notification
+        if (queueEntry.conversation_id) {
+          try {
+            const { data: docData } = await supabase
+              .from('knowledge_documents')
+              .select('file_name')
+              .eq('id', documentId)
+              .maybeSingle();
+            
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: queueEntry.conversation_id,
+                role: 'system',
+                content: `__PDF_VALIDATION_FAILED__${JSON.stringify({
+                  title: docData?.file_name || 'Unknown Document',
+                  reason: aiResult.motivazione
+                })}`
+              });
+            console.log('[validate-document] ✓ Validation failed notification sent');
+          } catch (notifError) {
+            console.warn('[validate-document] ⚠️ Failed to send notification:', notifError);
+          }
+        }
       }
       
       return new Response(JSON.stringify({ 
@@ -658,12 +683,12 @@ async function markValidationFailed(
     })
     .eq('document_id', documentId);
 
-  // Update pdf_download_queue if exists
+  // Update pdf_download_queue if exists and send notification
   const { data: queueEntry } = await supabase
     .from('pdf_download_queue')
-    .select('id')
+    .select('id, conversation_id')
     .eq('document_id', documentId)
-    .single();
+    .maybeSingle();
 
   if (queueEntry) {
     await supabase
@@ -674,5 +699,30 @@ async function markValidationFailed(
         completed_at: new Date().toISOString()
       })
       .eq('id', queueEntry.id);
+    
+    // 📬 Send validation error notification
+    if (queueEntry.conversation_id) {
+      try {
+        const { data: docData } = await supabase
+          .from('knowledge_documents')
+          .select('file_name')
+          .eq('id', documentId)
+          .maybeSingle();
+        
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: queueEntry.conversation_id,
+            role: 'system',
+            content: `__PDF_VALIDATION_ERROR__${JSON.stringify({
+              title: docData?.file_name || 'Unknown Document',
+              reason: reason
+            })}`
+          });
+        console.log('[validate-document] ✓ Validation error notification sent');
+      } catch (notifError) {
+        console.warn('[validate-document] ⚠️ Failed to send notification:', notifError);
+      }
+    }
   }
 }

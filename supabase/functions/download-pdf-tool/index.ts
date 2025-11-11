@@ -375,6 +375,14 @@ serve(async (req) => {
         const errorMsg = `Could not extract PDF URL from landing page: ${extraction.error}`;
         console.error(`❌ [EXTRACTION] ${errorMsg}`);
         
+        // Get conversation_id for notification
+        const { data: queueEntry } = await supabase
+          .from('pdf_download_queue')
+          .select('conversation_id')
+          .eq('url', originalUrl)
+          .eq('search_query', search_query || '')
+          .maybeSingle();
+        
         await supabase
           .from('pdf_download_queue')
           .update({
@@ -385,6 +393,25 @@ serve(async (req) => {
           .eq('url', originalUrl)
           .eq('search_query', search_query || '');
         
+        // 📬 Send download failed notification
+        if (queueEntry?.conversation_id) {
+          try {
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: queueEntry.conversation_id,
+                role: 'system',
+                content: `__PDF_DOWNLOAD_FAILED__${JSON.stringify({
+                  title: expected_title || 'Document',
+                  reason: errorMsg,
+                  url: originalUrl
+                })}`
+              });
+          } catch (notifError) {
+            console.warn('[download-pdf-tool] ⚠️ Failed to send notification:', notifError);
+          }
+        }
+        
         throw new Error(errorMsg);
       }
     }
@@ -392,6 +419,14 @@ serve(async (req) => {
     else {
       const errorMsg = validation.error || 'Link not accessible';
       console.error(`❌ [PRE-CHECK] ${errorMsg}`);
+      
+      // Get conversation_id for notification
+      const { data: queueEntry } = await supabase
+        .from('pdf_download_queue')
+        .select('conversation_id')
+        .eq('url', originalUrl)
+        .eq('search_query', search_query || '')
+        .maybeSingle();
       
       await supabase
         .from('pdf_download_queue')
@@ -402,6 +437,25 @@ serve(async (req) => {
         })
         .eq('url', originalUrl)
         .eq('search_query', search_query || '');
+      
+      // 📬 Send download failed notification
+      if (queueEntry?.conversation_id) {
+        try {
+          await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: queueEntry.conversation_id,
+              role: 'system',
+              content: `__PDF_DOWNLOAD_FAILED__${JSON.stringify({
+                title: expected_title || 'Document',
+                reason: `Link non accessibile: ${errorMsg}`,
+                url: originalUrl
+              })}`
+            });
+        } catch (notifError) {
+          console.warn('[download-pdf-tool] ⚠️ Failed to send notification:', notifError);
+        }
+      }
       
       throw new Error(`Cannot download PDF: ${errorMsg}`);
     }
@@ -551,6 +605,13 @@ serve(async (req) => {
 
     console.log('✅ PDF uploaded to storage:', filePath);
 
+    // Get conversation_id for notifications
+    const { data: queueEntry } = await supabase
+      .from('pdf_download_queue')
+      .select('conversation_id')
+      .eq('url', originalUrl)
+      .maybeSingle();
+
     // Create document record (skip text extraction - will be done by process-document)
     const { data: document, error: docError } = await supabase
       .from('knowledge_documents')
@@ -642,6 +703,26 @@ serve(async (req) => {
       fileName,
       documentId: document.id
     });
+    
+    // 📬 Send download complete notification
+    if (queueEntry?.conversation_id) {
+      console.log(`[download-pdf-tool] 📬 Sending download notification...`);
+      try {
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: queueEntry.conversation_id,
+            role: 'system',
+            content: `__PDF_DOWNLOADED__${JSON.stringify({
+              title: fileName,
+              documentId: document.id
+            })}`
+          });
+        console.log('[download-pdf-tool] ✓ Download notification sent');
+      } catch (notifError) {
+        console.warn('[download-pdf-tool] ⚠️ Failed to send notification:', notifError);
+      }
+    }
     
     return new Response(
       JSON.stringify({ 
