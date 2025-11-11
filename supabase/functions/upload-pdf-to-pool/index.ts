@@ -66,15 +66,22 @@ serve(async (req) => {
     const documentId = document.id;
     console.log(`[STEP 1] ✓ Document created (id: ${documentId})`);
 
-    // Step 2: Create agent_document_links (auto-assign to uploading agent)
-    console.log('[STEP 2] Creating agent_document_links...');
+    // ⚠️ CRITICAL WORKFLOW NOTE:
+    // This function is for DIRECT UPLOADS by a specific agent.
+    // It creates a 'manual' link to assign the document to the uploading agent.
+    // For documents downloaded via search (download-pdf-tool), they should go to
+    // the SHARED POOL without any agent assignment.
+    // NEVER use 'ai_assigned' - only 'manual' or no link at all for shared pool.
+    
+    // Step 2: Create agent_document_links (manual assignment for direct upload)
+    console.log('[STEP 2] Creating agent_document_links (manual assignment)...');
     
     const { error: linkError } = await supabase
       .from('agent_document_links')
       .insert({
         document_id: documentId,
         agent_id: agentId,
-        assignment_type: 'manual',
+        assignment_type: 'manual', // ✅ ALWAYS 'manual' for direct uploads
         confidence_score: 1.0,
       });
 

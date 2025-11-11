@@ -75,6 +75,13 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // ⚠️ CRITICAL WORKFLOW NOTE:
+  // This function ONLY validates documents and generates AI summaries.
+  // It MUST NEVER create agent_document_links or assign documents to agents.
+  // Documents stay in the shared pool after validation.
+  // Assignment is done later by users through the DocumentPool UI.
+  // NEVER use 'ai_assigned' assignment type.
+
   try {
     const startTime = Date.now(); // ✅ Track validation start time
     

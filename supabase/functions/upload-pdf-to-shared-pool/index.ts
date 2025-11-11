@@ -25,6 +25,12 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // ⚠️ CRITICAL WORKFLOW NOTE:
+  // This function uploads documents to the SHARED POOL.
+  // It MUST NEVER create agent_document_links or assign documents to agents.
+  // Documents remain in the shared pool and are assigned later by users through the UI.
+  // NEVER use 'ai_assigned' - assignment is always done manually by users.
+
   try {
     const { text, fileName, fileSize } = await req.json();
     
