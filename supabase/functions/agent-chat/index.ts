@@ -2338,6 +2338,15 @@ Deno.serve(async (req) => {
                 answer: consultationResponse
               });
             
+            // 12. Insert special system message to notify frontend that consultation is complete
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversation.id,
+                role: 'system',
+                content: `__CONSULTATION_COMPLETE__@${targetSlug}`
+              });
+            
             console.log(`✅ [REQ-${requestId}] Inter-agent consultation completed for @${targetSlug}`);
             
           } catch (consultError) {

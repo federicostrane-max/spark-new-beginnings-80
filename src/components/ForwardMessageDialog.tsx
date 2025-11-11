@@ -33,7 +33,7 @@ interface Conversation {
 interface ForwardMessageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  message: { id: string; role: "user" | "assistant"; content: string } | null;
+  message: { id: string; role: "user" | "assistant" | "system"; content: string } | null;
   currentAgentId: string;
   onForwardComplete: (conversationId: string, agentId: string, messageContent: string) => void;
 }

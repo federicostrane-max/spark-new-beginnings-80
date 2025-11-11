@@ -41,7 +41,7 @@ interface Agent {
 
 interface Message {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   llm_provider?: string;
 }
@@ -190,6 +190,13 @@ export default function MultiAgentConsultant() {
           const msg = payload.new as Message;
           
           if (payload.eventType === 'INSERT') {
+            // 🔧 Check for consultation complete marker
+            if (msg.role === 'system' && msg.content?.startsWith('__CONSULTATION_COMPLETE__')) {
+              console.log('🔄 [REALTIME] Consultation completed, reloading messages...');
+              loadConversation(currentConversation.id);
+              return; // Don't add this system message to the UI
+            }
+            
             // Add new message if it doesn't exist (prevents duplicates)
             setMessages(prev => {
               const exists = prev.some(m => m.id === msg.id);
@@ -721,16 +728,6 @@ export default function MultiAgentConsultant() {
                   agent_id: currentAgent.id,
                   title: (text || accumulatedText || "Chat").slice(0, 50)
                 });
-              }
-              
-              // 🔧 FIX: Reload messages after inter-agent consultation
-              if (text && text.includes('@')) {
-                console.log('🔄 Message contained @tag, reloading messages to catch consultation responses...');
-                setTimeout(() => {
-                  if (currentConversation?.id) {
-                    loadConversation(currentConversation.id);
-                  }
-                }, 2000); // Wait 2s for inter-agent consultation to complete
               }
               
             } else if (parsed.type === "error") {
