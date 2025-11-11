@@ -4812,8 +4812,9 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     // DETERMINISTIC WORKFLOW: DETECT QUERY PROPOSAL IN AGENT RESPONSE
                     if (isBookSearchExpert && !systemManagedSearch) {
                       const proposedQuery = detectProposedQuery(fullResponse);
-                      if (proposedQuery && !conversationState.lastProposedQuery) {
-                        console.log(`🎯 [WORKFLOW] Detected proposed query in agent response: "${proposedQuery}"`);
+                      // Update if we find a query AND (no previous query OR new query is longer/more complete)
+                      if (proposedQuery && (!conversationState.lastProposedQuery || proposedQuery.length > conversationState.lastProposedQuery.length)) {
+                        console.log(`🎯 [WORKFLOW] Updated proposed query in agent response: "${proposedQuery}"`);
                         updateConversationState(conversationId, {
                           lastProposedQuery: proposedQuery,
                           waitingForConfirmation: true
