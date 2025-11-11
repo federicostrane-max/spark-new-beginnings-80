@@ -210,7 +210,7 @@ serve(async (req) => {
       throw new Error('Missing SerpAPI API key');
     }
     
-    const searchQuery = `"${topic}" filetype:pdf`;
+    const searchQuery = `"${topic}" PDF`;
     const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks}&hl=en&lr=lang_en`;
     
     console.log(`🔎 Query: ${searchQuery}`);
