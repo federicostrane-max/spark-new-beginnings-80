@@ -120,25 +120,34 @@ export type Database = {
           agent_id: string
           created_at: string | null
           id: string
+          last_proposed_query: string | null
           title: string | null
           updated_at: string | null
           user_id: string
+          waiting_for_confirmation: boolean | null
+          workflow_updated_at: string | null
         }
         Insert: {
           agent_id: string
           created_at?: string | null
           id?: string
+          last_proposed_query?: string | null
           title?: string | null
           updated_at?: string | null
           user_id: string
+          waiting_for_confirmation?: boolean | null
+          workflow_updated_at?: string | null
         }
         Update: {
           agent_id?: string
           created_at?: string | null
           id?: string
+          last_proposed_query?: string | null
           title?: string | null
           updated_at?: string | null
           user_id?: string
+          waiting_for_confirmation?: boolean | null
+          workflow_updated_at?: string | null
         }
         Relationships: [
           {

@@ -107,24 +107,46 @@ interface ConversationState {
   lastSearchResults: SearchResult[] | null;
 }
 
-// In-memory state store (could be moved to DB for persistence)
-const conversationStates = new Map<string, ConversationState>();
+// ========================================
+// CONVERSATION STATE PERSISTENCE (DATABASE)
+// Stato salvato nel DB invece che in memoria per persistenza tra richieste
+// ========================================
 
-function getConversationState(conversationId: string): ConversationState {
-  if (!conversationStates.has(conversationId)) {
-    conversationStates.set(conversationId, {
-      conversationId,
-      lastProposedQuery: null,
-      waitingForConfirmation: false,
-      lastSearchResults: null,
-    });
-  }
-  return conversationStates.get(conversationId)!;
+async function getConversationState(conversationId: string, supabaseClient: any): Promise<ConversationState> {
+  const { data } = await supabaseClient
+    .from('agent_conversations')
+    .select('last_proposed_query, waiting_for_confirmation')
+    .eq('id', conversationId)
+    .single();
+
+  console.log(`📖 [WORKFLOW] State loaded from DB for conversation ${conversationId}:`, data);
+
+  return {
+    conversationId,
+    lastProposedQuery: data?.last_proposed_query || null,
+    waitingForConfirmation: data?.waiting_for_confirmation || false,
+    lastSearchResults: null
+  };
 }
 
-function updateConversationState(conversationId: string, updates: Partial<ConversationState>) {
-  const state = getConversationState(conversationId);
-  Object.assign(state, updates);
+async function updateConversationState(conversationId: string, updates: Partial<ConversationState>, supabaseClient: any) {
+  const dbUpdates: any = {
+    workflow_updated_at: new Date().toISOString()
+  };
+  
+  if ('lastProposedQuery' in updates) {
+    dbUpdates.last_proposed_query = updates.lastProposedQuery;
+  }
+  if ('waitingForConfirmation' in updates) {
+    dbUpdates.waiting_for_confirmation = updates.waitingForConfirmation;
+  }
+
+  await supabaseClient
+    .from('agent_conversations')
+    .update(dbUpdates)
+    .eq('id', conversationId);
+    
+  console.log(`💾 [WORKFLOW] State persisted to DB for conversation ${conversationId}:`, dbUpdates);
 }
 
 // Pattern detection for query proposals
@@ -2822,7 +2844,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // DETERMINISTIC WORKFLOW: CHECK USER INPUT
           // ========================================
           
-          const conversationState = getConversationState(conversationId);
+          const conversationState = await getConversationState(conversationId, supabase);
           let systemManagedSearch = false;
           let systemSearchResults: SearchResult[] | null = null;
           
@@ -2891,18 +2913,18 @@ Il prompt deve essere pronto all'uso direttamente.`;
                 }
                 
                 // Clear waiting state
-                updateConversationState(conversationId, {
+                await updateConversationState(conversationId, {
                   waitingForConfirmation: false,
                   lastProposedQuery: null
-                });
+                }, supabase);
               } else if (isNewQueryRequest(message)) {
                 console.log(`🔄 [WORKFLOW] User requested different query`);
                 // Reset state and let agent propose new query
-                updateConversationState(conversationId, {
+                await updateConversationState(conversationId, {
                   waitingForConfirmation: false,
                   lastProposedQuery: null,
                   lastSearchResults: null
-                });
+                }, supabase);
               }
             }
           }
@@ -3664,10 +3686,10 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                         const proposedQuery = detectProposedQuery(fullResponse);
                         if (proposedQuery && !conversationState.lastProposedQuery) {
                           console.log(`🎯 [WORKFLOW] Detected proposed query in agent response: "${proposedQuery}"`);
-                          updateConversationState(conversationId, {
+                          await updateConversationState(conversationId, {
                             lastProposedQuery: proposedQuery,
                             waitingForConfirmation: true
-                          });
+                          }, supabase);
                         }
                       }
                       
@@ -4815,10 +4837,10 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       // Update if we find a query AND (no previous query OR new query is longer/more complete)
                       if (proposedQuery && (!conversationState.lastProposedQuery || proposedQuery.length > conversationState.lastProposedQuery.length)) {
                         console.log(`🎯 [WORKFLOW] Updated proposed query in agent response: "${proposedQuery}"`);
-                        updateConversationState(conversationId, {
+                        await updateConversationState(conversationId, {
                           lastProposedQuery: proposedQuery,
                           waitingForConfirmation: true
-                        });
+                        }, supabase);
                       }
                     }
                     
