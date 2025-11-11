@@ -129,23 +129,31 @@ function updateConversationState(conversationId: string, updates: Partial<Conver
 
 // Pattern detection for query proposals
 function detectProposedQuery(text: string): string | null {
+  console.log(`🔍 [PATTERN] Checking for proposed query in text: "${text.substring(0, 200)}..."`);
+  
   // Patterns: "Vuoi quindi che ricerco per '[QUERY]'?"
   //           "Ti propongo: [QUERY]"
   //           "Provo con: [QUERY]"
+  // UPDATED: Now supports both ASCII and Unicode quotes (', ', ", ", etc.)
   const patterns = [
-    /vuoi\s+(?:quindi\s+)?che\s+ricerco\s+per\s+['""]([^'""]+)['""]?\??/i,
+    /vuoi\s+(?:quindi\s+)?che\s+ricerco\s+per\s+['""''‚‛„‟‹›«»]([^'""''‚‛„‟‹›«»]+)['""''‚‛„‟‹›«»]?\??/i,
     /ti\s+propongo:?\s+([^.\n?]+)/i,
     /provo\s+con:?\s+([^.\n?]+)/i,
     /cerco:?\s+([^.\n?]+)/i,
+    // Fallback: works even if quotes are inconsistent or missing
+    /vuoi\s+(?:quindi\s+)?che\s+ricerco\s+per\s+(.+?)\??$/i,
   ];
   
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      return match[1].trim();
+      const extractedQuery = match[1].trim();
+      console.log(`✅ [PATTERN] Detected proposed query: "${extractedQuery}"`);
+      return extractedQuery;
     }
   }
   
+  console.log('❌ [PATTERN] No proposed query detected');
   return null;
 }
 
