@@ -3565,17 +3565,11 @@ ${agent.system_prompt}${knowledgeContext}`;
                         const variantIndex = toolInput.variantIndex || 0;
                         const proposedQuery = variants[variantIndex] || variants[0];
                         
-                        // ✅ SISTEMA INVIA SUBITO IL MESSAGGIO (bypassa l'agente)
-                        let proposalText = `\n\n🔍 **Query proposta #${variantIndex + 1}:**\n`;
-                        proposalText += `\`\`\`\n${proposedQuery}\n\`\`\`\n\n`;
-                        proposalText += `Questa è la query ESATTA che userò per cercare su Google.\n\n`;
-                        proposalText += `Vuoi che cerchi con questa query?\n`;
-                        if (variantIndex < variants.length - 1) {
-                          proposalText += `\n_(Ho altre ${variants.length - variantIndex - 1} varianti da provare se questa non va bene)_\n`;
-                        }
+                        // ✅ SISTEMA INVIA SUBITO LA QUERY PULITA (solo originalTopic + " PDF")
+                        const cleanQuery = toolInput.originalTopic + " PDF";
                         
-                        fullResponse += proposalText;
-                        await sendSSE(JSON.stringify({ type: 'content', text: proposalText }));
+                        fullResponse += cleanQuery;
+                        await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery }));
                         
                         // ✅ BLOCCA l'agente dal mandare la sua versione
                         skipAgentResponse = true;
