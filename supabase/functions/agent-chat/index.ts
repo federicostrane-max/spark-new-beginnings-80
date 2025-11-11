@@ -2923,35 +2923,15 @@ Il prompt deve essere pronto all'uso direttamente.`;
                   systemSearchResults = pdfResults;
                   conversationState.lastSearchResults = systemSearchResults;
                   
-                  // Build a message that includes the results
-                  if (pdfResults.length > 0) {
-                    let resultsText = `Ho trovato ${pdfResults.length} PDF per "${conversationState.lastProposedQuery}":\n\n`;
-                    pdfResults.forEach((pdf: any, idx: number) => {
-                      resultsText += `${idx + 1}. ${pdf.title}\n`;
-                    });
-                    resultsText += `\nConfermi il download di questi PDF?`;
-                    processedMessage = resultsText;
-                  } else {
-                    processedMessage = `Non ho trovato risultati per "${conversationState.lastProposedQuery}". Vuoi provare con una query diversa?`;
-                  }
-                  
-                  console.log(`📝 [WORKFLOW] User message replaced with results list`);
-                  
-                  // Update the user message in DB
-                  await supabase
-                    .from('agent_messages')
-                    .update({ content: processedMessage })
-                    .eq('id', userMessageId);
+                  // Search results will be passed to LLM via searchResultsContext
+                  console.log(`✅ [WORKFLOW] Search results will be passed to LLM via system prompt`);
+                  console.log(`📝 [WORKFLOW] User message kept unchanged: "${message}"`);
                     
                 } catch (err) {
                   console.error('❌ [WORKFLOW] Search exception:', err);
                   systemSearchResults = null;
-                  const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-                  processedMessage = `Errore durante la ricerca: ${errorMessage}. Riprova con una query diversa.`;
-                  await supabase
-                    .from('agent_messages')
-                    .update({ content: processedMessage })
-                    .eq('id', userMessageId);
+                  console.log(`❌ [WORKFLOW] Search failed, will let LLM handle the error`);
+                  // Error will be communicated via LLM response, not by modifying user message
                 }
                 
                 // Clear waiting state
