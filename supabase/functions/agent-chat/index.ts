@@ -3478,7 +3478,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                                 maxResultsPerBook: toolInput.maxResultsPerBook || 2
                               },
                               headers: {
-                                authorization: req.headers.get('authorization') || ''
+                                authorization: req.headers.get('Authorization') || ''
                               }
                             }
                           );
