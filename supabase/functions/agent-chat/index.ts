@@ -2438,6 +2438,7 @@ Deno.serve(async (req) => {
           let toolUseName: string | null = null;
           let toolUseInputJson = '';
           let needsToolResultContinuation = false;
+          let skipAgentResponse = false; // Flag to block agent output after system message
           
           // Use truncatedMessages instead of cleanedMessages
           const anthropicMessages = truncatedMessages
@@ -3466,8 +3467,12 @@ ${agent.system_prompt}${knowledgeContext}`;
                   if (llmProvider === 'openai') {
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
-                      fullResponse += newText;
-                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      // Block agent output if system has already sent the message
+                      if (!skipAgentResponse) {
+                        fullResponse += newText;
+                        await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      }
                       
                       // Log progress every 500 chars
                       const now = Date.now();
@@ -3560,15 +3565,7 @@ ${agent.system_prompt}${knowledgeContext}`;
                         const variantIndex = toolInput.variantIndex || 0;
                         const proposedQuery = variants[variantIndex] || variants[0];
                         
-                        toolResult = {
-                          proposedQuery,
-                          variantIndex,
-                          totalVariants: variants.length,
-                          hasMore: variantIndex < variants.length - 1,
-                          allVariants: variants // Per debug
-                        };
-                        
-                        // Formatta proposta per l'utente con QUERY COMPLETA
+                        // ✅ SISTEMA INVIA SUBITO IL MESSAGGIO (bypassa l'agente)
                         let proposalText = `\n\n🔍 **Query proposta #${variantIndex + 1}:**\n`;
                         proposalText += `\`\`\`\n${proposedQuery}\n\`\`\`\n\n`;
                         proposalText += `Questa è la query ESATTA che userò per cercare su Google.\n\n`;
@@ -3579,6 +3576,19 @@ ${agent.system_prompt}${knowledgeContext}`;
                         
                         fullResponse += proposalText;
                         await sendSSE(JSON.stringify({ type: 'content', text: proposalText }));
+                        
+                        // ✅ BLOCCA l'agente dal mandare la sua versione
+                        skipAgentResponse = true;
+                        
+                        // Tool result minimale - l'agente non deve scrivere altro
+                        toolResult = {
+                          status: 'query_shown_to_user',
+                          proposedQuery,
+                          variantIndex,
+                          totalVariants: variants.length,
+                          hasMore: variantIndex < variants.length - 1,
+                          note: 'Query already displayed to user. Wait for user confirmation.'
+                        };
                       }
                       
                       // New tool: search_pdf_with_query
@@ -4647,8 +4657,12 @@ ${agent.system_prompt}${knowledgeContext}`;
                   // Handle text content
                   if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                     const newText = parsed.delta.text;
-                    fullResponse += newText;
-                    await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                    
+                    // Block agent output if system has already sent the message
+                    if (!skipAgentResponse) {
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                    }
                     
                     // Log progress every 500 chars
                     const now = Date.now();
