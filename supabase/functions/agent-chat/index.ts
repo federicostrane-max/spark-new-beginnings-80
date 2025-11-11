@@ -89,6 +89,7 @@ interface SearchResult {
   year?: string;
   source?: string;
   url: string;
+  snippet?: string;
   credibilityScore?: number;
   source_type?: string;
   verified?: boolean;
@@ -2073,16 +2074,19 @@ Deno.serve(async (req) => {
       ? `${messageWithoutTags}${attachmentContext}`
       : messageWithoutTags;
 
-    // Save user message (original with @tags)
-    const { error: userMsgError } = await supabase
+    // Save user message (original with @tags) and get ID for potential update
+    const { data: userMessage, error: userMsgError } = await supabase
       .from('agent_messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
         content: message  // Keep original message with @tags
-      });
+      })
+      .select('id')
+      .single();
 
     if (userMsgError) throw userMsgError;
+    const userMessageId = userMessage.id;
     
     // ============================================
     // INTER-AGENT CONSULTATION - DETERMINISTIC
@@ -2814,6 +2818,9 @@ Il prompt deve essere pronto all'uso direttamente.`;
           let systemManagedSearch = false;
           let systemSearchResults: SearchResult[] | null = null;
           
+          // CRITICAL: Create mutable copy of message for workflow modifications
+          let processedMessage = message;
+          
           // Check if this is a Book Search Expert conversation
           const isBookSearchExpert = agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert';
           
@@ -2858,6 +2865,17 @@ Il prompt deve essere pronto all'uso direttamente.`;
                     console.log(`✅ [WORKFLOW] Search complete. Found ${searchData.results?.length || 0} results`);
                     systemSearchResults = searchData.results || [];
                     conversationState.lastSearchResults = systemSearchResults;
+                    
+                    // ✅ CRITICAL FIX: Replace user message so LLM understands context
+                    // Instead of passing "Ok", we update the DB with a meaningful message
+                    processedMessage = `Ho confermato la ricerca per "${conversationState.lastProposedQuery}". Presentami i risultati trovati.`;
+                    console.log(`📝 [WORKFLOW] User message replaced with: "${processedMessage}"`);
+                    
+                    // Update the user message in DB
+                    await supabase
+                      .from('agent_messages')
+                      .update({ content: processedMessage })
+                      .eq('id', userMessageId);
                   }
                 } catch (err) {
                   console.error('❌ [WORKFLOW] Search exception:', err);
@@ -3027,20 +3045,36 @@ Il prompt deve essere pronto all'uso direttamente.`;
           if (systemManagedSearch && systemSearchResults) {
             console.log(`📦 [WORKFLOW] Injecting ${systemSearchResults.length} search results into agent context`);
             
-            searchResultsContext = `\n\n🔍 SEARCH RESULTS AUTOMATICI (${systemSearchResults.length} PDF trovati):\n\n`;
+            searchResultsContext = `
+
+## SYSTEM MANAGED SEARCH - RESULTS READY
+
+The system has automatically executed a search based on your proposed query and found ${systemSearchResults.length} PDF(s).
+
+**CRITICAL**: The user has just confirmed they want to see these results. You MUST now:
+1. Present these ${systemSearchResults.length} PDF(s) in a clear, numbered list with titles and sources
+2. Include a brief description or snippet for each PDF
+3. Ask if they want to download these PDFs
+4. Offer to formulate a different search query if these aren't relevant
+
+### Found PDFs:
+
+`;
             
             systemSearchResults.forEach((result, idx) => {
               searchResultsContext += `${idx + 1}. **${result.title}**\n`;
-              if (result.authors) searchResultsContext += `   Autori: ${result.authors}\n`;
-              if (result.year) searchResultsContext += `   Anno: ${result.year}\n`;
-              if (result.source) searchResultsContext += `   Fonte: ${result.source}\n`;
-              searchResultsContext += `   URL: ${result.url}\n\n`;
+              searchResultsContext += `   - Source: ${result.source}\n`;
+              searchResultsContext += `   - URL: ${result.url}\n`;
+              if (result.snippet) searchResultsContext += `   - Snippet: ${result.snippet}\n`;
+              if (result.authors) searchResultsContext += `   - Authors: ${result.authors}\n`;
+              if (result.year) searchResultsContext += `   - Year: ${result.year}\n`;
+              searchResultsContext += `\n`;
             });
             
-            searchResultsContext += `\nINSTRUZIONI PER L'AGENTE:\n`;
-            searchResultsContext += `1. Elenca i PDF trovati in modo conciso (solo titoli numerati)\n`;
-            searchResultsContext += `2. Chiedi all'utente: "Vuoi che scarichi questi PDF? Oppure vuoi che formuli una query diversa?"\n`;
-            searchResultsContext += `3. NON chiamare tool. Scrivi solo testo.\n\n`;
+            searchResultsContext += `\n**Your Response Format**:\n`;
+            searchResultsContext += `- List all PDFs clearly with numbers\n`;
+            searchResultsContext += `- Ask: "Vuoi che scarichi questi PDF? Oppure vuoi che formuli una query diversa?"\n`;
+            searchResultsContext += `- DO NOT call any tools yet - just present the results\n\n`;
           }
           
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
