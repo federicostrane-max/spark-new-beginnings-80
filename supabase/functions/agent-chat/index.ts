@@ -2884,28 +2884,41 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // Add tool-specific override for Book Search Expert
           let toolOverride = '';
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - MANDATORY TOOL USAGE 🚨
+            toolOverride = `\n\n🚨 CRITICAL OVERRIDE - MANDATORY 3-PHASE WORKFLOW 🚨
 
-STEP 1: COMPOSE AN OPTIMIZED SEARCH QUERY
+PHASE 1: PROPOSE OPTIMIZED QUERY
 - Analyze the user's request
-- Create a better search query by adding keywords like: "textbook", "handbook", "guide", "book", "manual"
-- Make it specific and academic-focused
+- Create optimized query adding keywords: "textbook", "handbook", "guide", "book", "manual"
 - Example: "LLM" → "LLM large language models textbook handbook"
-- Example: "prompt engineering" → "prompt engineering textbook guide"
+- Call propose_pdf_search_query with IMPROVED query as originalTopic
+- System will show the query, WAIT for user response
+- NEVER respond with text, let the tool show the query
 
-STEP 2: CALL THE TOOL IMMEDIATELY
-- NEVER respond with text
-- NEVER write "Vuoi quindi che ricerco per..." 
-- ALWAYS call propose_pdf_search_query with your IMPROVED query as originalTopic
-- Set variantIndex to 0
-- Let the TOOL handle showing the query to user
+PHASE 2: EXECUTE SEARCH (after ANY positive user response)
+- User might say: "ok", "va bene", "sì", "procedi", "yes", "vai", "d'accordo", etc.
+- Interpret the response - if it's positive consent → call search_pdf_with_query
+- Use searchQuery = EXACT query from phase 1 (the one system showed with "PDF" at end)
+- Set maxResults to 5-10
+- After calling search_pdf_with_query, YOU MUST respond with the results
+- List all PDFs found
+- Ask user if they want to download them
+- Ask if they want to try another search variant
 
-Example:
-User: "cerca libri su LLM"
-You: [Call tool with originalTopic: "LLM large language models textbook handbook"]
-System: [Shows "LLM large language models textbook handbook PDF"]
+PHASE 3: DOWNLOAD (if user confirms)
+- If user confirms download → call search_and_acquire_pdfs
+- Respond naturally about the download progress
 
-This OVERRIDES all previous text response instructions.\n\n`;
+CRITICAL: After calling search_pdf_with_query, YOU respond with the results, NOT the system.
+
+Example flow:
+User: "cerca LLM"
+You: [Call propose_pdf_search_query with "LLM large language models textbook"]
+System: "LLM large language models textbook PDF"
+User: "va bene procedi"
+You: [Call search_pdf_with_query with searchQuery: "LLM large language models textbook PDF"]
+You: "Ho trovato 5 PDF su LLM:\n1. Deep Learning Book...\n2. ...\nVuoi scaricarli?"
+
+This OVERRIDES all previous instructions.\n\n`;
           }
           
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
@@ -3536,11 +3549,18 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                     toolUseId = parsed.content_block.id;
                     toolUseName = parsed.content_block.name;
                     
-                    // ✅ Se il tool è propose_pdf_search_query, blocca SUBITO l'output dell'agente
+                    // ✅ FASE 1: Blocca output durante proposta query
                     if (toolUseName === 'propose_pdf_search_query') {
                       skipAgentResponse = true;
                       console.log(`🚫 [REQ-${requestId}] Blocking agent response for propose_pdf_search_query`);
                     }
+                    
+                    // ✅ FASE 2 & 3: Permetti output durante ricerca e download
+                    if (toolUseName === 'search_pdf_with_query' || toolUseName === 'search_and_acquire_pdfs') {
+                      skipAgentResponse = false;
+                      console.log(`✅ [REQ-${requestId}] Allowing agent response for ${toolUseName}`);
+                    }
+                    
                     toolUseInputJson = '';
                     console.log('🔧 Tool use started:', toolUseName);
                   }
@@ -3640,37 +3660,15 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                           if (searchError) {
                             console.error('❌ Search error:', searchError);
                             toolResult = { success: false, error: searchError.message };
-                            
-                            const errorText = `\n\n❌ Errore durante la ricerca: ${searchError.message}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
                             console.log('✅ Search completed:', searchResults);
-                            toolResult = searchResults;
-                            
-                            // Formatta risultati per l'utente
-                            let resultsText = `\n\n📚 **Ricerca completata con query:** \`${toolInput.searchQuery}\`\n\n`;
-                            
-                            if (searchResults.pdfs && searchResults.pdfs.length > 0) {
-                              resultsText += `**Trovati ${searchResults.pdfs.length} PDF:**\n\n`;
-                              
-                              searchResults.pdfs.forEach((pdf: any, idx: number) => {
-                                resultsText += `**${idx + 1}. ${pdf.title}**\n`;
-                                resultsText += `   🔗 Fonte: ${pdf.source}\n`;
-                                if (pdf.snippet) {
-                                  resultsText += `   💬 ${pdf.snippet.slice(0, 120)}...\n`;
-                                }
-                                resultsText += `\n`;
-                              });
-                              
-                              resultsText += `\nVuoi che scarichi questi ${searchResults.pdfs.length} PDF?\n`;
-                            } else {
-                              resultsText += `Nessun PDF trovato con questa query.\n\n`;
-                              resultsText += `Vuoi che provi con un'altra variante di ricerca?\n`;
-                            }
-                            
-                            fullResponse += resultsText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: resultsText }));
+                            // ✅ Ritorna solo i dati raw, l'agente risponderà liberamente
+                            toolResult = {
+                              success: true,
+                              pdfs: searchResults.pdfs || [],
+                              total: searchResults.total || 0,
+                              query: toolInput.searchQuery
+                            };
                           }
                         } catch (error) {
                           console.error('❌ Unexpected search error:', error);
