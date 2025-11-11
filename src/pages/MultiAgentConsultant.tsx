@@ -723,6 +723,16 @@ export default function MultiAgentConsultant() {
                 });
               }
               
+              // 🔧 FIX: Reload messages after inter-agent consultation
+              if (text && text.includes('@')) {
+                console.log('🔄 Message contained @tag, reloading messages to catch consultation responses...');
+                setTimeout(() => {
+                  if (currentConversation?.id) {
+                    loadConversation(currentConversation.id);
+                  }
+                }, 2000); // Wait 2s for inter-agent consultation to complete
+              }
+              
             } else if (parsed.type === "error") {
               throw new Error(parsed.error || "Unknown error");
             }
