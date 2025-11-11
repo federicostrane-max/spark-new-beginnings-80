@@ -46,6 +46,42 @@ interface UserIntent {
   count?: number; // Number of results requested
 }
 
+// Helper function to generate query variants with full transparency
+function generateQueryVariants(originalTopic: string): string[] {
+  const queries: string[] = [];
+  
+  // 1. Topic originale completo con quotes e "PDF"
+  queries.push(`"${originalTopic}" PDF`);
+  
+  // 2. Rimuovi parole comuni ("filler words")
+  const fillers = ['complete', 'guidebook', 'handbook', 'comprehensive', 'ultimate', 'guide', 'definitive', 'essential'];
+  let simplified = originalTopic;
+  fillers.forEach(word => {
+    simplified = simplified.replace(new RegExp(`\\b${word}\\b`, 'gi'), '').trim().replace(/\s+/g, ' ');
+  });
+  
+  if (simplified !== originalTopic && simplified.length > 3) {
+    queries.push(`"${simplified}" PDF`);
+  }
+  
+  // 3. Prime 3 parole chiave + "PDF book"
+  const words = originalTopic.split(/\s+/).filter(w => w.length > 2);
+  if (words.length > 3) {
+    queries.push(`${words.slice(0, 3).join(' ')} PDF book`);
+  }
+  
+  // 4. Prime 2 parole + "guide PDF"
+  if (words.length > 2) {
+    queries.push(`${words.slice(0, 2).join(' ')} guide PDF`);
+  }
+  
+  // 5. Senza quotes + "PDF"
+  queries.push(`${originalTopic} PDF`);
+  
+  // Rimuovi duplicati mantenendo l'ordine
+  return [...new Set(queries)];
+}
+
 interface SearchResult {
   number: number;
   title: string;
@@ -2888,30 +2924,81 @@ ${agent.system_prompt}${knowledgeContext}`;
             });
           }
           
-          // Add search_and_acquire_pdfs tool for both Book Search Expert agents
+          // Add PDF search tools for both Book Search Expert agents
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
+            // Tool 1: Propose a search query variant to the user
             tools.push({
-              name: 'search_and_acquire_pdfs',
-              description: 'Automatically discovers books on a topic, finds their PDFs, validates them, and adds them to the knowledge pool. This is a complete workflow that: 1) Discovers relevant books, 2) Searches for verified PDF downloads, 3) Checks for duplicates, 4) Downloads and validates PDFs, 5) Automatically adds validated PDFs to the pool. Use this when the user wants to find and acquire PDF books on a specific topic.',
+              name: 'propose_pdf_search_query',
+              description: 'Genera e propone una query di ricerca PDF all\'utente SENZA eseguirla. La query mostrata è IDENTICA a quella che verrà usata per la ricerca. L\'utente potrà approvare, rifiutare o modificare la query. Usa questo PRIMA di search_pdf_with_query per ottenere l\'approvazione dell\'utente.',
               input_schema: {
                 type: 'object',
                 properties: {
-                  topic: {
+                  originalTopic: {
                     type: 'string',
-                    description: 'The topic to search for (e.g., "machine learning", "quantum physics", "medieval history")'
+                    description: 'Il topic originale richiesto dall\'utente (es: "LLM Prompt Engineering")'
                   },
-                  maxBooks: {
+                  variantIndex: {
                     type: 'number',
-                    description: 'Maximum number of books to discover (default 5, max 10)',
-                    default: 5
-                  },
-                  maxResultsPerBook: {
-                    type: 'number',
-                    description: 'Maximum PDFs to find per book (default 2, max 5)',
-                    default: 2
+                    description: 'Indice della variante di query (0 = più specifica, aumenta per query più generiche). Default: 0',
+                    default: 0
                   }
                 },
-                required: ['topic']
+                required: ['originalTopic']
+              }
+            });
+            
+            // Tool 2: Execute approved search query
+            tools.push({
+              name: 'search_pdf_with_query',
+              description: 'Esegue una ricerca PDF con una query specifica SENZA scaricare i PDF. Mostra solo i risultati. La query usata è ESATTAMENTE quella approvata dall\'utente. Usa questo DOPO che l\'utente ha approvato una query proposta da propose_pdf_search_query.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  searchQuery: {
+                    type: 'string',
+                    description: 'La query di ricerca COMPLETA E FINALE che verrà usata per cercare (es: "LLM Prompt Engineering" PDF). Questa è la query ESATTA che verrà inviata a Google.'
+                  },
+                  maxResults: {
+                    type: 'number',
+                    description: 'Numero massimo di risultati da trovare (default: 5, max: 10)',
+                    default: 5
+                  }
+                },
+                required: ['searchQuery']
+              }
+            });
+            
+            // Tool 3: Download approved PDFs
+            tools.push({
+              name: 'search_and_acquire_pdfs',
+              description: 'Scarica e valida PDF già trovati e approvati dall\'utente. Il download avviene in BACKGROUND. Usa questo DOPO che l\'utente ha confermato di voler scaricare i risultati di search_pdf_with_query.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  pdfsToDownload: {
+                    type: 'array',
+                    description: 'Lista di PDF da scaricare (già trovati e approvati dall\'utente)',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        title: { 
+                          type: 'string',
+                          description: 'Titolo del PDF'
+                        },
+                        url: { 
+                          type: 'string',
+                          description: 'URL del PDF'
+                        },
+                        source: { 
+                          type: 'string',
+                          description: 'Dominio sorgente del PDF'
+                        }
+                      },
+                      required: ['title', 'url', 'source']
+                    }
+                  }
+                },
+                required: ['pdfsToDownload']
               }
             });
           }
@@ -3461,21 +3548,122 @@ ${agent.system_prompt}${knowledgeContext}`;
                         }
                       }
                       
+                      // New tool: propose_pdf_search_query
+                      if (toolUseName === 'propose_pdf_search_query') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: propose_pdf_search_query`);
+                        console.log('   Original topic:', toolInput.originalTopic);
+                        console.log('   Variant index:', toolInput.variantIndex || 0);
+                        
+                        // Genera varianti complete
+                        const variants = generateQueryVariants(toolInput.originalTopic);
+                        const variantIndex = toolInput.variantIndex || 0;
+                        const proposedQuery = variants[variantIndex] || variants[0];
+                        
+                        toolResult = {
+                          proposedQuery,
+                          variantIndex,
+                          totalVariants: variants.length,
+                          hasMore: variantIndex < variants.length - 1,
+                          allVariants: variants // Per debug
+                        };
+                        
+                        // Formatta proposta per l'utente con QUERY COMPLETA
+                        let proposalText = `\n\n🔍 **Query proposta #${variantIndex + 1}:**\n`;
+                        proposalText += `\`\`\`\n${proposedQuery}\n\`\`\`\n\n`;
+                        proposalText += `Questa è la query ESATTA che userò per cercare su Google.\n\n`;
+                        proposalText += `Vuoi che cerchi con questa query?\n`;
+                        if (variantIndex < variants.length - 1) {
+                          proposalText += `\n_(Ho altre ${variants.length - variantIndex - 1} varianti da provare se questa non va bene)_\n`;
+                        }
+                        
+                        fullResponse += proposalText;
+                        await sendSSE(JSON.stringify({ type: 'content', text: proposalText }));
+                      }
+                      
+                      // New tool: search_pdf_with_query
+                      if (toolUseName === 'search_pdf_with_query') {
+                        toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] Tool called: search_pdf_with_query`);
+                        console.log('   Search query:', toolInput.searchQuery);
+                        console.log('   Max results:', toolInput.maxResults || 5);
+                        
+                        try {
+                          // Chiama la nuova funzione edge che SOLO cerca senza scaricare
+                          const { data: searchResults, error: searchError } = await supabase.functions.invoke(
+                            'search-pdfs-only',
+                            {
+                              body: {
+                                query: toolInput.searchQuery, // Query ESATTA approvata dall'utente
+                                maxResults: toolInput.maxResults || 5
+                              }
+                            }
+                          );
+                          
+                          if (searchError) {
+                            console.error('❌ Search error:', searchError);
+                            toolResult = { success: false, error: searchError.message };
+                            
+                            const errorText = `\n\n❌ Errore durante la ricerca: ${searchError.message}\n\n`;
+                            fullResponse += errorText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          } else {
+                            console.log('✅ Search completed:', searchResults);
+                            toolResult = searchResults;
+                            
+                            // Formatta risultati per l'utente
+                            let resultsText = `\n\n📚 **Ricerca completata con query:** \`${toolInput.searchQuery}\`\n\n`;
+                            
+                            if (searchResults.pdfs && searchResults.pdfs.length > 0) {
+                              resultsText += `**Trovati ${searchResults.pdfs.length} PDF:**\n\n`;
+                              
+                              searchResults.pdfs.forEach((pdf: any, idx: number) => {
+                                resultsText += `**${idx + 1}. ${pdf.title}**\n`;
+                                resultsText += `   🔗 Fonte: ${pdf.source}\n`;
+                                if (pdf.snippet) {
+                                  resultsText += `   💬 ${pdf.snippet.slice(0, 120)}...\n`;
+                                }
+                                resultsText += `\n`;
+                              });
+                              
+                              resultsText += `\nVuoi che scarichi questi ${searchResults.pdfs.length} PDF?\n`;
+                            } else {
+                              resultsText += `Nessun PDF trovato con questa query.\n\n`;
+                              resultsText += `Vuoi che provi con un'altra variante di ricerca?\n`;
+                            }
+                            
+                            fullResponse += resultsText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: resultsText }));
+                          }
+                        } catch (error) {
+                          console.error('❌ Unexpected search error:', error);
+                          const errorMessage = error instanceof Error ? error.message : String(error);
+                          toolResult = { success: false, error: errorMessage };
+                          
+                          const errorText = `\n\n❌ Errore imprevisto: ${errorMessage}\n\n`;
+                          fullResponse += errorText;
+                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                        }
+                      }
+                      
+                      // Modified tool: search_and_acquire_pdfs (now accepts pre-found PDFs)
                       if (toolUseName === 'search_and_acquire_pdfs') {
                         toolCallCount++;
                         console.log(`🛠️ [REQ-${requestId}] Tool called: search_and_acquire_pdfs`);
-                        console.log('   Topic:', toolInput.topic);
-                        console.log('   Max books:', toolInput.maxBooks || 5);
-                        console.log('   Max PDFs per book:', toolInput.maxResultsPerBook || 2);
+                        console.log('   PDFs to download:', toolInput.pdfsToDownload?.length || 0);
                         
                         try {
+                          // Informa l'utente che il download è iniziato
+                          const downloadStartText = `\n\n⏬ **Download avviato in BACKGROUND per ${toolInput.pdfsToDownload.length} PDF**\n\n`;
+                          fullResponse += downloadStartText;
+                          await sendSSE(JSON.stringify({ type: 'content', text: downloadStartText }));
+                          
+                          // Invoca la vecchia funzione ma con la nuova modalità
                           const { data: acquireData, error: acquireError } = await supabase.functions.invoke(
                             'search-and-acquire-pdfs',
                             {
                               body: {
-                                topic: toolInput.topic,
-                                maxBooks: toolInput.maxBooks || 5,
-                                maxResultsPerBook: toolInput.maxResultsPerBook || 2
+                                pdfsToDownload: toolInput.pdfsToDownload
                               },
                               headers: {
                                 authorization: req.headers.get('Authorization') || ''
@@ -3484,14 +3672,14 @@ ${agent.system_prompt}${knowledgeContext}`;
                           );
                           
                           if (acquireError) {
-                            console.error('❌ Search and acquire error:', acquireError);
+                            console.error('❌ Download error:', acquireError);
                             toolResult = { success: false, error: acquireError.message };
                             
-                            const errorText = `\n\n❌ Errore durante la ricerca e acquisizione PDF: ${acquireError.message}\n\n`;
+                            const errorText = `\n\n❌ Errore durante il download: ${acquireError.message}\n\n`;
                             fullResponse += errorText;
                             await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
-                            console.log('✅ Search and acquire completed:', acquireData);
+                            console.log('✅ Download in progress:', acquireData);
                             toolResult = acquireData;
                             
                             // Format initial results (immediate feedback)
