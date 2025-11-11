@@ -3614,10 +3614,19 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
                         const cleanQuery = toolInput.originalTopic + " PDF";
                         
                         // Invia solo la query pulita (skipAgentResponse è già true da content_block_start)
-                        await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery }));
+                        await sendSSE(JSON.stringify({ type: 'content', text: cleanQuery + '\n\n' }));
+                        fullResponse += cleanQuery + '\n\n';
                         
                         // Il flag è già true, ma confermiamo
                         skipAgentResponse = true;
+                        
+                        // ✅ SALVA nel database - questo messaggio sarà visibile all'agente nel prossimo turno
+                        await supabase
+                          .from('agent_messages')
+                          .update({ 
+                            content: `🔍 ${cleanQuery}\n\n[SYSTEM NOTE: Query shown to user. If user confirms with "ok"/"va bene"/"sì", call search_pdf_with_query with searchQuery: "${cleanQuery}" and maxResults: 5-10]`
+                          })
+                          .eq('id', placeholderMsg.id);
                         
                         // Tool result minimale - l'agente non deve scrivere altro
                         toolResult = {
@@ -4762,6 +4771,7 @@ ${toolOverride}${agent.system_prompt}${knowledgeContext}`;
             }
             throw error;
           }
+
 
           // ========== AUTO-CONTINUATION FOR DEEPSEEK (ASYNC) ==========
           if (llmProvider === 'deepseek' && DEEPSEEK_API_KEY) {
