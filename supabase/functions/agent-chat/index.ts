@@ -99,6 +99,67 @@ interface SearchResult {
 // DETERMINISTIC WORKFLOW HELPERS
 // ============================================
 
+interface ConversationState {
+  conversationId: string;
+  lastProposedQuery: string | null;
+  waitingForConfirmation: boolean;
+  lastSearchResults: SearchResult[] | null;
+}
+
+// In-memory state store (could be moved to DB for persistence)
+const conversationStates = new Map<string, ConversationState>();
+
+function getConversationState(conversationId: string): ConversationState {
+  if (!conversationStates.has(conversationId)) {
+    conversationStates.set(conversationId, {
+      conversationId,
+      lastProposedQuery: null,
+      waitingForConfirmation: false,
+      lastSearchResults: null,
+    });
+  }
+  return conversationStates.get(conversationId)!;
+}
+
+function updateConversationState(conversationId: string, updates: Partial<ConversationState>) {
+  const state = getConversationState(conversationId);
+  Object.assign(state, updates);
+}
+
+// Pattern detection for query proposals
+function detectProposedQuery(text: string): string | null {
+  // Patterns: "Vuoi quindi che ricerco per '[QUERY]'?"
+  //           "Ti propongo: [QUERY]"
+  //           "Provo con: [QUERY]"
+  const patterns = [
+    /vuoi\s+(?:quindi\s+)?che\s+ricerco\s+per\s+['""]([^'""]+)['""]?\??/i,
+    /ti\s+propongo:?\s+([^.\n?]+)/i,
+    /provo\s+con:?\s+([^.\n?]+)/i,
+    /cerco:?\s+([^.\n?]+)/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  
+  return null;
+}
+
+// Pattern detection for user confirmations
+function isConfirmation(text: string): boolean {
+  const confirmationPatterns = /^(ok|sì|si|yes|va\s+bene|perfetto|esatto|corretto|vai|proceed|d'?accordo)$/i;
+  return confirmationPatterns.test(text.trim());
+}
+
+// Pattern detection for "altra query" requests
+function isNewQueryRequest(text: string): boolean {
+  const newQueryPatterns = /(altra\s+query|query\s+diversa|prova\s+(un[''])?altra|cambia\s+query|diversa|altro\s+tentativo)/i;
+  return newQueryPatterns.test(text);
+}
+
 // ============================================
 // AUTO-CONTINUATION SYSTEM
 // ============================================
@@ -2746,6 +2807,81 @@ Il prompt deve essere pronto all'uso direttamente.`;
           }
           
           // ========================================
+          // DETERMINISTIC WORKFLOW: CHECK USER INPUT
+          // ========================================
+          
+          const conversationState = getConversationState(conversationId);
+          let systemManagedSearch = false;
+          let systemSearchResults: SearchResult[] | null = null;
+          
+          // Check if this is a Book Search Expert conversation
+          const isBookSearchExpert = agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert';
+          
+          if (isBookSearchExpert) {
+            console.log(`🔍 [WORKFLOW] Checking conversation state:`, {
+              conversationId,
+              waitingForConfirmation: conversationState.waitingForConfirmation,
+              lastProposedQuery: conversationState.lastProposedQuery,
+              userMessage: message.substring(0, 100)
+            });
+            
+            // STEP 1: Check if user confirmed a proposed query
+            if (conversationState.waitingForConfirmation && conversationState.lastProposedQuery) {
+              if (isConfirmation(message)) {
+                console.log(`✅ [WORKFLOW] User confirmed query: "${conversationState.lastProposedQuery}"`);
+                systemManagedSearch = true;
+                
+                // Execute search automatically
+                let searchQuery = conversationState.lastProposedQuery;
+                if (!searchQuery.toLowerCase().includes('pdf')) {
+                  searchQuery += ' PDF';
+                }
+                
+                console.log(`🔎 [WORKFLOW] Executing automatic search for: "${searchQuery}"`);
+                
+                try {
+                  const { data: searchData, error: searchError } = await supabase.functions.invoke(
+                    'search-pdfs-only',
+                    {
+                      body: {
+                        query: searchQuery,
+                        count: 10,
+                        conversationId: conversationId
+                      }
+                    }
+                  );
+                  
+                  if (searchError) {
+                    console.error('❌ [WORKFLOW] Search error:', searchError);
+                    systemSearchResults = null;
+                  } else {
+                    console.log(`✅ [WORKFLOW] Search complete. Found ${searchData.results?.length || 0} results`);
+                    systemSearchResults = searchData.results || [];
+                    conversationState.lastSearchResults = systemSearchResults;
+                  }
+                } catch (err) {
+                  console.error('❌ [WORKFLOW] Search exception:', err);
+                  systemSearchResults = null;
+                }
+                
+                // Clear waiting state
+                updateConversationState(conversationId, {
+                  waitingForConfirmation: false,
+                  lastProposedQuery: null
+                });
+              } else if (isNewQueryRequest(message)) {
+                console.log(`🔄 [WORKFLOW] User requested different query`);
+                // Reset state and let agent propose new query
+                updateConversationState(conversationId, {
+                  waitingForConfirmation: false,
+                  lastProposedQuery: null,
+                  lastSearchResults: null
+                });
+              }
+            }
+          }
+          
+          // ========================================
           // DETECT @AGENT MENTIONS FOR INTER-AGENT COMMUNICATION
           // ========================================
           const agentMentionRegex = /@([a-zA-Z0-9\-_]+)/g;
@@ -2882,6 +3018,31 @@ Il prompt deve essere pronto all'uso direttamente.`;
           }
           
           
+          // ========================================
+          // DETERMINISTIC WORKFLOW: INJECT SEARCH RESULTS
+          // ========================================
+          
+          let searchResultsContext = '';
+          
+          if (systemManagedSearch && systemSearchResults) {
+            console.log(`📦 [WORKFLOW] Injecting ${systemSearchResults.length} search results into agent context`);
+            
+            searchResultsContext = `\n\n🔍 SEARCH RESULTS AUTOMATICI (${systemSearchResults.length} PDF trovati):\n\n`;
+            
+            systemSearchResults.forEach((result, idx) => {
+              searchResultsContext += `${idx + 1}. **${result.title}**\n`;
+              if (result.authors) searchResultsContext += `   Autori: ${result.authors}\n`;
+              if (result.year) searchResultsContext += `   Anno: ${result.year}\n`;
+              if (result.source) searchResultsContext += `   Fonte: ${result.source}\n`;
+              searchResultsContext += `   URL: ${result.url}\n\n`;
+            });
+            
+            searchResultsContext += `\nINSTRUZIONI PER L'AGENTE:\n`;
+            searchResultsContext += `1. Elenca i PDF trovati in modo conciso (solo titoli numerati)\n`;
+            searchResultsContext += `2. Chiedi all'utente: "Vuoi che scarichi questi PDF? Oppure vuoi che formuli una query diversa?"\n`;
+            searchResultsContext += `3. NON chiamare tool. Scrivi solo testo.\n\n`;
+          }
+          
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
@@ -2892,7 +3053,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
-${agent.system_prompt}${knowledgeContext}`;
+${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
 
           // Add mention instruction if @agent tags were detected
           const enhancedSystemPrompt = mentions.length > 0 
@@ -3452,6 +3613,20 @@ ${agent.system_prompt}${knowledgeContext}`;
                       if (!skipAgentResponse) {
                         fullResponse += newText;
                         await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      }
+                      
+                      // ========================================
+                      // DETERMINISTIC WORKFLOW: DETECT QUERY PROPOSAL IN AGENT RESPONSE
+                      // ========================================
+                      if (isBookSearchExpert && !systemManagedSearch) {
+                        const proposedQuery = detectProposedQuery(fullResponse);
+                        if (proposedQuery && !conversationState.lastProposedQuery) {
+                          console.log(`🎯 [WORKFLOW] Detected proposed query in agent response: "${proposedQuery}"`);
+                          updateConversationState(conversationId, {
+                            lastProposedQuery: proposedQuery,
+                            waitingForConfirmation: true
+                          });
+                        }
                       }
                       
                       // Log progress every 500 chars
