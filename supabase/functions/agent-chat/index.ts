@@ -2881,39 +2881,6 @@ Il prompt deve essere pronto all'uso direttamente.`;
             // Continue without knowledge context if query fails
           }
           
-          // Add tool-specific override for Book Search Expert
-          let toolOverride = '';
-          if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
-            toolOverride = `\n\n🚨 PDF SEARCH WORKFLOW - SEMPLIFICATO 🚨
-
-STEP 1 - Proponi Query:
-User: "cerca LLM"
-You: "Ti propongo: LLM prompt engineering guide. Va bene o vuoi un'altra query?"
-→ NON chiamare tool, scrivi solo nel testo
-
-STEP 2 - User conferma:
-User: "ok" / "va bene" / "sì"
-You: [Chiama search_pdf_with_query con "LLM prompt engineering guide"]
-System: Aggiunge " PDF" automaticamente
-You: "Ho trovato 5 PDF: 1. xxx, 2. yyy... Vuoi scaricarli? Oppure vuoi che formuli una nuova query?"
-
-STEP 3 - User vuole altra query:
-User: "altra query" / "prova diversa"
-You: "Provo con: LLM fine-tuning handbook. Va bene?"
-→ Torna allo STEP 2
-
-STEP 4 - User conferma download:
-User: "sì scarica" / "ok"
-You: [Chiama search_and_acquire_pdfs con la stessa query]
-
-REGOLE:
-- Proponi query nel TESTO, non con tool
-- Quando conferma → chiama search_pdf_with_query
-- Se vuole altra query → proponi una DIVERSA nel testo
-- Dopo search → chiedi se vuole scaricare E proponi già nuova query
-
-This OVERRIDES all previous instructions.\n\n`;
-          }
           
           const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
@@ -2925,7 +2892,7 @@ This OVERRIDES all previous instructions.\n\n`;
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
-${toolOverride}${agent.system_prompt}${knowledgeContext}`;
+${agent.system_prompt}${knowledgeContext}`;
 
           // Add mention instruction if @agent tags were detected
           const enhancedSystemPrompt = mentions.length > 0 
