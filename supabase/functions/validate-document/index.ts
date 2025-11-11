@@ -6,6 +6,56 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const VALIDATION_TIMEOUT = 300000; // 5 minuti
+
+/**
+ * Helper per verificare timeout durante validazione
+ */
+function checkTimeout(startTime: number, context: string) {
+  if (Date.now() - startTime > VALIDATION_TIMEOUT) {
+    throw new Error(`Validation timeout exceeded (5 minutes) at ${context}`);
+  }
+}
+
+/**
+ * Wrapper per chiamate AI con retry automatico su rate limit
+ */
+async function callAIWithRetry(url: string, options: any, startTime: number, maxRetries = 3) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      checkTimeout(startTime, `AI call attempt ${attempt + 1}`);
+      
+      const response = await fetch(url, options);
+      
+      if (response.status === 429) {
+        const backoff = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        console.log(`[validate-document] ⏳ Rate limited, retrying in ${backoff}ms...`);
+        await new Promise(resolve => setTimeout(resolve, backoff));
+        continue;
+      }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[validate-document] AI API error:`, response.status, errorText);
+        
+        if (response.status === 402) {
+          throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
+        }
+        
+        throw new Error(`AI API error: ${response.status}`);
+      }
+      
+      return response;
+    } catch (error: any) {
+      if (attempt === maxRetries - 1) {
+        throw error;
+      }
+      console.log(`[validate-document] ⚠️ Attempt ${attempt + 1} failed, retrying...`);
+    }
+  }
+  throw new Error('All retry attempts failed');
+}
+
 interface ValidationRequest {
   documentId: string;
   searchQuery: string;
@@ -26,12 +76,14 @@ serve(async (req) => {
   }
 
   try {
+    const startTime = Date.now(); // ✅ Track validation start time
+    
     const requestBody = await req.json();
     const documentId = requestBody.documentId;
     const expected_title = requestBody.expected_title;
     const expected_author = requestBody.expected_author;
 
-    console.log(`[validate-document] ========== START ==========`);
+    console.log(`[validate-document] ========== START (timeout: ${VALIDATION_TIMEOUT}ms) ==========`);
     console.log(`[validate-document] Input:`, JSON.stringify({
       documentId,
       hasExtractedText: !!requestBody.extractedText,
@@ -203,6 +255,7 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
+    checkTimeout(startTime, 'before AI summary generation');
     console.log('[validate-document] Generating complete AI summary for validation...');
 
     const summaryPrompt = `Analizza questo documento e genera un riepilogo strutturato completo.
@@ -226,38 +279,29 @@ Rispondi SOLO con questo formato JSON:
   "complexity_level": "beginner|intermediate|advanced"
 }`;
 
-    const summaryResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
+    // ✅ Use retry logic for AI call
+    const summaryResponse = await callAIWithRetry(
+      'https://ai.gateway.lovable.dev/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'Sei un esperto di analisi documentale. Rispondi SOLO con JSON valido nel formato richiesto.' 
+            },
+            { role: 'user', content: summaryPrompt }
+          ],
+          temperature: 0.3,
+        }),
       },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'Sei un esperto di analisi documentale. Rispondi SOLO con JSON valido nel formato richiesto.' 
-          },
-          { role: 'user', content: summaryPrompt }
-        ],
-        temperature: 0.3,
-      }),
-    });
-
-    if (!summaryResponse.ok) {
-      const errorText = await summaryResponse.text();
-      console.error('[validate-document] AI API error:', summaryResponse.status, errorText);
-      
-      if (summaryResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (summaryResponse.status === 402) {
-        throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
-      }
-      
-      throw new Error(`AI API error: ${summaryResponse.status}`);
-    }
+      startTime
+    );
 
     const summaryData = await summaryResponse.json();
     const summaryContent = summaryData.choices?.[0]?.message?.content;
@@ -281,6 +325,7 @@ Rispondi SOLO con questo formato JSON:
     // ========================================
     // STEP 3: Validate Relevance Using Summary
     // ========================================
+    checkTimeout(startTime, 'before relevance validation');
     console.log('[validate-document] Validating relevance using generated summary...');
 
     const relevancePrompt = `Query di ricerca originale: "${searchQuery}"
@@ -317,38 +362,29 @@ Rispondi SOLO con questo formato JSON:
 
 Se confidence < 70, considera il documento NON rilevante.`;
 
-    const relevanceResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
+    // ✅ Use retry logic for AI call
+    const relevanceResponse = await callAIWithRetry(
+      'https://ai.gateway.lovable.dev/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'Sei un validatore rigoroso di documenti. Rispondi SOLO con JSON valido nel formato richiesto. Sii critico e accetta solo documenti davvero pertinenti.' 
+            },
+            { role: 'user', content: relevancePrompt }
+          ],
+          temperature: 0.3,
+        }),
       },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'Sei un validatore rigoroso di documenti. Rispondi SOLO con JSON valido nel formato richiesto. Sii critico e accetta solo documenti davvero pertinenti.' 
-          },
-          { role: 'user', content: relevancePrompt }
-        ],
-        temperature: 0.3,
-      }),
-    });
-
-    if (!relevanceResponse.ok) {
-      const errorText = await relevanceResponse.text();
-      console.error('[validate-document] AI API error:', relevanceResponse.status, errorText);
-      
-      if (relevanceResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (relevanceResponse.status === 402) {
-        throw new Error('Payment required. Please add credits to your Lovable AI workspace.');
-      }
-      
-      throw new Error(`AI API error: ${relevanceResponse.status}`);
-    }
+      startTime
+    );
 
     const relevanceData = await relevanceResponse.json();
     const relevanceContent = relevanceData.choices?.[0]?.message?.content;

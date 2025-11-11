@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTTS } from "@/contexts/TTSContext";
 import { useAgentHealth } from "@/hooks/useAgentHealth";
+import { toast } from "sonner";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
@@ -82,6 +83,7 @@ export default function MultiAgentConsultant() {
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
+  const currentConversationRef = useRef<string | null>(null);
 
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
   const agentHealth = useAgentHealth(agents.map(a => a.id));
@@ -323,7 +325,9 @@ export default function MultiAgentConsultant() {
     }
     
     if (conversationId) {
+      // ✅ CRITICAL: Wait for conversation to load AND sync ref
       await loadConversation(conversationId);
+      currentConversationRef.current = conversationId;
     }
   }, [session?.user?.id]);
 
@@ -401,6 +405,7 @@ export default function MultiAgentConsultant() {
 
       if (convError) throw convError;
       setCurrentConversation(conv);
+      currentConversationRef.current = conv.id; // ✅ Sync ref
 
       // Load all messages with full content
       const { data: msgs, error: msgsError } = await supabase
@@ -456,10 +461,21 @@ export default function MultiAgentConsultant() {
     const agent = forceAgent || currentAgent;
     if (!agent) return;
 
-    const conversationId = forceConversationId || currentConversation?.id;
+    // ✅ NEW: Use ref for immediate access, fallback to state
+    const conversationId = forceConversationId || currentConversationRef.current || currentConversation?.id;
 
     if (!conversationId) {
-      console.error("No active conversation");
+      console.error("❌ No active conversation - agent might still be loading");
+      toast.error("Please wait for the conversation to load");
+      return;
+    }
+    
+    // ✅ Verify conversation belongs to current agent
+    if (currentConversation && currentConversation.agent_id !== agent.id) {
+      console.error("❌ Conversation mismatch detected!");
+      console.error("  Current agent:", agent.id, agent.name);
+      console.error("  Conversation agent:", currentConversation.agent_id);
+      toast.error("Please try again - conversation is loading");
       return;
     }
 

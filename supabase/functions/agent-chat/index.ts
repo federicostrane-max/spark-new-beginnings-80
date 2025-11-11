@@ -1709,97 +1709,100 @@ function parsePdfTableFromMarkdown(markdownText: string): Array<{
  * Processa il download di un singolo PDF dalla queue
  */
 async function processDownload(queueId: string, supabaseClient: any, requestId: string) {
+  const MAX_DOWNLOAD_TIME = 120000; // 2 minuti
   const logPrefix = `🔄 [REQ-${requestId}][DOWNLOAD-${queueId.slice(0, 8)}]`;
-  console.log(`${logPrefix} Starting download process`);
+  console.log(`${logPrefix} Starting download process (timeout: ${MAX_DOWNLOAD_TIME}ms)`);
   
   try {
-    // 1. Aggiorna status a 'downloading'
-    const { error: updateError } = await supabaseClient
-      .from('pdf_download_queue')
-      .update({ 
-        status: 'downloading',
-        started_at: new Date().toISOString()
-      })
-      .eq('id', queueId);
-    
-    if (updateError) {
-      console.error(`${logPrefix} Failed to update status:`, updateError);
-      return;
-    }
-    
-    // 2. Recupera dati dalla queue
-    const { data: queueEntry, error: fetchError } = await supabaseClient
-      .from('pdf_download_queue')
-      .select('*')
-      .eq('id', queueId)
-      .single();
-    
-    if (fetchError || !queueEntry) {
-      console.error(`${logPrefix} Failed to fetch queue entry:`, fetchError);
-      return;
-    }
-    
-    console.log(`${logPrefix} Downloading: ${queueEntry.expected_title}`);
-    console.log(`${logPrefix} URL: ${queueEntry.url}`);
-    
-    // 3. Incrementa download_attempts
-    await supabaseClient
-      .from('pdf_download_queue')
-      .update({ download_attempts: (queueEntry.download_attempts || 0) + 1 })
-      .eq('id', queueId);
-    
-    // 4. Chiama download-pdf-tool
-    const { data: downloadResult, error: downloadError } = await supabaseClient.functions.invoke(
-      'download-pdf-tool',
-      {
-        body: {
-          url: queueEntry.url,
-          search_query: queueEntry.search_query,
-          expected_title: queueEntry.expected_title,
-          expected_author: queueEntry.expected_author
-        }
-      }
+    // ✅ Create timeout promise
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Download timeout after 2 minutes')), MAX_DOWNLOAD_TIME)
     );
     
-    if (downloadError || !downloadResult?.success) {
-      const errorMsg = downloadError?.message || downloadResult?.error || 'Unknown error';
-      console.error(`${logPrefix} Download failed:`, errorMsg);
-      
-      await supabaseClient
+    // ✅ Create download promise
+    const downloadPromise = (async () => {
+      // 1. Aggiorna status a 'downloading'
+      const { error: updateError } = await supabaseClient
         .from('pdf_download_queue')
-        .update({
-          status: 'failed',
-          error_message: errorMsg,
-          completed_at: new Date().toISOString()
+        .update({ 
+          status: 'downloading',
+          started_at: new Date().toISOString()
         })
         .eq('id', queueId);
       
-      return;
-    }
+      if (updateError) {
+        console.error(`${logPrefix} Failed to update status:`, updateError);
+        return;
+      }
+      
+      // 2. Recupera dati dalla queue
+      const { data: queueEntry, error: fetchError } = await supabaseClient
+        .from('pdf_download_queue')
+        .select('*')
+        .eq('id', queueId)
+        .single();
+      
+      if (fetchError || !queueEntry) {
+        console.error(`${logPrefix} Failed to fetch queue entry:`, fetchError);
+        return;
+      }
+      
+      console.log(`${logPrefix} Downloading: ${queueEntry.expected_title}`);
+      console.log(`${logPrefix} URL: ${queueEntry.url}`);
+      
+      // 3. Incrementa download_attempts
+      await supabaseClient
+        .from('pdf_download_queue')
+        .update({ download_attempts: (queueEntry.download_attempts || 0) + 1 })
+        .eq('id', queueId);
+      
+      // 4. Chiama download-pdf-tool
+      const { data: downloadResult, error: downloadError } = await supabaseClient.functions.invoke(
+        'download-pdf-tool',
+        {
+          body: {
+            url: queueEntry.url,
+            search_query: queueEntry.search_query,
+            expected_title: queueEntry.expected_title,
+            expected_author: queueEntry.expected_author
+          }
+        }
+      );
+      
+      if (downloadError || !downloadResult?.success) {
+        const errorMsg = downloadError?.message || downloadResult?.error || 'Unknown error';
+        console.error(`${logPrefix} Download failed:`, errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      console.log(`${logPrefix} ✅ PDF downloaded: ${downloadResult.document.file_name}`);
+      
+      // 5. Aggiorna con document_id e status 'validating'
+      await supabaseClient
+        .from('pdf_download_queue')
+        .update({
+          status: 'validating',
+          document_id: downloadResult.document.id,
+          downloaded_file_name: downloadResult.document.file_name
+        })
+        .eq('id', queueId);
+      
+      // 6. Attendi validazione (polling)
+      await waitForValidation(queueId, downloadResult.document.id, supabaseClient, requestId);
+    })();
     
-    console.log(`${logPrefix} ✅ PDF downloaded: ${downloadResult.document.file_name}`);
+    // ✅ Race between download and timeout
+    await Promise.race([downloadPromise, timeoutPromise]);
     
-    // 5. Aggiorna con document_id e status 'validating'
-    await supabaseClient
-      .from('pdf_download_queue')
-      .update({
-        status: 'validating',
-        document_id: downloadResult.document.id,
-        downloaded_file_name: downloadResult.document.file_name
-      })
-      .eq('id', queueId);
+  } catch (error: any) {
+    console.error(`${logPrefix} ❌ Download failed:`, error.message);
     
-    // 6. Attendi validazione (polling)
-    await waitForValidation(queueId, downloadResult.document.id, supabaseClient, requestId);
-    
-  } catch (error) {
-    console.error(`${logPrefix} Unexpected error:`, error);
-    
+    // ✅ CRITICAL: Always update status to failed
     await supabaseClient
       .from('pdf_download_queue')
       .update({
         status: 'failed',
-        error_message: error instanceof Error ? error.message : 'Unknown error',
+        error_message: error.message || 'Unknown error',
         completed_at: new Date().toISOString()
       })
       .eq('id', queueId);
@@ -5114,6 +5117,12 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
               // Inserisci nella queue
               for (const entry of pdfEntries) {
+                console.log(`📥 [REQ-${requestId}] Queuing PDF for download:`);
+                console.log(`   Title: ${entry.title}`);
+                console.log(`   Conversation ID: ${conversation.id}`);
+                console.log(`   Agent ID: ${agent.id}`);
+                console.log(`   Agent Name: ${agent.name}`);
+                
                 const { data: queueEntry, error: queueError } = await supabase
                   .from('pdf_download_queue')
                   .insert({
