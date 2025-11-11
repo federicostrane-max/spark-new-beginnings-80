@@ -2878,46 +2878,71 @@ Il prompt deve essere pronto all'uso direttamente.`;
                 
                 // Execute search automatically
                 let searchQuery = conversationState.lastProposedQuery;
-                if (!searchQuery.toLowerCase().includes('pdf')) {
-                  searchQuery += ' PDF';
-                }
                 
                 console.log(`🔎 [WORKFLOW] Executing automatic search for: "${searchQuery}"`);
                 
                 try {
-                  const { data: searchData, error: searchError } = await supabase.functions.invoke(
-                    'search-pdfs-only',
-                    {
-                      body: {
-                        query: searchQuery,
-                        count: 10,
-                        conversationId: conversationId
-                      }
-                    }
-                  );
-                  
-                  if (searchError) {
-                    console.error('❌ [WORKFLOW] Search error:', searchError);
-                    systemSearchResults = null;
-                  } else {
-                    console.log(`✅ [WORKFLOW] Search complete. Found ${searchData.results?.length || 0} results`);
-                    systemSearchResults = searchData.results || [];
-                    conversationState.lastSearchResults = systemSearchResults;
-                    
-                    // ✅ CRITICAL FIX: Replace user message so LLM understands context
-                    // Instead of passing "Ok", we update the DB with a meaningful message
-                    processedMessage = `Ho confermato la ricerca per "${conversationState.lastProposedQuery}". Presentami i risultati trovati.`;
-                    console.log(`📝 [WORKFLOW] User message replaced with: "${processedMessage}"`);
-                    
-                    // Update the user message in DB
-                    await supabase
-                      .from('agent_messages')
-                      .update({ content: processedMessage })
-                      .eq('id', userMessageId);
+                  // Use web search via SerpAPI (same as search_pdf_with_query tool)
+                  const serpApiKey = Deno.env.get('SERPAPI_API_KEY');
+                  if (!serpApiKey) {
+                    throw new Error('SERPAPI_API_KEY not configured');
                   }
+                  
+                  const searchUrl = `https://serpapi.com/search.json?q=${encodeURIComponent(searchQuery + ' PDF')}&api_key=${serpApiKey}&num=10`;
+                  console.log(`📡 [WORKFLOW] Calling SerpAPI: ${searchUrl.replace(serpApiKey, 'XXX')}`);
+                  
+                  const searchResponse = await fetch(searchUrl);
+                  if (!searchResponse.ok) {
+                    throw new Error(`SerpAPI error: ${searchResponse.status}`);
+                  }
+                  
+                  const searchJson = await searchResponse.json();
+                  const organicResults = searchJson.organic_results || [];
+                  
+                  // Extract PDF results
+                  const pdfResults = organicResults
+                    .filter((r: any) => r.link && r.link.toLowerCase().endsWith('.pdf'))
+                    .slice(0, 10)
+                    .map((r: any) => ({
+                      title: r.title || 'Untitled',
+                      url: r.link,
+                      source: r.source || new URL(r.link).hostname,
+                      snippet: r.snippet || ''
+                    }));
+                  
+                  console.log(`✅ [WORKFLOW] Search complete. Found ${pdfResults.length} PDF results`);
+                  systemSearchResults = pdfResults;
+                  conversationState.lastSearchResults = systemSearchResults;
+                  
+                  // Build a message that includes the results
+                  if (pdfResults.length > 0) {
+                    let resultsText = `Ho trovato ${pdfResults.length} PDF per "${conversationState.lastProposedQuery}":\n\n`;
+                    pdfResults.forEach((pdf: any, idx: number) => {
+                      resultsText += `${idx + 1}. ${pdf.title}\n`;
+                    });
+                    resultsText += `\nConfermi il download di questi PDF?`;
+                    processedMessage = resultsText;
+                  } else {
+                    processedMessage = `Non ho trovato risultati per "${conversationState.lastProposedQuery}". Vuoi provare con una query diversa?`;
+                  }
+                  
+                  console.log(`📝 [WORKFLOW] User message replaced with results list`);
+                  
+                  // Update the user message in DB
+                  await supabase
+                    .from('agent_messages')
+                    .update({ content: processedMessage })
+                    .eq('id', userMessageId);
+                    
                 } catch (err) {
                   console.error('❌ [WORKFLOW] Search exception:', err);
                   systemSearchResults = null;
+                  const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+                  processedMessage = `Errore durante la ricerca: ${errorMessage}. Riprova con una query diversa.`;
+                  await supabase
+                    .from('agent_messages')
+                    .update({ content: processedMessage })
+                    .eq('id', userMessageId);
                 }
                 
                 // Clear waiting state
