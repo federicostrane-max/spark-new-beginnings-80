@@ -303,6 +303,43 @@ export default function MultiAgentConsultant() {
     }
   };
 
+  // ✅ Verifica agent con retry intelligente (fino a 3 tentativi)
+  const verifyAgentWithRetry = useCallback(async (agentId: string, maxAttempts = 3) => {
+    console.log('[MultiAgentConsultant] Starting agent verification:', { agentId, maxAttempts });
+    
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // 2s, 4s, 6s
+      
+      const { data, error } = await supabase
+        .from('agents')
+        .select('id, name')
+        .eq('id', agentId)
+        .eq('active', true)
+        .maybeSingle();
+      
+      if (!error && data) {
+        console.log(`[MultiAgentConsultant] ✅ Agent verified in DB (attempt ${attempt}):`, data.name);
+        return true;
+      }
+      
+      console.warn(`[MultiAgentConsultant] ⚠️ Agent not found (attempt ${attempt}/${maxAttempts})`);
+    }
+    
+    // ✅ Dopo tutti i tentativi, ricarica solo la lista agenti
+    console.warn('[MultiAgentConsultant] Agent verification failed after all attempts, refreshing agents list');
+    console.log('[MultiAgentConsultant] State before refresh:', {
+      currentAgentId: currentAgent?.id,
+      currentAgentName: currentAgent?.name,
+      conversationId: currentConversation?.id,
+      messagesCount: messages.length,
+      timestamp: new Date().toISOString()
+    });
+    
+    setAgentUpdateTrigger(prev => prev + 1);
+    toast.warning('Agent list updated');
+    return false;
+  }, [currentAgent, currentConversation, messages.length]);
+
   const handleSelectAgent = useCallback(async (agent: Agent) => {
     setCurrentAgent(agent);
     setMessages([]);
@@ -351,24 +388,9 @@ export default function MultiAgentConsultant() {
       checkUnsyncedDocs(newAgent.id);
     }
     
-    // Fallback: verify agent appears in list after 2 seconds
-    setTimeout(() => {
-      supabase
-        .from('agents')
-        .select('id, name')
-        .eq('id', newAgent.id)
-        .eq('active', true)
-        .maybeSingle()
-        .then(({ data, error }) => {
-          if (!error && data) {
-            console.log('[MultiAgentConsultant] Agent verified in DB:', data.name);
-          } else {
-            console.error('[MultiAgentConsultant] Agent not found in DB, reloading page...');
-            window.location.reload();
-          }
-        });
-    }, 2000);
-  }, [handleSelectAgent]);
+    // ✅ Verifica con retry invece di reload forzato
+    verifyAgentWithRetry(newAgent.id);
+  }, [handleSelectAgent, verifyAgentWithRetry]);
 
   const handleDeleteAgent = async (agentId: string) => {
     try {
