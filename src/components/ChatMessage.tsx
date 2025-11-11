@@ -156,25 +156,42 @@ export const ChatMessage = ({
   };
 
   const touchStartY = useRef(0);
+  const touchStartX = useRef(0);
   const mouseStartY = useRef(0);
+  const mouseStartX = useRef(0);
   const hasMoved = useRef(false);
+  const hasTextSelection = useRef(false);
 
   const handleLongPressStart = (e: React.TouchEvent | React.MouseEvent) => {
     if (selectionMode) return;
     
-    // Track initial position to detect scrolling/dragging
+    // Check if there's already a text selection - if so, don't interfere
+    const selection = window.getSelection();
+    if (selection && selection.toString().length > 0) {
+      hasTextSelection.current = true;
+      return;
+    }
+    
+    hasTextSelection.current = false;
+    
+    // Track initial position to detect scrolling/dragging/text selection
     if ('touches' in e) {
       touchStartY.current = e.touches[0].clientY;
+      touchStartX.current = e.touches[0].clientX;
       hasMoved.current = false;
     } else if ('clientY' in e) {
       mouseStartY.current = e.clientY;
+      mouseStartX.current = e.clientX;
       hasMoved.current = false;
     }
     
     setIsLongPressing(true);
     longPressTimer.current = setTimeout(() => {
-      // Only trigger long press if user hasn't moved
-      if (!hasMoved.current && onLongPress) {
+      // Only trigger long press if user hasn't moved AND no text is selected
+      const selection = window.getSelection();
+      const hasSelection = selection && selection.toString().length > 0;
+      
+      if (!hasMoved.current && !hasSelection && onLongPress) {
         onLongPress();
         justEnteredSelectionMode.current = true;
         // Vibrazione per feedback tattile (se disponibile)
@@ -183,14 +200,16 @@ export const ChatMessage = ({
         }
       }
       setIsLongPressing(false);
-    }, 1200); // Aumentato da 800ms a 1200ms
+    }, 800); // Ridotto a 800ms per essere più responsive
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Detect if user is scrolling - soglia aumentata per evitare selezioni accidentali
-    if (touchStartY.current) {
+    // Detect if user is scrolling or selecting text
+    if (touchStartY.current || touchStartX.current) {
       const deltaY = Math.abs(e.touches[0].clientY - touchStartY.current);
-      if (deltaY > 50) { // Aumentato da 10px a 50px
+      const deltaX = Math.abs(e.touches[0].clientX - touchStartX.current);
+      // Ridotta soglia per permettere selezione testo più facilmente
+      if (deltaY > 10 || deltaX > 10) {
         hasMoved.current = true;
         handleLongPressEnd();
       }
@@ -198,10 +217,12 @@ export const ChatMessage = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Detect if user is dragging - soglia aumentata per evitare selezioni accidentali
-    if (mouseStartY.current) {
+    // Detect if user is dragging or selecting text
+    if (mouseStartY.current || mouseStartX.current) {
       const deltaY = Math.abs(e.clientY - mouseStartY.current);
-      if (deltaY > 50) { // Aumentato da 10px a 50px
+      const deltaX = Math.abs(e.clientX - mouseStartX.current);
+      // Ridotta soglia per permettere selezione testo più facilmente
+      if (deltaY > 10 || deltaX > 10) {
         hasMoved.current = true;
         handleLongPressEnd();
       }
@@ -215,7 +236,11 @@ export const ChatMessage = ({
     }
     setIsLongPressing(false);
     touchStartY.current = 0;
+    touchStartX.current = 0;
+    mouseStartY.current = 0;
+    mouseStartX.current = 0;
     hasMoved.current = false;
+    hasTextSelection.current = false;
   };
 
   const isUser = role === "user";
@@ -298,7 +323,7 @@ export const ChatMessage = ({
         className={cn(
           "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
           "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
-          "touch-pan-y select-text",
+          "select-text cursor-text",
           isUser && !selectionMode && "ml-auto",
           selectionMode && "ml-8",
           isUser 
