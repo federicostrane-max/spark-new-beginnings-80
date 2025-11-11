@@ -2018,7 +2018,7 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation } = requestBody;
     
     // Validate inputs
     validateMessageLength(message);
@@ -2126,9 +2126,10 @@ Deno.serve(async (req) => {
 
     // Validate that user message doesn't contain system-generated patterns
     // Skip validation for messages with @tags (meta-discussion about the system)
+    // Skip validation for inter-agent consultations (skipSystemValidation flag)
     const hasAgentTags = mentionedAgentSlugs.length > 0;
     
-    if (!hasAgentTags) {
+    if (!hasAgentTags && !skipSystemValidation) {
       const systemPatterns = [
         /^Ho trovato \d+ PDF/i,
         /Confermi il download/i,
@@ -2264,7 +2265,8 @@ Deno.serve(async (req) => {
                 body: {
                   conversationId: consultConversation.id,
                   message: messageWithoutTags,
-                  agentSlug: targetSlug
+                  agentSlug: targetSlug,
+                  skipSystemValidation: true
                 },
                 headers: {
                   Authorization: req.headers.get('authorization') || ''
