@@ -2121,6 +2121,23 @@ Deno.serve(async (req) => {
       ? `${messageWithoutTags}${attachmentContext}`
       : messageWithoutTags;
 
+    // Validate that user message doesn't contain system-generated patterns
+    const systemPatterns = [
+      /^Ho trovato \d+ PDF/i,
+      /Confermi il download/i,
+      /Download avviato in BACKGROUND/i,
+      /Non ho trovato risultati per/i,
+      /Errore durante la ricerca/i,
+      /Vuoi provare con una query diversa/i
+    ];
+    
+    const looksLikeSystemMessage = systemPatterns.some(pattern => pattern.test(message));
+    
+    if (looksLikeSystemMessage) {
+      console.error('⚠️ [VALIDATION] Detected system-like content in user message:', message);
+      throw new Error('Invalid user message: contains system-generated content');
+    }
+
     // Save user message (original with @tags) and get ID for potential update
     const { data: userMessage, error: userMsgError } = await supabase
       .from('agent_messages')
