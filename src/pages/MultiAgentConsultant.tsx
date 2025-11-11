@@ -178,21 +178,28 @@ export default function MultiAgentConsultant() {
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'agent_messages',
           filter: `conversation_id=eq.${currentConversation.id}`
         },
         (payload) => {
-          console.log('📡 [REALTIME] Message update:', payload.new);
-          const updatedMsg = payload.new;
+          console.log('📡 [REALTIME] Message change:', payload.eventType, payload.new);
+          const msg = payload.new as Message;
           
-          if (updatedMsg.role === 'assistant') {
-            setMessages(prev => prev.map(msg => 
-              msg.id === updatedMsg.id
-                ? { ...msg, content: updatedMsg.content }
-                : msg
-            ));
+          if (msg.role === 'assistant') {
+            if (payload.eventType === 'INSERT') {
+              // Add new message if it doesn't exist
+              setMessages(prev => {
+                const exists = prev.some(m => m.id === msg.id);
+                return exists ? prev : [...prev, msg];
+              });
+            } else if (payload.eventType === 'UPDATE') {
+              // Update existing message
+              setMessages(prev => prev.map(m => 
+                m.id === msg.id ? { ...m, content: msg.content } : m
+              ));
+            }
           }
         }
       )
@@ -261,20 +268,29 @@ export default function MultiAgentConsultant() {
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'agent_messages',
           filter: `conversation_id=eq.${currentConversation.id}`
         },
         (payload) => {
-          console.log('📨 Realtime update:', payload.new.id);
           const updatedMessage = payload.new as Message;
+          console.log('📨 Realtime change:', payload.eventType, updatedMessage.id);
           
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === updatedMessage.id ? updatedMessage : msg
-            )
-          );
+          if (payload.eventType === 'INSERT') {
+            // Add new message if it doesn't exist
+            setMessages(prev => {
+              const exists = prev.some(m => m.id === updatedMessage.id);
+              return exists ? prev : [...prev, updatedMessage];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            // Update existing message
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === updatedMessage.id ? updatedMessage : msg
+              )
+            );
+          }
         }
       )
       .subscribe();
