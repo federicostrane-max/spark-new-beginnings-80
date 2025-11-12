@@ -3742,12 +3742,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     
                     // Check for regular content
                     if (delta.content) {
-                      // If we had reasoning before, add a separator before the actual answer
-                      if (fullResponse.includes('💭') && !fullResponse.includes('\n\n---\n\n**Risposta:**\n')) {
-                        newText = '\n\n---\n\n**Risposta:**\n' + delta.content;
-                      } else {
-                        newText = delta.content;
-                      }
+                      newText = delta.content;
                       
                       // Block agent output if system has already sent the message
                       if (!skipAgentResponse) {
