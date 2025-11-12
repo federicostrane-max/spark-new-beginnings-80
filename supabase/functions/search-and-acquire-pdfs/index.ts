@@ -417,7 +417,10 @@ serve(async (req) => {
       });
     }
     
-    result.message = `Found ${result.pdfs_found} PDFs: ${result.pdfs_queued} queued for download, ${result.pdfs_already_existing} already in pool`;
+    // Remove descriptive message - let the LLM format response per prompt
+    result.action = result.pdfs_found > 0 
+      ? (pdfsToDownload ? 'download_queued' : 'search_complete')
+      : 'no_results';
     
     console.log(`\n✅ [SEARCH & ACQUIRE] Completed!`);
     console.log(`   🔎 PDFs found: ${result.pdfs_found}`);
@@ -442,7 +445,7 @@ serve(async (req) => {
         pdfs_already_existing: 0,
         pdfs_failed: 0,
         found_pdfs: [],
-        message: `Error: ${errorMessage}`
+        action: 'error'
       }),
       { 
         status: 500,
