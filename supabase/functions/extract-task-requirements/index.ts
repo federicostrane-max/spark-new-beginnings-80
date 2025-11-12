@@ -14,7 +14,7 @@ serve(async (req) => {
 
   try {
     // Increment this to force re-extraction with updated filters
-    const FILTER_VERSION = 'v4';
+    const FILTER_VERSION = 'v5';
     
     const { agentId } = await req.json();
 
@@ -121,6 +121,10 @@ Extract and categorize the following:
    - Generic terms (e.g., "context", "citation", "knowledge base", "source")
    - Terms you think are relevant but are not written in the prompt
    - Background knowledge about the domain not mentioned in prompt
+   - ❌ **CRITICAL: Terms that appear ONLY in dialogue examples** (User/Assistant exchanges)
+     - Examples show HOW to behave, not WHAT to know
+     - If a term appears only in example questions/answers, DO NOT extract it
+     - Extract only if the term is mentioned in the main prompt instructions
    
    **Examples:**
    
@@ -135,6 +139,10 @@ Extract and categorize the following:
    Prompt: "Answer about Che Guevara's life. Focus on events from 1928 to 1967. Reference only the biography text."
    ✅ CORRECT: ["Che Guevara", "1928", "1967"]
    ❌ WRONG: ["Argentina", "Bolivia", "guerrilla warfare"] (not explicitly in prompt)
+   
+   Prompt: "Answer about Che Guevara's life. Example: User: 'Tell me about World War II.' Assistant: 'I can only answer about Che Guevara.'"
+   ✅ CORRECT: ["Che Guevara"]
+   ❌ WRONG: ["World War II"] (appears only in example dialogue showing off-topic handling)
    
    - Return as array of strings
 
