@@ -36,6 +36,11 @@ interface AcquisitionResult {
     source: string;
     status: 'queued' | 'existing' | 'failed';
   }>;
+  failed_pdfs?: Array<{
+    title: string;
+    url: string;
+    reason: string;
+  }>;
   message: string;
 }
 
@@ -54,6 +59,7 @@ async function validatePdfUrl(url: string, title: string): Promise<{
   contentType?: string;
   fileSize?: number;
   credibilityScore?: number;
+  failureReason?: string;
 }> {
   try {
     const domain = new URL(url).hostname;
@@ -61,7 +67,7 @@ async function validatePdfUrl(url: string, title: string): Promise<{
     // Check blacklist
     if (BLACKLIST_DOMAINS.some(d => domain.includes(d))) {
       console.log(`    ⛔ Blacklisted domain: ${domain}`);
-      return { valid: false };
+      return { valid: false, failureReason: `Dominio non affidabile (${domain}) - richiede login o accesso limitato` };
     }
     
     // HEAD request with timeout
@@ -80,15 +86,21 @@ async function validatePdfUrl(url: string, title: string): Promise<{
     
     if (!contentType.includes('application/pdf')) {
       console.log(`    ❌ Not a PDF: ${contentType}`);
-      return { valid: false };
+      return { valid: false, failureReason: `Non è un PDF (tipo: ${contentType})` };
     }
     
     const fileSize = parseInt(response.headers.get('content-length') || '0');
     
     // Check size (min 100KB, max 100MB)
     if (fileSize > 0 && (fileSize < 100000 || fileSize > 100000000)) {
-      console.log(`    ⚠️ Size out of range: ${(fileSize / 1024 / 1024).toFixed(1)}MB`);
-      return { valid: false };
+      const sizeMB = (fileSize / 1024 / 1024).toFixed(1);
+      console.log(`    ⚠️ Size out of range: ${sizeMB}MB`);
+      return { 
+        valid: false, 
+        failureReason: fileSize < 100000 
+          ? `File troppo piccolo (${sizeMB}MB) - potrebbe essere corrotto`
+          : `File troppo grande (${sizeMB}MB) - limite massimo 100MB`
+      };
     }
     
     // Calculate credibility score
@@ -125,10 +137,11 @@ async function validatePdfUrl(url: string, title: string): Promise<{
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
       console.log(`    ⏱️ Timeout`);
+      return { valid: false, failureReason: 'Timeout - il server non risponde' };
     } else {
       console.log(`    ❌ Validation error: ${(error as Error).message}`);
+      return { valid: false, failureReason: `Errore di connessione: ${(error as Error).message}` };
     }
-    return { valid: false };
   }
 }
 
@@ -208,6 +221,7 @@ serve(async (req) => {
     }
     
     let validatedPdfs: PDFResult[] = [];
+    const failedPdfs: Array<{ title: string; url: string; reason: string }> = [];
     
     // Check if we have pre-selected PDFs from the agent
     if (pdfsToDownload && pdfsToDownload.length > 0) {
@@ -224,6 +238,11 @@ serve(async (req) => {
         if (!validation.valid) {
           console.log(`   ❌ Failed validation`);
           result.pdfs_failed++;
+          failedPdfs.push({
+            title: pdf.title,
+            url: pdf.url,
+            reason: validation.failureReason || 'Motivo sconosciuto'
+          });
           continue;
         }
         
@@ -277,6 +296,8 @@ serve(async (req) => {
       // STEP 2: Light validation + deduplication + queueing
       console.log(`🔄 [STEP 2] Validating and queueing PDFs`);
       
+      const failedPdfs: Array<{ title: string; url: string; reason: string }> = [];
+      
       for (let i = 0; i < organicResults.length; i++) {
         const item = organicResults[i];
         const url = item.link;
@@ -291,6 +312,11 @@ serve(async (req) => {
         
         if (!validation.valid) {
           result.pdfs_failed++;
+          failedPdfs.push({
+            title,
+            url,
+            reason: validation.failureReason || 'Motivo sconosciuto'
+          });
           continue;
         }
         
@@ -311,6 +337,7 @@ serve(async (req) => {
       result.message = pdfsToDownload && pdfsToDownload.length > 0 
         ? `Pre-selected ${pdfsToDownload.length} PDFs but none passed validation`
         : `Found results but none passed validation`;
+      result.failed_pdfs = failedPdfs;
       
       // 📝 Salva query nello storico anche se non ha trovato risultati
       if (topic) {
