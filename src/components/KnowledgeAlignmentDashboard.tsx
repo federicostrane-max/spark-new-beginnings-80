@@ -13,7 +13,6 @@ import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
 import GapAnalysisView from './GapAnalysisView';
-import { ExtractionPromptDialog } from './ExtractionPromptDialog';
 
 interface KnowledgeAlignmentDashboardProps {
   agentId: string;
@@ -406,7 +405,6 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                 </CardDescription>
               </div>
               <div className="flex gap-2">
-                <ExtractionPromptDialog />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span>

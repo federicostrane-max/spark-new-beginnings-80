@@ -23,6 +23,7 @@ import {
 import { Loader2, Edit, Save, X, Plus, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import crypto from "crypto-js";
+import { ExtractionPromptDialog } from "@/components/ExtractionPromptDialog";
 
 interface CoreConceptItem {
   concept: string;
@@ -548,6 +549,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
               )}
             </div>
             <div className="flex gap-2">
+              <ExtractionPromptDialog />
               {!editMode && (
                 <>
                   <Button

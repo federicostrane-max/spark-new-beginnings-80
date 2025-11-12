@@ -18,7 +18,7 @@ export const ExtractionPromptDialog = ({ children }: ExtractionPromptDialogProps
         {children || (
           <Button variant="outline" size="sm">
             <FileCode2 className="mr-2 h-4 w-4" />
-            Vedi Prompt di Estrazione
+            Filter Agent
           </Button>
         )}
       </DialogTrigger>
