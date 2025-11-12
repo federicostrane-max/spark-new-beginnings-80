@@ -14,7 +14,7 @@ serve(async (req) => {
 
   try {
     // Increment this to force re-extraction with updated filters
-    const FILTER_VERSION = 'v3';
+    const FILTER_VERSION = 'v4';
     
     const { agentId } = await req.json();
 
@@ -103,17 +103,40 @@ Extract and categorize the following:
 3. **Decision Patterns**: Decision criteria, prioritization rules, evaluation frameworks
    - Return as array of objects: {pattern: string, criteria: string[]}
 
-4. **Domain Vocabulary**: ONLY domain-specific terms, proper nouns, specialized terminology unique to this agent's subject area
-   - INCLUDE ONLY: Names of people, places, events, organizations, specialized technical terms, domain-specific jargon
-   - EXCLUDE ALL: Generic terms that any LLM already knows (e.g., "context", "citation", "fact", "knowledge base", "source", "reference", "methodology", "protocol", "structure")
-   - EXCLUDE ALL: Common words and general concepts
-   - EXCLUDE ALL: Meta-terms about knowledge management or information processing
-   - Focus ONLY on terms that would require specialized knowledge to understand
-   - Return as array of strings
+4. **Domain Vocabulary**: Extract ONLY terms explicitly mentioned/written in the system prompt text
    
-   Example for a biography agent about Che Guevara:
-   - CORRECT: ["Sierra Maestra", "La Higuera", "Revolución Cubana", "Foco guerrillero", "Ejército Rebelde", "Movimento 26 de Julio"]
-   - WRONG: ["citazione", "contesto", "fonte", "biografia", "documento", "knowledge base", "fatto documentato", "protocollo"]
+   **CRITICAL EXTRACTION RULES:**
+   - ✅ INCLUDE ONLY if the term is literally written/mentioned in the prompt text
+   - ❌ DO NOT deduce, infer, or add terms based on your domain knowledge
+   - ❌ DO NOT add terms you think would be relevant to the topic
+   - ❌ DO NOT interpret or expand on what the prompt implies
+   
+   **What to Extract (if explicitly present in prompt):**
+   - Proper nouns: Names of people, places, organizations, events
+   - Specific dates, numbers, or identifiers mentioned in the prompt
+   - Specialized technical terms or domain-specific jargon that appear in the prompt
+   - Titles of books, documents, or sources cited in the prompt
+   
+   **What to NEVER Extract:**
+   - Generic terms (e.g., "context", "citation", "knowledge base", "source")
+   - Terms you think are relevant but are not written in the prompt
+   - Background knowledge about the domain not mentioned in prompt
+   
+   **Examples:**
+   
+   Prompt: "You are an expert on Sierra Maestra. Answer based on the Che Guevara Bio book."
+   ✅ CORRECT: ["Sierra Maestra", "Che Guevara Bio"]
+   ❌ WRONG: ["Fidel Castro", "Revolución Cubana", "Moncada", "Granma"] (not in prompt, even if relevant)
+   
+   Prompt: "You are a historian. Answer questions about the Cuban Revolution using scholarly sources."
+   ✅ CORRECT: ["Cuban Revolution"]
+   ❌ WRONG: ["Fidel Castro", "Che Guevara", "Sierra Maestra", "Batista"] (not mentioned)
+   
+   Prompt: "Answer about Che Guevara's life. Focus on events from 1928 to 1967. Reference only the biography text."
+   ✅ CORRECT: ["Che Guevara", "1928", "1967"]
+   ❌ WRONG: ["Argentina", "Bolivia", "guerrilla warfare"] (not explicitly in prompt)
+   
+   - Return as array of strings
 
 Return ONLY valid JSON in this exact format:
 {
