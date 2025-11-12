@@ -183,6 +183,10 @@ Return ONLY valid JSON in this exact format:
     const content = aiData.choices[0].message.content;
 
     console.log('[extract-task-requirements] AI response received');
+    console.log('📋 Raw AI Response:', {
+      length: content.length,
+      preview: content.substring(0, 200)
+    });
 
     // Parse JSON response
     let extracted;
@@ -200,6 +204,81 @@ Return ONLY valid JSON in this exact format:
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+    }
+
+    // Validate requirements structure before saving
+    const validateRequirementsStructure = (requirements: any): boolean => {
+      // Validate core_concepts
+      if (!Array.isArray(requirements.core_concepts)) {
+        console.error('❌ core_concepts is not an array');
+        return false;
+      }
+      
+      // Validate procedural_knowledge
+      if (!Array.isArray(requirements.procedural_knowledge)) {
+        console.error('❌ procedural_knowledge is not an array');
+        return false;
+      }
+      
+      const invalidProcedural = requirements.procedural_knowledge.some((item: any, idx: number) => {
+        if (!item?.process || typeof item.process !== 'string') {
+          console.error(`❌ procedural_knowledge[${idx}].process is invalid`);
+          return true;
+        }
+        if (!Array.isArray(item.steps)) {
+          console.error(`❌ procedural_knowledge[${idx}].steps is not an array`);
+          return true;
+        }
+        return false;
+      });
+      
+      if (invalidProcedural) return false;
+      
+      // Validate decision_patterns
+      if (!Array.isArray(requirements.decision_patterns)) {
+        console.error('❌ decision_patterns is not an array');
+        return false;
+      }
+      
+      const invalidDecision = requirements.decision_patterns.some((item: any, idx: number) => {
+        if (!item?.pattern || typeof item.pattern !== 'string') {
+          console.error(`❌ decision_patterns[${idx}].pattern is invalid`);
+          return true;
+        }
+        if (!Array.isArray(item.criteria)) {
+          console.error(`❌ decision_patterns[${idx}].criteria is not an array`);
+          return true;
+        }
+        return false;
+      });
+      
+      if (invalidDecision) return false;
+      
+      // Validate domain_vocabulary
+      if (!Array.isArray(requirements.domain_vocabulary)) {
+        console.error('❌ domain_vocabulary is not an array');
+        return false;
+      }
+      
+      return true;
+    };
+
+    console.log('📦 Parsed Requirements Structure:', {
+      core_concepts_count: extracted.core_concepts?.length,
+      procedural_count: extracted.procedural_knowledge?.length,
+      decision_count: extracted.decision_patterns?.length,
+      vocabulary_count: extracted.domain_vocabulary?.length
+    });
+
+    // Validate structure
+    if (!validateRequirementsStructure(extracted)) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'AI response has invalid structure. Please try again or adjust the extraction prompt.',
+          details: 'The extracted requirements do not match the expected structure.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Filter out generic terms from domain_vocabulary - VERY AGGRESSIVE FILTER

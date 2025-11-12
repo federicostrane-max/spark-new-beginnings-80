@@ -136,6 +136,24 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     return currentHash !== requirements.system_prompt_hash;
   };
 
+  const hasCorruptedData = (): boolean => {
+    if (!requirements) return false;
+    
+    // Check procedural knowledge structure
+    if (!Array.isArray(requirements.procedural_knowledge)) return true;
+    const hasInvalidProcedural = requirements.procedural_knowledge.some(
+      item => !item?.process || !Array.isArray(item.steps)
+    );
+    
+    // Check decision patterns structure
+    if (!Array.isArray(requirements.decision_patterns)) return true;
+    const hasInvalidDecision = requirements.decision_patterns.some(
+      item => !item?.pattern || !Array.isArray(item.criteria)
+    );
+    
+    return hasInvalidProcedural || hasInvalidDecision;
+  };
+
   const handleEditMode = () => {
     if (editMode && hasUnsavedChanges) {
       setShowExitDialog(true);
@@ -468,35 +486,71 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     </ul>
   );
 
-  const renderProceduralReadOnly = (items: ProceduralKnowledgeItem[]) => (
-    <div className="space-y-3">
-      {items.map((item, idx) => (
-        <div key={idx}>
-          <p className="text-sm font-medium text-foreground">{item.process}</p>
-          <ul className="list-decimal list-inside ml-4 mt-1 space-y-0.5">
-            {item.steps.map((step, stepIdx) => (
-              <li key={stepIdx} className="text-sm text-muted-foreground">{step}</li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
+  const renderProceduralReadOnly = (items: ProceduralKnowledgeItem[]) => {
+    // Validate data structure
+    if (!Array.isArray(items)) {
+      return <p className="text-sm text-destructive">⚠️ Dati non validi. Ri-estrai i requirements.</p>;
+    }
+    
+    return (
+      <div className="space-y-3">
+        {items.map((item, idx) => {
+          // Skip invalid items
+          if (!item?.process || !Array.isArray(item.steps)) {
+            return (
+              <div key={idx} className="text-sm text-destructive">
+                ⚠️ Voce {idx + 1} malformata
+              </div>
+            );
+          }
+          
+          return (
+            <div key={idx}>
+              <p className="text-sm font-medium text-foreground">{item.process}</p>
+              <ul className="list-decimal list-inside ml-4 mt-1 space-y-0.5">
+                {item.steps.map((step, stepIdx) => (
+                  <li key={stepIdx} className="text-sm text-muted-foreground">{step}</li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
-  const renderDecisionReadOnly = (items: DecisionPatternItem[]) => (
-    <div className="space-y-3">
-      {items.map((item, idx) => (
-        <div key={idx}>
-          <p className="text-sm font-medium text-foreground">{item.pattern}</p>
-          <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
-            {item.criteria.map((crit, critIdx) => (
-              <li key={critIdx} className="text-sm text-muted-foreground">{crit}</li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
+  const renderDecisionReadOnly = (items: DecisionPatternItem[]) => {
+    // Validate data structure
+    if (!Array.isArray(items)) {
+      return <p className="text-sm text-destructive">⚠️ Dati non validi. Ri-estrai i requirements.</p>;
+    }
+    
+    return (
+      <div className="space-y-3">
+        {items.map((item, idx) => {
+          // Skip invalid items
+          if (!item?.pattern || !Array.isArray(item.criteria)) {
+            return (
+              <div key={idx} className="text-sm text-destructive">
+                ⚠️ Voce {idx + 1} malformata
+              </div>
+            );
+          }
+          
+          return (
+            <div key={idx}>
+              <p className="text-sm font-medium text-foreground">{item.pattern}</p>
+              <ul className="list-disc list-inside ml-4 mt-1 space-y-0.5">
+                {item.criteria.map((crit, critIdx) => (
+                  <li key={critIdx} className="text-sm text-muted-foreground">{crit}</li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderVocabularyReadOnly = (items: DomainVocabularyItem[]) => (
     <ul className="list-disc list-inside space-y-1">
@@ -540,7 +594,9 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-semibold">Task Requirements</h3>
-              {isOutOfSync() ? (
+              {hasCorruptedData() ? (
+                <Badge variant="destructive">⚠️ Dati Corrotti</Badge>
+              ) : isOutOfSync() ? (
                 <Badge variant="destructive">Out of sync</Badge>
               ) : (
                 <Badge variant="secondary">
