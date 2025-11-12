@@ -3512,32 +3512,48 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             } else if (llmProvider === 'openrouter') {
               // OpenRouter implementation (streaming) - access to 100+ models
               const selectedModel = aiModel || 'deepseek/deepseek-chat'; // Use agent's model or default
+              
               console.log('🚀 ROUTING TO OPENROUTER');
-              console.log(`   Model: ${selectedModel}`);
-              console.log(`   Message count: ${anthropicMessages.length}`);
+              console.log(`   Selected Model: ${selectedModel}`);
               
               const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
               if (!OPENROUTER_API_KEY) {
-                throw new Error('OPENROUTER_API_KEY is required but not set');
+                throw new Error('OPENROUTER_API_KEY not configured');
               }
+              
+              // Prepare body with optimized settings for thinking models like Kimi K2
+              const isThinkingModel = selectedModel.includes('kimi-k2') || selectedModel.includes('thinking');
+              const requestBody: any = {
+                model: selectedModel,
+                messages: [
+                  { role: 'system', content: enhancedSystemPrompt },
+                  ...anthropicMessages
+                ],
+                stream: true
+              };
+              
+              // Apply specific configurations for thinking models
+              if (isThinkingModel) {
+                requestBody.temperature = 1.0; // Recommended for K2 Thinking
+                requestBody.max_tokens = 32000; // High limit for thinking models (minimum 16000)
+                requestBody.reasoning = true; // Enable reasoning output for OpenRouter
+                console.log(`🧠 [REQ-${requestId}] Thinking model detected - temperature=1.0, max_tokens=32000, reasoning=true`);
+              } else {
+                requestBody.temperature = 0.7;
+                requestBody.max_tokens = 4000;
+              }
+              
+              console.log(`📤 [REQ-${requestId}] OpenRouter request - model: ${selectedModel}, temp: ${requestBody.temperature}, max_tokens: ${requestBody.max_tokens}, reasoning: ${requestBody.reasoning || false}`);
               
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
-                  'Content-Type': 'application/json',
                   'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                  'Content-Type': 'application/json',
                   'HTTP-Referer': 'https://lovable.dev',
                   'X-Title': 'Multi-Agent Consultant',
                 },
-                body: JSON.stringify({
-                  model: selectedModel,
-                  messages: [
-                    { role: 'system', content: enhancedSystemPrompt },
-                    ...anthropicMessages
-                  ],
-                  temperature: 0.7,
-                  stream: true
-                }),
+                body: JSON.stringify(requestBody),
                 signal: controller.signal
               });
               
@@ -3730,14 +3746,29 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   // Handle OpenAI streaming format (also used by OpenRouter)
                   if (llmProvider === 'openai' || llmProvider === 'openrouter') {
                     const delta = parsed.choices?.[0]?.delta;
-                    if (!delta) continue;
+                    const message = parsed.choices?.[0]?.message;
                     
                     let newText = '';
                     
-                    // Check for reasoning_content (used by thinking models like Kimi K2)
-                    if (delta.reasoning_content) {
+                    // Check for reasoning_details (OpenRouter format for thinking models)
+                    if (message?.reasoning_details && Array.isArray(message.reasoning_details)) {
+                      for (const detail of message.reasoning_details) {
+                        if (detail.text) {
+                          console.log(`🧠 [REQ-${requestId}] Reasoning (OpenRouter): ${detail.text.slice(0, 100)}...`);
+                          reasoningContent += detail.text;
+                          const reasoningText = `💭 ${detail.text}`;
+                          if (!skipAgentResponse) {
+                            fullResponse += reasoningText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: reasoningText }));
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Check for reasoning_content (Moonshot native format for thinking models)
+                    if (delta?.reasoning_content) {
                       const reasoningChunk = delta.reasoning_content;
-                      console.log(`🧠 [REQ-${requestId}] Reasoning chunk: ${reasoningChunk.slice(0, 100)}...`);
+                      console.log(`🧠 [REQ-${requestId}] Reasoning (Moonshot): ${reasoningChunk.slice(0, 100)}...`);
                       
                       // Accumulate reasoning separately
                       reasoningContent += reasoningChunk;
@@ -3751,6 +3782,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                         await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       }
                     }
+                    
+                    if (!delta) continue;
                     
                     // Check for regular content
                     if (delta.content) {
