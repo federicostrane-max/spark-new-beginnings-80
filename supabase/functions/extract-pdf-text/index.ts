@@ -83,7 +83,32 @@ serve(async (req) => {
 
     if (!pdfBlob || !successfulBucket) {
       const triedPaths = bucketsToTry.map(b => `${b.name}/${b.path}`).join(', ');
-      throw new Error(`File not found in any storage bucket. Tried: ${triedPaths}`);
+      console.log('[extract-pdf-text] ❌ File not found in any bucket, marking document as validation_failed');
+      
+      // Mark document as validation_failed if documentId is provided
+      if (documentId) {
+        await supabase
+          .from('knowledge_documents')
+          .update({
+            processing_status: 'validation_failed',
+            validation_status: 'rejected',
+            validation_reason: `File not found in storage. Tried: ${triedPaths}`
+          })
+          .eq('id', documentId);
+      }
+      
+      // Return 200 with success: false to avoid blocking workflow
+      return new Response(
+        JSON.stringify({ 
+          success: false,
+          error: `File not found in any storage bucket. Tried: ${triedPaths}`,
+          text: ''
+        }),
+        { 
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
     }
 
     console.log(`[extract-pdf-text] PDF downloaded from ${successfulBucket.name}, size: ${pdfBlob.size} bytes`);
