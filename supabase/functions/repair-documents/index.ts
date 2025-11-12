@@ -313,12 +313,15 @@ serve(async (req) => {
     // 3. Trigger validation for downloaded but pending documents
     const { data: pendingDocs, error: pendingError } = await supabase
       .from('knowledge_documents')
-      .select('id, file_name, search_query')
+      .select('id, file_name, search_query, created_at')
       .eq('processing_status', 'downloaded')
-      .eq('validation_status', 'pending');
+      .eq('validation_status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(5);
 
     if (!pendingError && pendingDocs) {
-      console.log(`[repair-documents] Triggering validation for ${pendingDocs.length} pending documents`);
+      console.log(`[repair-documents] Triggering validation for ${pendingDocs.length} pending documents:`, 
+        pendingDocs.map(d => d.file_name).join(', '));
       
       for (const doc of pendingDocs) {
         try {
@@ -349,11 +352,14 @@ serve(async (req) => {
     // 4. Unblock documents stuck in processing
     const { data: stuckDocs, error: stuckError } = await supabase
       .from('knowledge_documents')
-      .select('id, file_name')
-      .or('processing_status.eq.processing,processing_status.eq.pending_processing');
+      .select('id, file_name, created_at')
+      .or('processing_status.eq.processing,processing_status.eq.pending_processing')
+      .order('created_at', { ascending: true })
+      .limit(10);
 
     if (!stuckError && stuckDocs) {
-      console.log(`[repair-documents] Unblocking ${stuckDocs.length} stuck documents`);
+      console.log(`[repair-documents] Unblocking ${stuckDocs.length} stuck documents:`, 
+        stuckDocs.map(d => d.file_name).join(', '));
       
       for (const doc of stuckDocs) {
         try {
