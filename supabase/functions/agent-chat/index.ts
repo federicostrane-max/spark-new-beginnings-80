@@ -3938,6 +3938,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                               });
                             }
                             
+                            // 🚨 MOSTRA motivi specifici dei fallimenti
+                            if (acquireData.failed_pdfs && acquireData.failed_pdfs.length > 0) {
+                              resultText += `\n⚠️ **PDF non scaricabili:**\n\n`;
+                              acquireData.failed_pdfs.forEach((pdf: any, idx: number) => {
+                                resultText += `${idx + 1}. ❌ **${pdf.title}**\n`;
+                                resultText += `   🔗 ${pdf.url.slice(0, 60)}...\n`;
+                                resultText += `   ⚠️ Motivo: ${pdf.reason}\n\n`;
+                              });
+                            }
+                            
                             // ⚠️ MOSTRA messaggio "Download in corso" SOLO se ci sono PDF in coda
                             if (acquireData.pdfs_queued > 0) {
                               resultText += `\n⏳ **Download e validazione in corso...** Riceverai un aggiornamento quando i PDF saranno validati e aggiunti al pool.\n\n`;
