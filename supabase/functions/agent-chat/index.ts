@@ -3726,10 +3726,23 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     continue; // Skip OpenAI/Anthropic-specific handling
                   }
                   
-                  // Handle OpenAI streaming format
-                  if (llmProvider === 'openai') {
-                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                      const newText = parsed.choices[0].delta.content;
+                  // Handle OpenAI streaming format (also used by OpenRouter)
+                  if (llmProvider === 'openai' || llmProvider === 'openrouter') {
+                    const delta = parsed.choices?.[0]?.delta;
+                    if (!delta) continue;
+                    
+                    let newText = '';
+                    
+                    // Check for reasoning_content (used by thinking models like Kimi K2)
+                    if (delta.reasoning_content) {
+                      // Log reasoning but don't show it to user (just for debugging)
+                      console.log(`🧠 [REQ-${requestId}] Reasoning: ${delta.reasoning_content.slice(0, 100)}...`);
+                      // We don't add reasoning to fullResponse to avoid confusing users
+                    }
+                    
+                    // Check for regular content
+                    if (delta.content) {
+                      newText = delta.content;
                       
                       // Block agent output if system has already sent the message
                       if (!skipAgentResponse) {
