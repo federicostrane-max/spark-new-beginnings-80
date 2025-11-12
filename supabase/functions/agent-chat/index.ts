@@ -2127,9 +2127,11 @@ Deno.serve(async (req) => {
     // Validate that user message doesn't contain system-generated patterns
     // Skip validation for messages with @tags (meta-discussion about the system)
     // Skip validation for inter-agent consultations (skipSystemValidation flag)
+    // Apply validation ONLY for Book Search Expert (to prevent re-sending its responses)
     const hasAgentTags = mentionedAgentSlugs.length > 0;
+    const isBookSearchExpert = agent.slug === 'book-search-expert';
     
-    if (!hasAgentTags && !skipSystemValidation) {
+    if (!hasAgentTags && !skipSystemValidation && isBookSearchExpert) {
       const systemPatterns = [
         /^Ho trovato \d+ PDF/i,
         /Confermi il download/i,
@@ -2142,7 +2144,7 @@ Deno.serve(async (req) => {
       const looksLikeSystemMessage = systemPatterns.some(pattern => pattern.test(message));
       
       if (looksLikeSystemMessage) {
-        console.error('⚠️ [VALIDATION] Detected system-like content in user message:', message);
+        console.error('⚠️ [VALIDATION] Detected Book Search Expert response in user message:', message);
         throw new Error('Invalid user message: contains system-generated content');
       }
     }
