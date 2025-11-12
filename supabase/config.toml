@@ -97,3 +97,7 @@ verify_jwt = true
 
 [functions.suggest-next-query]
 verify_jwt = true
+
+[functions.repair-documents]
+verify_jwt = true
+timeout = 600
