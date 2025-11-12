@@ -6,6 +6,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Chunk text into overlapping segments for embeddings
+function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length);
+    chunks.push(text.slice(start, end));
+    start += chunkSize - overlap;
+  }
+  
+  return chunks;
+}
+
 interface ProcessRequest {
   documentId: string;
   fullText?: string; // Complete extracted text (optional, can be fetched from DB)
@@ -281,6 +295,116 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       }
     }
 
+    // ========================================
+    // Create Chunks with Embeddings for Shared Pool
+    // ========================================
+    console.log('[process-document] Creating chunks for shared pool...');
+    
+    // Check if chunks already exist for this document
+    const { data: existingChunks, error: checkError } = await supabase
+      .from('agent_knowledge')
+      .select('id')
+      .eq('pool_document_id', documentId)
+      .limit(1);
+    
+    if (checkError) {
+      console.error('[process-document] Error checking for existing chunks:', checkError);
+    }
+    
+    if (existingChunks && existingChunks.length > 0) {
+      console.log('[process-document] ✓ Chunks already exist, skipping chunk creation');
+    } else {
+      console.log('[process-document] No existing chunks found, creating new chunks...');
+      
+      // Get document details for chunk metadata
+      const { data: doc } = await supabase
+        .from('knowledge_documents')
+        .select('file_name')
+        .eq('id', documentId)
+        .single();
+      
+      const fileName = doc?.file_name || 'Unknown Document';
+      
+      // Chunk the text
+      const chunks = chunkText(fullText, 1000, 200);
+      console.log(`[process-document] Created ${chunks.length} chunks`);
+      
+      // Get OpenAI API key for embeddings
+      const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+      if (!openAIApiKey) {
+        throw new Error('OPENAI_API_KEY not configured for embeddings');
+      }
+      
+      // Process chunks in batches
+      const BATCH_SIZE = 10;
+      let processedChunks = 0;
+      const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
+      
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+        const batch = chunks.slice(i, i + BATCH_SIZE);
+        
+        console.log(`[process-document] Processing batch ${batchNumber}/${totalBatches} (${batch.length} chunks)...`);
+        
+        // Generate embeddings for batch
+        const embeddingPromises = batch.map(async (chunk) => {
+          const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${openAIApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'text-embedding-3-small',
+              input: chunk,
+            }),
+          });
+          
+          if (!embeddingResponse.ok) {
+            throw new Error(`Failed to generate embedding: ${embeddingResponse.statusText}`);
+          }
+          
+          const embeddingData = await embeddingResponse.json();
+          return {
+            content: chunk,
+            embedding: embeddingData.data[0].embedding,
+          };
+        });
+        
+        const chunksWithEmbeddings = await Promise.all(embeddingPromises);
+        
+        // Insert chunks into agent_knowledge (shared pool)
+        const { error: insertError } = await supabase
+          .from('agent_knowledge')
+          .insert(
+            chunksWithEmbeddings.map((chunk) => ({
+              agent_id: null,  // NULL = shared pool
+              document_name: fileName,
+              content: chunk.content,
+              embedding: chunk.embedding,
+              category: 'General',
+              source_type: 'shared_pool',
+              pool_document_id: documentId,
+            }))
+          );
+        
+        if (insertError) {
+          console.error(`[process-document] Batch ${batchNumber} insert error:`, insertError);
+          throw insertError;
+        }
+        
+        processedChunks += batch.length;
+        console.log(`[process-document] ✓ Batch ${batchNumber}/${totalBatches} completed (${processedChunks}/${chunks.length} chunks)`);
+        
+        // Small delay between batches
+        if (i + BATCH_SIZE < chunks.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      console.log(`[process-document] ✓ All ${processedChunks} chunks created successfully`);
+    }
+    
     // ========================================
     // Update Database with Analysis
     // ========================================
