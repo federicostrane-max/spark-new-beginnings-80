@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
 import GapAnalysisView from './GapAnalysisView';
+import { ExtractionPromptDialog } from './ExtractionPromptDialog';
 
 interface KnowledgeAlignmentDashboardProps {
   agentId: string;
@@ -404,25 +405,28 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                   Sistema autonomo di ottimizzazione della conoscenza
                 </CardDescription>
               </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span>
-                    <Button 
-                      onClick={triggerManualAnalysis} 
-                      disabled={isAnalyzing || !canAnalyze}
-                      size="sm"
-                    >
-                      <Play className="mr-2 h-4 w-4" />
-                      {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {!canAnalyze && cooldownActive && (
-                  <TooltipContent>
-                    <p>Prossima analisi disponibile tra {cooldownMinutes} minuti</p>
-                  </TooltipContent>
-                )}
-              </Tooltip>
+              <div className="flex gap-2">
+                <ExtractionPromptDialog />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button 
+                        onClick={triggerManualAnalysis} 
+                        disabled={isAnalyzing || !canAnalyze}
+                        size="sm"
+                      >
+                        <Play className="mr-2 h-4 w-4" />
+                        {isAnalyzing ? 'Analisi in corso...' : 'Analizza Ora'}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!canAnalyze && cooldownActive && (
+                    <TooltipContent>
+                      <p>Prossima analisi disponibile tra {cooldownMinutes} minuti</p>
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
