@@ -3738,6 +3738,12 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       console.log(`🧠 [REQ-${requestId}] Reasoning: ${delta.reasoning_content.slice(0, 100)}...`);
                       // Show reasoning to user with a distinctive format
                       newText = `💭 ${delta.reasoning_content}`;
+                      
+                      // Accumulate reasoning in fullResponse (it's valid content)
+                      if (!skipAgentResponse) {
+                        fullResponse += newText;
+                        await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      }
                     }
                     
                     // Check for regular content
@@ -5070,10 +5076,10 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             
             console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
             
-            // Check for empty response (common with thinking models)
-            if (!fullResponse || fullResponse.trim().length === 0) {
+            // Check for empty response (only if no reasoning was provided)
+            if ((!fullResponse || fullResponse.trim().length === 0) && !fullResponse.includes('💭')) {
               console.warn(`⚠️ [REQ-${requestId}] Empty response detected from ${llmProvider} model: ${agent.ai_model}`);
-              fullResponse = "⚠️ Il modello ha elaborato la richiesta ma non ha prodotto una risposta testuale. Questo può accadere con modelli 'thinking' come Kimi K2.\n\n🔄 **Suggerimenti:**\n- Riprova riformulando la domanda\n- Oppure cambia modello nelle impostazioni agente (es. Claude 3.5 Sonnet o GPT-4o)";
+              fullResponse = "⚠️ Il modello ha elaborato la richiesta ma non ha prodotto una risposta testuale.\n\n🔄 **Suggerimenti:**\n- Riprova riformulando la domanda\n- Oppure cambia modello nelle impostazioni agente (es. Claude 3.5 Sonnet o GPT-4o)";
               
               // Update the message in DB with the fallback
               await supabase
