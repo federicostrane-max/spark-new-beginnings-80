@@ -58,9 +58,17 @@ export default function MultiAgentConsultant() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
+  
+  // 🔄 Restore session from sessionStorage on mount
+  const [currentAgent, setCurrentAgent] = useState<Agent | null>(() => {
+    const saved = sessionStorage.getItem('currentAgent');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
+  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(() => {
+    const saved = sessionStorage.getItem('currentConversation');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -87,6 +95,47 @@ export default function MultiAgentConsultant() {
 
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
   const agentHealth = useAgentHealth(agents.map(a => a.id));
+
+  // 💾 Save current session to sessionStorage
+  useEffect(() => {
+    if (currentAgent) {
+      sessionStorage.setItem('currentAgent', JSON.stringify(currentAgent));
+    }
+  }, [currentAgent]);
+
+  useEffect(() => {
+    if (currentConversation) {
+      sessionStorage.setItem('currentConversation', JSON.stringify(currentConversation));
+    }
+  }, [currentConversation]);
+
+  // 🔄 Restore conversation on reload if we have saved state
+  useEffect(() => {
+    const savedAgent = sessionStorage.getItem('currentAgent');
+    const savedConversation = sessionStorage.getItem('currentConversation');
+    
+    if (savedAgent && savedConversation && !currentAgent && session?.user?.id) {
+      const agent = JSON.parse(savedAgent);
+      const conversation = JSON.parse(savedConversation);
+      
+      // Verify agent still exists
+      supabase
+        .from('agents')
+        .select('*')
+        .eq('id', agent.id)
+        .single()
+        .then(({ data, error }) => {
+          if (!error && data) {
+            setCurrentAgent(data);
+            loadConversation(conversation.id);
+          } else {
+            // Clear invalid session
+            sessionStorage.removeItem('currentAgent');
+            sessionStorage.removeItem('currentConversation');
+          }
+        });
+    }
+  }, [session?.user?.id]);
 
   // Intelligent auto-scroll - solo quando l'utente è vicino al fondo
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
