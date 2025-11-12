@@ -324,7 +324,7 @@ export const ChatMessage = ({
       <div
         className={cn(
           "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
-          "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
+          "w-fit max-w-[calc(100%-1rem)] md:max-w-[75%]",
           "select-text cursor-text",
           isUser && !selectionMode && "ml-auto",
           selectionMode && "ml-8",
