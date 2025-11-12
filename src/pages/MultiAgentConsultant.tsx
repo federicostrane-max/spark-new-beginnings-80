@@ -137,6 +137,14 @@ export default function MultiAgentConsultant() {
     }
   }, [session?.user?.id]);
 
+  // 🔄 Load messages when conversation changes (e.g., after page reload or agent selection)
+  useEffect(() => {
+    if (currentConversation?.id && messages.length === 0 && !loadingMessages) {
+      console.log('📬 Auto-loading messages for conversation:', currentConversation.id);
+      loadConversation(currentConversation.id);
+    }
+  }, [currentConversation?.id]);
+
   // Intelligent auto-scroll - solo quando l'utente è vicino al fondo
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
