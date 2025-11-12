@@ -26,6 +26,11 @@ serve(async (req) => {
       throw new Error('Missing required field: newPromptContent');
     }
 
+    // Validate placeholder presence
+    if (!newPromptContent.includes('${agent.system_prompt}')) {
+      throw new Error('Filter prompt must contain the placeholder ${agent.system_prompt}');
+    }
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);

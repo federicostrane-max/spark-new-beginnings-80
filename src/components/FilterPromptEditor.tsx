@@ -9,7 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, History, Save, Info } from 'lucide-react';
+import { Loader2, History, Save, Info, AlertTriangle } from 'lucide-react';
 
 interface FilterPrompt {
   id: string;
@@ -83,6 +83,16 @@ export const FilterPromptEditor = () => {
       toast({
         title: 'Errore',
         description: 'Il prompt non può essere vuoto',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Check for required placeholder
+    if (!editedContent.includes('${agent.system_prompt}')) {
+      toast({
+        title: 'Errore - Placeholder Mancante',
+        description: 'Il prompt deve contenere il placeholder ${agent.system_prompt} per funzionare correttamente.',
         variant: 'destructive',
       });
       return;
@@ -221,6 +231,17 @@ export const FilterPromptEditor = () => {
             {showHistory ? 'Nascondi' : 'Mostra'} Storico
           </Button>
         </div>
+
+        <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+          <AlertTriangle className="h-4 w-4 text-amber-600" />
+          <AlertDescription className="text-sm">
+            <strong>Placeholder obbligatorio:</strong> Il prompt deve contenere{' '}
+            <code className="bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 px-1 rounded font-mono">
+              {'${agent.system_prompt}'}
+            </code>{' '}
+            per permettere l'inserimento dinamico del prompt dell'agente durante l'analisi.
+          </AlertDescription>
+        </Alert>
 
         <Textarea
           value={editedContent}
