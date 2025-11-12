@@ -100,4 +100,4 @@ verify_jwt = true
 
 [functions.repair-documents]
 verify_jwt = true
-timeout = 600
+timeout = 900

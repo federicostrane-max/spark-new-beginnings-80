@@ -19,10 +19,23 @@ function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200
   const chunks: string[] = [];
   let start = 0;
   
+  // Skip if text is too large (> 5MB)
+  if (text.length > 5000000) {
+    console.log(`[repair-documents] Text too large (${text.length} chars), splitting into larger chunks`);
+    chunkSize = 5000;
+    overlap = 500;
+  }
+  
   while (start < text.length) {
     const end = Math.min(start + chunkSize, text.length);
     chunks.push(text.slice(start, end));
     start += chunkSize - overlap;
+    
+    // Safety check to prevent infinite loops
+    if (chunks.length > 10000) {
+      console.log(`[repair-documents] Too many chunks (${chunks.length}), stopping`);
+      break;
+    }
   }
   
   return chunks;
@@ -49,16 +62,17 @@ serve(async (req) => {
 
     console.log('[repair-documents] Starting repair process...');
 
-    // 1. Find documents validated but without chunks
+    // 1. Find documents validated but without chunks (LIMIT 5 at a time)
     const { data: validatedDocs, error: validatedError } = await supabase
       .from('knowledge_documents')
       .select('id, file_name, file_path')
       .eq('validation_status', 'validated')
-      .eq('processing_status', 'ready_for_assignment');
+      .eq('processing_status', 'ready_for_assignment')
+      .limit(5);
 
     if (validatedError) throw validatedError;
 
-    console.log(`[repair-documents] Found ${validatedDocs?.length || 0} validated documents`);
+    console.log(`[repair-documents] Found ${validatedDocs?.length || 0} validated documents (processing max 5)`);
 
     // Check which ones actually need chunks
     const docsNeedingChunks = [];
@@ -81,12 +95,30 @@ serve(async (req) => {
       try {
         console.log(`[repair-documents] Creating chunks for ${doc.file_name}`);
 
-        // Download PDF
-        const { data: fileData, error: downloadError } = await supabase.storage
+        // Download PDF - try different path patterns
+        let fileData;
+        let downloadError;
+        
+        // Try direct path first
+        const downloadResult = await supabase.storage
           .from('knowledge-pdfs')
           .download(doc.file_path);
+        
+        fileData = downloadResult.data;
+        downloadError = downloadResult.error;
+        
+        // If failed, try without shared-pool-uploads prefix
+        if (downloadError && doc.file_path.includes('shared-pool-uploads/')) {
+          const altPath = doc.file_path.replace('shared-pool-uploads/', '');
+          console.log(`[repair-documents] Retrying with path: ${altPath}`);
+          const retryResult = await supabase.storage
+            .from('knowledge-pdfs')
+            .download(altPath);
+          fileData = retryResult.data;
+          downloadError = retryResult.error;
+        }
 
-        if (downloadError) throw downloadError;
+        if (downloadError || !fileData) throw downloadError || new Error('No file data');
 
         // Convert to base64 for OCR
         const arrayBuffer = await fileData.arrayBuffer();
@@ -106,6 +138,11 @@ serve(async (req) => {
 
         const fullText = ocrData.text;
         console.log(`[repair-documents] Extracted ${fullText.length} chars of text`);
+        
+        // Skip if text is too large (> 10MB)
+        if (fullText.length > 10000000) {
+          throw new Error(`Text too large (${fullText.length} chars), skipping to prevent timeout`);
+        }
 
         // Create chunks
         const textChunks = chunkText(fullText);
