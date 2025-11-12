@@ -3735,14 +3735,19 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     
                     // Check for reasoning_content (used by thinking models like Kimi K2)
                     if (delta.reasoning_content) {
-                      // Log reasoning but don't show it to user (just for debugging)
                       console.log(`🧠 [REQ-${requestId}] Reasoning: ${delta.reasoning_content.slice(0, 100)}...`);
-                      // We don't add reasoning to fullResponse to avoid confusing users
+                      // Show reasoning to user with a distinctive format
+                      newText = `💭 ${delta.reasoning_content}`;
                     }
                     
                     // Check for regular content
                     if (delta.content) {
-                      newText = delta.content;
+                      // If we had reasoning before, add a separator before the actual answer
+                      if (fullResponse.includes('💭') && !fullResponse.includes('\n\n---\n\n**Risposta:**\n')) {
+                        newText = '\n\n---\n\n**Risposta:**\n' + delta.content;
+                      } else {
+                        newText = delta.content;
+                      }
                       
                       // Block agent output if system has already sent the message
                       if (!skipAgentResponse) {
