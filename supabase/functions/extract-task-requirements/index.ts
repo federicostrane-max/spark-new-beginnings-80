@@ -1,4 +1,3 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.78.0";
 
@@ -13,368 +12,167 @@ serve(async (req) => {
   }
 
   try {
-    // Increment this to force re-extraction with updated filters
-    const FILTER_VERSION = 'v6';
-    
     const { agentId } = await req.json();
+    
+    console.log('[extract-task-requirements] Starting extraction for agent:', agentId);
+    
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
 
-    if (!agentId) {
-      return new Response(
-        JSON.stringify({ error: 'Agent ID required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    console.log('[extract-task-requirements] Fetching agent:', agentId);
-
-    // Fetch agent with system_prompt
+    // 1. Fetch agent
     const { data: agent, error: agentError } = await supabase
       .from('agents')
-      .select('id, name, system_prompt')
+      .select('system_prompt, name')
       .eq('id', agentId)
       .single();
 
     if (agentError || !agent) {
-      console.error('[extract-task-requirements] Agent fetch error:', agentError);
-      return new Response(
-        JSON.stringify({ error: 'Agent not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      throw new Error(`Agent not found: ${agentError?.message}`);
     }
 
-    // Calculate hash of system_prompt
+    console.log('[extract-task-requirements] Agent found:', agent.name);
+
+    // 2. Calculate prompt hash
     const encoder = new TextEncoder();
-    const data = encoder.encode(agent.system_prompt);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const promptHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(agent.system_prompt));
+    const promptHash = Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
 
-    console.log('[extract-task-requirements] Prompt hash:', promptHash);
-
-    // Check if requirements already exist with same hash and filter version
-    
-    const { data: existing, error: existingError } = await supabase
+    // 3. Check cache
+    const { data: existing } = await supabase
       .from('agent_task_requirements')
       .select('*')
       .eq('agent_id', agentId)
-      .single();
-
-    // Check active filter version from database
-    const { data: activeFilter } = await supabase
-      .from('filter_agent_prompts')
-      .select('filter_version, version_number')
-      .eq('is_active', true)
+      .eq('system_prompt_hash', promptHash)
       .maybeSingle();
 
-    const currentFilterVersion = activeFilter?.filter_version || FILTER_VERSION;
-    const expectedModel = `openai/gpt-5-mini-${currentFilterVersion}-prompt_v${activeFilter?.version_number || 1}`;
-    
-    if (existing && existing.system_prompt_hash === promptHash && existing.extraction_model === expectedModel) {
-      console.log('[extract-task-requirements] Requirements up to date');
+    if (existing) {
+      console.log('[extract-task-requirements] Using cached requirements');
       return new Response(
-        JSON.stringify({
-          success: true,
-          requirement_id: existing.id,
-          extracted: {
-            core_concepts: existing.core_concepts,
-            procedural_knowledge: existing.procedural_knowledge,
-            decision_patterns: existing.decision_patterns,
-            domain_vocabulary: existing.domain_vocabulary,
-            bibliographic_references: existing.bibliographic_references,
-          },
-          cached: true,
-        }),
+        JSON.stringify({ success: true, cached: true, requirement_id: existing.id, data: existing }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('[extract-task-requirements] Fetching active filter prompt from database');
-
-    // Fetch active filter prompt from database
-    const { data: filterPrompt, error: promptError } = await supabase
+    // 4. Fetch active filter prompt
+    const { data: filterPrompt, error: filterError } = await supabase
       .from('filter_agent_prompts')
-      .select('prompt_content, filter_version, version_number')
+      .select('prompt_content, filter_version')
       .eq('is_active', true)
-      .maybeSingle();
+      .single();
 
-    let aiPrompt: string;
-    let filterVersionForModel: string;
-
-    if (promptError || !filterPrompt) {
-      console.warn('[extract-task-requirements] Failed to fetch filter prompt, using hardcoded fallback:', promptError);
-      
-      // Fallback to hardcoded prompt if database fails
-      filterVersionForModel = FILTER_VERSION;
-      aiPrompt = `Analyze this AI agent's system prompt and extract its task requirements into a structured format.
-
-System Prompt:
-\${agent.system_prompt}
-
-Extract and categorize the following:
-
-1. **Core Concepts**: Key domain concepts, entities, business rules, fundamental knowledge areas
-   - Return as array of objects: {concept: string, importance: 'high'|'medium'|'low'}
-
-2. **Procedural Knowledge**: Step-by-step processes, workflows, methodologies the agent needs to follow
-   - Return as array of objects: {process: string, steps: string[]}
-
-3. **Decision Patterns**: Decision criteria, prioritization rules, evaluation frameworks
-   - Return as array of objects: {pattern: string, criteria: string[]}
-
-4. **Domain Vocabulary**: Extract ONLY terms explicitly mentioned/written in the system prompt text
-   - Return as array of strings
-
-5. **Bibliographic References** (CRITICAL PREREQUISITES)
-   - Format: array of objects
-   - Fields: {type: 'book'|'article'|'author'|'document', title?: string, author?: string, year?: string, importance: 'critical'|'high'|'medium', context: string}
-
-Return ONLY valid JSON in this exact format:
-{
-  "core_concepts": [{concept: "...", importance: "high"}],
-  "procedural_knowledge": [{process: "...", steps: ["...", "..."]}],
-  "decision_patterns": [{pattern: "...", criteria: ["...", "..."]}],
-  "domain_vocabulary": ["term1", "term2"],
-  "bibliographic_references": []
-}`;
-      // Replace placeholder with actual prompt
-      aiPrompt = aiPrompt.replace('${agent.system_prompt}', agent.system_prompt);
-    } else {
-      console.log(`[extract-task-requirements] Using filter prompt v${filterPrompt.version_number} (${filterPrompt.filter_version})`);
-      filterVersionForModel = filterPrompt.filter_version || FILTER_VERSION;
-      
-      // Replace placeholder in database prompt with actual agent prompt
-      aiPrompt = filterPrompt.prompt_content.replace('${agent.system_prompt}', agent.system_prompt);
+    if (filterError || !filterPrompt) {
+      throw new Error('No active filter prompt found');
     }
 
-    console.log('[extract-task-requirements] Calling AI to extract requirements');
+    console.log('[extract-task-requirements] Using filter prompt version:', filterPrompt.filter_version);
 
-    // Call Lovable AI to extract requirements
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
+    // 5. Prepare AI prompt
+    const aiPrompt = `${filterPrompt.prompt_content}
 
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+AGENT SYSTEM PROMPT TO ANALYZE:
+${agent.system_prompt}`;
+
+    // 6. Call AI with filter prompt
+    console.log('[extract-task-requirements] Calling AI for extraction...');
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: 'openai/gpt-5-mini',
-        messages: [
-          { role: 'system', content: 'You are an expert at analyzing AI system prompts and extracting structured task requirements. Return only valid JSON.' },
-          { role: 'user', content: aiPrompt }
-        ],
+        messages: [{ role: 'user', content: aiPrompt }],
       }),
     });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('[extract-task-requirements] AI API error:', errorText);
-      return new Response(
-        JSON.stringify({ error: 'AI extraction failed', details: errorText }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`AI API error: ${response.status} - ${errorText}`);
     }
 
-    const aiData = await aiResponse.json();
+    const aiData = await response.json();
     const content = aiData.choices[0].message.content;
 
-    console.log('[extract-task-requirements] AI response received');
-    console.log('📋 Raw AI Response:', {
-      length: content.length,
-      preview: content.substring(0, 200)
-    });
-
-    // Parse JSON response
+    // 7. Parse JSON (supporta sia raw JSON che markdown ```json)
     let extracted;
     try {
       extracted = JSON.parse(content);
-    } catch (parseError) {
-      console.error('[extract-task-requirements] JSON parse error:', parseError);
-      // Try to extract JSON from markdown code blocks
-      const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+    } catch {
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         extracted = JSON.parse(jsonMatch[1]);
       } else {
-        return new Response(
-          JSON.stringify({ error: 'Failed to parse AI response', details: content }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        throw new Error('Invalid AI response format - not valid JSON');
       }
     }
 
-    // Validate requirements structure before saving
-    const validateRequirementsStructure = (requirements: any): boolean => {
-      // Validate core_concepts
-      if (!Array.isArray(requirements.core_concepts)) {
-        console.error('❌ core_concepts is not an array');
-        return false;
-      }
-      
-      // Validate procedural_knowledge
-      if (!Array.isArray(requirements.procedural_knowledge)) {
-        console.error('❌ procedural_knowledge is not an array');
-        return false;
-      }
-      
-      const invalidProcedural = requirements.procedural_knowledge.some((item: any, idx: number) => {
-        if (!item?.process || typeof item.process !== 'string') {
-          console.error(`❌ procedural_knowledge[${idx}].process is invalid`);
-          return true;
-        }
-        if (!Array.isArray(item.steps)) {
-          console.error(`❌ procedural_knowledge[${idx}].steps is not an array`);
-          return true;
-        }
-        return false;
-      });
-      
-      if (invalidProcedural) return false;
-      
-      // Validate decision_patterns
-      if (!Array.isArray(requirements.decision_patterns)) {
-        console.error('❌ decision_patterns is not an array');
-        return false;
-      }
-      
-      const invalidDecision = requirements.decision_patterns.some((item: any, idx: number) => {
-        if (!item?.pattern || typeof item.pattern !== 'string') {
-          console.error(`❌ decision_patterns[${idx}].pattern is invalid`);
-          return true;
-        }
-        if (!Array.isArray(item.criteria)) {
-          console.error(`❌ decision_patterns[${idx}].criteria is not an array`);
-          return true;
-        }
-        return false;
-      });
-      
-      if (invalidDecision) return false;
-      
-      // Validate domain_vocabulary
-      if (!Array.isArray(requirements.domain_vocabulary)) {
-        console.error('❌ domain_vocabulary is not an array');
-        return false;
-      }
-      
-      return true;
-    };
-
-    console.log('📦 Parsed Requirements Structure:', {
-      core_concepts_count: extracted.core_concepts?.length,
-      procedural_count: extracted.procedural_knowledge?.length,
-      decision_count: extracted.decision_patterns?.length,
-      vocabulary_count: extracted.domain_vocabulary?.length
-    });
-
-    // Validate structure
-    if (!validateRequirementsStructure(extracted)) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'AI response has invalid structure. Please try again or adjust the extraction prompt.',
-          details: 'The extracted requirements do not match the expected structure.'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Filter out generic terms from domain_vocabulary - VERY AGGRESSIVE FILTER
-    const GENERIC_TERMS = [
-      // Italian generic terms
-      'citazione', 'contesto', 'fonte', 'fatto', 'riferimento', 'verifica',
-      'estrazione', 'interpretazione', 'limitazione', 'protocollo', 'struttura',
-      'infanzia', 'formazione', 'biografia', 'documento', 'informazione',
-      'conoscenza', 'base', 'dati', 'sistema', 'processo', 'metodo',
-      'analisi', 'valutazione', 'controllo', 'gestione', 'documentazione',
-      'posizione', 'interno', 'esterno', 'generale', 'specifico',
-      // English generic terms
-      'citation', 'context', 'source', 'fact', 'reference', 'verification',
-      'extraction', 'interpretation', 'limitation', 'protocol', 'structure',
-      'childhood', 'formation', 'biography', 'document', 'information',
-      'knowledge', 'base', 'data', 'system', 'process', 'method',
-      'analysis', 'evaluation', 'control', 'management', 'documentation',
-      'position', 'internal', 'external', 'general', 'specific',
-      // Knowledge management terms
-      'knowledge base', 'fatto documentato', 'database', 'metadata',
-      'chunk', 'embedding', 'vector', 'search', 'query', 'retrieval'
+    // 8. Validate structure
+    const requiredFields = [
+      'theoretical_concepts',
+      'operational_concepts',
+      'procedural_knowledge',
+      'explicit_rules',
+      'domain_vocabulary',
+      'bibliographic_references'
     ];
 
-    if (extracted.domain_vocabulary) {
-      const originalCount = extracted.domain_vocabulary.length;
-      extracted.domain_vocabulary = extracted.domain_vocabulary.filter(
-        (term: string) => {
-          const lowerTerm = term.toLowerCase().trim();
-          
-          // Remove if empty
-          if (!lowerTerm) return false;
-          
-          // Remove if too short (likely generic)
-          if (lowerTerm.length < 5) return false;
-          
-          // Remove if it's a generic term (exact match or contains)
-          if (GENERIC_TERMS.some(generic => lowerTerm === generic || lowerTerm.includes(generic))) {
-            console.log(`[extract-task-requirements] Filtering out generic term: ${term}`);
-            return false;
-          }
-          
-          // Remove if it's all lowercase common words (likely generic)
-          const commonWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
-          if (commonWords.some(word => lowerTerm === word)) return false;
-          
-          return true;
-        }
-      );
-      console.log(`[extract-task-requirements] Filtered domain vocabulary: ${originalCount} -> ${extracted.domain_vocabulary.length} terms`);
-      console.log(`[extract-task-requirements] Remaining terms:`, extracted.domain_vocabulary);
+    for (const field of requiredFields) {
+      if (!Array.isArray(extracted[field])) {
+        throw new Error(`Missing or invalid field: ${field}`);
+      }
     }
 
-    // Upsert requirements with filter version to force re-extraction when filter changes
-    const { data: requirement, error: upsertError } = await supabase
+    console.log('[extract-task-requirements] Extraction successful:', {
+      theoretical_concepts: extracted.theoretical_concepts.length,
+      operational_concepts: extracted.operational_concepts.length,
+      procedural_knowledge: extracted.procedural_knowledge.length,
+      explicit_rules: extracted.explicit_rules.length,
+      domain_vocabulary: extracted.domain_vocabulary.length,
+      bibliographic_references: extracted.bibliographic_references.length
+    });
+
+    // 9. Save to database
+    const { data: requirement, error: insertError } = await supabase
       .from('agent_task_requirements')
       .upsert({
         agent_id: agentId,
-        core_concepts: extracted.core_concepts || [],
-        procedural_knowledge: extracted.procedural_knowledge || [],
-        decision_patterns: extracted.decision_patterns || [],
-        domain_vocabulary: extracted.domain_vocabulary || [],
-        bibliographic_references: extracted.bibliographic_references || [],
-        extraction_model: `openai/gpt-5-mini-${filterVersionForModel}-prompt_v${filterPrompt?.version_number || 1}`,
+        theoretical_concepts: extracted.theoretical_concepts,
+        operational_concepts: extracted.operational_concepts,
+        procedural_knowledge: extracted.procedural_knowledge,
+        explicit_rules: extracted.explicit_rules,
+        domain_vocabulary: extracted.domain_vocabulary,
+        bibliographic_references: extracted.bibliographic_references,
+        extraction_model: `openai/gpt-5-mini-${filterPrompt.filter_version}`,
         system_prompt_hash: promptHash,
-        extracted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'agent_id',
-      })
+      }, { onConflict: 'agent_id' })
       .select()
       .single();
 
-    if (upsertError) {
-      console.error('[extract-task-requirements] Upsert error:', upsertError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to save requirements', details: upsertError }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (insertError) {
+      throw new Error(`Failed to save requirements: ${insertError.message}`);
     }
 
-    console.log('[extract-task-requirements] Requirements saved:', requirement.id);
+    console.log('[extract-task-requirements] Requirements saved successfully');
 
     return new Response(
-      JSON.stringify({
-        success: true,
+      JSON.stringify({ 
+        success: true, 
+        cached: false, 
         requirement_id: requirement.id,
-        extracted,
-        cached: false,
+        data: extracted 
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[extract-task-requirements] Error:', error);
     return new Response(
-      JSON.stringify({ error: error.message || 'Unknown error' }),
+      JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

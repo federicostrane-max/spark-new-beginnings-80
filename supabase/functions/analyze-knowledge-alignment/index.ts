@@ -1,4 +1,3 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.78.0";
 
@@ -7,96 +6,35 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const CONFIG = {
-  auto_removal: {
-    enabled: true,
-    threshold: 0.3,
-    max_removals_per_run: 50,
-    cooldown_minutes: 60,
-  },
-  safe_mode: {
-    duration_days: 7,
-  },
-  score_weights: {
-    semantic_relevance: 0.30,
-    concept_coverage: 0.25,
-    procedural_match: 0.15,
-    vocabulary_alignment: 0.10,
-    bibliographic_match: 0.20,
-  },
-  batch_processing: {
-    batch_size: 100, // Reduced to 100 to stay under 150s timeout
-    max_concurrent: 20, // Increased to 20 to compensate
-  },
-  retry: {
-    max_attempts: 3,
-    initial_delay_ms: 1000,
-    max_delay_ms: 10000,
-  },
+const WEIGHTS = {
+  semantic_relevance: 0.30,
+  concept_coverage: 0.25,
+  procedural_match: 0.15,
+  vocabulary_alignment: 0.10,
+  bibliographic_match: 0.20
 };
+
+const REMOVAL_THRESHOLD = 0.30;
+const MAX_AUTO_REMOVALS = 50;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const startTime = Date.now();
+
   try {
-    const { agentId, forceReanalysis = false } = await req.json();
-
-    if (!agentId) {
-      return new Response(
-        JSON.stringify({ error: 'Agent ID required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
+    const { agentId, forceReanalysis } = await req.json();
+    
     console.log('[analyze-alignment] Starting analysis for agent:', agentId);
+    
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
 
-    // Check cooldown
-    if (!forceReanalysis) {
-      const { data: lastLog } = await supabase
-        .from('alignment_analysis_log')
-        .select('started_at')
-        .eq('agent_id', agentId)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (lastLog) {
-        const timeSinceLastAnalysis = Date.now() - new Date(lastLog.started_at).getTime();
-        const cooldownMs = CONFIG.auto_removal.cooldown_minutes * 60 * 1000;
-        
-        if (timeSinceLastAnalysis < cooldownMs) {
-          console.log('[analyze-alignment] Cooldown active, skipping');
-          return new Response(
-            JSON.stringify({ 
-              success: false, 
-              message: 'Cooldown active',
-              next_analysis_available_at: new Date(new Date(lastLog.started_at).getTime() + cooldownMs).toISOString(),
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-      }
-    }
-
-    // Check safe mode
-    const { data: agent } = await supabase
-      .from('agents')
-      .select('first_alignment_completed_at')
-      .eq('id', agentId)
-      .single();
-
-    const safeModeActive = !agent?.first_alignment_completed_at || 
-      (Date.now() - new Date(agent.first_alignment_completed_at).getTime()) < (CONFIG.safe_mode.duration_days * 24 * 60 * 60 * 1000);
-
-    console.log('[analyze-alignment] Safe mode:', safeModeActive);
-
-    // Fetch requirements
+    // 1. Fetch requirements
     const { data: requirements, error: reqError } = await supabase
       .from('agent_task_requirements')
       .select('*')
@@ -104,549 +42,326 @@ serve(async (req) => {
       .single();
 
     if (reqError || !requirements) {
-      console.error('[analyze-alignment] Requirements not found:', reqError);
-      return new Response(
-        JSON.stringify({ error: 'Task requirements not found. Run extract-task-requirements first.' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      throw new Error('No requirements found. Run extract-task-requirements first.');
     }
 
-    // Get total chunks count
-    const { count: totalChunks } = await supabase
-      .from('agent_knowledge')
-      .select('*', { count: 'exact', head: true })
-      .eq('agent_id', agentId)
-      .eq('is_active', true);
+    console.log('[analyze-alignment] Requirements loaded');
 
-    console.log('[analyze-alignment] Total chunks:', totalChunks);
+    // ==========================================
+    // FASE 1: CHECK PREREQUISITI (GATING)
+    // ==========================================
+    console.log('[analyze-alignment] FASE 1: Checking bibliographic prerequisites...');
+    
+    const criticalSources = (requirements.bibliographic_references as any[])
+      .filter(ref => ref.importance === 'critical');
 
-    // ============================================================
-    // PREREQUISITE CHECK: Verify critical bibliographic references
-    // ============================================================
-    console.log('[analyze-alignment] Checking bibliographic prerequisites');
+    let prerequisiteCheck = {
+      passed: true,
+      missing_sources: [] as any[],
+      critical_sources_found: criticalSources.length
+    };
 
-    const bibliographicReferences = requirements.bibliographic_references || [];
-    const criticalReferences = bibliographicReferences.filter(
-      (ref: any) => ref.importance === 'critical'
-    );
+    if (criticalSources.length > 0) {
+      const { data: chunks } = await supabase
+        .from('agent_knowledge')
+        .select('document_name')
+        .eq('agent_id', agentId)
+        .eq('is_active', true);
 
-    console.log('[analyze-alignment] Found', criticalReferences.length, 'critical references');
-
-    if (criticalReferences.length > 0) {
-      console.log('[analyze-alignment] Critical references:', JSON.stringify(criticalReferences, null, 2));
+      const documentNames = (chunks || []).map(c => c.document_name.toLowerCase());
       
-      const missingReferences = [];
-      
-      for (const ref of criticalReferences) {
-        const searchTerms = [];
-        if (ref.title) searchTerms.push(ref.title);
-        if (ref.author) searchTerms.push(ref.author);
-        
-        let found = false;
-        for (const term of searchTerms) {
-          const { data: matchingChunks } = await supabase
-            .from('agent_knowledge')
-            .select('id, document_name, content')
-            .eq('agent_id', agentId)
-            .eq('is_active', true)
-            .or(`document_name.ilike.%${term}%,content.ilike.%${term}%`)
-            .limit(1);
-          
-          if (matchingChunks && matchingChunks.length > 0) {
-            found = true;
-            console.log(`[analyze-alignment] ✅ Found reference "${term}" in knowledge base`);
-            break;
-          }
-        }
-        
-        if (!found) {
-          console.log(`[analyze-alignment] ❌ MISSING critical reference:`, ref);
-          missingReferences.push(ref);
-        }
-      }
-      
-      // BLOCK ANALYSIS IF CRITICAL REFERENCES ARE MISSING
-      if (missingReferences.length > 0) {
-        console.log('[analyze-alignment] 🚫 BLOCKING ANALYSIS - Missing critical sources:', missingReferences);
-        
-        const { error: logError } = await supabase
-          .from('alignment_analysis_log')
-          .insert({
-            agent_id: agentId,
-            trigger_type: forceReanalysis ? 'manual' : 'scheduled',
-            total_chunks_analyzed: totalChunks || 0,
-            chunks_flagged_for_removal: 0,
-            chunks_auto_removed: 0,
-            safe_mode_active: safeModeActive,
-            progress_chunks_analyzed: 0,
-            prerequisite_check_status: 'blocked_missing_sources',
-            missing_bibliographic_references: missingReferences,
-            completed_at: new Date().toISOString(),
-            duration_ms: 0,
-          });
-        
-        if (logError) {
-          console.error('[analyze-alignment] Failed to log blocked status:', logError);
-        }
-        
-        return new Response(
-          JSON.stringify({
-            success: false,
-            blocked: true,
-            prerequisite_check_failed: true,
-            missing_critical_sources: missingReferences,
-            message: `Analisi BLOCCATA: ${missingReferences.length} riferimento/i bibliografico/i critico/i assente/i dal knowledge base.`,
-            actions_required: [
-              'Carica i documenti mancanti nel knowledge base dell\'agente',
-              'OPPURE rimuovi i riferimenti bibliografici dal prompt dell\'agente',
-            ],
-            total_chunks: totalChunks,
-          }),
-          { 
-            status: 423,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-          }
-        );
-      }
-      
-      console.log('[analyze-alignment] ✅ All critical bibliographic references present - proceeding with analysis');
+      prerequisiteCheck.missing_sources = criticalSources.filter(source => {
+        const titleLower = source.title.toLowerCase();
+        return !documentNames.some(doc => doc.includes(titleLower));
+      });
+
+      prerequisiteCheck.passed = prerequisiteCheck.missing_sources.length === 0;
+      prerequisiteCheck.critical_sources_found = criticalSources.length - prerequisiteCheck.missing_sources.length;
     }
 
-    // ============================================================
-    // PREREQUISITES PASSED - Continue with normal analysis
-    // ============================================================
+    // Save prerequisite check
+    await supabase
+      .from('prerequisite_checks')
+      .insert({
+        agent_id: agentId,
+        requirement_id: requirements.id,
+        check_passed: prerequisiteCheck.passed,
+        missing_critical_sources: prerequisiteCheck.missing_sources,
+        critical_sources_found: Array(prerequisiteCheck.critical_sources_found).fill({}),
+      });
 
-    if (!totalChunks || totalChunks === 0) {
-      console.log('[analyze-alignment] No active chunks found for agent');
+    if (!prerequisiteCheck.passed) {
+      console.log('❌ [analyze-alignment] Prerequisiti non passati - BLOCCO analisi');
+      
+      await supabase
+        .from('alignment_analysis_log')
+        .insert({
+          agent_id: agentId,
+          requirement_id: requirements.id,
+          prerequisite_check_passed: false,
+          missing_critical_sources: prerequisiteCheck.missing_sources,
+          total_chunks_analyzed: 0,
+          completed_at: new Date().toISOString(),
+          duration_ms: Date.now() - startTime
+        });
+
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          message: 'No active knowledge chunks found for this agent',
-          total_chunks: 0,
+        JSON.stringify({
+          success: false,
+          blocked: true,
+          reason: 'Missing critical bibliographic sources',
+          missing_sources: prerequisiteCheck.missing_sources
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Check for existing analysis log to resume
-    const { data: existingLog } = await supabase
-      .from('alignment_analysis_log')
+    console.log('✅ [analyze-alignment] Prerequisiti passati - PROCEDO con scoring');
+
+    // ==========================================
+    // FASE 2: SCORING QUALITATIVO (5 DIMENSIONI)
+    // ==========================================
+    console.log('[analyze-alignment] FASE 2: Starting quality scoring...');
+
+    const { data: activeChunks } = await supabase
+      .from('agent_knowledge')
       .select('*')
       .eq('agent_id', agentId)
-      .is('completed_at', null)
-      .order('started_at', { ascending: false })
-      .limit(1)
-      .single();
+      .eq('is_active', true);
 
-    const startOffset = existingLog?.progress_chunks_analyzed || 0;
-    const endOffset = Math.min(startOffset + CONFIG.batch_processing.batch_size, totalChunks);
-
-    console.log('[analyze-alignment] Batch range:', startOffset, '-', endOffset);
-
-    // Fetch batch of chunks
-    const { data: chunks, error: chunksError } = await supabase
-      .from('agent_knowledge')
-      .select('id, content, category, summary, document_name')
-      .eq('agent_id', agentId)
-      .eq('is_active', true)
-      .range(startOffset, endOffset - 1);
-
-    if (chunksError) {
-      console.error('[analyze-alignment] Chunks fetch error:', chunksError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch chunks', details: chunksError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    if (!activeChunks || activeChunks.length === 0) {
+      throw new Error('No active knowledge chunks found');
     }
 
-    console.log('[analyze-alignment] Processing batch of', chunks?.length || 0, 'chunks');
+    console.log(`[analyze-alignment] Analyzing ${activeChunks.length} chunks...`);
 
-    // Use existing log or create new one
-    let analysisLog = existingLog;
-    
-    if (!analysisLog) {
-      const { data: newLog, error: logError } = await supabase
-        .from('alignment_analysis_log')
-        .insert({
-          agent_id: agentId,
-          trigger_type: forceReanalysis ? 'manual' : 'scheduled',
-          total_chunks_analyzed: totalChunks || 0,
-          chunks_flagged_for_removal: 0,
-          safe_mode_active: safeModeActive,
-          progress_chunks_analyzed: 0,
-          prerequisite_check_status: 'passed',
-          missing_bibliographic_references: [],
-        })
-        .select()
-        .single();
+    // Analyze chunks in batches
+    const BATCH_SIZE = 10;
+    let totalScored = 0;
+    const chunkScores: Array<{chunk_id: string, final_score: number}> = [];
 
-      if (logError) {
-        console.error('[analyze-alignment] Log creation error:', logError);
-        return new Response(
-          JSON.stringify({ error: 'Failed to create analysis log' }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+    for (let i = 0; i < activeChunks.length; i += BATCH_SIZE) {
+      const batch = activeChunks.slice(i, i + BATCH_SIZE);
       
-      analysisLog = newLog;
-    }
-
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
-    const chunkScores: Array<{ chunk_id: string; final_score: number }> = [];
-    const maxConcurrent = CONFIG.batch_processing.max_concurrent;
-
-    // Resume logic: Check which chunks already have scores (skip if force reanalysis)
-    let chunksToAnalyze = chunks || [];
-    
-    if (!forceReanalysis) {
-      const { data: existingScores } = await supabase
-        .from('knowledge_relevance_scores')
-        .select('chunk_id')
-        .eq('requirement_id', requirements.id);
-
-      const analyzedChunkIds = new Set(existingScores?.map(s => s.chunk_id) || []);
-      chunksToAnalyze = chunks?.filter(c => !analyzedChunkIds.has(c.id)) || [];
-
-      console.log('[analyze-alignment] Already analyzed:', analyzedChunkIds.size, 'chunks');
-      console.log('[analyze-alignment] Need to analyze:', chunksToAnalyze.length, 'chunks');
-    } else {
-      console.log('[analyze-alignment] Force reanalysis: analyzing all', chunksToAnalyze.length, 'chunks in batch');
-    }
-
-    // Helper function to call AI with retry logic
-    const callAIWithRetry = async (chunk: any, attempt = 1): Promise<any> => {
-      const analysisPrompt = `Analyze chunk vs requirements.
-
-Requirements: ${JSON.stringify(requirements, null, 2)}
-Chunk: ${chunk.content.substring(0, 500)}...
-Category: ${chunk.category}
-Document: ${chunk.document_name}
-
-Rate 0.0-1.0 on each dimension:
-
-1. semantic_relevance: How semantically relevant to agent's core task?
-2. concept_coverage: How well covers required core concepts?
-3. procedural_match: Contains needed procedural knowledge/workflows?
-4. vocabulary_alignment: Uses required domain-specific terminology?
-5. bibliographic_match: From/references required bibliographic sources?
-   - 1.0 = Directly from required book/article/author
-   - 0.8 = Explicitly references required sources
-   - 0.5 = Related but not from exact source
-   - 0.3 = Weak connection to required sources
-   - 0.0 = No connection to any required source
-
-JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_match": 0.0, "vocabulary_alignment": 0.0, "bibliographic_match": 0.0, "reasoning": "brief"}`;
-
-      try {
-        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-5-mini',
-            messages: [
-              { role: 'system', content: 'You are an expert at analyzing knowledge relevance. Return only valid JSON.' },
-              { role: 'user', content: analysisPrompt }
-            ],
-          }),
-        });
-
-        if (!aiResponse.ok) {
-          const errorText = await aiResponse.text();
-          
-          // Check if we should retry
-          if (attempt < CONFIG.retry.max_attempts && (aiResponse.status === 429 || aiResponse.status >= 500)) {
-            const delay = Math.min(
-              CONFIG.retry.initial_delay_ms * Math.pow(2, attempt - 1),
-              CONFIG.retry.max_delay_ms
-            );
-            console.log(`[analyze-alignment] Retry ${attempt}/${CONFIG.retry.max_attempts} for chunk ${chunk.id} after ${delay}ms (status: ${aiResponse.status})`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return callAIWithRetry(chunk, attempt + 1);
-          }
-          
-          throw new Error(`AI API error (${aiResponse.status}): ${errorText}`);
-        }
-
-        const aiData = await aiResponse.json();
-        let scores;
+      for (const chunk of batch) {
         try {
-          const content = aiData.choices[0].message.content;
-          scores = JSON.parse(content);
-        } catch {
-          const content = aiData.choices[0].message.content;
-          const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
-          if (jsonMatch) {
-            scores = JSON.parse(jsonMatch[1]);
-          } else {
-            throw new Error('Failed to parse AI response JSON');
-          }
-        }
+          const scores = await analyzeChunkWithAI(chunk, requirements);
+          const finalScore = calculateWeightedScore(scores);
+          
+          await supabase
+            .from('knowledge_relevance_scores')
+            .insert({
+              chunk_id: chunk.id,
+              agent_id: agentId,
+              requirement_id: requirements.id,
+              semantic_relevance: scores.semantic_relevance,
+              concept_coverage: scores.concept_coverage,
+              procedural_match: scores.procedural_match,
+              vocabulary_alignment: scores.vocabulary_alignment,
+              bibliographic_match: scores.bibliographic_match,
+              final_relevance_score: finalScore,
+              analysis_model: 'openai/gpt-5-mini',
+              analysis_reasoning: scores.reasoning
+            });
 
-        return scores;
-      } catch (error: any) {
-        if (attempt < CONFIG.retry.max_attempts) {
-          const delay = Math.min(
-            CONFIG.retry.initial_delay_ms * Math.pow(2, attempt - 1),
-            CONFIG.retry.max_delay_ms
-          );
-          console.log(`[analyze-alignment] Retry ${attempt}/${CONFIG.retry.max_attempts} for chunk ${chunk.id} after ${delay}ms (error: ${error?.message || 'Unknown'})`);
-
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return callAIWithRetry(chunk, attempt + 1);
+          chunkScores.push({ chunk_id: chunk.id, final_score: finalScore });
+          totalScored++;
+        } catch (error) {
+          console.error(`[analyze-alignment] Error scoring chunk ${chunk.id}:`, error);
         }
-        throw error;
       }
+
+      console.log(`[analyze-alignment] Progress: ${Math.min(i + BATCH_SIZE, activeChunks.length)}/${activeChunks.length}`);
+    }
+
+    // Calculate overall metrics
+    const { data: allScores } = await supabase
+      .from('knowledge_relevance_scores')
+      .select('*')
+      .eq('requirement_id', requirements.id);
+
+    const overallAlignment = allScores && allScores.length > 0
+      ? (allScores.reduce((sum, s) => sum + (s.final_relevance_score || 0), 0) / allScores.length) * 100
+      : 0;
+
+    const dimensionBreakdown = {
+      semantic_relevance: allScores && allScores.length > 0
+        ? (allScores.reduce((sum, s) => sum + (s.semantic_relevance || 0), 0) / allScores.length) * 100
+        : 0,
+      concept_coverage: allScores && allScores.length > 0
+        ? (allScores.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / allScores.length) * 100
+        : 0,
+      procedural_match: allScores && allScores.length > 0
+        ? (allScores.reduce((sum, s) => sum + (s.procedural_match || 0), 0) / allScores.length) * 100
+        : 0,
+      vocabulary_alignment: allScores && allScores.length > 0
+        ? (allScores.reduce((sum, s) => sum + (s.vocabulary_alignment || 0), 0) / allScores.length) * 100
+        : 0,
+      bibliographic_match: allScores && allScores.length > 0
+        ? (allScores.reduce((sum, s) => sum + (s.bibliographic_match || 0), 0) / allScores.length) * 100
+        : 0
     };
 
-    // Analyze chunks in batches with improved error handling
-    let successCount = 0;
-    let errorCount = 0;
-    
-    if (chunksToAnalyze.length > 0) {
-      for (let i = 0; i < chunksToAnalyze.length; i += maxConcurrent) {
-        const batch = chunksToAnalyze.slice(i, i + maxConcurrent);
-        console.log(`[analyze-alignment] Processing batch ${Math.floor(i / maxConcurrent) + 1}, chunks ${i + 1}-${i + batch.length}/${chunksToAnalyze.length}`);
-        
-        const results = await Promise.allSettled(batch.map(async (chunk) => {
-          try {
-            const scores = await callAIWithRetry(chunk);
-
-            // Calculate final score
-            const finalScore = 
-              (scores.semantic_relevance * CONFIG.score_weights.semantic_relevance) +
-              (scores.concept_coverage * CONFIG.score_weights.concept_coverage) +
-              (scores.procedural_match * CONFIG.score_weights.procedural_match) +
-              (scores.vocabulary_alignment * CONFIG.score_weights.vocabulary_alignment) +
-              ((scores.bibliographic_match || 0) * CONFIG.score_weights.bibliographic_match);
-
-            // Store score
-            await supabase
-              .from('knowledge_relevance_scores')
-              .upsert({
-                chunk_id: chunk.id,
-                agent_id: agentId,
-                requirement_id: requirements.id,
-                semantic_relevance: scores.semantic_relevance,
-                concept_coverage: scores.concept_coverage,
-                procedural_match: scores.procedural_match,
-                vocabulary_alignment: scores.vocabulary_alignment,
-                bibliographic_match: scores.bibliographic_match || 0,
-                final_relevance_score: finalScore,
-                analysis_model: 'openai/gpt-5-mini',
-                analysis_reasoning: scores.reasoning,
-                analyzed_at: new Date().toISOString(),
-              }, {
-                onConflict: 'chunk_id,requirement_id',
-              });
-
-            chunkScores.push({ chunk_id: chunk.id, final_score: finalScore });
-            successCount++;
-            
-          } catch (error: any) {
-            console.error('[analyze-alignment] Failed to analyze chunk after retries:', chunk.id, error?.message || 'Unknown error');
-
-            errorCount++;
-            throw error;
-          }
-        }));
-
-        // Log batch results
-        const batchSuccess = results.filter(r => r.status === 'fulfilled').length;
-        const batchErrors = results.filter(r => r.status === 'rejected').length;
-        console.log(`[analyze-alignment] Batch completed: ${batchSuccess} success, ${batchErrors} errors`);
-
-        // Update progress in real-time after each mini-batch
-        const { count: currentAnalyzedCount } = await supabase
-          .from('knowledge_relevance_scores')
-          .select('*', { count: 'exact', head: true })
-          .eq('requirement_id', requirements.id);
-
-        await supabase
-          .from('alignment_analysis_log')
-          .update({ progress_chunks_analyzed: currentAnalyzedCount || 0 })
-          .eq('id', analysisLog.id);
-
-        console.log(`[analyze-alignment] Progress updated: ${currentAnalyzedCount}/${totalChunks} chunks`);
-
-        // Reduced delay between batches for faster overall processing
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-    }
-    
-    console.log(`[analyze-alignment] Total results: ${successCount} success, ${errorCount} errors`);
-
-    // Identify chunks for removal
-    const chunksToRemove = chunkScores.filter(s => s.final_score < CONFIG.auto_removal.threshold);
-    console.log('[analyze-alignment] Chunks flagged for removal:', chunksToRemove.length);
-
+    // Handle low relevance chunks
+    const chunksToRemove = chunkScores.filter(s => s.final_score < REMOVAL_THRESHOLD);
     let chunksAutoRemoved = 0;
     let requiresManualApproval = false;
 
-    // Auto-removal logic
-    if (!safeModeActive && CONFIG.auto_removal.enabled && chunksToRemove.length > 0) {
-      if (chunksToRemove.length > CONFIG.auto_removal.max_removals_per_run) {
-        console.log('[analyze-alignment] Too many chunks to remove, flagging for manual approval');
-        requiresManualApproval = true;
-      } else {
-        console.log('[analyze-alignment] Auto-removing', chunksToRemove.length, 'chunks');
-        
-        for (const { chunk_id, final_score } of chunksToRemove) {
-          const { data: chunk } = await supabase
-            .from('agent_knowledge')
-            .select('*')
-            .eq('id', chunk_id)
-            .single();
-
-          if (chunk) {
-            // Backup to history
-            await supabase
-              .from('knowledge_removal_history')
-              .insert({
-                chunk_id: chunk.id,
-                agent_id: chunk.agent_id,
-                document_name: chunk.document_name,
-                content: chunk.content,
-                category: chunk.category,
-                summary: chunk.summary,
-                embedding: chunk.embedding,
-                pool_document_id: chunk.pool_document_id,
-                source_type: chunk.source_type,
-                removal_reason: 'auto_removed_low_relevance',
-                final_relevance_score: final_score,
-                removal_type: 'auto',
-              });
-
-            // Soft delete
-            await supabase
-              .from('agent_knowledge')
-              .update({
-                is_active: false,
-                removed_at: new Date().toISOString(),
-                removal_reason: `Auto-removed: relevance score ${final_score.toFixed(2)} below threshold ${CONFIG.auto_removal.threshold}`,
-              })
-              .eq('id', chunk_id);
-
-            chunksAutoRemoved++;
-          }
-        }
+    if (chunksToRemove.length <= MAX_AUTO_REMOVALS) {
+      for (const chunk of chunksToRemove) {
+        await supabase
+          .from('agent_knowledge')
+          .update({
+            is_active: false,
+            removed_at: new Date().toISOString(),
+            removal_reason: `relevance score ${chunk.final_score.toFixed(3)} below threshold ${REMOVAL_THRESHOLD}`
+          })
+          .eq('id', chunk.chunk_id);
       }
+      chunksAutoRemoved = chunksToRemove.length;
+    } else {
+      requiresManualApproval = true;
     }
 
-    // Update first alignment timestamp if needed
-    if (!agent?.first_alignment_completed_at) {
-      await supabase
-        .from('agents')
-        .update({ first_alignment_completed_at: new Date().toISOString() })
-        .eq('id', agentId);
-    }
-
-    // Calculate real coverage metrics
-    const { data: allScores } = await supabase
-      .from('knowledge_relevance_scores')
-      .select('concept_coverage, semantic_relevance, chunk_id')
-      .eq('requirement_id', requirements.id);
-
-    const totalScored = allScores?.length || 0;
-    const avgConceptCoverage = totalScored > 0
-      ? (allScores!.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / totalScored) * 100
-      : 0;
-
-    // Identify gaps (core concepts with low coverage)
-    const coreConcepts = requirements.core_concepts || [];
-    const gaps = coreConcepts.filter((concept: any) => {
-      const conceptScores = allScores?.filter(s => s.concept_coverage < 0.5) || [];
-      return conceptScores.length > totalScored * 0.3; // More than 30% of chunks have low coverage
-    }).slice(0, 5); // Top 5 gaps
-
-    // Identify surplus (categories with many low-scoring chunks)
-    const categoryScores = new Map<string, number[]>();
-    chunks?.forEach(chunk => {
-      const score = allScores?.find(s => s.chunk_id === chunk.id);
-      if (score) {
-        const scores = categoryScores.get(chunk.category) || [];
-        scores.push(score.semantic_relevance);
-        categoryScores.set(chunk.category, scores);
-      }
-    });
-
-    const surplus = Array.from(categoryScores.entries())
-      .filter(([_, scores]) => {
-        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-        return avgScore < 0.3 && scores.length > 3;
-      })
-      .map(([category, _]) => category)
-      .slice(0, 5);
-
-    // Count actual chunks analyzed (saved in DB)
-    const { count: actualAnalyzedCount } = await supabase
-      .from('knowledge_relevance_scores')
-      .select('*', { count: 'exact', head: true })
-      .eq('requirement_id', requirements.id);
-
-    const realProgress = actualAnalyzedCount || 0;
-    console.log(`[analyze-alignment] Real progress from DB: ${realProgress}/${totalChunks} chunks`);
-
-    // Calculate if more batches are needed based on real progress
-    const moreBatchesNeeded = realProgress < (totalChunks || 0);
-    console.log(`[analyze-alignment] Batch status: ${realProgress}/${totalChunks}, more needed: ${moreBatchesNeeded}`);
-
-    // Update analysis log with real progress
-    const updateData: any = {
-      chunks_flagged_for_removal: chunksToRemove.length,
-      progress_chunks_analyzed: realProgress, // Use real DB count instead of estimated
-      chunks_auto_removed: chunksAutoRemoved,
-      concept_coverage_percentage: avgConceptCoverage,
-      identified_gaps: gaps,
-      surplus_categories: surplus,
-    };
-
-    // Mark as completed only if all batches are done
-    if (!moreBatchesNeeded) {
-      updateData.completed_at = new Date().toISOString();
-      updateData.duration_ms = Date.now() - new Date(analysisLog.started_at).getTime();
-      console.log('[analyze-alignment] ✅ Analysis fully completed - all batches processed');
-    }
-
+    // Save analysis log
     await supabase
       .from('alignment_analysis_log')
-      .update(updateData)
-      .eq('id', analysisLog.id);
+      .insert({
+        agent_id: agentId,
+        requirement_id: requirements.id,
+        prerequisite_check_passed: true,
+        missing_critical_sources: [],
+        overall_alignment_percentage: Math.round(overallAlignment * 100) / 100,
+        dimension_breakdown: dimensionBreakdown,
+        total_chunks_analyzed: totalScored,
+        chunks_flagged_for_removal: chunksToRemove.length,
+        chunks_auto_removed: chunksAutoRemoved,
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - startTime
+      });
 
-    const statusMessage = moreBatchesNeeded 
-      ? `Batch completed: ${realProgress}/${totalChunks} chunks`
-      : 'Analysis completed';
-    
-    console.log('[analyze-alignment]', statusMessage);
+    console.log('[analyze-alignment] Analysis completed successfully');
 
     return new Response(
       JSON.stringify({
         success: true,
-        analysis_id: analysisLog.id,
-        safe_mode_active: safeModeActive,
-        batch_completed: true,
-        chunks_analyzed_this_batch: chunks?.length || 0,
-        total_progress: realProgress,
-        total_chunks: totalChunks || 0,
-        more_batches_needed: moreBatchesNeeded,
-        next_batch_offset: realProgress,
-        chunks_flagged_for_removal: chunksToRemove.length,
-        chunks_auto_removed: chunksAutoRemoved,
-        requires_manual_approval: requiresManualApproval,
-        concept_coverage_percentage: avgConceptCoverage,
-        identified_gaps: gaps,
-        surplus_categories: surplus,
+        overall_alignment_percentage: Math.round(overallAlignment * 100) / 100,
+        dimension_breakdown: {
+          semantic_relevance: Math.round(dimensionBreakdown.semantic_relevance * 100) / 100,
+          concept_coverage: Math.round(dimensionBreakdown.concept_coverage * 100) / 100,
+          procedural_match: Math.round(dimensionBreakdown.procedural_match * 100) / 100,
+          vocabulary_alignment: Math.round(dimensionBreakdown.vocabulary_alignment * 100) / 100,
+          bibliographic_match: Math.round(dimensionBreakdown.bibliographic_match * 100) / 100
+        },
+        chunks_analyzed: totalScored,
+        chunks_removed: chunksAutoRemoved,
+        requires_manual_approval: requiresManualApproval
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('[analyze-alignment] Error:', error);
     return new Response(
-      JSON.stringify({ error: error.message || 'Unknown error' }),
+      JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
+
+async function analyzeChunkWithAI(chunk: any, requirements: any) {
+  const prompt = `Analyze this knowledge chunk against agent requirements.
+
+REQUIREMENTS:
+- Theoretical Concepts: ${requirements.theoretical_concepts.join(', ')}
+- Operational Concepts: ${requirements.operational_concepts.join(', ')}
+- Procedural Knowledge: ${requirements.procedural_knowledge.join(', ')}
+- Explicit Rules: ${requirements.explicit_rules.join(', ')}
+- Domain Vocabulary: ${requirements.domain_vocabulary.join(', ')}
+
+CHUNK TO ANALYZE:
+Document: ${chunk.document_name}
+Category: ${chunk.category}
+Content: ${chunk.content.substring(0, 800)}...
+
+Score each dimension 0.0-1.0:
+
+1. SEMANTIC_RELEVANCE: How relevant to agent's core task?
+   - 1.0: Directly addresses primary task domain
+   - 0.7: Related to secondary tasks
+   - 0.4: Tangentially related
+   - 0.0: Completely unrelated
+
+2. CONCEPT_COVERAGE: Covers theoretical/operational concepts?
+   - 1.0: Explains multiple concepts in depth
+   - 0.7: Covers some concepts well
+   - 0.4: Mentions concepts briefly
+   - 0.0: No relevant concepts
+
+3. PROCEDURAL_MATCH: Contains needed procedures/rules?
+   - 1.0: Complete step-by-step procedures
+   - 0.7: Partial procedures
+   - 0.4: Mentions procedures without steps
+   - 0.0: No procedural content
+
+4. VOCABULARY_ALIGNMENT: Uses required domain terms?
+   - 1.0: Uses multiple domain terms correctly
+   - 0.7: Uses some domain terms
+   - 0.4: Basic domain terms occasionally
+   - 0.0: No domain vocabulary
+
+5. BIBLIOGRAPHIC_MATCH: Quality of use of sources?
+   - 1.0: Directly from required sources
+   - 0.7: Cites related sources
+   - 0.4: Mentions similar sources
+   - 0.0: No connection to required sources
+
+Return ONLY valid JSON:
+{
+  "semantic_relevance": 0.0,
+  "concept_coverage": 0.0,
+  "procedural_match": 0.0,
+  "vocabulary_alignment": 0.0,
+  "bibliographic_match": 0.0,
+  "reasoning": "brief explanation"
+}`;
+
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'openai/gpt-5-mini',
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`AI API error: ${response.status}`);
+  }
+
+  const aiData = await response.json();
+  const content = aiData.choices[0].message.content;
+  
+  try {
+    return JSON.parse(content);
+  } catch {
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[1]);
+    }
+    throw new Error('Invalid AI response format');
+  }
+}
+
+function calculateWeightedScore(scores: any): number {
+  return (
+    (scores.semantic_relevance * WEIGHTS.semantic_relevance) +
+    (scores.concept_coverage * WEIGHTS.concept_coverage) +
+    (scores.procedural_match * WEIGHTS.procedural_match) +
+    (scores.vocabulary_alignment * WEIGHTS.vocabulary_alignment) +
+    ((scores.bibliographic_match || 0) * WEIGHTS.bibliographic_match)
+  );
+}

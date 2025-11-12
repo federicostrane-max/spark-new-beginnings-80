@@ -466,46 +466,49 @@ export type Database = {
       }
       agent_task_requirements: {
         Row: {
-          agent_id: string
+          agent_id: string | null
           bibliographic_references: Json
-          core_concepts: Json
-          created_at: string
-          decision_patterns: Json
-          domain_vocabulary: Json
-          extracted_at: string
+          created_at: string | null
+          domain_vocabulary: string[]
+          explicit_rules: string[]
+          extracted_at: string | null
           extraction_model: string
           id: string
-          procedural_knowledge: Json
+          operational_concepts: string[]
+          procedural_knowledge: string[]
           system_prompt_hash: string
-          updated_at: string
+          theoretical_concepts: string[]
+          updated_at: string | null
         }
         Insert: {
-          agent_id: string
+          agent_id?: string | null
           bibliographic_references?: Json
-          core_concepts?: Json
-          created_at?: string
-          decision_patterns?: Json
-          domain_vocabulary?: Json
-          extracted_at?: string
-          extraction_model?: string
+          created_at?: string | null
+          domain_vocabulary?: string[]
+          explicit_rules?: string[]
+          extracted_at?: string | null
+          extraction_model: string
           id?: string
-          procedural_knowledge?: Json
+          operational_concepts?: string[]
+          procedural_knowledge?: string[]
           system_prompt_hash: string
-          updated_at?: string
+          theoretical_concepts?: string[]
+          updated_at?: string | null
         }
         Update: {
-          agent_id?: string
+          agent_id?: string | null
           bibliographic_references?: Json
-          core_concepts?: Json
-          created_at?: string
-          decision_patterns?: Json
-          domain_vocabulary?: Json
-          extracted_at?: string
+          created_at?: string | null
+          domain_vocabulary?: string[]
+          explicit_rules?: string[]
+          extracted_at?: string | null
           extraction_model?: string
           id?: string
-          procedural_knowledge?: Json
+          operational_concepts?: string[]
+          procedural_knowledge?: string[]
           system_prompt_hash?: string
-          updated_at?: string
+          theoretical_concepts?: string[]
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -564,64 +567,52 @@ export type Database = {
       }
       alignment_analysis_log: {
         Row: {
-          agent_id: string
+          agent_id: string | null
           chunks_auto_removed: number
           chunks_flagged_for_removal: number
           completed_at: string | null
-          concept_coverage_percentage: number | null
-          created_at: string
+          created_at: string | null
+          dimension_breakdown: Json | null
           duration_ms: number | null
-          error_message: string | null
           id: string
-          identified_gaps: Json | null
-          missing_bibliographic_references: Json | null
-          prerequisite_check_status: string | null
-          progress_chunks_analyzed: number | null
-          safe_mode_active: boolean
+          missing_critical_sources: Json | null
+          overall_alignment_percentage: number | null
+          prerequisite_check_passed: boolean
+          requirement_id: string | null
           started_at: string
-          surplus_categories: Json | null
           total_chunks_analyzed: number
-          trigger_type: string
         }
         Insert: {
-          agent_id: string
-          chunks_auto_removed?: number
-          chunks_flagged_for_removal: number
-          completed_at?: string | null
-          concept_coverage_percentage?: number | null
-          created_at?: string
-          duration_ms?: number | null
-          error_message?: string | null
-          id?: string
-          identified_gaps?: Json | null
-          missing_bibliographic_references?: Json | null
-          prerequisite_check_status?: string | null
-          progress_chunks_analyzed?: number | null
-          safe_mode_active?: boolean
-          started_at?: string
-          surplus_categories?: Json | null
-          total_chunks_analyzed: number
-          trigger_type: string
-        }
-        Update: {
-          agent_id?: string
+          agent_id?: string | null
           chunks_auto_removed?: number
           chunks_flagged_for_removal?: number
           completed_at?: string | null
-          concept_coverage_percentage?: number | null
-          created_at?: string
+          created_at?: string | null
+          dimension_breakdown?: Json | null
           duration_ms?: number | null
-          error_message?: string | null
           id?: string
-          identified_gaps?: Json | null
-          missing_bibliographic_references?: Json | null
-          prerequisite_check_status?: string | null
-          progress_chunks_analyzed?: number | null
-          safe_mode_active?: boolean
+          missing_critical_sources?: Json | null
+          overall_alignment_percentage?: number | null
+          prerequisite_check_passed: boolean
+          requirement_id?: string | null
           started_at?: string
-          surplus_categories?: Json | null
           total_chunks_analyzed?: number
-          trigger_type?: string
+        }
+        Update: {
+          agent_id?: string | null
+          chunks_auto_removed?: number
+          chunks_flagged_for_removal?: number
+          completed_at?: string | null
+          created_at?: string | null
+          dimension_breakdown?: Json | null
+          duration_ms?: number | null
+          id?: string
+          missing_critical_sources?: Json | null
+          overall_alignment_percentage?: number | null
+          prerequisite_check_passed?: boolean
+          requirement_id?: string | null
+          started_at?: string
+          total_chunks_analyzed?: number
         }
         Relationships: [
           {
@@ -629,6 +620,13 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alignment_analysis_log_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "agent_task_requirements"
             referencedColumns: ["id"]
           },
         ]
@@ -911,112 +909,49 @@ export type Database = {
         }
         Relationships: []
       }
-      knowledge_gap_analysis: {
-        Row: {
-          agent_id: string
-          analysis_date: string
-          created_at: string | null
-          id: string
-          missing_bibliographic_references: Json
-          missing_core_concepts: Json
-          missing_decision_patterns: Json
-          missing_domain_vocabulary: Json
-          missing_procedural_knowledge: Json
-          overall_gap_score: number
-          recommendations: Json | null
-          requirement_id: string
-        }
-        Insert: {
-          agent_id: string
-          analysis_date?: string
-          created_at?: string | null
-          id?: string
-          missing_bibliographic_references?: Json
-          missing_core_concepts?: Json
-          missing_decision_patterns?: Json
-          missing_domain_vocabulary?: Json
-          missing_procedural_knowledge?: Json
-          overall_gap_score: number
-          recommendations?: Json | null
-          requirement_id: string
-        }
-        Update: {
-          agent_id?: string
-          analysis_date?: string
-          created_at?: string | null
-          id?: string
-          missing_bibliographic_references?: Json
-          missing_core_concepts?: Json
-          missing_decision_patterns?: Json
-          missing_domain_vocabulary?: Json
-          missing_procedural_knowledge?: Json
-          overall_gap_score?: number
-          recommendations?: Json | null
-          requirement_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "knowledge_gap_analysis_agent_id_fkey"
-            columns: ["agent_id"]
-            isOneToOne: false
-            referencedRelation: "agents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "knowledge_gap_analysis_requirement_id_fkey"
-            columns: ["requirement_id"]
-            isOneToOne: false
-            referencedRelation: "agent_task_requirements"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       knowledge_relevance_scores: {
         Row: {
-          agent_id: string
+          agent_id: string | null
           analysis_model: string
           analysis_reasoning: string | null
-          analyzed_at: string
+          analyzed_at: string | null
           bibliographic_match: number
-          chunk_id: string
+          chunk_id: string | null
           concept_coverage: number
-          created_at: string
           final_relevance_score: number
           id: string
           procedural_match: number
-          requirement_id: string
+          requirement_id: string | null
           semantic_relevance: number
           vocabulary_alignment: number
         }
         Insert: {
-          agent_id: string
-          analysis_model?: string
+          agent_id?: string | null
+          analysis_model: string
           analysis_reasoning?: string | null
-          analyzed_at?: string
-          bibliographic_match?: number
-          chunk_id: string
+          analyzed_at?: string | null
+          bibliographic_match: number
+          chunk_id?: string | null
           concept_coverage: number
-          created_at?: string
           final_relevance_score: number
           id?: string
           procedural_match: number
-          requirement_id: string
+          requirement_id?: string | null
           semantic_relevance: number
           vocabulary_alignment: number
         }
         Update: {
-          agent_id?: string
+          agent_id?: string | null
           analysis_model?: string
           analysis_reasoning?: string | null
-          analyzed_at?: string
+          analyzed_at?: string | null
           bibliographic_match?: number
-          chunk_id?: string
+          chunk_id?: string | null
           concept_coverage?: number
-          created_at?: string
           final_relevance_score?: number
           id?: string
           procedural_match?: number
-          requirement_id?: string
+          requirement_id?: string | null
           semantic_relevance?: number
           vocabulary_alignment?: number
         }
@@ -1328,6 +1263,54 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      prerequisite_checks: {
+        Row: {
+          agent_id: string | null
+          check_passed: boolean
+          checked_at: string | null
+          created_at: string | null
+          critical_sources_found: Json | null
+          id: string
+          missing_critical_sources: Json | null
+          requirement_id: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          check_passed: boolean
+          checked_at?: string | null
+          created_at?: string | null
+          critical_sources_found?: Json | null
+          id?: string
+          missing_critical_sources?: Json | null
+          requirement_id?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          check_passed?: boolean
+          checked_at?: string | null
+          created_at?: string | null
+          critical_sources_found?: Json | null
+          id?: string
+          missing_critical_sources?: Json | null
+          requirement_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prerequisite_checks_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prerequisite_checks_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "agent_task_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       search_query_history: {
         Row: {
