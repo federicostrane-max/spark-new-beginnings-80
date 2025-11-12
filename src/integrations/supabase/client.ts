@@ -27,6 +27,23 @@ export async function updateAgentPrompt(agentSlugOrId: string, newSystemPrompt: 
   });
 }
 
+// Helper to update filter agent prompt
+export async function updateFilterPrompt(
+  newPromptContent: string, 
+  filterVersion?: string,
+  notes?: string
+) {
+  const { data: userData } = await supabase.auth.getUser();
+  return supabase.functions.invoke('update-filter-prompt', {
+    body: { 
+      newPromptContent,
+      filterVersion,
+      notes,
+      updatedBy: userData.user?.id,
+    }
+  });
+}
+
 // Helper to force knowledge alignment analysis
 export async function forceAlignmentAnalysis(agentId: string) {
   // Extract requirements

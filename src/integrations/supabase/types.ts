@@ -686,6 +686,39 @@ export type Database = {
           },
         ]
       }
+      filter_agent_prompts: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          filter_version: string | null
+          id: string
+          is_active: boolean | null
+          notes: string | null
+          prompt_content: string
+          version_number: number
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          filter_version?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          prompt_content: string
+          version_number?: number
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          filter_version?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          prompt_content?: string
+          version_number?: number
+        }
+        Relationships: []
+      }
       inter_agent_logs: {
         Row: {
           completed_at: string | null
@@ -1432,6 +1465,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_filter_prompt: {
+        Args: { prompt_id: string }
+        Returns: undefined
+      }
       count_processing_documents: { Args: never; Returns: number }
       find_orphaned_chunks: {
         Args: never

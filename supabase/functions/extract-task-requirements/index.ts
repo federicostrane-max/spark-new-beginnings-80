@@ -63,7 +63,16 @@ serve(async (req) => {
       .eq('agent_id', agentId)
       .single();
 
-    const expectedModel = `openai/gpt-5-mini-${FILTER_VERSION}`;
+    // Check active filter version from database
+    const { data: activeFilter } = await supabase
+      .from('filter_agent_prompts')
+      .select('filter_version, version_number')
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const currentFilterVersion = activeFilter?.filter_version || FILTER_VERSION;
+    const expectedModel = `openai/gpt-5-mini-${currentFilterVersion}-prompt_v${activeFilter?.version_number || 1}`;
+    
     if (existing && existing.system_prompt_hash === promptHash && existing.extraction_model === expectedModel) {
       console.log('[extract-task-requirements] Requirements up to date');
       return new Response(
@@ -83,15 +92,27 @@ serve(async (req) => {
       );
     }
 
-    console.log('[extract-task-requirements] Calling AI to extract requirements');
+    console.log('[extract-task-requirements] Fetching active filter prompt from database');
 
-    // Call Lovable AI to extract requirements
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
+    // Fetch active filter prompt from database
+    const { data: filterPrompt, error: promptError } = await supabase
+      .from('filter_agent_prompts')
+      .select('prompt_content, filter_version, version_number')
+      .eq('is_active', true)
+      .maybeSingle();
 
-    const aiPrompt = `Analyze this AI agent's system prompt and extract its task requirements into a structured format.
+    let aiPrompt: string;
+    let filterVersionForModel: string;
+
+    if (promptError || !filterPrompt) {
+      console.warn('[extract-task-requirements] Failed to fetch filter prompt, using hardcoded fallback:', promptError);
+      
+      // Fallback to hardcoded prompt if database fails
+      filterVersionForModel = FILTER_VERSION;
+      aiPrompt = `Analyze this AI agent's system prompt and extract its task requirements into a structured format.
 
 System Prompt:
-${agent.system_prompt}
+\${agent.system_prompt}
 
 Extract and categorize the following:
 
@@ -105,54 +126,11 @@ Extract and categorize the following:
    - Return as array of objects: {pattern: string, criteria: string[]}
 
 4. **Domain Vocabulary**: Extract ONLY terms explicitly mentioned/written in the system prompt text
-   
-   **CRITICAL EXTRACTION RULES:**
-   - ✅ INCLUDE ONLY if the term is literally written/mentioned in the prompt text
-   - ❌ DO NOT deduce, infer, or add terms based on your domain knowledge
-   - ❌ DO NOT add terms you think would be relevant to the topic
-   - ❌ DO NOT interpret or expand on what the prompt implies
-   
-   **What to Extract (if explicitly present in prompt):**
-   - Proper nouns: Names of people, places, organizations, events
-   - Specific dates, numbers, or identifiers mentioned in the prompt
-   - Specialized technical terms or domain-specific jargon that appear in the prompt
-   - Titles of books, documents, or sources cited in the prompt
-   
-   **What to NEVER Extract:**
-   - Generic terms (e.g., "context", "citation", "knowledge base", "source")
-   - Terms you think are relevant but are not written in the prompt
-   - Background knowledge about the domain not mentioned in prompt
-   - ❌ **CRITICAL: Terms that appear ONLY in dialogue examples** (User/Assistant exchanges)
-     - Examples show HOW to behave, not WHAT to know
-     - If a term appears only in example questions/answers, DO NOT extract it
-     - Extract only if the term is mentioned in the main prompt instructions
-   
    - Return as array of strings
 
 5. **Bibliographic References** (CRITICAL PREREQUISITES)
-   
-   **OBJECTIVE**: Extract ONLY books, articles, authors, or documents EXPLICITLY mentioned in the prompt as required knowledge sources.
-   
-   **EXTRACTION RULES:**
-   ✅ EXTRACT IF:
-   - Prompt mentions a specific book or article title
-   - Prompt cites an author as a knowledge source
-   - Prompt says "based on X", "using Y", "according to Z", "as described in W"
-   - Prompt explicitly requires reference to a specific source
-   
-   ❌ DO NOT EXTRACT IF:
-   - Topic discussed but no specific sources mentioned (e.g., "Cuban history expert" → NO)
-   - You infer "probably needs book X" but it's not mentioned
-   - Generic categories like "historical texts", "academic articles" (too vague)
-   
-   **IMPORTANCE LEVELS:**
-   - "critical": Explicit source WITHOUT which agent CANNOT function properly
-   - "high": Recommended source for quality responses
-   - "medium": Useful but not strictly necessary
-   
    - Format: array of objects
    - Fields: {type: 'book'|'article'|'author'|'document', title?: string, author?: string, year?: string, importance: 'critical'|'high'|'medium', context: string}
-   - IF UNCERTAIN, DO NOT EXTRACT (better empty than false positives)
 
 Return ONLY valid JSON in this exact format:
 {
@@ -160,16 +138,22 @@ Return ONLY valid JSON in this exact format:
   "procedural_knowledge": [{process: "...", steps: ["...", "..."]}],
   "decision_patterns": [{pattern: "...", criteria: ["...", "..."]}],
   "domain_vocabulary": ["term1", "term2"],
-  "bibliographic_references": [
-    {
-      "type": "book",
-      "title": "Exact Title",
-      "author": "Author Name",
-      "importance": "critical",
-      "context": "Why this source is needed"
-    }
-  ]
+  "bibliographic_references": []
 }`;
+      // Replace placeholder with actual prompt
+      aiPrompt = aiPrompt.replace('${agent.system_prompt}', agent.system_prompt);
+    } else {
+      console.log(`[extract-task-requirements] Using filter prompt v${filterPrompt.version_number} (${filterPrompt.filter_version})`);
+      filterVersionForModel = filterPrompt.filter_version || FILTER_VERSION;
+      
+      // Replace placeholder in database prompt with actual agent prompt
+      aiPrompt = filterPrompt.prompt_content.replace('${agent.system_prompt}', agent.system_prompt);
+    }
+
+    console.log('[extract-task-requirements] Calling AI to extract requirements');
+
+    // Call Lovable AI to extract requirements
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -278,7 +262,7 @@ Return ONLY valid JSON in this exact format:
         decision_patterns: extracted.decision_patterns || [],
         domain_vocabulary: extracted.domain_vocabulary || [],
         bibliographic_references: extracted.bibliographic_references || [],
-        extraction_model: `openai/gpt-5-mini-${FILTER_VERSION}`,
+        extraction_model: `openai/gpt-5-mini-${filterVersionForModel}-prompt_v${filterPrompt?.version_number || 1}`,
         system_prompt_hash: promptHash,
         extracted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),

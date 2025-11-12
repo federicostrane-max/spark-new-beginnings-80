@@ -79,6 +79,12 @@ verify_jwt = true
 [functions.update-task-requirements]
 verify_jwt = true
 
+[functions.update-agent-prompt]
+verify_jwt = true
+
+[functions.update-filter-prompt]
+verify_jwt = true
+
 [functions.continue-deepseek-response]
 verify_jwt = true
 timeout = 600
