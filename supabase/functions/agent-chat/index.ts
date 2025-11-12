@@ -2581,6 +2581,7 @@ Deno.serve(async (req) => {
           }));
 
           let fullResponse = '';
+          let reasoningContent = ''; // Track reasoning separately (for thinking models like Kimi K2)
           let lastUpdateTime = Date.now();
           let toolUseId: string | null = null;
           let toolUseName: string | null = null;
@@ -3735,11 +3736,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     
                     // Check for reasoning_content (used by thinking models like Kimi K2)
                     if (delta.reasoning_content) {
-                      console.log(`🧠 [REQ-${requestId}] Reasoning: ${delta.reasoning_content.slice(0, 100)}...`);
-                      // Show reasoning to user with a distinctive format
-                      newText = `💭 ${delta.reasoning_content}`;
+                      const reasoningChunk = delta.reasoning_content;
+                      console.log(`🧠 [REQ-${requestId}] Reasoning chunk: ${reasoningChunk.slice(0, 100)}...`);
                       
-                      // Accumulate reasoning in fullResponse (it's valid content)
+                      // Accumulate reasoning separately
+                      reasoningContent += reasoningChunk;
+                      
+                      // Show reasoning to user with a distinctive format
+                      newText = `💭 ${reasoningChunk}`;
+                      
+                      // Send to user and accumulate in fullResponse
                       if (!skipAgentResponse) {
                         fullResponse += newText;
                         await sendSSE(JSON.stringify({ type: 'content', text: newText }));
@@ -5076,10 +5082,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             
             console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
             
-            // Check for empty response (only if no reasoning was provided)
-            const hasReasoning = fullResponse && fullResponse.includes('💭');
-            if ((!fullResponse || fullResponse.trim().length === 0) && !hasReasoning) {
-              console.warn(`⚠️ [REQ-${requestId}] Empty response detected from ${llmProvider} model: ${agent.ai_model}`);
+            // If there's reasoning but no final response, use reasoning as the response
+            if ((!fullResponse || fullResponse.trim().length === 0) && reasoningContent) {
+              console.log(`ℹ️ [REQ-${requestId}] Using reasoning as final response (${reasoningContent.length} chars)`);
+              fullResponse = `💭 ${reasoningContent}`;
+            }
+            
+            // Check for empty response (only if there's neither response nor reasoning)
+            const hasContent = fullResponse && fullResponse.trim().length > 0;
+            if (!hasContent) {
+              console.warn(`⚠️ [REQ-${requestId}] Empty response detected from ${llmProvider} model: ${agent.ai_model}. Response length: 0 chars, Reasoning length: ${reasoningContent.length} chars`);
               fullResponse = "⚠️ Il modello ha elaborato la richiesta ma non ha prodotto una risposta testuale.\n\n🔄 **Suggerimenti:**\n- Riprova riformulando la domanda\n- Oppure cambia modello nelle impostazioni agente (es. Claude 3.5 Sonnet o GPT-4o)";
               
               // Update the message in DB with the fallback
@@ -5094,6 +5106,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 content: fullResponse
               }));
             }
+            
+            console.log(`📊 [REQ-${requestId}] Final response - Content: ${fullResponse.length} chars, Reasoning: ${reasoningContent.length} chars`);
             
             clearInterval(keepAliveInterval);
           } catch (error) {
