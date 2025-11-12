@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
@@ -13,6 +13,7 @@ interface ChatMessageProps {
   role: "user" | "assistant" | "system";
   content: string;
   isStreaming?: boolean;
+  thinkingElapsed?: number;
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
@@ -26,7 +27,8 @@ export const ChatMessage = ({
   id, 
   role, 
   content, 
-  isStreaming, 
+  isStreaming,
+  thinkingElapsed,
   isSelected = false,
   selectionMode = false,
   onToggleSelection,
@@ -365,8 +367,18 @@ export const ChatMessage = ({
           </div>
         )}
 
-        {/* Indicatore di streaming sempre visibile */}
-        {isStreaming && (
+        {/* Indicatore di thinking quando streaming ma senza contenuto */}
+        {isStreaming && content.length === 0 && thinkingElapsed !== undefined && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm animate-pulse">
+              Il modello sta pensando... ({thinkingElapsed}s)
+            </span>
+          </div>
+        )}
+        
+        {/* Indicatore di streaming quando c'è contenuto */}
+        {isStreaming && content.length > 0 && (
           <div className="flex items-center gap-2 mt-2">
             <span className="inline-block w-2 h-4 bg-foreground animate-pulse" />
             <span className="text-xs text-muted-foreground animate-pulse">
