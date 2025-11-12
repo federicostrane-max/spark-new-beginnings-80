@@ -97,6 +97,7 @@ export const DocumentPoolTable = () => {
   const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [repairing, setRepairing] = useState(false);
 
   useEffect(() => {
     loadDocuments();
@@ -372,6 +373,51 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleRepairDocuments = async () => {
+    try {
+      setRepairing(true);
+      toast.loading('Riparazione documenti in corso...', { id: 'repair' });
+
+      const { data, error } = await supabase.functions.invoke('repair-documents');
+
+      if (error) throw error;
+
+      const result = data as {
+        chunksCreated: number;
+        revalidated: number;
+        validationTriggered: number;
+        unblocked: number;
+        errors: Array<{ fileName: string; error: string }>;
+      };
+
+      const total = result.chunksCreated + result.revalidated + result.validationTriggered + result.unblocked;
+      
+      if (result.errors.length > 0) {
+        toast.error(
+          `${total} documenti riparati, ${result.errors.length} errori. Controlla i log per dettagli.`,
+          { id: 'repair', duration: 5000 }
+        );
+        console.error('Repair errors:', result.errors);
+      } else {
+        toast.success(
+          `✅ Riparazione completata!\n` +
+          `• ${result.chunksCreated} documenti con chunks creati\n` +
+          `• ${result.revalidated} documenti ri-validati\n` +
+          `• ${result.validationTriggered} validazioni triggerate\n` +
+          `• ${result.unblocked} documenti sbloccati`,
+          { id: 'repair', duration: 7000 }
+        );
+      }
+
+      setTimeout(() => loadDocuments(), 2000);
+    } catch (error: any) {
+      console.error('Repair error:', error);
+      toast.error(`Errore nella riparazione: ${error.message}`, { id: 'repair' });
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
   const validatedSelectedDocs = selectedDocuments.filter((d) => d.validation_status === "validated");
 
@@ -464,24 +510,43 @@ export const DocumentPoolTable = () => {
               <FileText className="h-5 w-5" />
               Documenti ({filteredDocuments.length})
             </span>
-            <Button
-              onClick={handleBulkProcessUnprocessed}
-              disabled={bulkProcessing}
-              variant="outline"
-              size="sm"
-            >
-              {bulkProcessing ? (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                  Elaborazione...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Elabora documenti mancanti
-                </>
-              )}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleRepairDocuments}
+                disabled={repairing}
+                variant="default"
+                size="sm"
+              >
+                {repairing ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Riparazione...
+                  </>
+                ) : (
+                  <>
+                    🔧 Ripara tutti i documenti
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleBulkProcessUnprocessed}
+                disabled={bulkProcessing}
+                variant="outline"
+                size="sm"
+              >
+                {bulkProcessing ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Elaborazione...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Elabora documenti mancanti
+                  </>
+                )}
+              </Button>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
