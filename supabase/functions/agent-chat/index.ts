@@ -3938,7 +3938,10 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                               });
                             }
                             
-                            resultText += `\n⏳ **Download e validazione in corso...** Riceverai un aggiornamento quando i PDF saranno validati e aggiunti al pool.\n\n`;
+                            // ⚠️ MOSTRA messaggio "Download in corso" SOLO se ci sono PDF in coda
+                            if (acquireData.pdfs_queued > 0) {
+                              resultText += `\n⏳ **Download e validazione in corso...** Riceverai un aggiornamento quando i PDF saranno validati e aggiunti al pool.\n\n`;
+                            }
                             
                             fullResponse += resultText;
                             await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
