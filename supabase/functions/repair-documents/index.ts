@@ -91,13 +91,15 @@ serve(async (req) => {
         let fileData;
         let downloadError;
         
-        // List of paths to try
+        // List of paths to try - prioritize exact path, then variations
         const pathsToTry = [
-          doc.file_path,
-          doc.file_path.replace('shared-pool-uploads/', ''),
-          `shared-pool-uploads/${doc.file_name}`,
-          doc.file_name
-        ];
+          doc.file_path, // Try exact path from DB first
+          doc.file_path.startsWith('shared-pool-uploads/') 
+            ? doc.file_path.substring('shared-pool-uploads/'.length) 
+            : `shared-pool-uploads/${doc.file_path}`, // If has prefix, remove it; otherwise add it
+          doc.file_name, // Try just filename
+          `shared-pool-uploads/${doc.file_name}` // Try with prefix
+        ].filter((path, index, self) => self.indexOf(path) === index); // Remove duplicates
         
         for (const path of pathsToTry) {
           const result = await supabase.storage
@@ -107,14 +109,33 @@ serve(async (req) => {
           if (!result.error && result.data) {
             fileData = result.data;
             downloadError = null;
-            console.log(`[repair-documents] Successfully downloaded using path: ${path}`);
+            console.log(`[repair-documents] ✅ Downloaded successfully using path: ${path}`);
             break;
           }
           downloadError = result.error;
+          console.log(`[repair-documents] ❌ Failed to download using path: ${path}`);
         }
 
         if (downloadError || !fileData) {
-          throw new Error(`File not found in storage. Tried paths: ${pathsToTry.join(', ')}`);
+          console.error(`[repair-documents] ⚠️ Cannot find file for ${doc.file_name}. Marking as failed.`);
+          
+          // Mark document as failed instead of throwing error
+          await supabase
+            .from('knowledge_documents')
+            .update({ 
+              processing_status: 'failed',
+              validation_status: 'validation_failed',
+              validation_reason: `File not found in storage. Tried paths: ${pathsToTry.join(', ')}`
+            })
+            .eq('id', doc.id);
+          
+          result.errors.push({
+            id: doc.id,
+            fileName: doc.file_name,
+            error: `File not found in storage (marked as failed)`
+          });
+          
+          continue; // Skip to next document
         }
 
         // Convert to base64 for OCR
