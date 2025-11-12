@@ -661,6 +661,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                       <span className="text-xs text-muted-foreground">Long context, multilingual</span>
                     </div>
                   </SelectItem>
+                  <SelectItem value="moonshot/kimi-k2-thinking">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Kimi K2 Thinking</span>
+                      <span className="text-xs text-muted-foreground">Advanced reasoning, 262K context</span>
+                    </div>
+                  </SelectItem>
                   <SelectItem value="anthropic/claude-3.5-sonnet">
                     <div className="flex flex-col">
                       <span className="font-medium">Claude 3.5 Sonnet</span>
