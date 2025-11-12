@@ -581,6 +581,7 @@ Se confidence < 70, considera il documento NON rilevante.`;
             .eq('id', documentId)
             .single();
 
+          // System message for toast
           await supabase
             .from('agent_messages')
             .insert({
@@ -591,7 +592,17 @@ Se confidence < 70, considera il documento NON rilevante.`;
                 documentId: documentId
               })}`
             });
-          console.log('[validate-document] ✓ Notification sent successfully');
+          
+          // Assistant message for chat feedback
+          await supabase
+            .from('agent_messages')
+            .insert({
+              conversation_id: queueEntry.conversation_id,
+              role: 'assistant',
+              content: `✅ **PDF validato con successo**: ${docData?.file_name || 'Unknown Document'}\n\n📋 Il documento è stato validato e risulta pertinente. ${aiResult.motivazione}\n\nProcedo ora con l'elaborazione e l'aggiunta alla document pool...`
+            });
+          
+          console.log('[validate-document] ✓ Notifications sent successfully');
         } catch (notifError) {
           console.warn('[validate-document] ⚠️ Failed to send notification:', notifError);
           // Non-fatal, continue
