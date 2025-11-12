@@ -467,6 +467,7 @@ export type Database = {
       agent_task_requirements: {
         Row: {
           agent_id: string
+          bibliographic_references: Json
           core_concepts: Json
           created_at: string
           decision_patterns: Json
@@ -480,6 +481,7 @@ export type Database = {
         }
         Insert: {
           agent_id: string
+          bibliographic_references?: Json
           core_concepts?: Json
           created_at?: string
           decision_patterns?: Json
@@ -493,6 +495,7 @@ export type Database = {
         }
         Update: {
           agent_id?: string
+          bibliographic_references?: Json
           core_concepts?: Json
           created_at?: string
           decision_patterns?: Json
@@ -571,6 +574,8 @@ export type Database = {
           error_message: string | null
           id: string
           identified_gaps: Json | null
+          missing_bibliographic_references: Json | null
+          prerequisite_check_status: string | null
           progress_chunks_analyzed: number | null
           safe_mode_active: boolean
           started_at: string
@@ -589,6 +594,8 @@ export type Database = {
           error_message?: string | null
           id?: string
           identified_gaps?: Json | null
+          missing_bibliographic_references?: Json | null
+          prerequisite_check_status?: string | null
           progress_chunks_analyzed?: number | null
           safe_mode_active?: boolean
           started_at?: string
@@ -607,6 +614,8 @@ export type Database = {
           error_message?: string | null
           id?: string
           identified_gaps?: Json | null
+          missing_bibliographic_references?: Json | null
+          prerequisite_check_status?: string | null
           progress_chunks_analyzed?: number | null
           safe_mode_active?: boolean
           started_at?: string
@@ -875,6 +884,7 @@ export type Database = {
           analysis_date: string
           created_at: string | null
           id: string
+          missing_bibliographic_references: Json
           missing_core_concepts: Json
           missing_decision_patterns: Json
           missing_domain_vocabulary: Json
@@ -888,6 +898,7 @@ export type Database = {
           analysis_date?: string
           created_at?: string | null
           id?: string
+          missing_bibliographic_references?: Json
           missing_core_concepts?: Json
           missing_decision_patterns?: Json
           missing_domain_vocabulary?: Json
@@ -901,6 +912,7 @@ export type Database = {
           analysis_date?: string
           created_at?: string | null
           id?: string
+          missing_bibliographic_references?: Json
           missing_core_concepts?: Json
           missing_decision_patterns?: Json
           missing_domain_vocabulary?: Json
@@ -932,6 +944,7 @@ export type Database = {
           analysis_model: string
           analysis_reasoning: string | null
           analyzed_at: string
+          bibliographic_match: number
           chunk_id: string
           concept_coverage: number
           created_at: string
@@ -947,6 +960,7 @@ export type Database = {
           analysis_model?: string
           analysis_reasoning?: string | null
           analyzed_at?: string
+          bibliographic_match?: number
           chunk_id: string
           concept_coverage: number
           created_at?: string
@@ -962,6 +976,7 @@ export type Database = {
           analysis_model?: string
           analysis_reasoning?: string | null
           analyzed_at?: string
+          bibliographic_match?: number
           chunk_id?: string
           concept_coverage?: number
           created_at?: string

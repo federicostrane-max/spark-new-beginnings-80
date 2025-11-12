@@ -25,6 +25,8 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
   const [lastAnalysisStatus, setLastAnalysisStatus] = useState<'completed' | 'incomplete' | null>(null);
   const [cooldownActive, setCooldownActive] = useState(false);
   const [cooldownMinutes, setCooldownMinutes] = useState(0);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [missingCriticalSources, setMissingCriticalSources] = useState<any[]>([]);
 
   useEffect(() => {
     if (!enabled || !agentId) return;
@@ -163,6 +165,29 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
             if (analysisError) throw analysisError;
 
+            // Check if analysis was BLOCKED due to missing sources
+            if (analysisData.blocked && analysisData.prerequisite_check_failed) {
+              toast.dismiss(progressToastId);
+              setIsBlocked(true);
+              setMissingCriticalSources(analysisData.missing_critical_sources || []);
+              
+              toast.error(
+                <div>
+                  <p className="font-semibold">🚫 Analisi BLOCCATA</p>
+                  <p className="text-sm mt-1">{analysisData.message}</p>
+                  <ul className="text-xs mt-2 space-y-1">
+                    {analysisData.actions_required?.map((action: string, i: number) => (
+                      <li key={i}>• {action}</li>
+                    ))}
+                  </ul>
+                </div>,
+                { duration: 10000 }
+              );
+              
+              setIsAnalyzing(false);
+              return;
+            }
+
             totalAnalyzed = analysisData.total_progress;
             totalChunks = analysisData.total_chunks;
             moreBatchesNeeded = analysisData.more_batches_needed;
@@ -268,5 +293,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     canAnalyze: !cooldownActive || lastAnalysisStatus === 'incomplete',
     triggerManualAnalysis: () => handlePromptChange(false),
     forceAnalysis: () => handlePromptChange(true),
+    isBlocked,
+    missingCriticalSources,
   };
 };

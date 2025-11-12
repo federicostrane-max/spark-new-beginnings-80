@@ -18,10 +18,11 @@ const CONFIG = {
     duration_days: 7,
   },
   score_weights: {
-    semantic_relevance: 0.35,
-    concept_coverage: 0.30,
-    procedural_match: 0.20,
-    vocabulary_alignment: 0.15,
+    semantic_relevance: 0.30,
+    concept_coverage: 0.25,
+    procedural_match: 0.15,
+    vocabulary_alignment: 0.10,
+    bibliographic_match: 0.20,
   },
   batch_processing: {
     batch_size: 100, // Reduced to 100 to stay under 150s timeout
@@ -119,6 +120,102 @@ serve(async (req) => {
 
     console.log('[analyze-alignment] Total chunks:', totalChunks);
 
+    // ============================================================
+    // PREREQUISITE CHECK: Verify critical bibliographic references
+    // ============================================================
+    console.log('[analyze-alignment] Checking bibliographic prerequisites');
+
+    const bibliographicReferences = requirements.bibliographic_references || [];
+    const criticalReferences = bibliographicReferences.filter(
+      (ref: any) => ref.importance === 'critical'
+    );
+
+    console.log('[analyze-alignment] Found', criticalReferences.length, 'critical references');
+
+    if (criticalReferences.length > 0) {
+      console.log('[analyze-alignment] Critical references:', JSON.stringify(criticalReferences, null, 2));
+      
+      const missingReferences = [];
+      
+      for (const ref of criticalReferences) {
+        const searchTerms = [];
+        if (ref.title) searchTerms.push(ref.title);
+        if (ref.author) searchTerms.push(ref.author);
+        
+        let found = false;
+        for (const term of searchTerms) {
+          const { data: matchingChunks } = await supabase
+            .from('agent_knowledge')
+            .select('id, document_name, content')
+            .eq('agent_id', agentId)
+            .eq('is_active', true)
+            .or(`document_name.ilike.%${term}%,content.ilike.%${term}%`)
+            .limit(1);
+          
+          if (matchingChunks && matchingChunks.length > 0) {
+            found = true;
+            console.log(`[analyze-alignment] ✅ Found reference "${term}" in knowledge base`);
+            break;
+          }
+        }
+        
+        if (!found) {
+          console.log(`[analyze-alignment] ❌ MISSING critical reference:`, ref);
+          missingReferences.push(ref);
+        }
+      }
+      
+      // BLOCK ANALYSIS IF CRITICAL REFERENCES ARE MISSING
+      if (missingReferences.length > 0) {
+        console.log('[analyze-alignment] 🚫 BLOCKING ANALYSIS - Missing critical sources:', missingReferences);
+        
+        const { error: logError } = await supabase
+          .from('alignment_analysis_log')
+          .insert({
+            agent_id: agentId,
+            trigger_type: forceReanalysis ? 'manual' : 'scheduled',
+            total_chunks_analyzed: totalChunks || 0,
+            chunks_flagged_for_removal: 0,
+            chunks_auto_removed: 0,
+            safe_mode_active: safeModeActive,
+            progress_chunks_analyzed: 0,
+            prerequisite_check_status: 'blocked_missing_sources',
+            missing_bibliographic_references: missingReferences,
+            completed_at: new Date().toISOString(),
+            duration_ms: 0,
+          });
+        
+        if (logError) {
+          console.error('[analyze-alignment] Failed to log blocked status:', logError);
+        }
+        
+        return new Response(
+          JSON.stringify({
+            success: false,
+            blocked: true,
+            prerequisite_check_failed: true,
+            missing_critical_sources: missingReferences,
+            message: `Analisi BLOCCATA: ${missingReferences.length} riferimento/i bibliografico/i critico/i assente/i dal knowledge base.`,
+            actions_required: [
+              'Carica i documenti mancanti nel knowledge base dell\'agente',
+              'OPPURE rimuovi i riferimenti bibliografici dal prompt dell\'agente',
+            ],
+            total_chunks: totalChunks,
+          }),
+          { 
+            status: 423,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+      
+      console.log('[analyze-alignment] ✅ All critical bibliographic references present - proceeding with analysis');
+    }
+
+    // ============================================================
+    // PREREQUISITES PASSED - Continue with normal analysis
+    // ============================================================
+
     if (!totalChunks || totalChunks === 0) {
       console.log('[analyze-alignment] No active chunks found for agent');
       return new Response(
@@ -177,6 +274,8 @@ serve(async (req) => {
           chunks_flagged_for_removal: 0,
           safe_mode_active: safeModeActive,
           progress_chunks_analyzed: 0,
+          prerequisite_check_status: 'passed',
+          missing_bibliographic_references: [],
         })
         .select()
         .single();
@@ -221,9 +320,22 @@ serve(async (req) => {
 Requirements: ${JSON.stringify(requirements, null, 2)}
 Chunk: ${chunk.content.substring(0, 500)}...
 Category: ${chunk.category}
+Document: ${chunk.document_name}
 
-Rate 0.0-1.0: semantic_relevance, concept_coverage, procedural_match, vocabulary_alignment
-JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_match": 0.0, "vocabulary_alignment": 0.0, "reasoning": "brief"}`;
+Rate 0.0-1.0 on each dimension:
+
+1. semantic_relevance: How semantically relevant to agent's core task?
+2. concept_coverage: How well covers required core concepts?
+3. procedural_match: Contains needed procedural knowledge/workflows?
+4. vocabulary_alignment: Uses required domain-specific terminology?
+5. bibliographic_match: From/references required bibliographic sources?
+   - 1.0 = Directly from required book/article/author
+   - 0.8 = Explicitly references required sources
+   - 0.5 = Related but not from exact source
+   - 0.3 = Weak connection to required sources
+   - 0.0 = No connection to any required source
+
+JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_match": 0.0, "vocabulary_alignment": 0.0, "bibliographic_match": 0.0, "reasoning": "brief"}`;
 
       try {
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -307,7 +419,8 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
               (scores.semantic_relevance * CONFIG.score_weights.semantic_relevance) +
               (scores.concept_coverage * CONFIG.score_weights.concept_coverage) +
               (scores.procedural_match * CONFIG.score_weights.procedural_match) +
-              (scores.vocabulary_alignment * CONFIG.score_weights.vocabulary_alignment);
+              (scores.vocabulary_alignment * CONFIG.score_weights.vocabulary_alignment) +
+              ((scores.bibliographic_match || 0) * CONFIG.score_weights.bibliographic_match);
 
             // Store score
             await supabase
@@ -320,6 +433,7 @@ JSON only: {"semantic_relevance": 0.0, "concept_coverage": 0.0, "procedural_matc
                 concept_coverage: scores.concept_coverage,
                 procedural_match: scores.procedural_match,
                 vocabulary_alignment: scores.vocabulary_alignment,
+                bibliographic_match: scores.bibliographic_match || 0,
                 final_relevance_score: finalScore,
                 analysis_model: 'openai/gpt-5-mini',
                 analysis_reasoning: scores.reasoning,

@@ -14,7 +14,7 @@ serve(async (req) => {
 
   try {
     // Increment this to force re-extraction with updated filters
-    const FILTER_VERSION = 'v5';
+    const FILTER_VERSION = 'v6';
     
     const { agentId } = await req.json();
 
@@ -75,6 +75,7 @@ serve(async (req) => {
             procedural_knowledge: existing.procedural_knowledge,
             decision_patterns: existing.decision_patterns,
             domain_vocabulary: existing.domain_vocabulary,
+            bibliographic_references: existing.bibliographic_references,
           },
           cached: true,
         }),
@@ -126,32 +127,48 @@ Extract and categorize the following:
      - If a term appears only in example questions/answers, DO NOT extract it
      - Extract only if the term is mentioned in the main prompt instructions
    
-   **Examples:**
-   
-   Prompt: "You are an expert on Sierra Maestra. Answer based on the Che Guevara Bio book."
-   ✅ CORRECT: ["Sierra Maestra", "Che Guevara Bio"]
-   ❌ WRONG: ["Fidel Castro", "Revolución Cubana", "Moncada", "Granma"] (not in prompt, even if relevant)
-   
-   Prompt: "You are a historian. Answer questions about the Cuban Revolution using scholarly sources."
-   ✅ CORRECT: ["Cuban Revolution"]
-   ❌ WRONG: ["Fidel Castro", "Che Guevara", "Sierra Maestra", "Batista"] (not mentioned)
-   
-   Prompt: "Answer about Che Guevara's life. Focus on events from 1928 to 1967. Reference only the biography text."
-   ✅ CORRECT: ["Che Guevara", "1928", "1967"]
-   ❌ WRONG: ["Argentina", "Bolivia", "guerrilla warfare"] (not explicitly in prompt)
-   
-   Prompt: "Answer about Che Guevara's life. Example: User: 'Tell me about World War II.' Assistant: 'I can only answer about Che Guevara.'"
-   ✅ CORRECT: ["Che Guevara"]
-   ❌ WRONG: ["World War II"] (appears only in example dialogue showing off-topic handling)
-   
    - Return as array of strings
+
+5. **Bibliographic References** (CRITICAL PREREQUISITES)
+   
+   **OBJECTIVE**: Extract ONLY books, articles, authors, or documents EXPLICITLY mentioned in the prompt as required knowledge sources.
+   
+   **EXTRACTION RULES:**
+   ✅ EXTRACT IF:
+   - Prompt mentions a specific book or article title
+   - Prompt cites an author as a knowledge source
+   - Prompt says "based on X", "using Y", "according to Z", "as described in W"
+   - Prompt explicitly requires reference to a specific source
+   
+   ❌ DO NOT EXTRACT IF:
+   - Topic discussed but no specific sources mentioned (e.g., "Cuban history expert" → NO)
+   - You infer "probably needs book X" but it's not mentioned
+   - Generic categories like "historical texts", "academic articles" (too vague)
+   
+   **IMPORTANCE LEVELS:**
+   - "critical": Explicit source WITHOUT which agent CANNOT function properly
+   - "high": Recommended source for quality responses
+   - "medium": Useful but not strictly necessary
+   
+   - Format: array of objects
+   - Fields: {type: 'book'|'article'|'author'|'document', title?: string, author?: string, year?: string, importance: 'critical'|'high'|'medium', context: string}
+   - IF UNCERTAIN, DO NOT EXTRACT (better empty than false positives)
 
 Return ONLY valid JSON in this exact format:
 {
   "core_concepts": [{concept: "...", importance: "high"}],
   "procedural_knowledge": [{process: "...", steps: ["...", "..."]}],
   "decision_patterns": [{pattern: "...", criteria: ["...", "..."]}],
-  "domain_vocabulary": ["term1", "term2"]
+  "domain_vocabulary": ["term1", "term2"],
+  "bibliographic_references": [
+    {
+      "type": "book",
+      "title": "Exact Title",
+      "author": "Author Name",
+      "importance": "critical",
+      "context": "Why this source is needed"
+    }
+  ]
 }`;
 
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -260,6 +277,7 @@ Return ONLY valid JSON in this exact format:
         procedural_knowledge: extracted.procedural_knowledge || [],
         decision_patterns: extracted.decision_patterns || [],
         domain_vocabulary: extracted.domain_vocabulary || [],
+        bibliographic_references: extracted.bibliographic_references || [],
         extraction_model: `openai/gpt-5-mini-${FILTER_VERSION}`,
         system_prompt_hash: promptHash,
         extracted_at: new Date().toISOString(),

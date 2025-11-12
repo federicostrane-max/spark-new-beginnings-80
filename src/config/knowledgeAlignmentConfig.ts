@@ -21,10 +21,11 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
   
   // Scoring weights (to calculate final_relevance_score)
   score_weights: {
-    semantic_relevance: 0.35,
-    concept_coverage: 0.30,
-    procedural_match: 0.20,
-    vocabulary_alignment: 0.15,
+    semantic_relevance: 0.30,
+    concept_coverage: 0.25,
+    procedural_match: 0.15,
+    vocabulary_alignment: 0.10,
+    bibliographic_match: 0.20,
   },
   
   // AI Models (using Lovable AI)
