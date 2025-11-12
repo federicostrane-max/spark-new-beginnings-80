@@ -851,7 +851,21 @@ export default function MultiAgentConsultant() {
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval); // 🔍 Cleanup in caso di errore
       }
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
+      
+      // ❌ IMPORTANTE: Non rimuovere MAI il messaggio user (è già nel database)
+      // Rimuovi solo il placeholder assistant
+      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+      
+      // 🔄 Ricarica la conversazione dal database per avere i dati corretti
+      if (conversationId) {
+        setTimeout(() => {
+          loadConversation(conversationId);
+        }, 500);
+      }
+      
+      toast.error("Errore durante l'invio del messaggio", {
+        description: error.message || "Riprova tra qualche secondo"
+      });
     } finally {
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval); // 🔍 Cleanup garantito

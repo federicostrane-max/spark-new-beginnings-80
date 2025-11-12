@@ -185,6 +185,27 @@ serve(async (req) => {
     console.log(`   Processed: ${processed}`);
     console.log(`   Failed: ${failed}`);
     
+    // 📊 AGGIORNA STORICO QUERY con risultati reali
+    try {
+      const firstPdf = pendingPdfs[0];
+      if (firstPdf?.search_query) {
+        const originalTopic = firstPdf.search_query.replace(/^User selected:\s*/i, '').trim();
+        
+        await supabase
+          .from('search_query_history')
+          .update({
+            pdfs_downloaded: processed,
+            pdfs_failed: failed
+          })
+          .eq('conversation_id', conversationId)
+          .eq('original_topic', originalTopic);
+        
+        console.log(`  📊 Updated search_query_history: ${processed} downloaded, ${failed} failed`);
+      }
+    } catch (updateError) {
+      console.warn('  ⚠️ Failed to update query history:', updateError);
+    }
+    
     // 📬 NOTIFICA RIEPILOGO FINALE
     if (failed > 0 || processed > 0) {
       try {
