@@ -333,6 +333,59 @@ serve(async (req) => {
         }
       }
       
+      // 🔄 ZERO PDF → SUGGERISCI SUBITO QUERY ALTERNATIVA
+      if (topic && conversationId && agentId) {
+        console.log(`\n💡 [ZERO RESULTS] Suggesting alternative query immediately...`);
+        
+        try {
+          const { data: suggestionData, error: suggestionError } = await supabase.functions.invoke(
+            'suggest-next-query',
+            {
+              body: {
+                conversationId,
+                agentId,
+                originalTopic: topic
+              }
+            }
+          );
+          
+          if (!suggestionError && suggestionData?.hasNextQuery) {
+            console.log(`  ✨ Next query suggested: "${suggestionData.nextQuery}"`);
+            
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversationId,
+                role: 'system',
+                content: `__QUERY_SUGGESTION__${JSON.stringify({
+                  originalTopic: topic,
+                  nextQuery: suggestionData.nextQuery,
+                  variantIndex: suggestionData.variantIndex + 1,
+                  totalVariants: suggestionData.totalVariants,
+                  executedCount: suggestionData.executedCount,
+                  reason: 'zero_results'
+                })}`
+              });
+            console.log(`  📬 Sent immediate query suggestion`);
+          } else if (!suggestionError && !suggestionData?.hasNextQuery) {
+            console.log(`  ℹ️ No more query variants available`);
+            
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversationId,
+                role: 'system',
+                content: `__NO_MORE_QUERIES__${JSON.stringify({
+                  originalTopic: topic,
+                  totalAttempts: suggestionData?.executedCount || 0
+                })}`
+              });
+          }
+        } catch (suggestionError) {
+          console.warn('  ⚠️ Failed to suggest next query:', suggestionError);
+        }
+      }
+      
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

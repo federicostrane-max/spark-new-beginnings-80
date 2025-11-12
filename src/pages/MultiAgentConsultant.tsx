@@ -267,7 +267,10 @@ export default function MultiAgentConsultant() {
                   });
                 } else if (msg.content.startsWith('__QUERY_SUGGESTION__')) {
                   const data = JSON.parse(msg.content.replace('__QUERY_SUGGESTION__', ''));
-                  toast.info(`💡 Provo un'altra ricerca?`, {
+                  const reasonText = data.reason === 'zero_results' 
+                    ? '❌ Nessun PDF trovato. ' 
+                    : '';
+                  toast.info(`💡 ${reasonText}Provo un'altra ricerca?`, {
                     description: `Query ${data.variantIndex}/${data.totalVariants}: "${data.nextQuery}"`,
                     duration: 15000,
                     action: {
@@ -296,6 +299,12 @@ export default function MultiAgentConsultant() {
                         }
                       }
                     }
+                  });
+                } else if (msg.content.startsWith('__NO_MORE_QUERIES__')) {
+                  const data = JSON.parse(msg.content.replace('__NO_MORE_QUERIES__', ''));
+                  toast.warning(`🔚 Ho esaurito le query`, {
+                    description: `Provate ${data.totalAttempts} varianti di ricerca per "${data.originalTopic}"`,
+                    duration: 8000,
                   });
                 }
               } catch (e) {
