@@ -234,8 +234,12 @@ serve(async (req) => {
       }
     }
     
-    // 🔄 SUGGERIMENTO AUTOMATICO NUOVA QUERY
+    // 🔄 SUGGERIMENTO AUTOMATICO NUOVA QUERY (con delay per dare tempo all'agente)
     try {
+      // ⏰ RITARDO di 15 secondi per permettere all'agente di completare la risposta
+      console.log(`\n⏰ [AUTO-SUGGEST] Waiting 15 seconds before suggesting next query...`);
+      await new Promise(resolve => setTimeout(resolve, 15000));
+      
       // Prendi la topic dalla prima entry della coda
       const firstPdf = pendingPdfs[0];
       if (firstPdf?.search_query) {
