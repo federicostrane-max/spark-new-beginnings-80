@@ -16,26 +16,18 @@ interface RepairResult {
 }
 
 function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  
-  // Skip if text is too large (> 5MB)
-  if (text.length > 5000000) {
-    console.log(`[repair-documents] Text too large (${text.length} chars), splitting into larger chunks`);
+  // For very large texts, use larger chunks to prevent stack overflow
+  if (text.length > 1000000) {
     chunkSize = 5000;
     overlap = 500;
   }
   
-  while (start < text.length) {
+  const chunks: string[] = [];
+  const maxChunks = 5000; // Hard limit to prevent memory issues
+  
+  for (let start = 0; start < text.length && chunks.length < maxChunks; start += chunkSize - overlap) {
     const end = Math.min(start + chunkSize, text.length);
-    chunks.push(text.slice(start, end));
-    start += chunkSize - overlap;
-    
-    // Safety check to prevent infinite loops
-    if (chunks.length > 10000) {
-      console.log(`[repair-documents] Too many chunks (${chunks.length}), stopping`);
-      break;
-    }
+    chunks.push(text.substring(start, end));
   }
   
   return chunks;
@@ -62,17 +54,17 @@ serve(async (req) => {
 
     console.log('[repair-documents] Starting repair process...');
 
-    // 1. Find documents validated but without chunks (LIMIT 5 at a time)
+    // 1. Find documents validated but without chunks (LIMIT 3 at a time for stability)
     const { data: validatedDocs, error: validatedError } = await supabase
       .from('knowledge_documents')
       .select('id, file_name, file_path')
       .eq('validation_status', 'validated')
       .eq('processing_status', 'ready_for_assignment')
-      .limit(5);
+      .limit(3);
 
     if (validatedError) throw validatedError;
 
-    console.log(`[repair-documents] Found ${validatedDocs?.length || 0} validated documents (processing max 5)`);
+    console.log(`[repair-documents] Found ${validatedDocs?.length || 0} validated documents (processing max 3)`);
 
     // Check which ones actually need chunks
     const docsNeedingChunks = [];
@@ -95,30 +87,35 @@ serve(async (req) => {
       try {
         console.log(`[repair-documents] Creating chunks for ${doc.file_name}`);
 
-        // Download PDF - try different path patterns
+        // Download PDF - try multiple path patterns
         let fileData;
         let downloadError;
         
-        // Try direct path first
-        const downloadResult = await supabase.storage
-          .from('knowledge-pdfs')
-          .download(doc.file_path);
+        // List of paths to try
+        const pathsToTry = [
+          doc.file_path,
+          doc.file_path.replace('shared-pool-uploads/', ''),
+          `shared-pool-uploads/${doc.file_name}`,
+          doc.file_name
+        ];
         
-        fileData = downloadResult.data;
-        downloadError = downloadResult.error;
-        
-        // If failed, try without shared-pool-uploads prefix
-        if (downloadError && doc.file_path.includes('shared-pool-uploads/')) {
-          const altPath = doc.file_path.replace('shared-pool-uploads/', '');
-          console.log(`[repair-documents] Retrying with path: ${altPath}`);
-          const retryResult = await supabase.storage
+        for (const path of pathsToTry) {
+          const result = await supabase.storage
             .from('knowledge-pdfs')
-            .download(altPath);
-          fileData = retryResult.data;
-          downloadError = retryResult.error;
+            .download(path);
+          
+          if (!result.error && result.data) {
+            fileData = result.data;
+            downloadError = null;
+            console.log(`[repair-documents] Successfully downloaded using path: ${path}`);
+            break;
+          }
+          downloadError = result.error;
         }
 
-        if (downloadError || !fileData) throw downloadError || new Error('No file data');
+        if (downloadError || !fileData) {
+          throw new Error(`File not found in storage. Tried paths: ${pathsToTry.join(', ')}`);
+        }
 
         // Convert to base64 for OCR
         const arrayBuffer = await fileData.arrayBuffer();
@@ -139,60 +136,90 @@ serve(async (req) => {
         const fullText = ocrData.text;
         console.log(`[repair-documents] Extracted ${fullText.length} chars of text`);
         
-        // Skip if text is too large (> 10MB)
-        if (fullText.length > 10000000) {
+        // Skip if text is too large (> 5MB for safety)
+        if (fullText.length > 5000000) {
           throw new Error(`Text too large (${fullText.length} chars), skipping to prevent timeout`);
         }
 
-        // Create chunks
-        const textChunks = chunkText(fullText);
-        console.log(`[repair-documents] Created ${textChunks.length} chunks`);
+        // Create chunks with error handling
+        let textChunks: string[];
+        try {
+          textChunks = chunkText(fullText);
+          console.log(`[repair-documents] Created ${textChunks.length} chunks`);
+        } catch (chunkError: any) {
+          throw new Error(`Failed to chunk text: ${chunkError.message}`);
+        }
+        
+        // Limit chunks to prevent timeout
+        if (textChunks.length > 1000) {
+          console.log(`[repair-documents] Too many chunks (${textChunks.length}), limiting to 1000`);
+          textChunks = textChunks.slice(0, 1000);
+        }
 
-        // Process chunks in batches
-        const batchSize = 10;
+        // Process chunks in smaller batches with rate limiting
+        const batchSize = 5; // Reduced for stability
         for (let i = 0; i < textChunks.length; i += batchSize) {
           const batch = textChunks.slice(i, i + batchSize);
           
           await Promise.all(batch.map(async (chunkContent) => {
-            // Generate embedding
-            const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${openAIApiKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                model: 'text-embedding-3-small',
-                input: chunkContent,
-              }),
-            });
+            try {
+              // Generate embedding with retry
+              let embeddingData;
+              let retries = 2;
+              
+              while (retries > 0) {
+                const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${openAIApiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    model: 'text-embedding-3-small',
+                    input: chunkContent.substring(0, 8000), // Limit input size
+                  }),
+                });
 
-            if (!embeddingResponse.ok) {
-              throw new Error(`OpenAI embedding failed: ${embeddingResponse.statusText}`);
+                if (embeddingResponse.ok) {
+                  embeddingData = await embeddingResponse.json();
+                  break;
+                }
+                
+                retries--;
+                if (retries === 0) {
+                  throw new Error(`OpenAI embedding failed: ${embeddingResponse.statusText}`);
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+
+              const embedding = embeddingData.data[0].embedding;
+
+              // Insert chunk into agent_knowledge with agent_id = null (shared pool)
+              const { error: insertError } = await supabase
+                .from('agent_knowledge')
+                .insert({
+                  agent_id: null,
+                  pool_document_id: doc.id,
+                  document_name: doc.file_name,
+                  content: chunkContent,
+                  category: 'pool_document',
+                  summary: null,
+                  embedding: embedding,
+                  source_type: 'shared_pool',
+                  is_active: true
+                });
+
+              if (insertError) throw insertError;
+            } catch (chunkInsertError: any) {
+              console.error(`[repair-documents] Failed to process chunk: ${chunkInsertError.message}`);
+              // Continue with other chunks even if one fails
             }
-
-            const embeddingData = await embeddingResponse.json();
-            const embedding = embeddingData.data[0].embedding;
-
-            // Insert chunk into agent_knowledge with agent_id = null (shared pool)
-            const { error: insertError } = await supabase
-              .from('agent_knowledge')
-              .insert({
-                agent_id: null,
-                pool_document_id: doc.id,
-                document_name: doc.file_name,
-                content: chunkContent,
-                category: 'pool_document',
-                summary: null,
-                embedding: embedding,
-                source_type: 'shared_pool',
-                is_active: true
-              });
-
-            if (insertError) throw insertError;
           }));
 
           console.log(`[repair-documents] Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(textChunks.length / batchSize)}`);
+          
+          // Rate limiting between batches
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         // Update document status to completed
