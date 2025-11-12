@@ -3536,14 +3536,28 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               if (isThinkingModel) {
                 requestBody.temperature = 1.0; // Recommended for K2 Thinking
                 requestBody.max_tokens = 32000; // High limit for thinking models (minimum 16000)
-                requestBody.reasoning = { max_tokens: 16000 }; // Enable reasoning output for OpenRouter with max_tokens
-                console.log(`🧠 [REQ-${requestId}] Thinking model detected - temperature=1.0, max_tokens=32000, reasoning_max_tokens=16000`);
+                requestBody.reasoning = { maxTokens: 16000 }; // ✅ FIXED: camelCase as per OpenRouter docs
+                console.log(`🧠 [REQ-${requestId}] Thinking model config:`, {
+                  temperature: requestBody.temperature,
+                  max_tokens: requestBody.max_tokens,
+                  reasoning: requestBody.reasoning
+                });
               } else {
                 requestBody.temperature = 0.7;
                 requestBody.max_tokens = 4000;
               }
               
-              console.log(`📤 [REQ-${requestId}] OpenRouter request - model: ${selectedModel}, temp: ${requestBody.temperature}, max_tokens: ${requestBody.max_tokens}, reasoning: ${JSON.stringify(requestBody.reasoning) || false}`);
+              console.log(`📤 [REQ-${requestId}] OpenRouter request payload:`, {
+                model: selectedModel,
+                temperature: requestBody.temperature,
+                max_tokens: requestBody.max_tokens,
+                reasoning: requestBody.reasoning || 'not set',
+                stream: requestBody.stream,
+                messages_count: requestBody.messages.length,
+                system_prompt_length: requestBody.messages[0]?.content?.length || 0
+              });
+              
+              console.log(`📤 [REQ-${requestId}] Full request body:`, JSON.stringify(requestBody, null, 2));
               
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
@@ -3556,6 +3570,9 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 body: JSON.stringify(requestBody),
                 signal: controller.signal
               });
+              
+              console.log(`📥 [REQ-${requestId}] OpenRouter response status: ${response.status}`);
+              console.log(`📥 [REQ-${requestId}] Response headers:`, Object.fromEntries(response.headers.entries()));
               
             } else {
               // Default: Anthropic
@@ -3674,8 +3691,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
               if (done) {
                 const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
-                console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
-                console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
+                console.log(`✅ [REQ-${requestId}] Stream COMPLETED:`, {
+                  provider: llmProvider,
+                  duration_seconds: totalDuration,
+                  total_chunks: chunkCount,
+                  response_length: fullResponse.length,
+                  reasoning_length: reasoningContent.length
+                });
                 clearInterval(keepAliveInterval);
                 // Save before breaking
                 await supabase
@@ -3710,6 +3732,56 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   if (anthropicTimeout && chunkCount === 1) {
                     clearTimeout(anthropicTimeout);
                     console.log('✅ First chunk received, Anthropic timeout cleared');
+                  }
+                  
+                  // 🔍 DETAILED LOGGING FOR OPENROUTER CHUNKS
+                  if (llmProvider === 'openrouter') {
+                    console.log(`🔍 [REQ-${requestId}] OpenRouter Chunk #${chunkCount}:`, {
+                      has_choices: !!parsed.choices,
+                      has_delta: !!parsed.choices?.[0]?.delta,
+                      has_message: !!parsed.choices?.[0]?.message,
+                      delta_keys: parsed.choices?.[0]?.delta ? Object.keys(parsed.choices[0].delta) : [],
+                      message_keys: parsed.choices?.[0]?.message ? Object.keys(parsed.choices[0].message) : [],
+                      reasoning_details_count: parsed.choices?.[0]?.message?.reasoning_details?.length || 0,
+                      has_reasoning_content: !!parsed.choices?.[0]?.delta?.reasoning_content,
+                      has_content: !!parsed.choices?.[0]?.delta?.content,
+                      has_tool_calls: !!parsed.choices?.[0]?.delta?.tool_calls,
+                      finish_reason: parsed.choices?.[0]?.finish_reason || null
+                    });
+                    
+                    // Log reasoning_details if present
+                    if (parsed.choices?.[0]?.message?.reasoning_details) {
+                      console.log(`🧠 [REQ-${requestId}] reasoning_details found:`, 
+                        parsed.choices[0].message.reasoning_details.map((d: any) => ({
+                          type: d.type,
+                          text_length: d.text?.length || 0,
+                          text_preview: d.text?.slice(0, 100)
+                        }))
+                      );
+                    }
+                    
+                    // Log reasoning_content if present
+                    if (parsed.choices?.[0]?.delta?.reasoning_content) {
+                      console.log(`🧠 [REQ-${requestId}] reasoning_content chunk:`, {
+                        length: parsed.choices[0].delta.reasoning_content.length,
+                        preview: parsed.choices[0].delta.reasoning_content.slice(0, 100)
+                      });
+                    }
+                    
+                    // Log content if present
+                    if (parsed.choices?.[0]?.delta?.content) {
+                      console.log(`💬 [REQ-${requestId}] content chunk:`, {
+                        length: parsed.choices[0].delta.content.length,
+                        preview: parsed.choices[0].delta.content.slice(0, 100)
+                      });
+                    }
+                    
+                    // Log tool_calls if present
+                    if (parsed.choices?.[0]?.delta?.tool_calls) {
+                      console.log(`🔧 [REQ-${requestId}] tool_calls detected:`, 
+                        JSON.stringify(parsed.choices[0].delta.tool_calls, null, 2)
+                      );
+                    }
                   }
                   
                   // Log chunk details for debugging
