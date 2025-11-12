@@ -246,6 +246,25 @@ export default function MultiAgentConsultant() {
                     description: data.reason,
                     duration: 8000,
                   });
+                } else if (msg.content.startsWith('__PDF_PROCESSING_SUMMARY__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_PROCESSING_SUMMARY__', ''));
+                  if (data.status === 'all_failed') {
+                    toast.error(`❌ Tutti i PDF sono falliti`, {
+                      description: `${data.failed} su ${data.total} download non riusciti`,
+                      duration: 10000,
+                    });
+                  } else {
+                    toast.warning(`⚠️ Download completato con errori`, {
+                      description: `✅ ${data.processed} riusciti, ❌ ${data.failed} falliti su ${data.total} totali`,
+                      duration: 10000,
+                    });
+                  }
+                } else if (msg.content.startsWith('__PDF_PROCESSING_COMPLETE__')) {
+                  const data = JSON.parse(msg.content.replace('__PDF_PROCESSING_COMPLETE__', ''));
+                  toast.success(`✅ Download completato`, {
+                    description: `${data.processed} PDF scaricati su ${data.total}`,
+                    duration: 6000,
+                  });
                 }
               } catch (e) {
                 console.error('Failed to parse PDF notification data:', e);

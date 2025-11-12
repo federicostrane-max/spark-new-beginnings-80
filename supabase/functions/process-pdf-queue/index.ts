@@ -89,16 +89,35 @@ serve(async (req) => {
           
           if (downloadError) {
             console.error(`  ❌ Download failed:`, downloadError);
+            const errorMsg = downloadError.message || 'Download fallito';
             
             // Update queue status to failed
             await supabase
               .from('pdf_download_queue')
               .update({ 
                 status: 'failed',
-                error_message: downloadError.message || 'Download failed',
+                error_message: errorMsg,
                 completed_at: new Date().toISOString()
               })
               .eq('id', queueItem.id);
+            
+            // 📬 NOTIFICA FALLIMENTO ALL'UTENTE
+            try {
+              await supabase
+                .from('agent_messages')
+                .insert({
+                  conversation_id: queueItem.conversation_id,
+                  role: 'system',
+                  content: `__PDF_DOWNLOAD_FAILED__${JSON.stringify({
+                    title: queueItem.expected_title || 'Document',
+                    reason: errorMsg,
+                    url: queueItem.url
+                  })}`
+                });
+              console.log(`  📬 Notifica fallimento inviata per: ${queueItem.expected_title}`);
+            } catch (notifError) {
+              console.warn('  ⚠️ Failed to send failure notification:', notifError);
+            }
             
             failed++;
             return { success: false, title: queueItem.expected_title };
@@ -120,15 +139,34 @@ serve(async (req) => {
           
         } catch (error) {
           console.error(`  ❌ Error processing ${queueItem.expected_title}:`, error);
+          const errorMsg = error instanceof Error ? error.message : 'Errore sconosciuto';
           
           await supabase
             .from('pdf_download_queue')
             .update({ 
               status: 'failed',
-              error_message: error instanceof Error ? error.message : 'Unknown error',
+              error_message: errorMsg,
               completed_at: new Date().toISOString()
             })
             .eq('id', queueItem.id);
+          
+          // 📬 NOTIFICA ERRORE ALL'UTENTE
+          try {
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: queueItem.conversation_id,
+                role: 'system',
+                content: `__PDF_DOWNLOAD_FAILED__${JSON.stringify({
+                  title: queueItem.expected_title || 'Document',
+                  reason: errorMsg,
+                  url: queueItem.url
+                })}`
+              });
+            console.log(`  📬 Notifica errore inviata per: ${queueItem.expected_title}`);
+          } catch (notifError) {
+            console.warn('  ⚠️ Failed to send error notification:', notifError);
+          }
           
           failed++;
           return { success: false, title: queueItem.expected_title };
@@ -146,6 +184,34 @@ serve(async (req) => {
     console.log(`\n✅ [QUEUE PROCESSOR] Completed`);
     console.log(`   Processed: ${processed}`);
     console.log(`   Failed: ${failed}`);
+    
+    // 📬 NOTIFICA RIEPILOGO FINALE
+    if (failed > 0 || processed > 0) {
+      try {
+        const summaryMessage = failed > 0 
+          ? `__PDF_PROCESSING_SUMMARY__${JSON.stringify({
+              total: pendingPdfs.length,
+              processed,
+              failed,
+              status: failed === pendingPdfs.length ? 'all_failed' : 'partial_success'
+            })}`
+          : `__PDF_PROCESSING_COMPLETE__${JSON.stringify({
+              total: pendingPdfs.length,
+              processed
+            })}`;
+        
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: conversationId,
+            role: 'system',
+            content: summaryMessage
+          });
+        console.log(`  📬 Notifica riepilogo inviata`);
+      } catch (notifError) {
+        console.warn('  ⚠️ Failed to send summary notification:', notifError);
+      }
+    }
     
     return new Response(
       JSON.stringify({ 
