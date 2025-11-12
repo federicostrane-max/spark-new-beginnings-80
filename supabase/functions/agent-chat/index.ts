@@ -3471,19 +3471,40 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 ...anthropicMessages
               ];
               
+              const requestBody: any = {
+                model: 'deepseek-chat',
+                messages: deepseekMessages,
+                temperature: 0.7,
+                max_tokens: 4000,
+                stream: true
+              };
+
+              // Add tools if agent has them (convert from Anthropic to OpenAI format)
+              if (tools && tools.length > 0 && agent.slug === 'book-serach-expert') {
+                const openaiTools = tools
+                  .filter(t => t.name === 'search_and_acquire_pdfs')
+                  .map(tool => ({
+                    type: 'function',
+                    function: {
+                      name: tool.name,
+                      description: tool.description,
+                      parameters: tool.input_schema
+                    }
+                  }));
+                
+                if (openaiTools.length > 0) {
+                  requestBody.tools = openaiTools;
+                  console.log(`🔧 [REQ-${requestId}] Added ${openaiTools.length} tools to DeepSeek request`);
+                }
+              }
+              
               response = await fetch('https://api.deepseek.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                  model: 'deepseek-chat',
-                  messages: deepseekMessages,
-                  temperature: 0.7,
-                  max_tokens: 4000,
-                  stream: true
-                }),
+                body: JSON.stringify(requestBody),
                 signal: controller.signal
               });
               
@@ -3793,8 +3814,32 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   
                   // Handle DeepSeek streaming format
                   if (llmProvider === 'deepseek') {
-                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                      const newText = parsed.choices[0].delta.content;
+                    const delta = parsed.choices?.[0]?.delta;
+                    
+                    // Handle tool calls
+                    if (delta?.tool_calls) {
+                      console.log(`🔧 [REQ-${requestId}] DeepSeek tool calls detected:`, 
+                        JSON.stringify(delta.tool_calls, null, 2)
+                      );
+                      
+                      for (const toolCall of delta.tool_calls) {
+                        const toolName = toolCall.function?.name;
+                        
+                        if (!toolUseId && toolCall.id) {
+                          toolUseId = toolCall.id;
+                          toolUseName = toolName;
+                          toolUseInputJson = toolCall.function?.arguments || '';
+                          console.log(`🔧 Tool use started: ${toolUseName}`);
+                        } else if (toolCall.function?.arguments) {
+                          // Accumulate arguments
+                          toolUseInputJson += toolCall.function.arguments;
+                        }
+                      }
+                    }
+                    
+                    // Handle regular content
+                    if (delta?.content) {
+                      const newText = delta.content;
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
@@ -3814,6 +3859,84 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                         lastUpdateTime = now;
                       }
                     }
+                    
+                    // Handle finish_reason (tool execution trigger)
+                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseId && toolUseInputJson) {
+                      console.log('🔧 DeepSeek tool use complete, input JSON:', toolUseInputJson);
+                      
+                      try {
+                        const toolInput = JSON.parse(toolUseInputJson);
+                        let toolResult: any = null;
+                        
+                        // Execute search_and_acquire_pdfs tool
+                        if (toolUseName === 'search_and_acquire_pdfs') {
+                          toolCallCount++;
+                          console.log(`🛠️ [REQ-${requestId}] Tool called: search_and_acquire_pdfs`);
+                          console.log('   Input:', JSON.stringify(toolInput));
+                          
+                          try {
+                            const { data: acquireData, error: acquireError } = await supabase.functions.invoke(
+                              'search-and-acquire-pdfs',
+                              {
+                                body: {
+                                  agentId: agent.id,
+                                  conversationId,
+                                  ...toolInput
+                                },
+                                headers: {
+                                  authorization: req.headers.get('Authorization') || ''
+                                }
+                              }
+                            );
+                            
+                            if (acquireError) {
+                              console.error('❌ Tool execution error:', acquireError);
+                              const errorText = `\n\n❌ Errore durante l'esecuzione: ${acquireError.message}\n\n`;
+                              fullResponse += errorText;
+                              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                            } else {
+                              console.log('✅ Tool execution successful:', acquireData);
+                              
+                              // Format and send result
+                              let resultText = '';
+                              if (acquireData.message) {
+                                resultText = `\n\n${acquireData.message}`;
+                              }
+                              
+                              if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
+                                resultText += `\n\n📚 **PDF trovati:**\n`;
+                                acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
+                                  resultText += `\n${idx + 1}. **${pdf.title}**`;
+                                  if (pdf.url) resultText += `\n   🔗 ${pdf.url}`;
+                                  if (pdf.source) resultText += `\n   📍 Fonte: ${pdf.source}`;
+                                  resultText += '\n';
+                                });
+                                resultText += `\n💡 Vuoi scaricare qualche PDF? (es. "scarica il primo", "scarica tutti")`;
+                              }
+                              
+                              if (resultText) {
+                                fullResponse += resultText;
+                                await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
+                              }
+                            }
+                          } catch (err) {
+                            console.error('❌ Tool execution failed:', err);
+                            const errorText = `\n\nErrore nell'esecuzione dello strumento: ${err instanceof Error ? err.message : 'Unknown error'}`;
+                            fullResponse += errorText;
+                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+                          }
+                        }
+                        
+                        // Reset tool state
+                        toolUseId = null;
+                        toolUseName = null;
+                        toolUseInputJson = '';
+                        
+                      } catch (e) {
+                        console.error('❌ Failed to parse tool input JSON:', e);
+                      }
+                    }
+                    
                     continue; // Skip OpenAI/Anthropic-specific handling
                   }
                   
