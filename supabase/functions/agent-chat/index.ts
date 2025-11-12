@@ -5077,7 +5077,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
             
             // Check for empty response (only if no reasoning was provided)
-            if ((!fullResponse || fullResponse.trim().length === 0) && !fullResponse.includes('💭')) {
+            const hasReasoning = fullResponse && fullResponse.includes('💭');
+            if ((!fullResponse || fullResponse.trim().length === 0) && !hasReasoning) {
               console.warn(`⚠️ [REQ-${requestId}] Empty response detected from ${llmProvider} model: ${agent.ai_model}`);
               fullResponse = "⚠️ Il modello ha elaborato la richiesta ma non ha prodotto una risposta testuale.\n\n🔄 **Suggerimenti:**\n- Riprova riformulando la domanda\n- Oppure cambia modello nelle impostazioni agente (es. Claude 3.5 Sonnet o GPT-4o)";
               
