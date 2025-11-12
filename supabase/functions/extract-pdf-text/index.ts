@@ -46,26 +46,49 @@ serve(async (req) => {
       throw new Error('No file path provided or found');
     }
 
-    console.log(`[extract-pdf-text] Downloading PDF from storage: ${filePath}`);
+    console.log(`[extract-pdf-text] Attempting to download PDF: ${filePath}`);
 
-    // Download PDF from storage
-    const { data: pdfBlob, error: downloadError } = await supabase
-      .storage
-      .from('knowledge-pdfs')
-      .download(filePath);
+    // Try multiple storage buckets in priority order
+    const bucketsToTry = [
+      { name: 'shared-pool-uploads', path: filePath },
+      { name: 'knowledge-pdfs', path: filePath },
+      { name: 'shared-pool-uploads', path: filePath.replace('shared-pool-uploads/', '') },
+      { name: 'agent-attachments', path: filePath }
+    ];
 
-    if (downloadError || !pdfBlob) {
-      throw new Error(`Failed to download PDF: ${downloadError?.message || 'Unknown error'}`);
+    let pdfBlob = null;
+    let successfulBucket = null;
+
+    for (const bucket of bucketsToTry) {
+      console.log(`[extract-pdf-text] Trying bucket: ${bucket.name}, path: ${bucket.path}`);
+      
+      const { data, error } = await supabase.storage
+        .from(bucket.name)
+        .download(bucket.path);
+      
+      if (!error && data) {
+        pdfBlob = data;
+        successfulBucket = bucket;
+        console.log(`[extract-pdf-text] ✅ Download successful from ${bucket.name}`);
+        break;
+      }
+      
+      console.log(`[extract-pdf-text] ❌ Failed from ${bucket.name}:`, error?.message);
     }
 
-    console.log(`[extract-pdf-text] PDF downloaded, size: ${pdfBlob.size} bytes`);
+    if (!pdfBlob || !successfulBucket) {
+      const triedPaths = bucketsToTry.map(b => `${b.name}/${b.path}`).join(', ');
+      throw new Error(`File not found in any storage bucket. Tried: ${triedPaths}`);
+    }
+
+    console.log(`[extract-pdf-text] PDF downloaded from ${successfulBucket.name}, size: ${pdfBlob.size} bytes`);
 
     // Create a temporary signed URL for the PDF (valid for 5 minutes)
-    console.log('[extract-pdf-text] Creating signed URL...');
+    console.log(`[extract-pdf-text] Creating signed URL from ${successfulBucket.name}...`);
     const { data: signedUrlData, error: signedUrlError } = await supabase
       .storage
-      .from('knowledge-pdfs')
-      .createSignedUrl(filePath, 300); // 300 seconds = 5 minutes
+      .from(successfulBucket.name)
+      .createSignedUrl(successfulBucket.path, 300); // 300 seconds = 5 minutes
 
     if (signedUrlError || !signedUrlData?.signedUrl) {
       throw new Error(`Failed to create signed URL: ${signedUrlError?.message || 'Unknown error'}`);
