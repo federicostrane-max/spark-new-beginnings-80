@@ -320,6 +320,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
           .eq('id', documentId)
           .single();
         
+        // System message for toast
         await supabase
           .from('agent_messages')
           .insert({
@@ -331,7 +332,17 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
               summary: analysis.summary
             })}`
           });
-        console.log('[process-document] ✓ Processing complete notification sent');
+        
+        // Assistant message for chat feedback
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: queueData.conversation_id,
+            role: 'assistant',
+            content: `🎉 **PDF pronto per l'uso**: ${docData?.file_name || 'Unknown Document'}\n\n✨ Il documento è stato elaborato con successo e aggiunto alla document pool. È ora disponibile per essere assegnato agli agenti.\n\n📝 **Riepilogo**: ${analysis.summary}\n\n🏷️ **Parole chiave**: ${analysis.keywords.join(', ')}\n\n📚 **Argomenti**: ${analysis.topics.join(', ')}`
+          });
+        
+        console.log('[process-document] ✓ Processing complete notifications sent');
       } catch (notifError) {
         console.warn('[process-document] ⚠️ Failed to send notification:', notifError);
       }

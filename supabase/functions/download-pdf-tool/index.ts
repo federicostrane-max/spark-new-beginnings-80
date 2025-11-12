@@ -708,6 +708,7 @@ serve(async (req) => {
     if (queueEntry?.conversation_id) {
       console.log(`[download-pdf-tool] 📬 Sending download notification...`);
       try {
+        // System message for toast
         await supabase
           .from('agent_messages')
           .insert({
@@ -718,7 +719,17 @@ serve(async (req) => {
               documentId: document.id
             })}`
           });
-        console.log('[download-pdf-tool] ✓ Download notification sent');
+        
+        // Assistant message for chat feedback
+        await supabase
+          .from('agent_messages')
+          .insert({
+            conversation_id: queueEntry.conversation_id,
+            role: 'assistant',
+            content: `✅ **PDF scaricato con successo**: ${fileName}\n\n📄 Il documento è stato scaricato correttamente. Procedo ora con la validazione del contenuto...`
+          });
+        
+        console.log('[download-pdf-tool] ✓ Download notifications sent');
       } catch (notifError) {
         console.warn('[download-pdf-tool] ⚠️ Failed to send notification:', notifError);
       }
