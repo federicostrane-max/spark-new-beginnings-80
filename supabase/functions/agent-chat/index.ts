@@ -3536,14 +3536,14 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               if (isThinkingModel) {
                 requestBody.temperature = 1.0; // Recommended for K2 Thinking
                 requestBody.max_tokens = 32000; // High limit for thinking models (minimum 16000)
-                requestBody.reasoning = true; // Enable reasoning output for OpenRouter
-                console.log(`🧠 [REQ-${requestId}] Thinking model detected - temperature=1.0, max_tokens=32000, reasoning=true`);
+                requestBody.reasoning = { max_tokens: 16000 }; // Enable reasoning output for OpenRouter with max_tokens
+                console.log(`🧠 [REQ-${requestId}] Thinking model detected - temperature=1.0, max_tokens=32000, reasoning_max_tokens=16000`);
               } else {
                 requestBody.temperature = 0.7;
                 requestBody.max_tokens = 4000;
               }
               
-              console.log(`📤 [REQ-${requestId}] OpenRouter request - model: ${selectedModel}, temp: ${requestBody.temperature}, max_tokens: ${requestBody.max_tokens}, reasoning: ${requestBody.reasoning || false}`);
+              console.log(`📤 [REQ-${requestId}] OpenRouter request - model: ${selectedModel}, temp: ${requestBody.temperature}, max_tokens: ${requestBody.max_tokens}, reasoning: ${JSON.stringify(requestBody.reasoning) || false}`);
               
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
