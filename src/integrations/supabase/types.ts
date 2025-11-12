@@ -1281,6 +1281,60 @@ export type Database = {
         }
         Relationships: []
       }
+      search_query_history: {
+        Row: {
+          agent_id: string
+          conversation_id: string
+          created_at: string
+          executed_query: string
+          id: string
+          original_topic: string
+          pdfs_downloaded: number | null
+          pdfs_failed: number | null
+          query_variant_index: number
+          results_found: number | null
+        }
+        Insert: {
+          agent_id: string
+          conversation_id: string
+          created_at?: string
+          executed_query: string
+          id?: string
+          original_topic: string
+          pdfs_downloaded?: number | null
+          pdfs_failed?: number | null
+          query_variant_index: number
+          results_found?: number | null
+        }
+        Update: {
+          agent_id?: string
+          conversation_id?: string
+          created_at?: string
+          executed_query?: string
+          id?: string
+          original_topic?: string
+          pdfs_downloaded?: number | null
+          pdfs_failed?: number | null
+          query_variant_index?: number
+          results_found?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_query_history_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "search_query_history_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       search_results_cache: {
         Row: {
           authors: string | null

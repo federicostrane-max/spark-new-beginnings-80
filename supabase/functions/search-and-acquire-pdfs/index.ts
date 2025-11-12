@@ -311,10 +311,54 @@ serve(async (req) => {
       result.message = pdfsToDownload && pdfsToDownload.length > 0 
         ? `Pre-selected ${pdfsToDownload.length} PDFs but none passed validation`
         : `Found results but none passed validation`;
+      
+      // 📝 Salva query nello storico anche se non ha trovato risultati
+      if (topic) {
+        try {
+          await supabase
+            .from('search_query_history')
+            .insert({
+              conversation_id: conversationId,
+              agent_id: agentId,
+              original_topic: topic,
+              executed_query: topic,
+              query_variant_index: 0,
+              results_found: 0,
+              pdfs_downloaded: 0,
+              pdfs_failed: 0
+            });
+          console.log(`📝 Query saved to history (no results)`);
+        } catch (historyError) {
+          console.warn('⚠️ Failed to save query history:', historyError);
+        }
+      }
+      
       return new Response(
         JSON.stringify(result),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+    
+    // 📝 SALVA QUERY NELLO STORICO
+    if (topic) {
+      try {
+        await supabase
+          .from('search_query_history')
+          .insert({
+            conversation_id: conversationId,
+            agent_id: agentId,
+            original_topic: topic,
+            executed_query: topic,
+            query_variant_index: 0,
+            results_found: validatedPdfs.length,
+            pdfs_downloaded: 0,
+            pdfs_failed: 0
+          });
+        console.log(`📝 Query "${topic}" saved to history (${validatedPdfs.length} results)`);
+      } catch (historyError) {
+        console.warn('⚠️ Failed to save query history:', historyError);
+        // Non bloccare il flusso se il salvataggio fallisce
+      }
     }
     
     // Check duplicates and queue for download

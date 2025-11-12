@@ -265,6 +265,38 @@ export default function MultiAgentConsultant() {
                     description: `${data.processed} PDF scaricati su ${data.total}`,
                     duration: 6000,
                   });
+                } else if (msg.content.startsWith('__QUERY_SUGGESTION__')) {
+                  const data = JSON.parse(msg.content.replace('__QUERY_SUGGESTION__', ''));
+                  toast.info(`💡 Provo un'altra ricerca?`, {
+                    description: `Query ${data.variantIndex}/${data.totalVariants}: "${data.nextQuery}"`,
+                    duration: 15000,
+                    action: {
+                      label: "Sì, prova!",
+                      onClick: async () => {
+                        try {
+                          // Esegui la nuova ricerca
+                          const { error } = await supabase.functions.invoke('search-and-acquire-pdfs', {
+                            body: { 
+                              topic: data.nextQuery,
+                              maxBooks: 5 
+                            }
+                          });
+                          
+                          if (error) {
+                            toast.error("Errore durante la ricerca", {
+                              description: error.message
+                            });
+                          } else {
+                            toast.success("Ricerca avviata", {
+                              description: `Cerco PDF con: "${data.nextQuery}"`
+                            });
+                          }
+                        } catch (e) {
+                          console.error('Error executing suggested query:', e);
+                        }
+                      }
+                    }
+                  });
                 }
               } catch (e) {
                 console.error('Failed to parse PDF notification data:', e);

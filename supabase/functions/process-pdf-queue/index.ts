@@ -213,6 +213,64 @@ serve(async (req) => {
       }
     }
     
+    // 🔄 SUGGERIMENTO AUTOMATICO NUOVA QUERY
+    try {
+      // Prendi la topic dalla prima entry della coda
+      const firstPdf = pendingPdfs[0];
+      if (firstPdf?.search_query) {
+        console.log(`\n🤔 [AUTO-SUGGEST] Checking for next query suggestion...`);
+        
+        // Estrai la topic originale rimuovendo "User selected: " se presente
+        let originalTopic = firstPdf.search_query.replace(/^User selected:\s*/i, '').trim();
+        
+        // Chiama la funzione suggest-next-query
+        const { data: agentData } = await supabase
+          .from('agent_conversations')
+          .select('agent_id')
+          .eq('id', conversationId)
+          .single();
+        
+        if (agentData?.agent_id) {
+          const { data: suggestionData, error: suggestionError } = await supabase.functions.invoke(
+            'suggest-next-query',
+            {
+              body: {
+                conversationId,
+                agentId: agentData.agent_id,
+                originalTopic
+              }
+            }
+          );
+          
+          if (!suggestionError && suggestionData?.hasNextQuery) {
+            console.log(`  ✨ Next query suggested: "${suggestionData.nextQuery}"`);
+            
+            // Invia messaggio propositivo all'utente
+            await supabase
+              .from('agent_messages')
+              .insert({
+                conversation_id: conversationId,
+                role: 'system',
+                content: `__QUERY_SUGGESTION__${JSON.stringify({
+                  originalTopic,
+                  nextQuery: suggestionData.nextQuery,
+                  variantIndex: suggestionData.variantIndex + 1,
+                  totalVariants: suggestionData.totalVariants,
+                  executedCount: suggestionData.executedCount
+                })}`
+              });
+            
+            console.log(`  📬 Query suggestion sent to user`);
+          } else if (suggestionData && !suggestionData.hasNextQuery) {
+            console.log(`  ℹ️ All query variants exhausted for this topic`);
+          }
+        }
+      }
+    } catch (suggestError) {
+      console.warn('  ⚠️ Failed to suggest next query:', suggestError);
+      // Non bloccare il flusso se il suggerimento fallisce
+    }
+    
     return new Response(
       JSON.stringify({ 
         success: true,
