@@ -48,11 +48,16 @@ serve(async (req) => {
 
     console.log(`[extract-pdf-text] Attempting to download PDF: ${filePath}`);
 
+    // Extract clean filename without 'shared-pool-uploads/' prefix
+    const cleanFileName = filePath.replace(/^shared-pool-uploads\//, '');
+    console.log(`[extract-pdf-text] Original file_path: ${filePath}`);
+    console.log(`[extract-pdf-text] Clean filename: ${cleanFileName}`);
+
     // Try multiple storage buckets in priority order
     const bucketsToTry = [
-      { name: 'shared-pool-uploads', path: filePath },
+      { name: 'shared-pool-uploads', path: cleanFileName },
       { name: 'knowledge-pdfs', path: filePath },
-      { name: 'shared-pool-uploads', path: filePath.replace('shared-pool-uploads/', '') },
+      { name: 'shared-pool-uploads', path: filePath },
       { name: 'agent-attachments', path: filePath }
     ];
 
