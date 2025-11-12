@@ -541,6 +541,9 @@ serve(async (req) => {
       });
     }
     
+    // 🚨 CRITICAL: Assign failedPdfs to result so it gets returned
+    result.failed_pdfs = failedPdfs;
+    
     result.message = `Found ${result.pdfs_found} PDFs: ${result.pdfs_queued} queued for download, ${result.pdfs_already_existing} already in pool`;
     
     console.log(`\n✅ [SEARCH & ACQUIRE] Completed!`);
@@ -548,6 +551,10 @@ serve(async (req) => {
     console.log(`   📥 PDFs queued: ${result.pdfs_queued}`);
     console.log(`   ♻️ Already existing: ${result.pdfs_already_existing}`);
     console.log(`   ❌ Failed: ${result.pdfs_failed}`);
+    if (failedPdfs.length > 0) {
+      console.log(`   ⚠️ Failed PDFs with reasons:`);
+      failedPdfs.forEach(f => console.log(`      • ${f.title}: ${f.reason}`));
+    }
     
     return new Response(
       JSON.stringify(result),
