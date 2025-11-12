@@ -2127,11 +2127,9 @@ Deno.serve(async (req) => {
     // Validate that user message doesn't contain system-generated patterns
     // Skip validation for messages with @tags (meta-discussion about the system)
     // Skip validation for inter-agent consultations (skipSystemValidation flag)
-    // Apply validation ONLY for Book Search Expert (to prevent re-sending its responses)
     const hasAgentTags = mentionedAgentSlugs.length > 0;
-    const isBookSearchExpert = agent.slug === 'book-search-expert';
     
-    if (!hasAgentTags && !skipSystemValidation && isBookSearchExpert) {
+    if (!hasAgentTags && !skipSystemValidation) {
       const systemPatterns = [
         /^Ho trovato \d+ PDF/i,
         /Confermi il download/i,
@@ -2144,7 +2142,7 @@ Deno.serve(async (req) => {
       const looksLikeSystemMessage = systemPatterns.some(pattern => pattern.test(message));
       
       if (looksLikeSystemMessage) {
-        console.error('⚠️ [VALIDATION] Detected Book Search Expert response in user message:', message);
+        console.error('⚠️ [VALIDATION] Detected system-like content in user message:', message);
         throw new Error('Invalid user message: contains system-generated content');
       }
     }
@@ -2583,7 +2581,6 @@ Deno.serve(async (req) => {
           }));
 
           let fullResponse = '';
-          let reasoningContent = ''; // Track reasoning separately (for thinking models like Kimi K2)
           let lastUpdateTime = Date.now();
           let toolUseId: string | null = null;
           let toolUseName: string | null = null;
@@ -3471,40 +3468,19 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 ...anthropicMessages
               ];
               
-              const requestBody: any = {
-                model: 'deepseek-chat',
-                messages: deepseekMessages,
-                temperature: 0.7,
-                max_tokens: 4000,
-                stream: true
-              };
-
-              // Add tools if agent has them (convert from Anthropic to OpenAI format)
-              if (tools && tools.length > 0 && agent.slug === 'book-serach-expert') {
-                const openaiTools = tools
-                  .filter(t => t.name === 'search_and_acquire_pdfs')
-                  .map(tool => ({
-                    type: 'function',
-                    function: {
-                      name: tool.name,
-                      description: tool.description,
-                      parameters: tool.input_schema
-                    }
-                  }));
-                
-                if (openaiTools.length > 0) {
-                  requestBody.tools = openaiTools;
-                  console.log(`🔧 [REQ-${requestId}] Added ${openaiTools.length} tools to DeepSeek request`);
-                }
-              }
-              
               response = await fetch('https://api.deepseek.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
                   'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify({
+                  model: 'deepseek-chat',
+                  messages: deepseekMessages,
+                  temperature: 0.7,
+                  max_tokens: 4000,
+                  stream: true
+                }),
                 signal: controller.signal
               });
               
@@ -3535,67 +3511,34 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             } else if (llmProvider === 'openrouter') {
               // OpenRouter implementation (streaming) - access to 100+ models
               const selectedModel = aiModel || 'deepseek/deepseek-chat'; // Use agent's model or default
-              
               console.log('🚀 ROUTING TO OPENROUTER');
-              console.log(`   Selected Model: ${selectedModel}`);
+              console.log(`   Model: ${selectedModel}`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
               
               const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
               if (!OPENROUTER_API_KEY) {
-                throw new Error('OPENROUTER_API_KEY not configured');
+                throw new Error('OPENROUTER_API_KEY is required but not set');
               }
-              
-              // Prepare body with optimized settings for thinking models like Kimi K2
-              const isThinkingModel = selectedModel.includes('kimi-k2') || selectedModel.includes('thinking');
-              const requestBody: any = {
-                model: selectedModel,
-                messages: [
-                  { role: 'system', content: enhancedSystemPrompt },
-                  ...anthropicMessages
-                ],
-                stream: true
-              };
-              
-              // Apply specific configurations for thinking models
-              if (isThinkingModel) {
-                requestBody.temperature = 1.0; // Recommended for K2 Thinking
-                requestBody.max_tokens = 32000; // High limit for thinking models (minimum 16000)
-                requestBody.reasoning = { maxTokens: 16000 }; // ✅ FIXED: camelCase as per OpenRouter docs
-                console.log(`🧠 [REQ-${requestId}] Thinking model config:`, {
-                  temperature: requestBody.temperature,
-                  max_tokens: requestBody.max_tokens,
-                  reasoning: requestBody.reasoning
-                });
-              } else {
-                requestBody.temperature = 0.7;
-                requestBody.max_tokens = 4000;
-              }
-              
-              console.log(`📤 [REQ-${requestId}] OpenRouter request payload:`, {
-                model: selectedModel,
-                temperature: requestBody.temperature,
-                max_tokens: requestBody.max_tokens,
-                reasoning: requestBody.reasoning || 'not set',
-                stream: requestBody.stream,
-                messages_count: requestBody.messages.length,
-                system_prompt_length: requestBody.messages[0]?.content?.length || 0
-              });
-              
-              console.log(`📤 [REQ-${requestId}] Full request body:`, JSON.stringify(requestBody, null, 2));
               
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
-                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
                   'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
                   'HTTP-Referer': 'https://lovable.dev',
                   'X-Title': 'Multi-Agent Consultant',
                 },
-                body: JSON.stringify(requestBody),
+                body: JSON.stringify({
+                  model: selectedModel,
+                  messages: [
+                    { role: 'system', content: enhancedSystemPrompt },
+                    ...anthropicMessages
+                  ],
+                  temperature: 0.7,
+                  stream: true
+                }),
                 signal: controller.signal
               });
-              
-              console.log(`📥 [REQ-${requestId}] OpenRouter response status: ${response.status}`);
-              console.log(`📥 [REQ-${requestId}] Response headers:`, Object.fromEntries(response.headers.entries()));
               
             } else {
               // Default: Anthropic
@@ -3714,13 +3657,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
               if (done) {
                 const totalDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
-                console.log(`✅ [REQ-${requestId}] Stream COMPLETED:`, {
-                  provider: llmProvider,
-                  duration_seconds: totalDuration,
-                  total_chunks: chunkCount,
-                  response_length: fullResponse.length,
-                  reasoning_length: reasoningContent.length
-                });
+                console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
+                console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
                 clearInterval(keepAliveInterval);
                 // Save before breaking
                 await supabase
@@ -3757,56 +3695,6 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     console.log('✅ First chunk received, Anthropic timeout cleared');
                   }
                   
-                  // 🔍 DETAILED LOGGING FOR OPENROUTER CHUNKS
-                  if (llmProvider === 'openrouter') {
-                    console.log(`🔍 [REQ-${requestId}] OpenRouter Chunk #${chunkCount}:`, {
-                      has_choices: !!parsed.choices,
-                      has_delta: !!parsed.choices?.[0]?.delta,
-                      has_message: !!parsed.choices?.[0]?.message,
-                      delta_keys: parsed.choices?.[0]?.delta ? Object.keys(parsed.choices[0].delta) : [],
-                      message_keys: parsed.choices?.[0]?.message ? Object.keys(parsed.choices[0].message) : [],
-                      reasoning_details_count: parsed.choices?.[0]?.message?.reasoning_details?.length || 0,
-                      has_reasoning_content: !!parsed.choices?.[0]?.delta?.reasoning_content,
-                      has_content: !!parsed.choices?.[0]?.delta?.content,
-                      has_tool_calls: !!parsed.choices?.[0]?.delta?.tool_calls,
-                      finish_reason: parsed.choices?.[0]?.finish_reason || null
-                    });
-                    
-                    // Log reasoning_details if present
-                    if (parsed.choices?.[0]?.message?.reasoning_details) {
-                      console.log(`🧠 [REQ-${requestId}] reasoning_details found:`, 
-                        parsed.choices[0].message.reasoning_details.map((d: any) => ({
-                          type: d.type,
-                          text_length: d.text?.length || 0,
-                          text_preview: d.text?.slice(0, 100)
-                        }))
-                      );
-                    }
-                    
-                    // Log reasoning_content if present
-                    if (parsed.choices?.[0]?.delta?.reasoning_content) {
-                      console.log(`🧠 [REQ-${requestId}] reasoning_content chunk:`, {
-                        length: parsed.choices[0].delta.reasoning_content.length,
-                        preview: parsed.choices[0].delta.reasoning_content.slice(0, 100)
-                      });
-                    }
-                    
-                    // Log content if present
-                    if (parsed.choices?.[0]?.delta?.content) {
-                      console.log(`💬 [REQ-${requestId}] content chunk:`, {
-                        length: parsed.choices[0].delta.content.length,
-                        preview: parsed.choices[0].delta.content.slice(0, 100)
-                      });
-                    }
-                    
-                    // Log tool_calls if present
-                    if (parsed.choices?.[0]?.delta?.tool_calls) {
-                      console.log(`🔧 [REQ-${requestId}] tool_calls detected:`, 
-                        JSON.stringify(parsed.choices[0].delta.tool_calls, null, 2)
-                      );
-                    }
-                  }
-                  
                   // Log chunk details for debugging
                   if (llmProvider === 'anthropic') {
                     console.log(`🔍 [REQ-${requestId}] Anthropic Chunk ${chunkCount}: type=${parsed.type}`);
@@ -3814,32 +3702,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   
                   // Handle DeepSeek streaming format
                   if (llmProvider === 'deepseek') {
-                    const delta = parsed.choices?.[0]?.delta;
-                    
-                    // Handle tool calls
-                    if (delta?.tool_calls) {
-                      console.log(`🔧 [REQ-${requestId}] DeepSeek tool calls detected:`, 
-                        JSON.stringify(delta.tool_calls, null, 2)
-                      );
-                      
-                      for (const toolCall of delta.tool_calls) {
-                        const toolName = toolCall.function?.name;
-                        
-                        if (!toolUseId && toolCall.id) {
-                          toolUseId = toolCall.id;
-                          toolUseName = toolName;
-                          toolUseInputJson = toolCall.function?.arguments || '';
-                          console.log(`🔧 Tool use started: ${toolUseName}`);
-                        } else if (toolCall.function?.arguments) {
-                          // Accumulate arguments
-                          toolUseInputJson += toolCall.function.arguments;
-                        }
-                      }
-                    }
-                    
-                    // Handle regular content
-                    if (delta?.content) {
-                      const newText = delta.content;
+                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
@@ -3859,132 +3723,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                         lastUpdateTime = now;
                       }
                     }
-                    
-                    // Handle finish_reason (tool execution trigger)
-                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseId && toolUseInputJson) {
-                      console.log('🔧 DeepSeek tool use complete, input JSON:', toolUseInputJson);
-                      
-                      try {
-                        const toolInput = JSON.parse(toolUseInputJson);
-                        let toolResult: any = null;
-                        
-                        // Execute search_and_acquire_pdfs tool
-                        if (toolUseName === 'search_and_acquire_pdfs') {
-                          toolCallCount++;
-                          console.log(`🛠️ [REQ-${requestId}] Tool called: search_and_acquire_pdfs`);
-                          console.log('   Input:', JSON.stringify(toolInput));
-                          
-                          try {
-                            const { data: acquireData, error: acquireError } = await supabase.functions.invoke(
-                              'search-and-acquire-pdfs',
-                              {
-                                body: {
-                                  agentId: agent.id,
-                                  conversationId,
-                                  ...toolInput
-                                },
-                                headers: {
-                                  authorization: req.headers.get('Authorization') || ''
-                                }
-                              }
-                            );
-                            
-                            if (acquireError) {
-                              console.error('❌ Tool execution error:', acquireError);
-                              const errorText = `\n\n❌ Errore durante l'esecuzione: ${acquireError.message}\n\n`;
-                              fullResponse += errorText;
-                              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                            } else {
-                              console.log('✅ Tool execution successful:', acquireData);
-                              
-                              // Format and send result
-                              let resultText = '';
-                              if (acquireData.message) {
-                                resultText = `\n\n${acquireData.message}`;
-                              }
-                              
-                              if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
-                                resultText += `\n\n📚 **PDF trovati:**\n`;
-                                acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
-                                  resultText += `\n${idx + 1}. **${pdf.title}**`;
-                                  if (pdf.url) resultText += `\n   🔗 ${pdf.url}`;
-                                  if (pdf.source) resultText += `\n   📍 Fonte: ${pdf.source}`;
-                                  resultText += '\n';
-                                });
-                                resultText += `\n💡 Vuoi scaricare qualche PDF? (es. "scarica il primo", "scarica tutti")`;
-                              }
-                              
-                              if (resultText) {
-                                fullResponse += resultText;
-                                await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
-                              }
-                            }
-                          } catch (err) {
-                            console.error('❌ Tool execution failed:', err);
-                            const errorText = `\n\nErrore nell'esecuzione dello strumento: ${err instanceof Error ? err.message : 'Unknown error'}`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          }
-                        }
-                        
-                        // Reset tool state
-                        toolUseId = null;
-                        toolUseName = null;
-                        toolUseInputJson = '';
-                        
-                      } catch (e) {
-                        console.error('❌ Failed to parse tool input JSON:', e);
-                      }
-                    }
-                    
                     continue; // Skip OpenAI/Anthropic-specific handling
                   }
                   
-                  // Handle OpenAI streaming format (also used by OpenRouter)
-                  if (llmProvider === 'openai' || llmProvider === 'openrouter') {
-                    const delta = parsed.choices?.[0]?.delta;
-                    const message = parsed.choices?.[0]?.message;
-                    
-                    let newText = '';
-                    
-                    // Check for reasoning_details (OpenRouter format for thinking models)
-                    if (message?.reasoning_details && Array.isArray(message.reasoning_details)) {
-                      for (const detail of message.reasoning_details) {
-                        if (detail.text) {
-                          console.log(`🧠 [REQ-${requestId}] Reasoning (OpenRouter): ${detail.text.slice(0, 100)}...`);
-                          reasoningContent += detail.text;
-                          const reasoningText = `💭 ${detail.text}`;
-                          if (!skipAgentResponse) {
-                            fullResponse += reasoningText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: reasoningText }));
-                          }
-                        }
-                      }
-                    }
-                    
-                    // Check for reasoning_content (Moonshot native format for thinking models)
-                    if (delta?.reasoning_content) {
-                      const reasoningChunk = delta.reasoning_content;
-                      console.log(`🧠 [REQ-${requestId}] Reasoning (Moonshot): ${reasoningChunk.slice(0, 100)}...`);
-                      
-                      // Accumulate reasoning separately
-                      reasoningContent += reasoningChunk;
-                      
-                      // Show reasoning to user with a distinctive format
-                      newText = `💭 ${reasoningChunk}`;
-                      
-                      // Send to user and accumulate in fullResponse
-                      if (!skipAgentResponse) {
-                        fullResponse += newText;
-                        await sendSSE(JSON.stringify({ type: 'content', text: newText }));
-                      }
-                    }
-                    
-                    if (!delta) continue;
-                    
-                    // Check for regular content
-                    if (delta.content) {
-                      newText = delta.content;
+                  // Handle OpenAI streaming format
+                  if (llmProvider === 'openai') {
+                    if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
                       
                       // Block agent output if system has already sent the message
                       if (!skipAgentResponse) {
@@ -5311,34 +5056,6 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             }
             
             console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
-            
-            // If there's reasoning but no final response, use reasoning as the response
-            if ((!fullResponse || fullResponse.trim().length === 0) && reasoningContent) {
-              console.log(`ℹ️ [REQ-${requestId}] Using reasoning as final response (${reasoningContent.length} chars)`);
-              fullResponse = `💭 ${reasoningContent}`;
-            }
-            
-            // Check for empty response (only if there's neither response nor reasoning)
-            const hasContent = fullResponse && fullResponse.trim().length > 0;
-            if (!hasContent) {
-              console.warn(`⚠️ [REQ-${requestId}] Empty response detected from ${llmProvider} model: ${agent.ai_model}. Response length: 0 chars, Reasoning length: ${reasoningContent.length} chars`);
-              fullResponse = "⚠️ Il modello ha elaborato la richiesta ma non ha prodotto una risposta testuale.\n\n🔄 **Suggerimenti:**\n- Riprova riformulando la domanda\n- Oppure cambia modello nelle impostazioni agente (es. Claude 3.5 Sonnet o GPT-4o)";
-              
-              // Update the message in DB with the fallback
-              await supabase
-                .from('agent_messages')
-                .update({ content: fullResponse })
-                .eq('id', placeholderMsg.id);
-              
-              // Send the fallback message to client
-              await sendSSE(JSON.stringify({
-                type: 'content',
-                content: fullResponse
-              }));
-            }
-            
-            console.log(`📊 [REQ-${requestId}] Final response - Content: ${fullResponse.length} chars, Reasoning: ${reasoningContent.length} chars`);
-            
             clearInterval(keepAliveInterval);
           } catch (error) {
             const errorDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);

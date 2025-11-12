@@ -81,13 +81,9 @@ export default function MultiAgentConsultant() {
     chunks: number;
     status: string;
   } | null>(null);
-  const [thinkingStartTime, setThinkingStartTime] = useState<number | null>(null);
-  const [thinkingElapsed, setThinkingElapsed] = useState<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const currentConversationRef = useRef<string | null>(null);
-  const streamingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const messageSubscriptionRef = useRef<any>(null);
 
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
   const agentHealth = useAgentHealth(agents.map(a => a.id));
@@ -408,24 +404,9 @@ export default function MultiAgentConsultant() {
   }, [currentAgent, currentConversation, messages.length]);
 
   const handleSelectAgent = useCallback(async (agent: Agent) => {
-    // Reset critical states to prevent stuck input
-    setStreamingConversationId(null);
-    if (streamingTimeoutRef.current) {
-      clearTimeout(streamingTimeoutRef.current);
-      streamingTimeoutRef.current = null;
-    }
-    
-    // Clear messages and conversation state
     setCurrentAgent(agent);
     setMessages([]);
-    setCurrentConversation(null);
     setDrawerOpen(false);
-    
-    // Clean up realtime subscriptions
-    if (messageSubscriptionRef.current) {
-      supabase.removeChannel(messageSubscriptionRef.current);
-      messageSubscriptionRef.current = null;
-    }
     
     if (!session?.user?.id) return;
     
@@ -500,8 +481,6 @@ export default function MultiAgentConsultant() {
 
   const loadConversation = async (conversationId: string) => {
     setLoadingMessages(true);
-    setMessages([]); // Clear messages before loading to prevent ghost messages
-    
     try {
       const { data: conv, error: convError } = await supabase
         .from("agent_conversations")
@@ -525,7 +504,7 @@ export default function MultiAgentConsultant() {
       console.log('🔍 Loaded', msgs?.length, 'messages');
       
       if (!msgs || msgs.length === 0) {
-        console.log('✅ No messages in database, keeping empty state');
+        console.warn('⚠️ No messages loaded');
         setMessages([]);
         return;
       }
@@ -566,17 +545,9 @@ export default function MultiAgentConsultant() {
     
     const agent = forceAgent || currentAgent;
     if (!agent) return;
-    
-    const conversationId = forceConversationId || currentConversationRef.current || currentConversation?.id;
 
-    // Debug logging to understand state when sending fails
-    console.log('🚀 Attempting to send message:', {
-      streamingConversationId,
-      currentConversationId: currentConversation?.id,
-      loadingMessages,
-      hasConversation: !!currentConversation,
-      canSend: !!currentConversation && !loadingMessages && streamingConversationId !== currentConversation?.id
-    });
+    // ✅ NEW: Use ref for immediate access, fallback to state
+    const conversationId = forceConversationId || currentConversationRef.current || currentConversation?.id;
 
     if (!conversationId) {
       console.error("❌ No active conversation - agent might still be loading");
@@ -607,19 +578,9 @@ export default function MultiAgentConsultant() {
     
     setStreamingConversationId(conversationId);
     
-    // Start thinking timer
-    setThinkingStartTime(Date.now());
-    setThinkingElapsed(0);
-    
     // 🔍 Dichiarazione variabili per cleanup (accessibili da catch/finally)
     let timeout: NodeJS.Timeout | undefined;
     let stallDetectionInterval: NodeJS.Timeout | undefined;
-    let thinkingInterval: NodeJS.Timeout | undefined;
-    
-    // Update thinking elapsed every second
-    thinkingInterval = setInterval(() => {
-      setThinkingElapsed(prev => prev + 1);
-    }, 1000);
 
     try {
       // Create abort controller with 6 minute timeout (slightly longer than edge function)
@@ -769,13 +730,6 @@ export default function MultiAgentConsultant() {
               chunkCount++; // 🔍 Incrementa contatore chunk
               lastChunkTime = Date.now(); // 🔍 Aggiorna timestamp ultimo chunk
               
-              // Stop thinking timer when first content arrives
-              if (thinkingInterval && accumulatedText.length === parsed.text.length) {
-                clearInterval(thinkingInterval);
-                thinkingInterval = undefined;
-                setThinkingStartTime(null);
-              }
-              
               // 🔍 Log più frequente per diagnosi (ogni 500 caratteri)
               if (accumulatedText.length % 500 === 0) {
                 console.log(`📊 [${new Date().toISOString()}] Accumulated ${accumulatedText.length} chars (chunk #${chunkCount})`);
@@ -846,32 +800,15 @@ export default function MultiAgentConsultant() {
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval); // 🔍 Cleanup in caso di errore
       }
-      if (thinkingInterval) {
-        clearInterval(thinkingInterval);
-      }
       setMessages((prev) => prev.filter((m) => m.id !== userMessage.id && m.id !== assistantId));
     } finally {
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval); // 🔍 Cleanup garantito
       }
-      if (thinkingInterval) {
-        clearInterval(thinkingInterval);
-      }
       if (timeout) {
         clearTimeout(timeout);
       }
       setStreamingConversationId(null);
-      setThinkingStartTime(null);
-      setThinkingElapsed(0);
-      
-      // Fallback timeout to ensure streamingConversationId is cleared
-      if (streamingTimeoutRef.current) {
-        clearTimeout(streamingTimeoutRef.current);
-      }
-      streamingTimeoutRef.current = setTimeout(() => {
-        setStreamingConversationId(null);
-        console.log('🔒 Fallback: Cleared stuck streamingConversationId');
-      }, 360000); // 6 minutes
     }
   };
 
@@ -922,16 +859,7 @@ export default function MultiAgentConsultant() {
       
       if (error) throw error;
       
-      // Update local state
-      const remainingMessages = messages.filter(m => !selectedMessages.includes(m.id));
-      setMessages(remainingMessages);
-      
-      // If all messages deleted, ensure state is completely clear
-      if (remainingMessages.length === 0) {
-        console.log('✅ All messages deleted, clearing state');
-        setMessages([]);
-      }
-      
+      setMessages(prev => prev.filter(m => !selectedMessages.includes(m.id)));
       setSelectionMode(false);
       setSelectedMessages([]);
     } catch (error: any) {
@@ -1198,7 +1126,6 @@ export default function MultiAgentConsultant() {
                         role={msg.role}
                         content={msg.content}
                         isStreaming={streamingConversationId === currentConversation?.id && msg.id === messages[messages.length - 1]?.id}
-                        thinkingElapsed={thinkingStartTime && msg.id === messages[messages.length - 1]?.id ? thinkingElapsed : undefined}
                         selectionMode={selectionMode}
                         isSelected={selectedMessages.includes(msg.id)}
                         onToggleSelection={() => handleToggleSelection(msg.id)}
@@ -1220,7 +1147,7 @@ export default function MultiAgentConsultant() {
                 <ChatInput
                   onSend={handleSendMessage}
                   disabled={loadingMessages}
-                  sendDisabled={!currentConversation || loadingMessages || streamingConversationId === currentConversation?.id}
+                  sendDisabled={streamingConversationId === currentConversation?.id}
                   placeholder={`Message ${currentAgent.name}...`}
                 />
               </div>

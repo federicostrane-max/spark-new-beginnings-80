@@ -119,7 +119,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
 
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (input.trim() && !disabled && !sendDisabled) {
+    if (input.trim() && !disabled) {
       // Close suggestions when submitting
       setShowAgentSuggestions(false);
       onSend(input.trim(), attachments.length > 0 ? attachments : undefined);

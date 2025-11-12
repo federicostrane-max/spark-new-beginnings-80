@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2 } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
@@ -13,7 +13,6 @@ interface ChatMessageProps {
   role: "user" | "assistant" | "system";
   content: string;
   isStreaming?: boolean;
-  thinkingElapsed?: number;
   isSelected?: boolean;
   selectionMode?: boolean;
   onToggleSelection?: () => void;
@@ -27,8 +26,7 @@ export const ChatMessage = ({
   id, 
   role, 
   content, 
-  isStreaming,
-  thinkingElapsed,
+  isStreaming, 
   isSelected = false,
   selectionMode = false,
   onToggleSelection,
@@ -324,7 +322,7 @@ export const ChatMessage = ({
       <div
         className={cn(
           "inline-block rounded-2xl px-4 py-3 shadow-sm transition-all",
-          "w-fit max-w-[calc(100%-1rem)] md:max-w-[75%]",
+          "w-fit max-w-[calc(100vw-2rem)] md:max-w-[75%]",
           "select-text cursor-text",
           isUser && !selectionMode && "ml-auto",
           selectionMode && "ml-8",
@@ -341,9 +339,8 @@ export const ChatMessage = ({
             {displayContent}
           </div>
         ) : (
-          <div className="overflow-x-auto max-w-full">
-            <div className="break-words select-text [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:max-h-none [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_table]:my-4 [&_table]:border-collapse [&_table]:w-auto [&_table]:max-w-full [&_table]:table-auto [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
-              <ReactMarkdown
+          <div className="break-words overflow-wrap-anywhere select-text [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-visible [&_pre]:max-h-none [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
+            <ReactMarkdown 
               remarkPlugins={[remarkGfm]}
               components={{
                 a: ({ node, ...props }) => (
@@ -359,7 +356,6 @@ export const ChatMessage = ({
             >
               {displayContent}
             </ReactMarkdown>
-            </div>
           </div>
         )}
         
@@ -369,18 +365,8 @@ export const ChatMessage = ({
           </div>
         )}
 
-        {/* Indicatore di thinking quando streaming ma senza contenuto */}
-        {isStreaming && content.length === 0 && thinkingElapsed !== undefined && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm animate-pulse">
-              Il modello sta pensando... ({thinkingElapsed}s)
-            </span>
-          </div>
-        )}
-        
-        {/* Indicatore di streaming quando c'è contenuto */}
-        {isStreaming && content.length > 0 && (
+        {/* Indicatore di streaming sempre visibile */}
+        {isStreaming && (
           <div className="flex items-center gap-2 mt-2">
             <span className="inline-block w-2 h-4 bg-foreground animate-pulse" />
             <span className="text-xs text-muted-foreground animate-pulse">

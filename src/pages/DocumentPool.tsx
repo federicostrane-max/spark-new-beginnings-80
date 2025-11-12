@@ -101,35 +101,17 @@ export default function DocumentPool() {
   const handleRetryBlocked = async () => {
     setIsRetrying(true);
     try {
-      toast.loading('Reset PDF bloccati...', { id: 'retry' });
+      toast.loading('Avvio validazione PDF bloccati...', { id: 'retry' });
       
-      // Step 1: Reset stuck PDFs to pending status
-      const { data: resetData, error: resetError } = await supabase.functions.invoke('reset-stuck-queue-pdfs');
+      const { data, error } = await supabase.functions.invoke('retry-failed-documents');
       
-      if (resetError) throw resetError;
-      
-      const { resetCount, conversationIds } = resetData;
-      
-      if (resetCount === 0) {
-        toast.info('Nessun PDF bloccato trovato', { id: 'retry' });
-        return;
-      }
-      
-      toast.loading(`${resetCount} PDF resettati, avvio processamento...`, { id: 'retry' });
-      
-      // Step 2: Process queue for each affected conversation
-      for (const conversationId of conversationIds) {
-        await supabase.functions.invoke('process-pdf-queue', {
-          body: { conversationId }
-        });
-      }
+      if (error) throw error;
       
       toast.success(
-        `${resetCount} PDF in elaborazione! Riceverai notifiche real-time per ogni step.`,
+        'Validazione avviata! I PDF verranno processati nei prossimi minuti.',
         { id: 'retry', duration: 5000 }
       );
       
-      // Refresh UI after a delay
       setTimeout(() => {
         loadHealthMetrics();
         setTableKey(prev => prev + 1);
