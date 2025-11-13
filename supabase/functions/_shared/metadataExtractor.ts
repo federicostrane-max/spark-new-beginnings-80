@@ -101,7 +101,7 @@ Return ONLY valid JSON: {"title":"...","authors":["..."],"confidence":"high|medi
     let method: 'text' | 'chunks' | 'filename' = source === 'pdf' ? 'text' : 'chunks';
 
     const inv = [/^abstract:/i, /^intro/i, /^chapter\s+\d/i, /^\d+$/];
-    const needsAggressiveFallback = !title || title.length < 5 || inv.some(p => p.test(title)) || conf === 'low';
+    const needsAggressiveFallback = !title || title === 'unknown' || title.length < 5 || inv.some(p => p.test(title)) || conf === 'low';
     
     // Aggressive fallback: if initial extraction is poor, try with more context
     if (needsAggressiveFallback && source === 'chunks') {
