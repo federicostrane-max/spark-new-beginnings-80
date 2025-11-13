@@ -23,36 +23,66 @@ serve(async (req) => {
       documentsProcessed: 0,
       failedDeleted: 0,
       downloadedDeleted: 0,
+      totalAttempts: 0,
       errors: [] as string[]
     };
 
-    // STEP 1: Estrai metadata da documenti ready_for_assignment senza metadata
-    console.log('[cleanup] Step 1: Extracting metadata from ready documents...');
-    const { data: readyDocs } = await supabase
-      .from('knowledge_documents')
-      .select('id, file_path, file_name')
-      .eq('processing_status', 'ready_for_assignment')
-      .eq('validation_status', 'validated')
-      .is('extracted_title', null);
+    // LOOP PERSISTENTE: Continua finché ci sono documenti senza metadata
+    const MAX_ITERATIONS = 5;
+    let iteration = 0;
+    
+    while (iteration < MAX_ITERATIONS) {
+      iteration++;
+      console.log(`[cleanup] === Iteration ${iteration}/${MAX_ITERATIONS} ===`);
+      
+      // STEP 1: Estrai metadata da documenti ready_for_assignment senza metadata
+      console.log('[cleanup] Step 1: Extracting metadata from ready documents...');
+      const { data: readyDocs } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_path, file_name')
+        .eq('processing_status', 'ready_for_assignment')
+        .eq('validation_status', 'validated')
+        .is('extracted_title', null);
 
-    for (const doc of readyDocs || []) {
-      try {
-        const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path);
-        
-        if (result.success) {
-          await supabase
-            .from('knowledge_documents')
-            .update({
-              extracted_title: result.title,
-              extracted_authors: result.authors
-            })
-            .eq('id', doc.id);
+      if (!readyDocs || readyDocs.length === 0) {
+        console.log('[cleanup] ✅ No more documents without metadata');
+        break;
+      }
+
+      console.log(`[cleanup] Found ${readyDocs.length} documents without metadata`);
+
+      for (const doc of readyDocs) {
+        try {
+          results.totalAttempts++;
+          console.log(`[cleanup] Attempting: ${doc.file_name}`);
           
-          results.metadataExtracted++;
-          console.log(`[cleanup] ✅ Metadata: ${doc.file_name}`);
+          const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path);
+          
+          if (result.success) {
+            await supabase
+              .from('knowledge_documents')
+              .update({
+                extracted_title: result.title,
+                extracted_authors: result.authors
+              })
+              .eq('id', doc.id);
+            
+            results.metadataExtracted++;
+            console.log(`[cleanup] ✅ Metadata: ${doc.file_name} -> "${result.title}"`);
+          } else {
+            console.log(`[cleanup] ⚠️ Failed: ${doc.file_name}`);
+            results.errors.push(`Metadata extraction failed: ${doc.file_name}`);
+          }
+        } catch (error) {
+          console.error(`[cleanup] ❌ Error ${doc.file_name}:`, error);
+          results.errors.push(`Metadata ${doc.file_name}: ${error}`);
         }
-      } catch (error) {
-        results.errors.push(`Metadata ${doc.file_name}: ${error}`);
+      }
+      
+      // Breve pausa tra iterazioni per evitare rate limiting
+      if (iteration < MAX_ITERATIONS && readyDocs.length > 0) {
+        console.log('[cleanup] Waiting 2s before next iteration...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
