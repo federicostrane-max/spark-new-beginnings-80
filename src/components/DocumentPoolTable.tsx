@@ -73,6 +73,11 @@ interface KnowledgeDocument {
   complexity_level?: string;
   agent_ids?: string[];
   search_query?: string;
+  extracted_title?: string;
+  extracted_authors?: string[];
+  metadata_verified_online?: boolean;
+  metadata_verified_source?: string;
+  metadata_confidence?: string;
 }
 
 export const DocumentPoolTable = () => {
@@ -117,6 +122,11 @@ export const DocumentPoolTable = () => {
         .from("knowledge_documents")
         .select(`
           *,
+          extracted_title,
+          extracted_authors,
+          metadata_verified_online,
+          metadata_verified_source,
+          metadata_confidence,
           agent_document_links(
             agent_id,
             agents(id, name)
@@ -606,8 +616,45 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell className="max-w-0">
                       <div className="space-y-1">
-                        <div className="font-medium truncate text-sm" title={doc.file_name}>
-                          {doc.file_name}
+                        <div className="flex items-center gap-2">
+                          <div className="font-medium truncate text-sm" title={doc.file_name}>
+                            {doc.file_name}
+                          </div>
+                          {doc.extracted_title && (
+                            doc.metadata_verified_online ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 shrink-0">
+                                      ✓ Verificato
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">Metadata verificati online</p>
+                                    {doc.metadata_verified_source && (
+                                      <p className="text-xs text-muted-foreground mt-1">{doc.metadata_verified_source}</p>
+                                    )}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge variant="outline" className="text-xs text-gray-500 shrink-0">
+                                      ? Non verificato
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">Metadata non verificati online</p>
+                                    {doc.metadata_confidence && (
+                                      <p className="text-xs text-muted-foreground mt-1">Confidence: {doc.metadata_confidence}</p>
+                                    )}
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )
+                          )}
                         </div>
                         {doc.ai_summary && doc.ai_summary.trim() !== "" && (
                           <TooltipProvider>

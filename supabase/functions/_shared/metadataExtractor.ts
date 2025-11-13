@@ -135,23 +135,32 @@ export async function extractMetadataWithFallback(
   
   const metadataPrompt = `Extract the EXACT title and author(s) from this academic/technical document text.
 
-CRITICAL RULES FOR TITLE EXTRACTION:
-1. Look for these patterns that indicate titles:
-   - Text after "publication at:" or "DOI:" or "Chapter" markers
-   - URLs containing the title (e.g., researchgate.net/publication/123/Title_Here)
-   - Standalone prominent text that looks like a book/paper title
-   - Text in quotation marks or emphasized formatting
-2. Title should be 5-200 characters
-3. EXCLUDE: "Abstract:", "Introduction:", "Chapter X", "Section X", page numbers
-4. If you see ResearchGate or academic repository URLs, extract title from them
-5. Return confidence: "high" if clearly a title, "medium" if uncertain, "low" if not found
+TITLE PATTERNS TO LOOK FOR:
+1. Explicit labels: "Title:", "Document Title:", "Book Title:"
+2. First large/bold text block at the beginning of the document
+3. Text appearing before "Chapter 1", "Introduction", "Abstract", or "Preface"
+4. Text after "publication at:" or "DOI:" or "Chapter" markers
+5. URLs containing the title (e.g., researchgate.net/publication/123/Title_Here)
+6. Standalone prominent text that looks like a book/paper title
+7. Text in quotation marks or emphasized formatting
 
-AUTHOR EXTRACTION:
-- Look for names near the title, after "by", or in affiliation sections
-- Common patterns: "Author Name", "Name, University", "Department, Author"
-- Multiple authors may be separated by commas or "and"
+AUTHOR PATTERNS TO LOOK FOR:
+1. Explicit labels: "Author:", "Authors:", "By:", "Written by:", "Edited by:"
+2. Names near the title, after "by", or in affiliation sections
+3. Names in format "FirstName LastName" or "LastName, FirstName"
+4. Text near email addresses or institutional affiliations
+5. Common patterns: "Author Name", "Name, University", "Department, Author"
+6. Multiple authors separated by commas or "and"
 
-Document text (first 5000 characters from chunks):
+CRITICAL RULES:
+- Title should be 5-200 characters
+- EXCLUDE: "Abstract:", "Introduction:", "Chapter X", "Section X", page numbers
+- If you see ResearchGate or academic repository URLs, extract title from them
+- If title is "Chapter 1", "Introduction", etc. → look BEFORE it for the real title
+- Return confidence: "high" if clearly a title, "medium" if uncertain, "low" if not found
+- Do NOT invent or guess information
+
+Document text (first 5000 characters):
 ${textForExtraction.slice(0, 5000)}
 
 Return ONLY valid JSON:
@@ -222,9 +231,9 @@ Return ONLY valid JSON:
     let verifiedOnline = false;
     let verifiedSource: string | undefined;
 
-    if (enableWebValidation && extractedTitle && confidence !== 'low') {
+    if (enableWebValidation && extractedTitle) {
       try {
-        console.log('[metadataExtractor] 🌐 Validating metadata online...');
+        console.log(`[metadataExtractor] 🌐 Validating metadata online (confidence: ${confidence})...`);
         const { data: validationData, error: validationError } = await supabase.functions.invoke('validate-metadata-online', {
           body: { 
             title: extractedTitle, 
@@ -248,12 +257,26 @@ Return ONLY valid JSON:
         console.log('[metadataExtractor] ⚠️ Web validation failed:', validationError);
       }
     }
+    
+    // 🚨 EMERGENCY FILENAME FALLBACK - Guaranteed last resort
+    if (!extractedTitle || extractedTitle.trim() === '') {
+      console.log(`[metadataExtractor] 🚨 EMERGENCY FILENAME FALLBACK for: ${fileName || 'unknown'}`);
+      extractedTitle = (fileName || 'unknown-document')
+        .replace(/\.pdf$/i, '')
+        .replace(/[_-]/g, ' ')
+        .replace(/\(\d+\)$/g, '') // Remove (1), (2) etc.
+        .replace(/\s+/g, ' ')
+        .trim();
+      confidence = 'low';
+      extractionMethod = 'filename';
+      console.log(`[metadataExtractor] 📝 Fallback title: ${extractedTitle}`);
+    }
 
     const result: MetadataResult = {
       title: extractedTitle || null,
       authors: metadata.authors || null,
       source,
-      success: extractedTitle !== null,
+      success: !!extractedTitle, // Now guaranteed to be true
       confidence,
       extractionMethod,
       verifiedOnline,
@@ -265,6 +288,24 @@ Return ONLY valid JSON:
 
   } catch (aiError) {
     console.error('[metadataExtractor] ❌ AI extraction failed:', aiError);
-    return { title: null, authors: null, source, success: false };
+    
+    // Even in error case, use filename fallback
+    const fallbackTitle = (fileName || 'unknown-document')
+      .replace(/\.pdf$/i, '')
+      .replace(/[_-]/g, ' ')
+      .replace(/\(\d+\)$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    return {
+      title: fallbackTitle,
+      authors: [],
+      source,
+      success: true,
+      confidence: 'low' as const,
+      extractionMethod: 'filename',
+      verifiedOnline: false,
+      verifiedSource: undefined
+    };
   }
 }
