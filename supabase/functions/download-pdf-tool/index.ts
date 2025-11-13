@@ -586,14 +586,15 @@ serve(async (req) => {
     // Extract filename from URL or generate one
     const urlPath = new URL(url).pathname;
     const fileName = urlPath.split('/').pop() || `document_${Date.now()}.pdf`;
-    const filePath = `${Date.now()}_${fileName}`;
+    // FASE 2: Use standard path format (aligned with upload-pdf-to-shared-pool)
+    const filePath = `shared-pool-uploads/${fileName}`;
 
     console.log('📄 File size:', pdfArrayBuffer.byteLength, 'bytes');
 
-    // Upload to storage (Supabase client already initialized at top)
+    // Upload to storage using shared-pool-uploads bucket
     const { error: uploadError } = await supabase.storage
-      .from('knowledge-pdfs')
-      .upload(filePath, pdfArrayBuffer, {
+      .from('shared-pool-uploads')
+      .upload(fileName, pdfArrayBuffer, {
         contentType: 'application/pdf',
         upsert: false
       });

@@ -53,19 +53,23 @@ serve(async (req) => {
     console.log(`[extract-pdf-text] Original file_path: ${filePath}`);
     console.log(`[extract-pdf-text] Clean filename: ${cleanFileName}`);
 
-    // Try multiple storage buckets in priority order
+    // FASE 3: Intelligent multi-bucket search with fallback
+    // Priority order: exact path -> clean filename -> pattern matching
     const bucketsToTry = [
-      { name: 'shared-pool-uploads', path: cleanFileName },
-      { name: 'knowledge-pdfs', path: filePath },
-      { name: 'shared-pool-uploads', path: filePath },
-      { name: 'agent-attachments', path: filePath }
+      // Try exact path first (most common case)
+      { name: 'shared-pool-uploads', path: cleanFileName, strategy: 'exact' },
+      { name: 'knowledge-pdfs', path: filePath, strategy: 'exact' },
+      { name: 'shared-pool-uploads', path: filePath, strategy: 'exact' },
+      { name: 'agent-attachments', path: filePath, strategy: 'exact' }
     ];
 
     let pdfBlob = null;
     let successfulBucket = null;
+    let actualPath = null;
 
+    // Try exact paths first
     for (const bucket of bucketsToTry) {
-      console.log(`[extract-pdf-text] Trying bucket: ${bucket.name}, path: ${bucket.path}`);
+      console.log(`[extract-pdf-text] Trying ${bucket.strategy}: ${bucket.name}/${bucket.path}`);
       
       const { data, error } = await supabase.storage
         .from(bucket.name)
@@ -74,11 +78,55 @@ serve(async (req) => {
       if (!error && data) {
         pdfBlob = data;
         successfulBucket = bucket;
-        console.log(`[extract-pdf-text] ✅ Download successful from ${bucket.name}`);
+        actualPath = bucket.path;
+        console.log(`[extract-pdf-text] ✅ Download successful from ${bucket.name}/${bucket.path}`);
         break;
       }
       
       console.log(`[extract-pdf-text] ❌ Failed from ${bucket.name}:`, error?.message);
+    }
+
+    // FASE 3 Enhancement: If exact path fails, try pattern matching for timestamped files
+    if (!pdfBlob) {
+      console.log(`[extract-pdf-text] Exact paths failed, trying pattern matching for: ${cleanFileName}`);
+      
+      // List files in shared-pool-uploads bucket to find potential matches
+      const { data: fileList, error: listError } = await supabase.storage
+        .from('shared-pool-uploads')
+        .list('', { 
+          search: cleanFileName.replace(/[^a-zA-Z0-9]/g, '') // Remove special chars for search
+        });
+      
+      if (!listError && fileList && fileList.length > 0) {
+        // Try to find file matching the clean filename (could have timestamp prefix)
+        for (const file of fileList) {
+          if (file.name.includes(cleanFileName) || cleanFileName.includes(file.name)) {
+            console.log(`[extract-pdf-text] Found potential match: ${file.name}`);
+            
+            const { data, error } = await supabase.storage
+              .from('shared-pool-uploads')
+              .download(file.name);
+            
+            if (!error && data) {
+              pdfBlob = data;
+              successfulBucket = { name: 'shared-pool-uploads', path: file.name };
+              actualPath = file.name;
+              console.log(`[extract-pdf-text] ✅ Pattern match successful: ${file.name}`);
+              
+              // FASE 6: Update database with correct path
+              if (documentId && file.name !== filePath) {
+                console.log(`[extract-pdf-text] Updating DB path from ${filePath} to shared-pool-uploads/${file.name}`);
+                await supabase
+                  .from('knowledge_documents')
+                  .update({ file_path: `shared-pool-uploads/${file.name}` })
+                  .eq('id', documentId);
+              }
+              
+              break;
+            }
+          }
+        }
+      }
     }
 
     if (!pdfBlob || !successfulBucket) {

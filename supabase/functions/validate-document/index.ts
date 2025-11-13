@@ -177,7 +177,7 @@ serve(async (req) => {
     let extractedText = requestBody.extractedText;
     let searchQuery = requestBody.searchQuery || doc.search_query || '';
 
-    // If no extracted text provided, extract it from storage
+    // FASE 6: Enhanced text extraction with validation
     if (!extractedText || extractedText.trim().length < 10) {
       console.log('[validate-document] No extracted text, calling extract-pdf-text function...');
       
@@ -186,13 +186,62 @@ serve(async (req) => {
       });
       
       if (extractionError) {
-        console.error('[validate-document] Text extraction failed:', extractionError);
-        // Continue without extracted text - will be marked as validated but needs manual review
+        console.error('[validate-document] ❌ Text extraction failed:', extractionError);
+        
+        // FASE 6: Mark as validation_failed instead of proceeding
+        await markValidationFailed(
+          supabase, 
+          documentId, 
+          `Impossibile estrarre testo dal PDF: ${extractionError.message}`,
+          0
+        );
+        
+        return new Response(JSON.stringify({
+          success: false,
+          reason: 'Text extraction failed',
+          error: extractionError.message
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400
+        });
       } else if (extractionResult?.text) {
         extractedText = extractionResult.text;
         console.log(`[validate-document] ✅ Text extracted: ${extractedText.length} chars`);
+        
+        // FASE 6: Validate extraction success
+        if (extractedText.trim().length < 100) {
+          await markValidationFailed(
+            supabase,
+            documentId,
+            `Testo estratto troppo corto: ${extractedText.length} caratteri (minimo 100)`,
+            extractedText.length
+          );
+          
+          return new Response(JSON.stringify({
+            success: false,
+            reason: 'Insufficient text extracted'
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 400
+          });
+        }
       } else {
-        console.warn('[validate-document] No text extracted from PDF');
+        console.warn('[validate-document] ⚠️ No text extracted from PDF');
+        
+        await markValidationFailed(
+          supabase,
+          documentId,
+          'Nessun testo estratto dal PDF. Il documento potrebbe essere vuoto, protetto o contenere solo immagini.',
+          0
+        );
+        
+        return new Response(JSON.stringify({
+          success: false,
+          reason: 'No text extracted'
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400
+        });
       }
     }
 
