@@ -149,6 +149,18 @@ serve(async (req) => {
 
     if (existingChunks && existingChunks.length > 0) {
       console.log(`[sync-pool-document] Document already synced (${existingChunks.length} chunks)`);
+      
+      // ✅ CRITICAL FIX: Mark as completed before returning
+      await supabase
+        .from('agent_document_links')
+        .update({
+          sync_status: 'completed',
+          sync_completed_at: new Date().toISOString(),
+          sync_error: null
+        })
+        .eq('agent_id', agentId)
+        .eq('document_id', documentId);
+      
       return new Response(JSON.stringify({ 
         success: true, 
         message: 'Already synced',
