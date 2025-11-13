@@ -127,15 +127,28 @@ export default function DocumentPool() {
   const [testingExtraction, setTestingExtraction] = useState(false);
 
   const handleTestAggressiveExtraction = async () => {
+    console.log('[Test Extraction] Button clicked, starting test...');
     setTestingExtraction(true);
     try {
+      console.log('[Test Extraction] Invoking edge function...');
       toast.loading('Testing aggressive extraction...', { id: 'test-extraction' });
       
       const { data, error } = await supabase.functions.invoke('test-aggressive-extraction', {
-        body: {}
+        body: { strategies: ['content_inference'] }
       });
       
-      if (error) throw error;
+      console.log('[Test Extraction] Response received:', { data, error });
+      console.log('[Test Extraction] Full response:', JSON.stringify(data, null, 2));
+      
+      if (error) {
+        console.error('[Test Extraction] Error from function:', error);
+        throw error;
+      }
+      
+      if (!data) {
+        console.error('[Test Extraction] No data received');
+        throw new Error('No data received from function');
+      }
       
       console.log('[Test Extraction] Result:', data);
       
