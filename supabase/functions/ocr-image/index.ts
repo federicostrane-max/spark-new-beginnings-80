@@ -25,11 +25,13 @@ serve(async (req) => {
   }
 
   try {
-    const { imageUrl, fileName } = await req.json();
+    const { imageUrl, fileName, maxPages } = await req.json();
     
     if (!imageUrl) {
       throw new Error('No image URL provided');
     }
+    
+    const pagesToExtract = maxPages || 1; // Default to 1 page if not specified
 
     const googleApiKey = Deno.env.get('GOOGLE_AI_STUDIO_API_KEY');
     if (!googleApiKey) {
@@ -59,13 +61,13 @@ serve(async (req) => {
     const isPDF = fileName?.toLowerCase().endsWith('.pdf') || false;
     const mimeType = isPDF ? 'application/pdf' : (imageResponse.headers.get('content-type') || 'image/jpeg');
     const prompt = isPDF 
-      ? "Extract all text from this PDF document. Return only the extracted text, preserving the original structure and formatting as much as possible. Do not add any commentary or explanations."
+      ? `Extract ALL visible text from the first ${pagesToExtract} pages of this PDF document. Focus especially on: title, authors, publication info, chapter headings, and any bibliographic metadata. Return the text exactly as it appears, preserving formatting, line breaks, and structure. Do not add commentary.`
       : "Extract all text from this image. Return only the extracted text, nothing else.";
-
-    console.log(`[ocr-image] Processing as: ${mimeType}`);
+    
+    console.log(`[ocr-image] Processing as: ${mimeType} (${pagesToExtract} pages)`);
 
     // Call Google Vision API
-    console.log('[ocr-image] Calling Google Gemini API...');
+    console.log('[ocr-image] Calling Google Gemini API for OCR...');
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${googleApiKey}`,
       {

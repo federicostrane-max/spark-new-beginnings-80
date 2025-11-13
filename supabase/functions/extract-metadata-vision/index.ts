@@ -118,15 +118,17 @@ serve(async (req) => {
 
     console.log('[extract-metadata-vision] Using OCR-image function for vision extraction');
 
-    // Use ocr-image function to extract text from first page
+    // Use ocr-image function to extract text from first 10 pages
+    console.log('[extract-metadata-vision] Invoking ocr-image for first 10 pages...');
     const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr-image', {
       body: {
         imageUrl: signedUrl,
-        fileName: fileName || 'document.pdf'
+        fileName: fileName || 'document.pdf',
+        maxPages: 10  // Analyze first 10 pages instead of just 1
       }
     });
 
-    if (ocrError || !ocrData?.text) {
+    if (ocrError || !ocrData?.extractedText) {
       console.error('[extract-metadata-vision] ❌ OCR extraction failed:', ocrError);
       return new Response(
         JSON.stringify({
@@ -140,22 +142,35 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[extract-metadata-vision] OCR extracted ${ocrData.text.length} characters`);
+    const extractedText = ocrData.extractedText;
+    console.log(`[extract-metadata-vision] OCR extracted ${extractedText.length} characters from first 10 pages`);
 
     // Now use AI to extract metadata from OCR text with vision-optimized prompt
-    const metadataPrompt = `You are analyzing the FIRST PAGE of an academic paper or technical document.
+    const metadataPrompt = `You are analyzing the FIRST 10 PAGES of an academic paper or technical document.
 Extract the EXACT title and author(s) as they appear on the title page/cover page.
 
-CRITICAL RULES:
-1. Title should be the main heading (usually largest text, centered, at top)
-2. EXCLUDE these if they appear: "Abstract:", "Introduction:", "Chapter", page numbers, headers/footers
-3. Authors are usually listed below the title (may include affiliations/universities)
-4. If text seems to be from middle of document (starts with "Abstract:" or paragraph text), return null
-5. Title should be 5-200 characters
-6. Return confidence: "high" if clearly a title page, "medium" if uncertain, "low" if not a title page
+TITLE PATTERNS TO LOOK FOR:
+1. Title page heading (usually largest text, centered, at top of page 1-3)
+2. Text before "Abstract:", "Introduction:", "Chapter 1", "Preface"
+3. Text in ALL CAPS or Title Case at the beginning
+4. Prominent standalone text that looks like a book/paper title
+5. If you see "Chapter 1" or "Introduction", look BEFORE it for the real title
 
-Document text from first page:
-${ocrData.text.slice(0, 2000)}
+AUTHOR PATTERNS TO LOOK FOR:
+1. Names listed below the title (often on page 1-2)
+2. Text near affiliations/universities/email addresses
+3. Names in format "FirstName LastName" or "LastName, FirstName"
+4. Multiple authors separated by commas, "and", or on separate lines
+
+CRITICAL RULES:
+1. EXCLUDE: "Abstract:", "Introduction:", "Chapter X", page numbers, headers/footers, URLs
+2. Title should be 5-200 characters
+3. Return confidence: "high" if clearly from title page, "medium" if uncertain, "low" if not found
+4. Do NOT hallucinate or guess information
+5. Focus on pages 1-3 as they typically contain title/authors
+
+Document text from first 10 pages (prioritize earlier pages):
+${extractedText.slice(0, 8000)}
 
 Return ONLY valid JSON:
 {
