@@ -124,6 +124,34 @@ export default function DocumentPool() {
     }
   };
 
+  const [testingExtraction, setTestingExtraction] = useState(false);
+
+  const handleTestAggressiveExtraction = async () => {
+    setTestingExtraction(true);
+    try {
+      toast.loading('Testing aggressive extraction...', { id: 'test-extraction' });
+      
+      const { data, error } = await supabase.functions.invoke('test-aggressive-extraction', {
+        body: {}
+      });
+      
+      if (error) throw error;
+      
+      console.log('[Test Extraction] Result:', data);
+      
+      toast.success(
+        `Extracted: "${data.result.title}" (${data.result.confidence}) in ${data.result.executionTimeMs}ms`,
+        { id: 'test-extraction', duration: 10000 }
+      );
+      
+    } catch (err: any) {
+      console.error('[Test Extraction Failed]', err);
+      toast.error('Test failed: ' + err.message, { id: 'test-extraction' });
+    } finally {
+      setTestingExtraction(false);
+    }
+  };
+
   const handleMigration = async () => {
     try {
       setMigrating(true);
@@ -229,6 +257,25 @@ export default function DocumentPool() {
                 <>
                   <RefreshCw className="mr-2 h-5 w-5" />
                   Riprova PDF Bloccati
+                </>
+              )}
+            </Button>
+            
+            <Button
+              onClick={handleTestAggressiveExtraction}
+              disabled={testingExtraction}
+              variant="outline"
+              size="lg"
+            >
+              {testingExtraction ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Testing...
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="mr-2 h-5 w-5" />
+                  Test Aggressive Extraction
                 </>
               )}
             </Button>
