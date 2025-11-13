@@ -13,6 +13,8 @@ serve(async (req) => {
   }
 
   try {
+    const { forceReExtraction = false } = await req.json().catch(() => ({}));
+    
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -20,11 +22,19 @@ serve(async (req) => {
 
     const results = {
       metadataExtracted: 0,
+      metadataConfirmed: 0,
+      metadataImproved: 0,
+      metadataChanged: 0,
       documentsProcessed: 0,
       failedDeleted: 0,
       downloadedDeleted: 0,
       totalAttempts: 0,
-      errors: [] as string[]
+      verifiedOnline: 0,
+      highConfidence: 0,
+      mediumConfidence: 0,
+      lowConfidence: 0,
+      errors: [] as string[],
+      details: [] as any[]
     };
 
     // LOOP PERSISTENTE: Continua finché ci sono documenti senza metadata
@@ -35,14 +45,24 @@ serve(async (req) => {
       iteration++;
       console.log(`[cleanup] === Iteration ${iteration}/${MAX_ITERATIONS} ===`);
       
-      // STEP 1: Estrai metadata da documenti ready_for_assignment senza metadata
-      console.log('[cleanup] Step 1: Extracting metadata from ready documents...');
-      const { data: readyDocs } = await supabase
+      // STEP 1: Estrai metadata da documenti ready_for_assignment
+      const stepLabel = forceReExtraction 
+        ? 'Step 1: Re-extracting metadata from ALL ready documents...'
+        : 'Step 1: Extracting metadata from ready documents without title...';
+      console.log(`[cleanup] ${stepLabel}`);
+      
+      let query = supabase
         .from('knowledge_documents')
-        .select('id, file_path, file_name')
+        .select('id, file_path, file_name, extracted_title, extracted_authors, metadata_confidence, metadata_extraction_method, metadata_verified_online')
         .eq('processing_status', 'ready_for_assignment')
-        .eq('validation_status', 'validated')
-        .is('extracted_title', null);
+        .eq('validation_status', 'validated');
+      
+      // Solo se NON forceReExtraction, filtra per documenti senza titolo
+      if (!forceReExtraction) {
+        query = query.is('extracted_title', null);
+      }
+      
+      const { data: readyDocs } = await query;
 
       if (!readyDocs || readyDocs.length === 0) {
         console.log('[cleanup] ✅ No more documents without metadata');
@@ -54,7 +74,20 @@ serve(async (req) => {
       for (const doc of readyDocs) {
         try {
           results.totalAttempts++;
-          console.log(`[cleanup] Attempting: ${doc.file_name}`);
+          
+          // Store old metadata for comparison
+          const oldMetadata = {
+            title: doc.extracted_title,
+            authors: doc.extracted_authors,
+            confidence: doc.metadata_confidence,
+            method: doc.metadata_extraction_method,
+            verified: doc.metadata_verified_online
+          };
+          
+          console.log(`[cleanup] 📄 Processing: ${doc.file_name}`);
+          if (forceReExtraction && oldMetadata.title) {
+            console.log(`[cleanup]   OLD: title="${oldMetadata.title}" | authors=${JSON.stringify(oldMetadata.authors)} | confidence=${oldMetadata.confidence} | method=${oldMetadata.method} | verified=${oldMetadata.verified}`);
+          }
           
           const result = await extractMetadataWithFallback(
             supabase, 
@@ -65,6 +98,31 @@ serve(async (req) => {
           );
           
           if (result.success) {
+            // Compare old vs new metadata
+            let changeType = 'extracted'; // new extraction
+            
+            if (forceReExtraction && oldMetadata.title) {
+              if (oldMetadata.title !== result.title) {
+                console.log(`[cleanup]   🔄 TITLE CHANGE: "${oldMetadata.title}" → "${result.title}"`);
+                changeType = 'changed';
+                results.metadataChanged++;
+              } else if (JSON.stringify(oldMetadata.authors) !== JSON.stringify(result.authors)) {
+                console.log(`[cleanup]   🔄 AUTHORS CHANGE: ${JSON.stringify(oldMetadata.authors)} → ${JSON.stringify(result.authors)}`);
+                changeType = 'changed';
+                results.metadataChanged++;
+              } else if (oldMetadata.confidence !== result.confidence || !oldMetadata.verified && result.verifiedOnline) {
+                console.log(`[cleanup]   ⬆️ IMPROVED: confidence ${oldMetadata.confidence}→${result.confidence}, verified ${oldMetadata.verified}→${result.verifiedOnline}`);
+                changeType = 'improved';
+                results.metadataImproved++;
+              } else {
+                console.log(`[cleanup]   ✓ CONFIRMED: metadata matches`);
+                changeType = 'confirmed';
+                results.metadataConfirmed++;
+              }
+            } else {
+              results.metadataExtracted++;
+            }
+            
             await supabase
               .from('knowledge_documents')
               .update({
@@ -78,8 +136,25 @@ serve(async (req) => {
               })
               .eq('id', doc.id);
             
-            results.metadataExtracted++;
-            console.log(`[cleanup] ✅ Metadata: ${doc.file_name} -> "${result.title}" (${result.confidence}, ${result.extractionMethod}${result.verifiedOnline ? ', verified' : ''})`);
+            // Track confidence distribution
+            if (result.confidence === 'high') results.highConfidence++;
+            else if (result.confidence === 'medium') results.mediumConfidence++;
+            else if (result.confidence === 'low') results.lowConfidence++;
+            
+            if (result.verifiedOnline) results.verifiedOnline++;
+            
+            console.log(`[cleanup]   NEW: title="${result.title}" | authors=${JSON.stringify(result.authors)} | confidence=${result.confidence} | method=${result.extractionMethod} | verified=${result.verifiedOnline}`);
+            console.log(`[cleanup]   ACTION: ${changeType.toUpperCase()}`);
+            
+            results.details.push({
+              fileName: doc.file_name,
+              changeType,
+              oldTitle: oldMetadata.title,
+              newTitle: result.title,
+              confidence: result.confidence,
+              method: result.extractionMethod,
+              verified: result.verifiedOnline
+            });
           } else {
             console.log(`[cleanup] ⚠️ Failed: ${doc.file_name}`);
             results.errors.push(`Metadata extraction failed: ${doc.file_name}`);
@@ -147,11 +222,24 @@ serve(async (req) => {
       }
     }
 
+    console.log('[cleanup] === FINAL SUMMARY ===');
+    console.log(`[cleanup] Total processed: ${results.totalAttempts}`);
+    console.log(`[cleanup] Metadata extracted (new): ${results.metadataExtracted}`);
+    console.log(`[cleanup] Metadata confirmed: ${results.metadataConfirmed}`);
+    console.log(`[cleanup] Metadata improved: ${results.metadataImproved}`);
+    console.log(`[cleanup] Metadata changed: ${results.metadataChanged}`);
+    console.log(`[cleanup] Verified online: ${results.verifiedOnline}`);
+    console.log(`[cleanup] Confidence - High: ${results.highConfidence}, Medium: ${results.mediumConfidence}, Low: ${results.lowConfidence}`);
+    console.log(`[cleanup] Documents processed: ${results.documentsProcessed}`);
+    console.log(`[cleanup] Failed deleted: ${results.failedDeleted}`);
+    console.log(`[cleanup] Errors: ${results.errors.length}`);
+
     return new Response(JSON.stringify({
       success: true,
       ...results,
-      totalActions: results.metadataExtracted + results.documentsProcessed + 
-                    results.failedDeleted + results.downloadedDeleted
+      totalActions: results.metadataExtracted + results.metadataConfirmed + 
+                    results.metadataImproved + results.metadataChanged +
+                    results.documentsProcessed + results.failedDeleted + results.downloadedDeleted
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
