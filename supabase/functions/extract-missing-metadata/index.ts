@@ -83,7 +83,12 @@ ${fullText.slice(0, 3000)}`;
         }
 
         const metadataData = await metadataResponse.json();
-        const metadata = JSON.parse(metadataData.choices[0].message.content);
+        let content = metadataData.choices[0].message.content;
+        
+        // Remove markdown code blocks if present
+        content = content.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+        
+        const metadata = JSON.parse(content);
 
         // Update document with extracted metadata
         const { error: updateError } = await supabase

@@ -109,4 +109,7 @@ verify_jwt = true
 timeout = 900
 
 [functions.extract-missing-metadata]
+verify_jwt = false
+
+[functions.extract-pdf-text]
 verify_jwt = true
