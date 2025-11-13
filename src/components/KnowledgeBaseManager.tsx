@@ -68,6 +68,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [displayedDocuments, setDisplayedDocuments] = useState<PoolDocument[]>([]);
+  const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -581,6 +582,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
   const handleUnassignDocument = async (linkId: string, fileName: string) => {
     console.log('🔗 UNASSIGN DOCUMENT START - Link ID:', linkId);
+    setRemovingLinkId(linkId);
+    
     try {
       // Delete the link from agent_document_links
       const { error } = await supabase
@@ -597,7 +600,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       setHasTriedQuickSync(false);
       
       // Reload documents but don't close the dialog
-      loadDocuments();
+      await loadDocuments();
       
       // Notify parent to update badge
       if (onDocsUpdated) {
@@ -606,6 +609,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     } catch (error: any) {
       console.error('❌ Error unassigning document:', error);
       toast.error('Errore nella rimozione del documento');
+    } finally {
+      setRemovingLinkId(null);
     }
   };
 
@@ -738,11 +743,16 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                           e.stopPropagation();
                           handleUnassignDocument(doc.link_id, doc.file_name);
                         }}
+                        disabled={removingLinkId === doc.link_id}
                         type="button"
                         title="Rimuovi assegnazione"
                         className="h-8 w-8 p-0 flex-shrink-0"
                       >
-                        <Trash2 className="h-4 w-4 text-destructive" />
+                        {removingLinkId === doc.link_id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        )}
                       </Button>
                     </div>
                     
@@ -847,10 +857,15 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                             e.stopPropagation();
                             handleUnassignDocument(doc.link_id, doc.file_name);
                           }}
+                          disabled={removingLinkId === doc.link_id}
                           type="button"
                           title="Rimuovi assegnazione"
                         >
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                          {removingLinkId === doc.link_id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          )}
                         </Button>
                       </TableCell>
                     </TableRow>
