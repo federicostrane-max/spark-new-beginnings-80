@@ -62,7 +62,9 @@ serve(async (req) => {
       }
     }
     
-    console.log(`[extract-pdf-text] Target bucket: ${targetBucket}, path: ${targetPath}`);
+    // Decode URL-encoded characters (%20 -> space, %2C -> comma, etc.)
+    targetPath = decodeURIComponent(targetPath);
+    console.log(`[extract-pdf-text] Target bucket: ${targetBucket}, decoded path: ${targetPath}`);
 
     // Priority order: detected bucket with extracted path -> fallback to other buckets
     const bucketsToTry = [
