@@ -56,19 +56,30 @@ serve(async (req) => {
           results.totalAttempts++;
           console.log(`[cleanup] Attempting: ${doc.file_name}`);
           
-          const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path, doc.file_name);
+          const result = await extractMetadataWithFallback(
+            supabase, 
+            doc.id, 
+            doc.file_path, 
+            doc.file_name,
+            true // Enable web validation
+          );
           
           if (result.success) {
             await supabase
               .from('knowledge_documents')
               .update({
                 extracted_title: result.title,
-                extracted_authors: result.authors
+                extracted_authors: result.authors,
+                metadata_confidence: result.confidence,
+                metadata_extraction_method: result.extractionMethod,
+                metadata_verified_online: result.verifiedOnline || false,
+                metadata_verified_source: result.verifiedSource,
+                metadata_extracted_at: new Date().toISOString()
               })
               .eq('id', doc.id);
             
             results.metadataExtracted++;
-            console.log(`[cleanup] ✅ Metadata: ${doc.file_name} -> "${result.title}"`);
+            console.log(`[cleanup] ✅ Metadata: ${doc.file_name} -> "${result.title}" (${result.confidence}, ${result.extractionMethod}${result.verifiedOnline ? ', verified' : ''})`);
           } else {
             console.log(`[cleanup] ⚠️ Failed: ${doc.file_name}`);
             results.errors.push(`Metadata extraction failed: ${doc.file_name}`);

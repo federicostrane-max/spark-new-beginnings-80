@@ -5,22 +5,78 @@ interface MetadataResult {
   authors: string[] | null;
   source: 'pdf' | 'chunks';
   success: boolean;
+  confidence?: 'high' | 'medium' | 'low';
+  extractionMethod?: 'vision' | 'text' | 'chunks' | 'filename';
+  verifiedOnline?: boolean;
+  verifiedSource?: string;
 }
 
 /**
- * Estrae metadata con fallback automatico:
- * 1. Tenta estrazione da PDF originale
- * 2. Se PDF non disponibile, usa chunks esistenti
+ * Estrae metadata con strategia multi-level:
+ * 1. Vision-based extraction (primary) - analizza prima pagina PDF con AI vision
+ * 2. Text-based extraction (fallback) - estrae da testo con prompt migliorato
+ * 3. Web validation (optional) - verifica online esistenza documento
+ * 4. Filename fallback (last resort)
  */
 export async function extractMetadataWithFallback(
   supabase: any,
   documentId: string,
   filePath?: string,
-  fileName?: string
+  fileName?: string,
+  enableWebValidation: boolean = true
 ): Promise<MetadataResult> {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
   if (!lovableApiKey) {
     throw new Error('LOVABLE_API_KEY not configured');
+  }
+
+  console.log(`[metadataExtractor] Starting multi-strategy extraction for ${documentId}`);
+
+  // ========================================
+  // STEP 1: Vision-Based Extraction (PRIMARY)
+  // ========================================
+  try {
+    console.log('[metadataExtractor] 🔍 Attempting Vision extraction...');
+    const { data: visionData, error: visionError } = await supabase.functions.invoke('extract-metadata-vision', {
+      body: { documentId, filePath, fileName }
+    });
+
+    if (!visionError && visionData?.success && visionData.confidence === 'high') {
+      console.log('[metadataExtractor] ✅ Vision extraction HIGH confidence - using immediately');
+      
+      // If vision is high confidence, optionally validate online
+      if (enableWebValidation && visionData.title) {
+        try {
+          const { data: validationData } = await supabase.functions.invoke('validate-metadata-online', {
+            body: { title: visionData.title, authors: visionData.authors }
+          });
+
+          if (validationData?.verified) {
+            console.log('[metadataExtractor] ✅ Metadata verified online');
+            return {
+              ...visionData,
+              extractionMethod: 'vision',
+              verifiedOnline: true,
+              verifiedSource: validationData.source
+            };
+          }
+        } catch (validationError) {
+          console.log('[metadataExtractor] ⚠️ Web validation failed, but keeping vision result');
+        }
+      }
+
+      return {
+        ...visionData,
+        extractionMethod: 'vision'
+      };
+    }
+
+    // Store vision result as candidate for later comparison
+    if (!visionError && visionData?.success) {
+      console.log('[metadataExtractor] 📝 Vision extraction medium/low confidence - will compare with text');
+    }
+  } catch (visionError) {
+    console.log('[metadataExtractor] ⚠️ Vision extraction failed:', visionError);
   }
 
   let textForExtraction = '';
@@ -66,18 +122,28 @@ export async function extractMetadataWithFallback(
   }
 
   // ========================================
-  // STEP 3: Estrazione metadata con AI
+  // STEP 3: Text-Based Intelligent Extraction
   // ========================================
-  const metadataPrompt = `Extract the EXACT title and author(s) from this document text.
-The title is usually found at the beginning or in the first pages.
-Return ONLY a JSON object with this structure:
-{
-  "title": "Exact title as written in the document",
-  "authors": ["Author 1", "Author 2"]
-}
+  console.log('[metadataExtractor] 📄 Attempting text-based extraction with improved prompt...');
+  
+  const metadataPrompt = `Extract the EXACT title and author(s) from this academic/technical document text.
+
+CRITICAL RULES:
+1. Title should be 5-200 characters
+2. EXCLUDE if text starts with: "Abstract:", "Introduction:", "Chapter", "Section", numbers
+3. If this looks like middle of document (not title page), return null for title
+4. Authors: look for names near title, affiliations, or "by [Author]" patterns
+5. Return confidence: "high" if clearly a title, "medium" if uncertain, "low" if not a title
 
 Document text (first 3000 characters):
-${textForExtraction.slice(0, 3000)}`;
+${textForExtraction.slice(0, 3000)}
+
+Return ONLY valid JSON:
+{
+  "title": "Exact title or null",
+  "authors": ["Author 1", "Author 2"] or null,
+  "confidence": "high" | "medium" | "low"
+}`;
 
   try {
     const metadataResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -105,21 +171,81 @@ ${textForExtraction.slice(0, 3000)}`;
     
     const metadata = JSON.parse(content);
 
-    console.log(`[metadataExtractor] ✅ Metadata extracted from ${source}:`, metadata);
+    console.log(`[metadataExtractor] 📊 Text extraction result from ${source}:`, metadata);
 
-    // Se l'AI ritorna "null" come stringa o null, usa il nome file come fallback
+    // Validate extracted title
     let extractedTitle = metadata.title;
-    if (!extractedTitle || extractedTitle === 'null' || extractedTitle === 'NULL') {
-      console.log('[metadataExtractor] ⚠️ AI returned null/invalid title, using filename as fallback');
+    let confidence: 'high' | 'medium' | 'low' = metadata.confidence || 'medium';
+    let extractionMethod: 'text' | 'chunks' | 'filename' = source === 'pdf' ? 'text' : 'chunks';
+
+    // Check for invalid titles
+    const invalidPatterns = [
+      /^abstract:/i,
+      /^introduction:/i,
+      /^chapter\s+\d+/i,
+      /^\d+$/,
+      /^section\s+\d+/i
+    ];
+
+    if (!extractedTitle || 
+        extractedTitle === 'null' || 
+        extractedTitle === 'NULL' ||
+        extractedTitle.length < 5 ||
+        extractedTitle.length > 200 ||
+        invalidPatterns.some(pattern => pattern.test(extractedTitle))) {
+      
+      console.log('[metadataExtractor] ⚠️ Invalid title detected, using filename fallback');
       extractedTitle = fileName ? fileName.replace(/\.pdf$/i, '').replace(/_/g, ' ') : null;
+      confidence = 'low';
+      extractionMethod = 'filename';
     }
 
-    return {
+    // ========================================
+    // STEP 4: Web Validation (if enabled and title found)
+    // ========================================
+    let verifiedOnline = false;
+    let verifiedSource: string | undefined;
+
+    if (enableWebValidation && extractedTitle && confidence !== 'low') {
+      try {
+        console.log('[metadataExtractor] 🌐 Validating metadata online...');
+        const { data: validationData, error: validationError } = await supabase.functions.invoke('validate-metadata-online', {
+          body: { 
+            title: extractedTitle, 
+            authors: metadata.authors 
+          }
+        });
+
+        if (!validationError && validationData) {
+          verifiedOnline = validationData.verified;
+          verifiedSource = validationData.source;
+          
+          // Upgrade confidence if verified online
+          if (validationData.confidence === 'verified' && confidence === 'medium') {
+            confidence = 'high';
+            console.log('[metadataExtractor] ⬆️ Upgraded confidence to HIGH based on online verification');
+          }
+          
+          console.log(`[metadataExtractor] ${verifiedOnline ? '✅' : '⚠️'} Online validation: ${validationData.confidence}`);
+        }
+      } catch (validationError) {
+        console.log('[metadataExtractor] ⚠️ Web validation failed:', validationError);
+      }
+    }
+
+    const result: MetadataResult = {
       title: extractedTitle || null,
       authors: metadata.authors || null,
       source,
-      success: extractedTitle !== null
+      success: extractedTitle !== null,
+      confidence,
+      extractionMethod,
+      verifiedOnline,
+      verifiedSource
     };
+
+    console.log('[metadataExtractor] ✅ Final result:', result);
+    return result;
 
   } catch (aiError) {
     console.error('[metadataExtractor] ❌ AI extraction failed:', aiError);

@@ -858,6 +858,11 @@ export type Database = {
           file_size_bytes: number | null
           id: string
           keywords: string[] | null
+          metadata_confidence: string | null
+          metadata_extracted_at: string | null
+          metadata_extraction_method: string | null
+          metadata_verified_online: boolean | null
+          metadata_verified_source: string | null
           page_count: number | null
           processed_at: string | null
           processing_status: string
@@ -881,6 +886,11 @@ export type Database = {
           file_size_bytes?: number | null
           id?: string
           keywords?: string[] | null
+          metadata_confidence?: string | null
+          metadata_extracted_at?: string | null
+          metadata_extraction_method?: string | null
+          metadata_verified_online?: boolean | null
+          metadata_verified_source?: string | null
           page_count?: number | null
           processed_at?: string | null
           processing_status?: string
@@ -904,6 +914,11 @@ export type Database = {
           file_size_bytes?: number | null
           id?: string
           keywords?: string[] | null
+          metadata_confidence?: string | null
+          metadata_extracted_at?: string | null
+          metadata_extraction_method?: string | null
+          metadata_verified_online?: boolean | null
+          metadata_verified_source?: string | null
           page_count?: number | null
           processed_at?: string | null
           processing_status?: string
