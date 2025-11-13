@@ -139,10 +139,28 @@ export default function DocumentPool() {
       
       console.log('[Test Extraction] Result:', data);
       
-      toast.success(
-        `Extracted: "${data.result.title}" (${data.result.confidence}) in ${data.result.executionTimeMs}ms`,
-        { id: 'test-extraction', duration: 10000 }
-      );
+      const result = data.results[0];
+      const doc = data.document;
+
+      if (result.success) {
+        const titleInfo = result.title 
+          ? `Title: "${result.title}"`
+          : `No title found`;
+        
+        const authorsInfo = result.authors?.length > 0
+          ? ` | Authors: ${result.authors.join(', ')}`
+          : '';
+        
+        toast.success(
+          `✓ ${doc.fileName}\n${titleInfo}${authorsInfo}\nConfidence: ${result.confidence} (${result.executionTimeMs}ms)`,
+          { id: 'test-extraction', duration: 10000 }
+        );
+      } else {
+        toast.error(
+          `Failed to extract metadata: ${result.error}`,
+          { id: 'test-extraction' }
+        );
+      }
       
     } catch (err: any) {
       console.error('[Test Extraction Failed]', err);
