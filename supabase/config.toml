@@ -131,3 +131,7 @@ verify_jwt = false
 
 [functions.manual-metadata-override]
 verify_jwt = false
+
+[functions.test-aggressive-extraction]
+verify_jwt = false
+timeout = 180
