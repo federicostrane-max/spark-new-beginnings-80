@@ -116,3 +116,6 @@ verify_jwt = true
 
 [functions.fix-pending]
 verify_jwt = false
+
+[functions.complete-pool-cleanup]
+verify_jwt = false
