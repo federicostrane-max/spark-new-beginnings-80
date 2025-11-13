@@ -524,7 +524,15 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         .from('agent_document_links')
         .insert(assignments);
 
-      if (error) throw error;
+      // Handle duplicate key error - documents already assigned
+      if (error && error.code !== '23505') {
+        throw error;
+      }
+      
+      // If duplicate key, log and continue with sync
+      if (error && error.code === '23505') {
+        console.log('⚠️ Some documents already assigned, proceeding with sync...');
+      }
 
       // Sync each document and wait for completion
       let successCount = 0;
@@ -564,17 +572,34 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         toast.error('Errore nella sincronizzazione dei documenti');
       }
 
-      // Don't close the dialog automatically - let user verify sync status
-      setSyncProgress(null);
       loadDocuments();
       
       // Notify parent to update badge
       if (onDocsUpdated) {
         onDocsUpdated();
       }
+
+      // Close dialog after 2 seconds to let user see results
+      setTimeout(() => {
+        setShowAssignDialog(false);
+        setSyncProgress(null);
+        setSyncStatuses(new Map());
+      }, 2000);
+      
     } catch (error: any) {
       console.error('❌ Error assigning documents:', error);
-      toast.error('Errore nell\'assegnazione dei documenti');
+      
+      // Show specific message for duplicate key
+      if (error.code === '23505') {
+        toast.warning('Alcuni documenti sono già assegnati');
+      } else {
+        toast.error(`Errore: ${error.message}`);
+      }
+      
+      // Close dialog immediately on error
+      setShowAssignDialog(false);
+      setSyncProgress(null);
+      setSyncStatuses(new Map());
     } finally {
       setAssigning(false);
     }
