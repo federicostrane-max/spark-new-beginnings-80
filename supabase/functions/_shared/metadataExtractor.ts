@@ -15,7 +15,8 @@ interface MetadataResult {
 export async function extractMetadataWithFallback(
   supabase: any,
   documentId: string,
-  filePath?: string
+  filePath?: string,
+  fileName?: string
 ): Promise<MetadataResult> {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
   if (!lovableApiKey) {
@@ -106,11 +107,18 @@ ${textForExtraction.slice(0, 3000)}`;
 
     console.log(`[metadataExtractor] ✅ Metadata extracted from ${source}:`, metadata);
 
+    // Se l'AI ritorna "null" come stringa o null, usa il nome file come fallback
+    let extractedTitle = metadata.title;
+    if (!extractedTitle || extractedTitle === 'null' || extractedTitle === 'NULL') {
+      console.log('[metadataExtractor] ⚠️ AI returned null/invalid title, using filename as fallback');
+      extractedTitle = fileName ? fileName.replace(/\.pdf$/i, '').replace(/_/g, ' ') : null;
+    }
+
     return {
-      title: metadata.title || null,
+      title: extractedTitle || null,
       authors: metadata.authors || null,
       source,
-      success: true
+      success: extractedTitle !== null
     };
 
   } catch (aiError) {

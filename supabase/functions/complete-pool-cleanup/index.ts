@@ -56,7 +56,7 @@ serve(async (req) => {
           results.totalAttempts++;
           console.log(`[cleanup] Attempting: ${doc.file_name}`);
           
-          const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path);
+          const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path, doc.file_name);
           
           if (result.success) {
             await supabase
