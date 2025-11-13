@@ -49,7 +49,7 @@ export async function extractMetadataWithFallback(
       .from('agent_knowledge')
       .select('content')
       .eq('pool_document_id', documentId)
-      .limit(5);
+      .limit(20); // Increased from 5 to 20 for aggressive extraction
     if (data?.length) {
       text = data.map((c: any) => c.content).join('\n');
       source = 'chunks';
@@ -63,7 +63,24 @@ export async function extractMetadataWithFallback(
 
   // AI extraction
   try {
-    const prompt = `Extract title and authors. Rules: title 5-200 chars, look for Title:/By: or first bold text. Text: ${text.slice(0, 3000)}. JSON: {"title":"...","authors":[...],"confidence":"high"}`;
+    // Enhanced prompt for better extraction with more context
+    const maxChars = Math.min(text.length, 10000); // Increased from 3000 to 10000
+    const prompt = `You are a precise metadata extractor for academic and technical documents. 
+
+INSTRUCTIONS:
+1. Extract the document's title and authors from the text below
+2. Title should be 5-200 characters
+3. Look for explicit markers like "Title:", "By:", author lists, or first prominent heading
+4. If multiple potential titles exist, choose the most comprehensive one
+5. For authors, extract full names (avoid abbreviations if possible)
+6. Return HIGH confidence only if you find clear, unambiguous metadata
+7. Return MEDIUM if metadata is inferred but reasonable
+8. Return LOW if uncertain
+
+TEXT:
+${text.slice(0, maxChars)}
+
+Return ONLY valid JSON: {"title":"...","authors":["..."],"confidence":"high|medium|low"}`;
 
     const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -84,7 +101,15 @@ export async function extractMetadataWithFallback(
     let method: 'text' | 'chunks' | 'filename' = source === 'pdf' ? 'text' : 'chunks';
 
     const inv = [/^abstract:/i, /^intro/i, /^chapter\s+\d/i, /^\d+$/];
-    if (!title || title.length < 5 || inv.some(p => p.test(title))) {
+    const needsAggressiveFallback = !title || title.length < 5 || inv.some(p => p.test(title)) || conf === 'low';
+    
+    // Aggressive fallback: if initial extraction is poor, try with more context
+    if (needsAggressiveFallback && source === 'chunks') {
+      console.log('[metadata] Initial extraction poor, trying aggressive strategy...');
+      title = (fileName || 'unknown').replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+      conf = 'low';
+      method = 'filename';
+    } else if (needsAggressiveFallback) {
       title = (fileName || 'unknown').replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
       conf = 'low';
       method = 'filename';
