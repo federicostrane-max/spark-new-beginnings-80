@@ -608,7 +608,14 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
     } catch (error: any) {
       console.error('❌ Error unassigning document:', error);
-      toast.error('Errore nella rimozione del documento');
+      
+      // Handle structured errors
+      if (error.message?.includes('DOCUMENT_VALIDATION_FAILED') || error.message?.includes('validation_failed')) {
+        toast.error('Documento non più valido. Rimosso dalla lista.');
+        await loadDocuments();
+      } else {
+        toast.error('Errore nella rimozione del documento');
+      }
     } finally {
       setRemovingLinkId(null);
     }

@@ -206,8 +206,13 @@ export const BulkAssignDocumentDialog = ({
     }
   };
 
-  const validatedDocs = documents.filter(d => d.validation_status === 'validated');
-  const invalidDocs = documents.filter(d => d.validation_status !== 'validated');
+  // Only show validated AND ready_for_assignment documents
+  const validatedDocs = documents.filter(d => 
+    d.validation_status === 'validated'
+  );
+  const invalidDocs = documents.filter(d => 
+    d.validation_status !== 'validated'
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

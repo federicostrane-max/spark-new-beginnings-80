@@ -472,9 +472,9 @@ export const DocumentPoolTable = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-background">
                   <SelectItem value="all">Tutti</SelectItem>
-                  <SelectItem value="validated">Validato</SelectItem>
+                  <SelectItem value="validated">Validato e Pronto</SelectItem>
                   <SelectItem value="validating">In Validazione</SelectItem>
-                  <SelectItem value="validation_failed">Non Valido</SelectItem>
+                  <SelectItem value="validation_failed">⚠️ Non Disponibile</SelectItem>
                   <SelectItem value="ready_for_assignment">Pronto</SelectItem>
                   <SelectItem value="processing">In Elaborazione</SelectItem>
                 </SelectContent>
@@ -627,7 +627,14 @@ export const DocumentPoolTable = () => {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        {(!doc.ai_summary || doc.ai_summary.trim() === "") ? (
+                        {doc.validation_status === 'validation_failed' ? (
+                          <>
+                            <XCircle className="h-4 w-4 text-red-500" />
+                            <Badge variant="destructive" className="text-xs">
+                              Non Disponibile
+                            </Badge>
+                          </>
+                        ) : (!doc.ai_summary || doc.ai_summary.trim() === "") ? (
                           <>
                             <AlertCircle className="h-4 w-4 text-orange-500" />
                             <span className="text-sm text-orange-500 font-medium">
@@ -728,9 +735,15 @@ export const DocumentPoolTable = () => {
                             setSelectedDoc(doc);
                             setAssignDialogOpen(true);
                           }}
-                          disabled={doc.validation_status !== "validated"}
+                          disabled={doc.validation_status !== "validated" || doc.processing_status !== "ready_for_assignment"}
                           className="h-8 w-8 p-0"
-                          title="Assegna agenti"
+                          title={
+                            doc.validation_status !== "validated" 
+                              ? "Documento non validato - non disponibile per assegnazione" 
+                              : doc.processing_status !== "ready_for_assignment"
+                              ? "Documento non pronto per assegnazione"
+                              : "Assegna agenti"
+                          }
                         >
                           <LinkIcon className="h-3.5 w-3.5" />
                         </Button>
@@ -826,11 +839,11 @@ export const DocumentPoolTable = () => {
                             setSelectedDoc(doc);
                             setAssignDialogOpen(true);
                           }}
-                          disabled={doc.validation_status !== "validated"}
+                          disabled={doc.validation_status !== "validated" || doc.processing_status !== "ready_for_assignment"}
                           className="flex-1"
                         >
                           <LinkIcon className="h-4 w-4 mr-1" />
-                          Assegna
+                          {doc.validation_status !== "validated" ? "Non Disponibile" : "Assegna"}
                         </Button>
                         <Button
                           size="sm"

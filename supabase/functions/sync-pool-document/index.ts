@@ -74,8 +74,38 @@ serve(async (req) => {
       .maybeSingle();
 
     if (docError) throw docError;
+    
     if (!poolDoc) {
-      throw new Error(`Document ${documentId} not found or not validated`);
+      // Check if document exists but not ready
+      const { data: anyDoc } = await supabase
+        .from('knowledge_documents')
+        .select('processing_status, validation_status, file_name')
+        .eq('id', documentId)
+        .maybeSingle();
+      
+      if (anyDoc) {
+        return new Response(
+          JSON.stringify({
+            error: 'DOCUMENT_NOT_READY',
+            message: `Document "${anyDoc.file_name}" is not ready for assignment.`,
+            status: anyDoc.processing_status,
+            validation: anyDoc.validation_status,
+            documentId,
+            agentId
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      return new Response(
+        JSON.stringify({
+          error: 'DOCUMENT_NOT_FOUND',
+          message: 'Document not found',
+          documentId,
+          agentId
+        }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log(`[sync-pool-document] Found document: ${poolDoc.file_name}`);

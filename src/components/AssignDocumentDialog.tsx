@@ -56,6 +56,21 @@ export const AssignDocumentDialog = ({
     try {
       setLoading(true);
       
+      // Verify document is ready for assignment
+      const { data: docData, error: docError } = await supabase
+        .from("knowledge_documents")
+        .select("validation_status, processing_status")
+        .eq("id", document.id)
+        .single();
+      
+      if (docError) throw docError;
+      
+      if (docData.validation_status !== 'validated' || docData.processing_status !== 'ready_for_assignment') {
+        toast.error("Questo documento non è pronto per essere assegnato");
+        onOpenChange(false);
+        return;
+      }
+      
       // Load all agents
       const { data: agentsData, error: agentsError } = await supabase
         .from("agents")
@@ -137,7 +152,7 @@ export const AssignDocumentDialog = ({
         console.log(`[AssignDialog] NOTE: Chunks remain in agent_knowledge (shared pool)`);
       }
 
-      // Add newly assigned agents (link-based, no chunk copying)
+      // Add newly assigned agents and sync
       if (toAdd.length > 0) {
         console.log(`[AssignDialog] Adding ${toAdd.length} new agent assignments`);
         
@@ -155,7 +170,36 @@ export const AssignDocumentDialog = ({
         if (insertError) throw insertError;
 
         console.log(`[AssignDialog] ✓ Created agent_document_links for ${toAdd.length} agents`);
-        console.log(`[AssignDialog] NOTE: Chunks are shared via match_documents function (no duplication)`);
+        
+        // Sync documents to agents
+        for (const agentId of toAdd) {
+          try {
+            const { error: syncError } = await supabase.functions.invoke('sync-pool-document', {
+              body: { documentId: document.id, agentId }
+            });
+            
+            if (syncError) {
+              const errorData = typeof syncError === 'object' ? syncError : { message: String(syncError) };
+              
+              // Handle structured errors
+              if (errorData.error === 'DOCUMENT_NOT_READY') {
+                toast.error(`Documento non pronto: ${errorData.message}`);
+              } else if (errorData.error === 'DOCUMENT_VALIDATION_FAILED') {
+                toast.error(`Documento non valido. Eliminalo e ricaricalo.`);
+                // Auto-remove the failed link
+                await supabase
+                  .from("agent_document_links")
+                  .delete()
+                  .eq("document_id", document.id)
+                  .eq("agent_id", agentId);
+              } else {
+                console.error('Sync error for agent', agentId, errorData);
+              }
+            }
+          } catch (syncErr) {
+            console.error('Failed to sync document to agent', agentId, syncErr);
+          }
+        }
         
         toast.success(`Documento assegnato a ${toAdd.length} nuovi agenti`);
       }
@@ -165,7 +209,13 @@ export const AssignDocumentDialog = ({
       onOpenChange(false);
     } catch (error: any) {
       console.error("Error assigning document:", error);
-      toast.error("Errore nell'assegnazione del documento");
+      
+      // Check for RLS policy violation
+      if (error.message?.includes('prevent_linking_invalid_documents')) {
+        toast.error("Questo documento non può essere assegnato perché non è validato");
+      } else {
+        toast.error("Errore nell'assegnazione del documento");
+      }
     } finally {
       setAssigning(false);
     }
