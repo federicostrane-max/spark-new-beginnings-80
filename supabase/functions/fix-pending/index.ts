@@ -20,21 +20,18 @@ serve(async (req) => {
     let fixed = 0;
     let deleted = 0;
 
-    // Get all pending documents
-    const { data: allPending } = await supabase
+    const { data: pending } = await supabase
       .from('knowledge_documents')
-      .select('id, file_name, file_path')
+      .select('id, file_name')
       .eq('processing_status', 'pending_processing');
 
-    if (!allPending) {
+    if (!pending) {
       return new Response(JSON.stringify({ fixed: 0, deleted: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
-    // Process each document
-    for (const doc of allPending) {
-      // Check if has chunks
+    for (const doc of pending) {
       const { data: chunks } = await supabase
         .from('agent_knowledge')
         .select('id')
@@ -42,7 +39,6 @@ serve(async (req) => {
         .limit(1);
 
       if (chunks && chunks.length > 0) {
-        // Has chunks - just update status
         await supabase
           .from('knowledge_documents')
           .update({
@@ -52,7 +48,6 @@ serve(async (req) => {
           .eq('id', doc.id);
         fixed++;
       } else {
-        // No chunks - delete
         await supabase
           .from('agent_document_links')
           .delete()
