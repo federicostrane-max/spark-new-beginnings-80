@@ -263,7 +263,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       const { data: log } = await supabase
         .from('alignment_analysis_log')
-        .select('completed_at, progress_chunks_analyzed, total_chunks_analyzed')
+        .select('completed_at, total_chunks_analyzed')
         .eq('id', analysisId)
         .single();
 

@@ -23,10 +23,18 @@ interface AnalysisLog {
   started_at: string;
   completed_at: string | null;
   total_chunks_analyzed: number;
-  progress_chunks_analyzed: number;
   chunks_flagged_for_removal: number;
   chunks_auto_removed: number;
-  concept_coverage_percentage: number;
+  overall_alignment_percentage: number;
+  dimension_breakdown: {
+    semantic_relevance: number;
+    concept_coverage: number;
+    procedural_match: number;
+    vocabulary_alignment: number;
+    bibliographic_match: number;
+  } | null;
+  prerequisite_check_passed: boolean;
+  missing_critical_sources: any[];
   safe_mode_active: boolean;
   trigger_type: string;
 }
@@ -96,7 +104,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       
       const { data: log } = await supabase
         .from('alignment_analysis_log')
-        .select('progress_chunks_analyzed, total_chunks_analyzed, completed_at')
+        .select('total_chunks_analyzed, completed_at')
         .eq('agent_id', agentId)
         .or(`completed_at.is.null,completed_at.gte.${fiveMinutesAgo}`)
         .order('started_at', { ascending: false })
@@ -104,11 +112,12 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         .single();
 
       if (log) {
-        setProgressChunks(log.progress_chunks_analyzed || 0);
+        const currentProgress = log.total_chunks_analyzed || 0;
+        setProgressChunks(currentProgress);
         
         // If analysis just completed, show success toast
-        if (log.completed_at && progressChunks !== log.progress_chunks_analyzed) {
-          toast.success(`Analisi completata! ${log.progress_chunks_analyzed} chunks analizzati.`);
+        if (log.completed_at && progressChunks !== currentProgress) {
+          toast.success(`Analisi completata! ${currentProgress} chunks analizzati.`);
         }
       }
 
@@ -150,28 +159,24 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       .limit(10);
 
     if (logs) {
-      setAnalysisLogs(logs);
+      setAnalysisLogs(logs as unknown as AnalysisLog[]);
       
       if (logs.length > 0) {
         const latest = logs[0];
         
-        // Calculate real coverage from scores
-        const { data: scores } = await supabase
-          .from('knowledge_relevance_scores')
-          .select('concept_coverage')
-          .eq('agent_id', agentId);
-        
-        const realCoverage = scores && scores.length > 0
-          ? (scores.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / scores.length) * 100
-          : latest.concept_coverage_percentage || 0;
+        // Use overall_alignment_percentage from the log with type safety
+        const dimensionBreakdown = latest.dimension_breakdown as any;
+        const realCoverage = dimensionBreakdown?.concept_coverage 
+          ? dimensionBreakdown.concept_coverage * 100
+          : latest.overall_alignment_percentage || 0;
 
-      // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
-      // rappresenta il batch size (1000), non il totale reale dei chunk
-      setStats(prev => ({
-        ...prev,
-        removedChunks: latest.chunks_auto_removed,
-        conceptCoverage: realCoverage,
-      }));
+        // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
+        // rappresenta il batch size (1000), non il totale reale dei chunk
+        setStats(prev => ({
+          ...prev,
+          removedChunks: latest.chunks_auto_removed,
+          conceptCoverage: realCoverage,
+        }));
       }
     }
 
@@ -280,7 +285,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const progressPercentage = isAnalyzing && totalChunksInAnalysis > 0
     ? (progressChunks / totalChunksInAnalysis) * 100
     : (analysisLogs.length > 0 && stats.totalChunks > 0
-      ? ((analysisLogs[0].progress_chunks_analyzed || 0) / stats.totalChunks) * 100
+      ? ((analysisLogs[0].total_chunks_analyzed || 0) / stats.totalChunks) * 100
       : 0);
 
   // Estimate remaining time (assuming ~10 chunks per second)
@@ -385,7 +390,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             <XCircle className="h-5 w-5" />
             <AlertTitle>Analisi Incompleta</AlertTitle>
             <AlertDescription className="flex items-center justify-between">
-              <span>L'analisi si è fermata a {analysisLogs[0]?.progress_chunks_analyzed || 0}/{stats.totalChunks} chunk. Click per riavviare.</span>
+              <span>L'analisi si è fermata. Click per riavviare.</span>
               <Button onClick={triggerManualAnalysis} size="sm" variant="outline" className="ml-4">
                 <Play className="mr-2 h-4 w-4" />
                 Riavvia Analisi
@@ -710,7 +715,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                         )}
                       </TableCell>
                       <TableCell>
-                        {log.concept_coverage_percentage?.toFixed(0)}%
+                        {log.overall_alignment_percentage?.toFixed(0)}%
                       </TableCell>
                       <TableCell>
                         {log.safe_mode_active ? (

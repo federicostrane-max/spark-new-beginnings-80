@@ -12,7 +12,15 @@ serve(async (req) => {
   }
 
   try {
-    const { agentId, core_concepts, procedural_knowledge, decision_patterns, domain_vocabulary } = await req.json();
+    const { 
+      agentId, 
+      theoretical_concepts, 
+      operational_concepts, 
+      procedural_knowledge, 
+      explicit_rules, 
+      domain_vocabulary,
+      bibliographic_references 
+    } = await req.json();
 
     console.log("Updating task requirements for agent:", agentId);
 
@@ -21,9 +29,10 @@ serve(async (req) => {
       throw new Error("agentId is required");
     }
 
-    if (!Array.isArray(core_concepts) || 
+    if (!Array.isArray(theoretical_concepts) || 
+        !Array.isArray(operational_concepts) || 
         !Array.isArray(procedural_knowledge) || 
-        !Array.isArray(decision_patterns) || 
+        !Array.isArray(explicit_rules) || 
         !Array.isArray(domain_vocabulary)) {
       throw new Error("All requirement fields must be arrays");
     }
@@ -55,10 +64,12 @@ serve(async (req) => {
     const { data, error: updateError } = await supabase
       .from("agent_task_requirements")
       .update({
-        core_concepts,
+        theoretical_concepts,
+        operational_concepts,
         procedural_knowledge,
-        decision_patterns,
+        explicit_rules,
         domain_vocabulary,
+        bibliographic_references,
         updated_at: new Date().toISOString()
       })
       .eq("id", current.id)
