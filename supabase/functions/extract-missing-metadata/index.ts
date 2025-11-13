@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.78.0';
+import { extractMetadataWithFallback } from '../_shared/metadataExtractor.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,71 +39,27 @@ serve(async (req) => {
       try {
         console.log(`[extract-missing-metadata] Processing: ${doc.file_name}`);
 
-        // Extract text from PDF
-        const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
-          body: { documentId: doc.id, filePath: doc.file_path }
-        });
+        // Use shared metadata extractor with automatic fallback
+        const result = await extractMetadataWithFallback(supabase, doc.id, doc.file_path);
 
-        if (extractError || !extractData?.text) {
-          console.error(`[extract-missing-metadata] Text extraction failed for ${doc.file_name}:`, extractError);
+        if (result.success) {
+          // Update document with extracted metadata
+          const { error: updateError } = await supabase
+            .from('knowledge_documents')
+            .update({
+              extracted_title: result.title,
+              extracted_authors: result.authors
+            })
+            .eq('id', doc.id);
+
+          if (updateError) throw updateError;
+
+          console.log(`[extract-missing-metadata] ✅ ${doc.file_name}: "${result.title}" (source: ${result.source})`);
+          successCount++;
+        } else {
+          console.error(`[extract-missing-metadata] ❌ ${doc.file_name}: Failed to extract metadata`);
           errorCount++;
-          continue;
         }
-
-        const fullText = extractData.text;
-
-        // Extract metadata using Gemini
-        const metadataPrompt = `Extract the EXACT title and author(s) from this PDF text.
-The title is usually found on the first page or title page.
-Return ONLY a JSON object with this structure:
-{
-  "title": "Exact title as written in the document",
-  "authors": ["Author 1", "Author 2"]
-}
-
-PDF Text (first 3000 characters):
-${fullText.slice(0, 3000)}`;
-
-        const metadataResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lovableApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            messages: [{ role: 'user', content: metadataPrompt }],
-            response_format: { type: 'json_object' }
-          })
-        });
-
-        if (!metadataResponse.ok) {
-          console.error(`[extract-missing-metadata] AI failed for ${doc.file_name}`);
-          errorCount++;
-          continue;
-        }
-
-        const metadataData = await metadataResponse.json();
-        let content = metadataData.choices[0].message.content;
-        
-        // Remove markdown code blocks if present
-        content = content.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
-        
-        const metadata = JSON.parse(content);
-
-        // Update document with extracted metadata
-        const { error: updateError } = await supabase
-          .from('knowledge_documents')
-          .update({
-            extracted_title: metadata.title || null,
-            extracted_authors: metadata.authors || null
-          })
-          .eq('id', doc.id);
-
-        if (updateError) throw updateError;
-
-        console.log(`[extract-missing-metadata] ✅ ${doc.file_name}: "${metadata.title}"`);
-        successCount++;
 
       } catch (docError) {
         console.error(`[extract-missing-metadata] Error processing ${doc.file_name}:`, docError);

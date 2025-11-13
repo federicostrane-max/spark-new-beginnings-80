@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.78.0";
+import { extractMetadataWithFallback } from '../_shared/metadataExtractor.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -296,56 +297,20 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     }
 
     // ========================================
-    // Extract PDF Metadata (Title and Authors)
+    // Extract PDF Metadata (Title and Authors) with Fallback
     // ========================================
-    console.log('[process-document] Extracting PDF metadata from text...');
+    console.log('[process-document] Extracting PDF metadata...');
 
-    const metadataPrompt = `Extract the EXACT title and author(s) from this PDF text.
-The title is usually found on the first page or title page.
-Return ONLY a JSON object with this structure:
-{
-  "title": "Exact title as written in the document",
-  "authors": ["Author 1", "Author 2"]
-}
+    const result = await extractMetadataWithFallback(supabase, documentId);
 
-PDF Text (first 3000 characters):
-${fullText.slice(0, 3000)}`;
+    const extractedTitle = result.title;
+    const extractedAuthors = result.authors;
 
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    if (!lovableApiKey) {
-      console.warn('[process-document] LOVABLE_API_KEY not configured, skipping metadata extraction');
-    }
-
-    let extractedTitle = null;
-    let extractedAuthors = null;
-
-    if (lovableApiKey) {
-      try {
-        const metadataResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${lovableApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            messages: [{ role: 'user', content: metadataPrompt }],
-            response_format: { type: 'json_object' }
-          })
-        });
-
-        if (metadataResponse.ok) {
-          const metadataData = await metadataResponse.json();
-          const metadata = JSON.parse(metadataData.choices[0].message.content);
-          extractedTitle = metadata.title || null;
-          extractedAuthors = metadata.authors || null;
-          console.log('[process-document] ✅ Metadata extracted:', { title: extractedTitle, authors: extractedAuthors });
-        } else {
-          console.warn('[process-document] ⚠️ Metadata extraction failed:', metadataResponse.statusText);
-        }
-      } catch (metadataError) {
-        console.warn('[process-document] ⚠️ Error extracting metadata:', metadataError);
-      }
+    if (result.success) {
+      console.log(`[process-document] ✅ Metadata extracted from ${result.source}:`, 
+                  { title: extractedTitle, authors: extractedAuthors });
+    } else {
+      console.warn('[process-document] ⚠️ Metadata extraction failed');
     }
 
     // ========================================
