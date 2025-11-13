@@ -568,6 +568,7 @@ export type Database = {
       alignment_analysis_log: {
         Row: {
           agent_id: string | null
+          analysis_config: Json | null
           chunks_auto_removed: number
           chunks_flagged_for_removal: number
           completed_at: string | null
@@ -584,6 +585,7 @@ export type Database = {
         }
         Insert: {
           agent_id?: string | null
+          analysis_config?: Json | null
           chunks_auto_removed?: number
           chunks_flagged_for_removal?: number
           completed_at?: string | null
@@ -600,6 +602,7 @@ export type Database = {
         }
         Update: {
           agent_id?: string | null
+          analysis_config?: Json | null
           chunks_auto_removed?: number
           chunks_flagged_for_removal?: number
           completed_at?: string | null
@@ -924,6 +927,7 @@ export type Database = {
           requirement_id: string | null
           semantic_relevance: number
           vocabulary_alignment: number
+          weights_used: Json | null
         }
         Insert: {
           agent_id?: string | null
@@ -939,6 +943,7 @@ export type Database = {
           requirement_id?: string | null
           semantic_relevance: number
           vocabulary_alignment: number
+          weights_used?: Json | null
         }
         Update: {
           agent_id?: string | null
@@ -954,6 +959,7 @@ export type Database = {
           requirement_id?: string | null
           semantic_relevance?: number
           vocabulary_alignment?: number
+          weights_used?: Json | null
         }
         Relationships: [
           {

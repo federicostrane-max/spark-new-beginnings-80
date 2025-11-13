@@ -44,4 +44,12 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
     max_ai_suggestions_per_category: 5, // Limit detailed AI suggestions to top 5 gaps per category
     use_fast_model_for_bulk: true, // Use faster AI model for non-critical suggestions
   },
+  
+  // Experimental features for gradual rollout
+  experimental: {
+    adaptive_weights: true,      // Enable adaptive scoring weights based on agent type
+    adaptive_thresholds: true,   // Enable smart removal thresholds based on domain criticality
+    fallback_to_fixed: true,     // Fallback to fixed weights if agent type detection fails
+    show_config_in_dashboard: true // Display agent configuration in dashboard
+  },
 } as const;

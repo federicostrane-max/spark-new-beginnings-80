@@ -37,6 +37,18 @@ interface AnalysisLog {
   missing_critical_sources: any[];
   safe_mode_active: boolean;
   trigger_type: string;
+  analysis_config: {
+    agent_type: string;
+    domain_criticality: string;
+    weights_used: {
+      semantic_relevance: number;
+      concept_coverage: number;
+      procedural_match: number;
+      vocabulary_alignment: number;
+      bibliographic_match: number;
+    };
+    removal_threshold: number;
+  } | null;
 }
 
 interface RemovedChunk {
@@ -461,6 +473,62 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
               )}
             </div>
 
+            {/* Agent Configuration Card - NEW */}
+            {KNOWLEDGE_ALIGNMENT_CONFIG.experimental?.show_config_in_dashboard && analysisLogs[0]?.analysis_config && (
+              <Card className="bg-gradient-to-br from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 border-purple-200 dark:border-purple-800">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Target className="h-4 w-4 text-purple-600" />
+                    Agent Configuration
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Agent Type</div>
+                      <Badge variant="outline" className="capitalize">
+                        {analysisLogs[0].analysis_config.agent_type}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-xs text-muted-foreground">Domain Criticality</div>
+                      <Badge 
+                        variant={
+                          analysisLogs[0].analysis_config.domain_criticality === 'high' 
+                            ? 'destructive' 
+                            : analysisLogs[0].analysis_config.domain_criticality === 'medium'
+                            ? 'default'
+                            : 'secondary'
+                        }
+                        className="capitalize"
+                      >
+                        {analysisLogs[0].analysis_config.domain_criticality}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">Removal Threshold</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-lg font-semibold">
+                        {(analysisLogs[0].analysis_config.removal_threshold * 100).toFixed(0)}%
+                      </span>
+                      <Tooltip>
+                        <TooltipTrigger>
+                          <Info className="h-3 w-3 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p className="max-w-xs">
+                            Chunks with final relevance score below this threshold are flagged for removal.
+                            Threshold is adapted based on agent type and domain criticality.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Progress Section - Only show when analyzing */}
             {isAnalyzing && totalChunksInAnalysis > 0 && (
               <div className="p-4 border rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 space-y-3">
@@ -687,9 +755,11 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                   <TableRow>
                     <TableHead>Data</TableHead>
                     <TableHead>Trigger</TableHead>
+                    <TableHead>Agent Type</TableHead>
+                    <TableHead>Threshold</TableHead>
                     <TableHead>Chunk Analizzati</TableHead>
                     <TableHead>Rimossi</TableHead>
-                    <TableHead>Copertura</TableHead>
+                    <TableHead>Allineamento</TableHead>
                     <TableHead>Stato</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -704,6 +774,31 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                           {log.trigger_type}
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        {log.analysis_config ? (
+                          <Badge variant="outline" className="capitalize">
+                            {log.analysis_config.agent_type}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">N/A</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {log.analysis_config ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="font-mono text-sm cursor-help">
+                                {(log.analysis_config.removal_threshold * 100).toFixed(0)}%
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>Criticality: {log.analysis_config.domain_criticality}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">N/A</span>
+                        )}
+                      </TableCell>
                       <TableCell>{log.total_chunks_analyzed}</TableCell>
                       <TableCell>
                         {log.chunks_auto_removed > 0 ? (
@@ -715,7 +810,40 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                         )}
                       </TableCell>
                       <TableCell>
-                        {log.overall_alignment_percentage?.toFixed(0)}%
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="cursor-help">
+                              {log.overall_alignment_percentage?.toFixed(0)}%
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="font-semibold mb-1">Dimension Breakdown</p>
+                            {log.dimension_breakdown && log.analysis_config?.weights_used && (
+                              <div className="text-xs space-y-1">
+                                <div className="flex justify-between gap-4">
+                                  <span>Semantic:</span>
+                                  <span>{log.dimension_breakdown.semantic_relevance.toFixed(1)}% (weight: {(log.analysis_config.weights_used.semantic_relevance * 100).toFixed(0)}%)</span>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <span>Concepts:</span>
+                                  <span>{log.dimension_breakdown.concept_coverage.toFixed(1)}% (weight: {(log.analysis_config.weights_used.concept_coverage * 100).toFixed(0)}%)</span>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <span>Procedural:</span>
+                                  <span>{log.dimension_breakdown.procedural_match.toFixed(1)}% (weight: {(log.analysis_config.weights_used.procedural_match * 100).toFixed(0)}%)</span>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <span>Vocabulary:</span>
+                                  <span>{log.dimension_breakdown.vocabulary_alignment.toFixed(1)}% (weight: {(log.analysis_config.weights_used.vocabulary_alignment * 100).toFixed(0)}%)</span>
+                                </div>
+                                <div className="flex justify-between gap-4">
+                                  <span>Bibliographic:</span>
+                                  <span>{log.dimension_breakdown.bibliographic_match.toFixed(1)}% (weight: {(log.analysis_config.weights_used.bibliographic_match * 100).toFixed(0)}%)</span>
+                                </div>
+                              </div>
+                            )}
+                          </TooltipContent>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         {log.safe_mode_active ? (
