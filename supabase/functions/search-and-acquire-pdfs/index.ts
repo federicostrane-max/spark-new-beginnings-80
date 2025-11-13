@@ -46,13 +46,60 @@ interface AcquisitionResult {
 
 // Blacklist domains that require login or are unreliable
 const BLACKLIST_DOMAINS = [
-  'scribd.com',
-  'academia.edu',
-  'researchgate.net',
-  'chegg.com',
   'coursehero.com',
-  'jstor.org'
+  'chegg.com',
+  'studypool.com'
 ];
+
+// Helper function to identify likely PDF links even without .pdf extension
+function isProbablyPDF(url: string, title: string, snippet: string): boolean {
+  const urlLower = url.toLowerCase();
+  const titleLower = title.toLowerCase();
+  const snippetLower = snippet.toLowerCase();
+  
+  // Direct .pdf extension in URL
+  if (urlLower.includes('.pdf')) return true;
+  
+  // Known PDF hosting domains with viewer patterns
+  const pdfDomains = [
+    'arxiv.org',
+    'researchgate.net',
+    'academia.edu',
+    'scribd.com',
+    'archive.org',
+    'semanticscholar.org',
+    'philpapers.org',
+    'papers.ssrn.com',
+    'biorxiv.org',
+    'medrxiv.org',
+    'core.ac.uk'
+  ];
+  
+  const domain = new URL(url).hostname;
+  if (pdfDomains.some(d => domain.includes(d))) {
+    // Additional checks for viewer URLs
+    if (urlLower.includes('/pdf') || 
+        urlLower.includes('download') || 
+        urlLower.includes('document/') ||
+        urlLower.includes('/paper/')) {
+      return true;
+    }
+  }
+  
+  // Strong PDF indicators in title or snippet
+  const pdfKeywords = [
+    'pdf', '[pdf]', '(pdf)', 
+    'download pdf', 'view pdf', 
+    'full text pdf',
+    'paper (pdf)',
+    'libro pdf',
+    'book pdf'
+  ];
+  
+  return pdfKeywords.some(keyword => 
+    titleLower.includes(keyword) || snippetLower.includes(keyword)
+  );
+}
 
 async function validatePdfUrl(url: string, title: string): Promise<{
   valid: boolean;
@@ -269,7 +316,7 @@ serve(async (req) => {
       }
       
       const searchQuery = `"${topic}" PDF`;
-      const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks}&hl=en&lr=lang_en`;
+      const searchUrl = `https://serpapi.com/search?api_key=${apiKey}&q=${encodeURIComponent(searchQuery)}&num=${maxBooks * 2}`;
       
       console.log(`🔎 Query: ${searchQuery}`);
       
