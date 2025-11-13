@@ -48,19 +48,27 @@ serve(async (req) => {
 
     console.log(`[extract-pdf-text] Attempting to download PDF: ${filePath}`);
 
-    // Extract clean filename without 'shared-pool-uploads/' prefix
-    const cleanFileName = filePath.replace(/^shared-pool-uploads\//, '');
-    console.log(`[extract-pdf-text] Original file_path: ${filePath}`);
-    console.log(`[extract-pdf-text] Clean filename: ${cleanFileName}`);
+    // Extract bucket name and clean path if path includes bucket prefix
+    let targetBucket = 'shared-pool-uploads';
+    let targetPath = filePath;
+    
+    const knownBuckets = ['shared-pool-uploads', 'knowledge-pdfs', 'agent-attachments'];
+    for (const bucket of knownBuckets) {
+      if (filePath.startsWith(`${bucket}/`)) {
+        targetBucket = bucket;
+        targetPath = filePath.substring(bucket.length + 1);
+        console.log(`[extract-pdf-text] Detected bucket '${bucket}' in path, extracted: ${targetPath}`);
+        break;
+      }
+    }
+    
+    console.log(`[extract-pdf-text] Target bucket: ${targetBucket}, path: ${targetPath}`);
 
-    // FASE 3: Intelligent multi-bucket search with fallback
-    // Priority order: exact path -> clean filename -> pattern matching
+    // Priority order: detected bucket with extracted path -> fallback to other buckets
     const bucketsToTry = [
-      // Try exact path first (most common case)
-      { name: 'shared-pool-uploads', path: cleanFileName, strategy: 'exact' },
-      { name: 'knowledge-pdfs', path: filePath, strategy: 'exact' },
-      { name: 'shared-pool-uploads', path: filePath, strategy: 'exact' },
-      { name: 'agent-attachments', path: filePath, strategy: 'exact' }
+      { name: targetBucket, path: targetPath, strategy: 'exact' },
+      { name: 'knowledge-pdfs', path: targetPath, strategy: 'fallback' },
+      { name: 'agent-attachments', path: targetPath, strategy: 'fallback' }
     ];
 
     let pdfBlob = null;
@@ -88,37 +96,37 @@ serve(async (req) => {
 
     // FASE 3 Enhancement: If exact path fails, try pattern matching for timestamped files
     if (!pdfBlob) {
-      console.log(`[extract-pdf-text] Exact paths failed, trying pattern matching for: ${cleanFileName}`);
+      console.log(`[extract-pdf-text] Exact paths failed, trying pattern matching for: ${targetPath}`);
       
-      // List files in shared-pool-uploads bucket to find potential matches
+      // List files in target bucket to find potential matches
       const { data: fileList, error: listError } = await supabase.storage
-        .from('shared-pool-uploads')
+        .from(targetBucket)
         .list('', { 
-          search: cleanFileName.replace(/[^a-zA-Z0-9]/g, '') // Remove special chars for search
+          search: targetPath.replace(/[^a-zA-Z0-9]/g, '') // Remove special chars for search
         });
       
       if (!listError && fileList && fileList.length > 0) {
-        // Try to find file matching the clean filename (could have timestamp prefix)
+        // Try to find file matching the target path (could have timestamp prefix)
         for (const file of fileList) {
-          if (file.name.includes(cleanFileName) || cleanFileName.includes(file.name)) {
+          if (file.name.includes(targetPath) || targetPath.includes(file.name)) {
             console.log(`[extract-pdf-text] Found potential match: ${file.name}`);
             
             const { data, error } = await supabase.storage
-              .from('shared-pool-uploads')
+              .from(targetBucket)
               .download(file.name);
             
             if (!error && data) {
               pdfBlob = data;
-              successfulBucket = { name: 'shared-pool-uploads', path: file.name };
+              successfulBucket = { name: targetBucket, path: file.name };
               actualPath = file.name;
               console.log(`[extract-pdf-text] ✅ Pattern match successful: ${file.name}`);
               
               // FASE 6: Update database with correct path
-              if (documentId && file.name !== filePath) {
-                console.log(`[extract-pdf-text] Updating DB path from ${filePath} to shared-pool-uploads/${file.name}`);
+              if (documentId && `${targetBucket}/${file.name}` !== filePath) {
+                console.log(`[extract-pdf-text] Updating DB path from ${filePath} to ${targetBucket}/${file.name}`);
                 await supabase
                   .from('knowledge_documents')
-                  .update({ file_path: `shared-pool-uploads/${file.name}` })
+                  .update({ file_path: `${targetBucket}/${file.name}` })
                   .eq('id', documentId);
               }
               
