@@ -60,6 +60,8 @@ serve(async (req) => {
       throw new Error('PDF file path not found');
     }
 
+    console.log(`[extract-metadata-vision] Processing file path: ${pdfFilePath}`);
+
     // Extract bucket and path (file_path might include bucket name)
     let bucketName = 'shared-pool-uploads';
     let objectPath = pdfFilePath;
@@ -72,6 +74,8 @@ serve(async (req) => {
       }
     }
 
+    console.log(`[extract-metadata-vision] Using bucket: ${bucketName}, object path: ${objectPath}`);
+
     // Try to download PDF and get signed URL
     let signedUrl: string;
     try {
@@ -80,18 +84,23 @@ serve(async (req) => {
         .createSignedUrl(objectPath, 300);
 
       if (signError) {
+        console.error(`[extract-metadata-vision] Bucket ${bucketName} failed:`, signError);
         // Try alternative bucket
         const altBucket = bucketName === 'shared-pool-uploads' ? 'knowledge-pdfs' : 'shared-pool-uploads';
+        console.log(`[extract-metadata-vision] Trying alternative bucket: ${altBucket}`);
         const { data: signedData2, error: signError2 } = await supabase.storage
           .from(altBucket)
           .createSignedUrl(objectPath, 300);
 
         if (signError2) {
-          throw new Error('Could not create signed URL from any bucket');
+          console.error(`[extract-metadata-vision] Alternative bucket ${altBucket} also failed:`, signError2);
+          throw new Error(`Could not create signed URL from any bucket. First error: ${signError.message}, Second error: ${signError2.message}`);
         }
         signedUrl = signedData2.signedUrl;
+        console.log(`[extract-metadata-vision] ✅ Got signed URL from alternative bucket ${altBucket}`);
       } else {
         signedUrl = signedData.signedUrl;
+        console.log(`[extract-metadata-vision] ✅ Got signed URL from primary bucket ${bucketName}`);
       }
     } catch (urlError) {
       console.error('[extract-metadata-vision] ❌ Failed to get signed URL:', urlError);

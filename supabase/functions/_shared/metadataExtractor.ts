@@ -109,11 +109,18 @@ export async function extractMetadataWithFallback(
       .select('content')
       .eq('pool_document_id', documentId)
       .order('created_at', { ascending: true })
-      .limit(10); // Prime 10 chunks (di solito contengono titolo/autori)
+      .limit(20); // Increase to 20 chunks to capture title better
 
     if (chunksError || !chunks || chunks.length === 0) {
       console.error('[metadataExtractor] ❌ No chunks found for fallback');
-      return { title: null, authors: null, source: 'chunks', success: false };
+      return { 
+        title: fileName ? fileName.replace(/\.pdf$/i, '').replace(/_/g, ' ') : null,
+        authors: null, 
+        source: 'chunks', 
+        success: fileName !== null,
+        confidence: 'low',
+        extractionMethod: 'filename'
+      };
     }
 
     textForExtraction = chunks.map((c: any) => c.content).join('\n\n');
@@ -128,19 +135,28 @@ export async function extractMetadataWithFallback(
   
   const metadataPrompt = `Extract the EXACT title and author(s) from this academic/technical document text.
 
-CRITICAL RULES:
-1. Title should be 5-200 characters
-2. EXCLUDE if text starts with: "Abstract:", "Introduction:", "Chapter", "Section", numbers
-3. If this looks like middle of document (not title page), return null for title
-4. Authors: look for names near title, affiliations, or "by [Author]" patterns
-5. Return confidence: "high" if clearly a title, "medium" if uncertain, "low" if not a title
+CRITICAL RULES FOR TITLE EXTRACTION:
+1. Look for these patterns that indicate titles:
+   - Text after "publication at:" or "DOI:" or "Chapter" markers
+   - URLs containing the title (e.g., researchgate.net/publication/123/Title_Here)
+   - Standalone prominent text that looks like a book/paper title
+   - Text in quotation marks or emphasized formatting
+2. Title should be 5-200 characters
+3. EXCLUDE: "Abstract:", "Introduction:", "Chapter X", "Section X", page numbers
+4. If you see ResearchGate or academic repository URLs, extract title from them
+5. Return confidence: "high" if clearly a title, "medium" if uncertain, "low" if not found
 
-Document text (first 3000 characters):
-${textForExtraction.slice(0, 3000)}
+AUTHOR EXTRACTION:
+- Look for names near the title, after "by", or in affiliation sections
+- Common patterns: "Author Name", "Name, University", "Department, Author"
+- Multiple authors may be separated by commas or "and"
+
+Document text (first 5000 characters from chunks):
+${textForExtraction.slice(0, 5000)}
 
 Return ONLY valid JSON:
 {
-  "title": "Exact title or null",
+  "title": "Exact title or null if not found",
   "authors": ["Author 1", "Author 2"] or null,
   "confidence": "high" | "medium" | "low"
 }`;
