@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.78.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,86 +11,75 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
-
   try {
-    const result = { 
-      fixed: 0, 
-      reprocessed: 0, 
-      deleted: 0, 
-      total: 0 
-    };
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
 
-    // Get docs with chunks
-    const { data: chunks } = await supabase
-      .from('agent_knowledge')
-      .select('pool_document_id')
-      .not('pool_document_id', 'is', null);
-    
-    const withChunks = [...new Set(chunks?.map(c => c.pool_document_id) || [])];
+    let fixed = 0;
+    let deleted = 0;
 
-    // Fix docs with chunks
-    const { data: docs1 } = await supabase
+    // Get all pending documents
+    const { data: allPending } = await supabase
       .from('knowledge_documents')
-      .select('*')
-      .eq('processing_status', 'pending_processing')
-      .in('id', withChunks);
-    
-    for (const doc of docs1 || []) {
-      await supabase
-        .from('knowledge_documents')
-        .update({ 
-          processing_status: 'ready_for_assignment',
-          validation_status: 'validated'
-        })
-        .eq('id', doc.id);
-      result.fixed++;
-      result.total++;
+      .select('id, file_name, file_path')
+      .eq('processing_status', 'pending_processing');
+
+    if (!allPending) {
+      return new Response(JSON.stringify({ fixed: 0, deleted: 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    // Handle docs without chunks
-    const { data: docs2 } = await supabase
-      .from('knowledge_documents')
-      .select('*')
-      .eq('processing_status', 'pending_processing')
-      .not('id', 'in', withChunks.length > 0 ? `(${withChunks.map(id => `'${id}'`).join(',')})` : '()');
-    
-    for (const doc of docs2 || []) {
-      // Try to find PDF
-      let found = false;
-      const paths = [doc.file_path, `shared-pool-uploads/${doc.file_name}`];
-      
-      for (const path of paths) {
-        const { data } = await supabase.storage.from('knowledge-pdfs').download(path);
-        if (data) {
-          found = true;
-          break;
-        }
-      }
+    // Process each document
+    for (const doc of allPending) {
+      // Check if has chunks
+      const { data: chunks } = await supabase
+        .from('agent_knowledge')
+        .select('id')
+        .eq('pool_document_id', doc.id)
+        .limit(1);
 
-      if (found) {
-        await supabase.functions.invoke('process-document', { 
-          body: { documentId: doc.id } 
-        });
-        result.reprocessed++;
+      if (chunks && chunks.length > 0) {
+        // Has chunks - just update status
+        await supabase
+          .from('knowledge_documents')
+          .update({
+            processing_status: 'ready_for_assignment',
+            validation_status: 'validated'
+          })
+          .eq('id', doc.id);
+        fixed++;
       } else {
-        await supabase.from('agent_document_links').delete().eq('document_id', doc.id);
-        await supabase.from('knowledge_documents').delete().eq('id', doc.id);
-        result.deleted++;
+        // No chunks - delete
+        await supabase
+          .from('agent_document_links')
+          .delete()
+          .eq('document_id', doc.id);
+        
+        await supabase
+          .from('knowledge_documents')
+          .delete()
+          .eq('id', doc.id);
+        deleted++;
       }
-      result.total++;
     }
 
-    return new Response(JSON.stringify(result), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return new Response(
+      JSON.stringify({ fixed, deleted, total: fixed + deleted }), 
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
 
   } catch (error) {
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }), 
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Unknown' 
+      }), 
+      { 
+        status: 500, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
     );
   }
 });
