@@ -107,3 +107,6 @@ verify_jwt = true
 [functions.repair-documents]
 verify_jwt = true
 timeout = 900
+
+[functions.extract-missing-metadata]
+verify_jwt = true

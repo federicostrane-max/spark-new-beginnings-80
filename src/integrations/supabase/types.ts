@@ -851,6 +851,8 @@ export type Database = {
           ai_summary: string | null
           complexity_level: string | null
           created_at: string | null
+          extracted_authors: string[] | null
+          extracted_title: string | null
           file_name: string
           file_path: string
           file_size_bytes: number | null
@@ -872,6 +874,8 @@ export type Database = {
           ai_summary?: string | null
           complexity_level?: string | null
           created_at?: string | null
+          extracted_authors?: string[] | null
+          extracted_title?: string | null
           file_name: string
           file_path: string
           file_size_bytes?: number | null
@@ -893,6 +897,8 @@ export type Database = {
           ai_summary?: string | null
           complexity_level?: string | null
           created_at?: string | null
+          extracted_authors?: string[] | null
+          extracted_title?: string | null
           file_name?: string
           file_path?: string
           file_size_bytes?: number | null

@@ -249,17 +249,53 @@ serve(async (req) => {
     };
 
     if (criticalSources.length > 0) {
+      // Fetch chunks to get pool_document_ids
       const { data: chunks } = await supabase
         .from('agent_knowledge')
-        .select('document_name')
+        .select('document_name, pool_document_id')
         .eq('agent_id', agentId)
         .eq('is_active', true);
 
-      const documentNames = (chunks || []).map(c => c.document_name.toLowerCase());
+      const poolDocIds = [...new Set(chunks?.map(c => c.pool_document_id).filter(Boolean))];
       
+      // Fetch extracted metadata from knowledge_documents
+      const { data: documents } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_name, extracted_title, extracted_authors')
+        .in('id', poolDocIds);
+
+      // Helper function to normalize titles
+      function normalizeTitle(title: string): string {
+        if (!title) return '';
+        return decodeURIComponent(title)
+          .toLowerCase()
+          .replace(/[^\w\s.-]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
       prerequisiteCheck.missing_sources = criticalSources.filter(source => {
-        const titleLower = source.title.toLowerCase();
-        return !documentNames.some(doc => doc.includes(titleLower));
+        const refTitleNormalized = normalizeTitle(source.title);
+        
+        // Check against both extracted_title AND file_name
+        return !documents?.some(doc => {
+          const extractedTitleNormalized = doc.extracted_title 
+            ? normalizeTitle(doc.extracted_title)
+            : null;
+          const fileNameNormalized = normalizeTitle(doc.file_name);
+          
+          // Match if: extracted_title contains ref OR vice versa OR filename contains ref OR vice versa
+          const matchExtractedTitle = extractedTitleNormalized && (
+            extractedTitleNormalized.includes(refTitleNormalized) || 
+            refTitleNormalized.includes(extractedTitleNormalized)
+          );
+          
+          const matchFileName = 
+            fileNameNormalized.includes(refTitleNormalized) || 
+            refTitleNormalized.includes(fileNameNormalized);
+          
+          return matchExtractedTitle || matchFileName;
+        });
       });
 
       prerequisiteCheck.passed = prerequisiteCheck.missing_sources.length === 0;

@@ -365,6 +365,42 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           </Alert>
         )}
 
+        {/* Alert prerequisiti non passati */}
+        {analysisLogs.length > 0 && !analysisLogs[0].prerequisite_check_passed && (
+          <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
+            <XCircle className="h-5 w-5 text-red-600" />
+            <AlertTitle className="text-red-900 dark:text-red-100 font-bold text-lg">
+              🚫 Prerequisiti Non Soddisfatti - Analisi Bloccata
+            </AlertTitle>
+            <AlertDescription className="text-red-800 dark:text-red-200">
+              <p className="font-semibold mb-3">
+                L'analisi dell'allineamento è stata bloccata perché mancano documenti critici richiesti dal prompt dell'agente.
+              </p>
+              <div className="mt-3 bg-white dark:bg-gray-900 p-3 rounded border border-red-300 dark:border-red-700">
+                <p className="text-sm font-bold mb-2 text-red-900 dark:text-red-100">📚 Documenti Mancanti:</p>
+                <ul className="text-sm space-y-2 ml-4">
+                  {analysisLogs[0].missing_critical_sources.map((source: any, idx: number) => (
+                    <li key={idx} className="list-disc text-red-800 dark:text-red-200">
+                      <strong>{source.title}</strong>
+                      {source.authors && ` - ${source.authors}`}
+                      {source.year && ` (${source.year})`}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900 rounded border-2 border-yellow-400 dark:border-yellow-600">
+                <p className="text-sm font-bold text-yellow-900 dark:text-yellow-100 mb-2">⚠️ Azioni Richieste:</p>
+                <ol className="text-sm space-y-1.5 ml-5 list-decimal text-yellow-900 dark:text-yellow-100">
+                  <li>Carica i documenti mancanti nella <strong>Document Pool</strong></li>
+                  <li>Assegna i documenti all'agente</li>
+                  <li>Attendi il completamento della sincronizzazione</li>
+                  <li>Ri-esegui l'analisi dell'allineamento</li>
+                </ol>
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Alert analisi in corso */}
         {analysisStatus === 'running' && (
           <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
@@ -446,7 +482,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Safe Mode Badge */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {safeModeActive ? (
                 <>
                   <Badge variant="secondary" className="gap-1">
@@ -470,6 +506,23 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                   <CheckCircle2 className="h-3 w-3" />
                   Auto-Ottimizzazione Attiva
                 </Badge>
+              )}
+              
+              {/* Prerequisite Status Badge */}
+              {analysisLogs.length > 0 && (
+                <>
+                  {analysisLogs[0].prerequisite_check_passed ? (
+                    <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-700">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Prerequisiti Soddisfatti
+                    </Badge>
+                  ) : (
+                    <Badge variant="destructive" className="gap-1.5">
+                      <XCircle className="h-3.5 w-3.5" />
+                      Prerequisiti Mancanti ({analysisLogs[0].missing_critical_sources.length})
+                    </Badge>
+                  )}
+                </>
               )}
             </div>
 
