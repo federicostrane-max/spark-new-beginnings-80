@@ -223,38 +223,156 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 5: NO CHUNKS FOUND - This is a critical error
+    // STEP 5: NO CHUNKS FOUND - Try to process the document now
     // ========================================
     console.log('[sync-pool-document] ❌ No existing chunks found for this document!');
     console.log(`[sync-pool-document] Document ID: ${documentId}`);
     console.log(`[sync-pool-document] File path in DB: ${poolDoc.file_path}`);
+    console.log('[sync-pool-document] Attempting to process document from storage...');
     
-    // This means the document record exists but chunks were never created
-    // OR chunks were deleted. The document needs to be re-processed from scratch.
+    // Try to extract text from the PDF
+    let fullText: string;
     
-    // Mark sync as failed in agent_document_links
+    try {
+      const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+        body: { filePath: poolDoc.file_path }
+      });
+
+      if (extractError || !extractData?.text) {
+        console.error('[sync-pool-document] Failed to extract text:', extractError);
+        throw new Error('Could not extract text from PDF');
+      }
+
+      fullText = extractData.text;
+      console.log(`[sync-pool-document] Extracted ${fullText.length} characters from PDF`);
+    } catch (extractError) {
+      console.error('[sync-pool-document] PDF extraction failed:', extractError);
+      
+      // Mark sync as failed
+      await supabase
+        .from('agent_document_links')
+        .update({ 
+          sync_status: 'failed',
+          sync_completed_at: new Date().toISOString(),
+          sync_error: 'Document has no chunks and could not be extracted. Needs re-upload.'
+        })
+        .eq('document_id', documentId)
+        .eq('agent_id', agentId);
+      
+      return new Response(
+        JSON.stringify({ 
+          error: 'Document not processable',
+          message: `The document "${poolDoc.file_name}" has no text chunks in the database and could not be extracted.\n\nSolution: Delete this document from the pool and re-upload it.`,
+          documentId,
+          agentId,
+          fileName: poolDoc.file_name,
+          suggestion: 'Delete and re-upload the document'
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create chunks from the extracted text
+    console.log('[sync-pool-document] Creating chunks from extracted text...');
+    const textChunks = chunkText(fullText, 1000, 200);
+    console.log(`[sync-pool-document] Created ${textChunks.length} text chunks`);
+
+    // Generate embeddings and insert chunks
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+
+    const chunksToInsert = [];
+    const EMBEDDING_BATCH_SIZE = 10;
+
+    for (let i = 0; i < textChunks.length; i += EMBEDDING_BATCH_SIZE) {
+      const batch = textChunks.slice(i, i + EMBEDDING_BATCH_SIZE);
+      console.log(`[sync-pool-document] Processing embedding batch ${Math.floor(i / EMBEDDING_BATCH_SIZE) + 1}/${Math.ceil(textChunks.length / EMBEDDING_BATCH_SIZE)}`);
+
+      for (const chunk of batch) {
+        try {
+          // Generate embedding
+          const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'text-embedding-3-small',
+              input: chunk,
+            }),
+          });
+
+          if (!embeddingResponse.ok) {
+            console.error('[sync-pool-document] Embedding API error:', await embeddingResponse.text());
+            continue;
+          }
+
+          const embeddingData = await embeddingResponse.json();
+          const embedding = embeddingData.data[0].embedding;
+
+          chunksToInsert.push({
+            agent_id: agentId,
+            document_name: poolDoc.file_name,
+            content: chunk,
+            category: 'General',
+            summary: `Part of ${poolDoc.file_name}`,
+            embedding: JSON.stringify(embedding),
+            source_type: 'shared_pool',
+            pool_document_id: documentId,
+          });
+
+        } catch (embError) {
+          console.error('[sync-pool-document] Error generating embedding:', embError);
+        }
+      }
+    }
+
+    console.log(`[sync-pool-document] Generated ${chunksToInsert.length} chunks with embeddings`);
+
+    // Insert chunks in batches
+    const INSERT_BATCH_SIZE = 50;
+    let totalInserted = 0;
+    
+    for (let i = 0; i < chunksToInsert.length; i += INSERT_BATCH_SIZE) {
+      const batch = chunksToInsert.slice(i, i + INSERT_BATCH_SIZE);
+      console.log(`[sync-pool-document] Inserting batch ${Math.floor(i / INSERT_BATCH_SIZE) + 1}/${Math.ceil(chunksToInsert.length / INSERT_BATCH_SIZE)} (${batch.length} chunks)`);
+      
+      const { error: insertError } = await supabase
+        .from('agent_knowledge')
+        .insert(batch);
+
+      if (insertError) {
+        console.error('[sync-pool-document] Error inserting batch:', insertError);
+        throw insertError;
+      }
+      
+      totalInserted += batch.length;
+    }
+
+    console.log(`[sync-pool-document] ✓ Successfully created and inserted ${totalInserted} chunks`);
+
+    // Mark sync as completed
     await supabase
       .from('agent_document_links')
-      .update({ 
-        sync_status: 'failed',
+      .update({
+        sync_status: 'completed',
         sync_completed_at: new Date().toISOString(),
-        sync_error: 'Document has no chunks and no source file available. Needs re-upload.'
+        sync_error: null
       })
-      .eq('document_id', documentId)
-      .eq('agent_id', agentId);
-    
-    // Return clear error message
-    return new Response(
-      JSON.stringify({ 
-        error: 'Document not processable',
-        message: `The document "${poolDoc.file_name}" has no text chunks in the database. This usually happens when:\n\n1. The document was uploaded without processing\n2. The chunks were deleted\n3. Processing failed during upload\n\nSolution: Delete this document from the pool and re-upload it.`,
-        documentId,
-        agentId,
-        fileName: poolDoc.file_name,
-        suggestion: 'Delete and re-upload the document'
-      }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+      .eq('agent_id', agentId)
+      .eq('document_id', documentId);
+
+    return new Response(JSON.stringify({ 
+      success: true,
+      chunksCount: totalInserted,
+      totalChunks: totalInserted,
+      method: 'processed_on_demand'
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
 
   } catch (error) {
     console.error('[sync-pool-document] Error:', error);
