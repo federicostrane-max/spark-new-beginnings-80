@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Loader2 } from "lucide-react";
+import { Loader2, Check, X } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -45,6 +45,7 @@ export const AssignDocumentDialog = ({
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState(false);
+  const [syncingAgents, setSyncingAgents] = useState<Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>>(new Map());
 
   useEffect(() => {
     if (open) {
@@ -114,6 +115,54 @@ export const AssignDocumentDialog = ({
     });
   };
 
+  const pollSyncStatus = async (documentId: string, agentIds: string[]) => {
+    const maxAttempts = 60; // 60 secondi (1 poll al secondo)
+    let attempts = 0;
+    
+    const checkStatus = async (): Promise<void> => {
+      const { data } = await supabase
+        .from("agent_document_links")
+        .select("agent_id, sync_status")
+        .eq("document_id", documentId)
+        .in("agent_id", agentIds);
+      
+      // Aggiorna lo stato per ogni agente
+      const statusMap = new Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>();
+      data?.forEach(link => {
+        statusMap.set(link.agent_id, link.sync_status as 'pending' | 'syncing' | 'completed' | 'failed');
+      });
+      setSyncingAgents(statusMap);
+      
+      // Controlla se tutti sono completati o falliti
+      const allDone = data?.every(link => 
+        link.sync_status === 'completed' || link.sync_status === 'failed'
+      );
+      
+      if (allDone) {
+        const completedCount = data?.filter(link => link.sync_status === 'completed').length || 0;
+        const failedCount = data?.filter(link => link.sync_status === 'failed').length || 0;
+        
+        if (failedCount > 0) {
+          toast.error(`${completedCount} agenti sincronizzati, ${failedCount} falliti`);
+        } else {
+          toast.success(`Sincronizzazione completata per ${completedCount} agenti`);
+        }
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        toast.error("Timeout: la sincronizzazione sta impiegando troppo tempo");
+        return;
+      }
+      
+      attempts++;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return checkStatus();
+    };
+    
+    await checkStatus();
+  };
+
   const handleAssign = async () => {
     try {
       setAssigning(true);
@@ -171,6 +220,11 @@ export const AssignDocumentDialog = ({
 
         console.log(`[AssignDialog] ✓ Created agent_document_links for ${toAdd.length} agents`);
         
+        // Inizializza lo stato di sincronizzazione
+        const initialSyncMap = new Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>();
+        toAdd.forEach(agentId => initialSyncMap.set(agentId, 'pending'));
+        setSyncingAgents(initialSyncMap);
+        
         // Sync documents to agents
         for (const agentId of toAdd) {
           try {
@@ -201,12 +255,16 @@ export const AssignDocumentDialog = ({
           }
         }
         
-        toast.success(`Documento assegnato a ${toAdd.length} nuovi agenti`);
+        // Avvia il polling dello stato
+        await pollSyncStatus(document.id, toAdd);
+        
+        onAssigned();
+        onOpenChange(false);
+      } else {
+        toast.success("Assegnazione completata");
+        onAssigned();
+        onOpenChange(false);
       }
-
-      toast.success("Assegnazione completata");
-      onAssigned();
-      onOpenChange(false);
     } catch (error: any) {
       console.error("Error assigning document:", error);
       
@@ -262,26 +320,49 @@ export const AssignDocumentDialog = ({
           <div className="space-y-2 md:space-y-3">
             <div className="font-medium text-sm">Agenti Disponibili ({agents.length})</div>
             <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2">
-              {agents.map((agent) => (
-                <label
-                  key={agent.id}
-                  htmlFor={`agent-${agent.id}`}
-                  className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
-                >
-                  <Checkbox
-                    id={`agent-${agent.id}`}
-                    checked={selectedAgents.has(agent.id)}
-                    onCheckedChange={() => toggleAgent(agent.id)}
-                    className="mt-0.5"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm md:text-base">{agent.name}</div>
-                    <div className="text-xs md:text-sm text-muted-foreground line-clamp-2">
-                      {agent.description}
+              {agents.map((agent) => {
+                const syncStatus = syncingAgents.get(agent.id);
+                return (
+                  <label
+                    key={agent.id}
+                    htmlFor={`agent-${agent.id}`}
+                    className="flex items-start gap-3 p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
+                  >
+                    <Checkbox
+                      id={`agent-${agent.id}`}
+                      checked={selectedAgents.has(agent.id)}
+                      onCheckedChange={() => toggleAgent(agent.id)}
+                      className="mt-0.5"
+                      disabled={!!syncStatus}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm md:text-base flex items-center gap-2">
+                        {agent.name}
+                        {syncStatus === 'syncing' && (
+                          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                        )}
+                        {syncStatus === 'completed' && (
+                          <Check className="h-4 w-4 text-green-500" />
+                        )}
+                        {syncStatus === 'failed' && (
+                          <X className="h-4 w-4 text-red-500" />
+                        )}
+                      </div>
+                      <div className="text-xs md:text-sm text-muted-foreground line-clamp-2">
+                        {agent.description}
+                      </div>
+                      {syncStatus && (
+                        <div className="text-xs mt-1 font-medium">
+                          {syncStatus === 'pending' && 'In attesa...'}
+                          {syncStatus === 'syncing' && 'Sincronizzazione in corso...'}
+                          {syncStatus === 'completed' && 'Sincronizzato ✓'}
+                          {syncStatus === 'failed' && 'Sincronizzazione fallita ✗'}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </label>
-              ))}
+                  </label>
+                );
+              })}
             </div>
           </div>
         )}
@@ -290,19 +371,20 @@ export const AssignDocumentDialog = ({
           <Button 
             variant="outline" 
             onClick={() => onOpenChange(false)}
+            disabled={syncingAgents.size > 0}
             className="w-full sm:w-auto"
           >
-            Annulla
+            {syncingAgents.size > 0 ? "Sincronizzazione in corso..." : "Annulla"}
           </Button>
           <Button 
             onClick={handleAssign} 
-            disabled={assigning || selectedAgents.size === 0}
+            disabled={assigning || selectedAgents.size === 0 || syncingAgents.size > 0}
             className="w-full sm:w-auto"
           >
             {assigning ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Assegnazione...
+                Sincronizzazione...
               </>
             ) : (
               `Assegna a ${selectedAgents.size} agenti`
