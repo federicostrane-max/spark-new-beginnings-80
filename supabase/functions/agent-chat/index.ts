@@ -2377,12 +2377,12 @@ Deno.serve(async (req) => {
         } catch (error) {
           console.error(`❌ [REQ-${requestId}] Error processing @${targetSlug}:`, error);
           
-          // Insert system error message
+          // Insert assistant error message (system role not supported by Anthropic)
           await supabase
             .from('agent_messages')
             .insert({
               conversation_id: conversation.id,
-              role: 'system',
+              role: 'assistant',
               content: `❌ Errore durante l'elaborazione di @${targetSlug}`
             });
         }
@@ -2597,6 +2597,11 @@ Deno.serve(async (req) => {
               if (!m.content || typeof m.content !== 'string') return false;
               // Exclude messages with only whitespace
               if (m.content.trim() === '') return false;
+              // Exclude system messages (not supported by Anthropic Messages API)
+              if (m.role === 'system') {
+                console.log('⚠️ Filtering out system message (not compatible with Anthropic):', m.content.slice(0, 100));
+                return false;
+              }
               return true;
             })
             .map(m => ({
@@ -2609,6 +2614,13 @@ Deno.serve(async (req) => {
           if (hasEmptyMessages) {
             console.error('Found empty messages after filtering!', anthropicMessages);
             throw new Error('Cannot send empty messages to Anthropic');
+          }
+
+          // Verify no system messages remain (Anthropic doesn't accept them)
+          const hasSystemMessages = anthropicMessages.some(m => m.role === 'system');
+          if (hasSystemMessages) {
+            console.error('Found system messages in Anthropic payload!', anthropicMessages);
+            throw new Error('Cannot send system role messages to Anthropic API - use system parameter instead');
           }
 
           console.log('📤 Sending to Anthropic:');
