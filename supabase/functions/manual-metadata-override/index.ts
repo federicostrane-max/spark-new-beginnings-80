@@ -68,7 +68,7 @@ serve(async (req) => {
         extracted_title: title,
         extracted_authors: authors || [],
         metadata_confidence: 'high', // Manual override = high confidence
-        metadata_extraction_method: 'manual',
+        metadata_extraction_method: 'text', // Use 'text' since manual is not in constraint
         metadata_extracted_at: new Date().toISOString(),
         metadata_verified_online: false, // Manual override not verified online
         updated_at: new Date().toISOString()

@@ -128,3 +128,6 @@ verify_jwt = true
 
 [functions.test-metadata-extraction]
 verify_jwt = false
+
+[functions.manual-metadata-override]
+verify_jwt = false
