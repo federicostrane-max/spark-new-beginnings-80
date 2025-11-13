@@ -135,3 +135,7 @@ verify_jwt = false
 [functions.test-aggressive-extraction]
 verify_jwt = false
 timeout = 180
+
+[functions.reprocess-all-metadata]
+verify_jwt = false
+timeout = 300
