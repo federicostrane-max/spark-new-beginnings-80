@@ -113,3 +113,6 @@ verify_jwt = false
 
 [functions.extract-pdf-text]
 verify_jwt = true
+
+[functions.fix-pending]
+verify_jwt = false
