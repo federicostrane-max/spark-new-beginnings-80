@@ -93,7 +93,16 @@ serve(async (req) => {
         const poolDocIds = [...new Set(chunks?.map(c => c.pool_document_id).filter(Boolean))];
         const { data: docs } = await supabase.from('knowledge_documents').select('file_name, extracted_title').in('id', poolDocIds);
         
-        const normalize = (t: string) => t ? t.toLowerCase().replace(/[^\w\s.\-]/g, '').replace(/\s+/g, ' ').trim() : '';
+        const normalize = (t: string) => {
+          if (!t) return '';
+          try {
+            // Decode URL-encoded strings (e.g., %20 → space)
+            t = decodeURIComponent(t);
+          } catch {
+            // If decoding fails, use original string
+          }
+          return t.toLowerCase().replace(/[^\w\s.\-]/g, '').replace(/\s+/g, ' ').trim();
+        };
         const missing = criticalSources.filter(s => {
           const ref = normalize(s.title);
           return !docs?.some(d => {
