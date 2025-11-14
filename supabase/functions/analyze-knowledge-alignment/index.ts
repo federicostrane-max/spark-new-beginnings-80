@@ -277,6 +277,16 @@ serve(async (req) => {
         
         successfullyProcessed++;
         
+        // ✅ AGGIORNA IL PROGRESS OGNI 5 CHUNK per evitare perdita dati in caso di timeout
+        if (successfullyProcessed % 5 === 0) {
+          const intermediateProcessed = currentProcessed + successfullyProcessed;
+          await supabase.from('alignment_analysis_progress').update({
+            chunks_processed: intermediateProcessed,
+            updated_at: new Date().toISOString()
+          }).eq('id', progress.id);
+          console.log(`💾 Progress saved: ${intermediateProcessed}/${progress.total_chunks} (${((intermediateProcessed / progress.total_chunks) * 100).toFixed(1)}%)`);
+        }
+        
         console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)} (Batch progress: ${successfullyProcessed}/${chunks.length})`);
       } catch (e: any) {
         failedChunks.push(chunk.id);
