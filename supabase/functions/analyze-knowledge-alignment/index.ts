@@ -201,7 +201,15 @@ serve(async (req) => {
         if (upsertError) throw upsertError;
         
         successfullyProcessed++;
-        console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)}`);
+        
+        // ✅ AGGIORNA PROGRESS IMMEDIATAMENTE DOPO OGNI CHUNK
+        const newProcessed = progress.chunks_processed + successfullyProcessed;
+        await supabase.from('alignment_analysis_progress').update({
+          chunks_processed: newProcessed,
+          updated_at: new Date().toISOString()
+        }).eq('id', progress.id);
+        
+        console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)} (Total: ${newProcessed}/${progress.total_chunks})`);
       } catch (e: any) {
         failedChunks.push(chunk.id);
         console.error(`❌ Chunk ${chunk.id} failed:`, e.message);
