@@ -101,8 +101,11 @@ serve(async (req) => {
             // Decode URL-encoded strings (e.g., %20 → space)
             t = decodeURIComponent(t);
           } catch {
-            // If decoding fails, use original string
+            // If decoding fails, manually replace %20 with spaces
+            t = t.replace(/%20/g, ' ');
           }
+          // Remove special chars but keep alphanumeric, spaces, dots, hyphens
+          // Then normalize spaces and trim
           return t.toLowerCase().replace(/[^\w\s.\-]/g, '').replace(/\s+/g, ' ').trim();
         };
         const missing = criticalSources.filter(s => {
