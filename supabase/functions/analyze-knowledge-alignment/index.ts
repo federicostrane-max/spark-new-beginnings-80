@@ -157,6 +157,19 @@ serve(async (req) => {
     let successfullyProcessed = 0;
     const failedChunks: string[] = [];
 
+    // Clean previous scores only at the start of a fresh analysis
+    if (progress.current_batch === 0 && progress.chunks_processed === 0) {
+      const { error: deleteError } = await supabase
+        .from('knowledge_relevance_scores')
+        .delete()
+        .eq('agent_id', progress.agent_id)
+        .eq('requirement_id', requirements.id);
+      
+      if (!deleteError) {
+        console.log('🗑️ Cleaned previous scores for fresh analysis');
+      }
+    }
+
     for (const chunk of chunks) {
       try {
         const scores = await analyzeChunk(chunk, requirements);
@@ -166,19 +179,35 @@ serve(async (req) => {
                      scores.vocabulary_alignment * progress.partial_results.weights.vocabulary_alignment +
                      scores.bibliographic_match * progress.partial_results.weights.bibliographic_match;
         
-        await supabase.from('knowledge_relevance_scores').insert({
-          chunk_id: chunk.id, agent_id: progress.agent_id, requirement_id: requirements.id,
-          semantic_relevance: scores.semantic_relevance, concept_coverage: scores.concept_coverage,
-          procedural_match: scores.procedural_match, vocabulary_alignment: scores.vocabulary_alignment,
-          bibliographic_match: scores.bibliographic_match, final_relevance_score: final,
-          analysis_model: 'openai/gpt-5-mini', weights_used: progress.partial_results.weights
-        });
+        const { error: upsertError } = await supabase
+          .from('knowledge_relevance_scores')
+          .upsert({
+            chunk_id: chunk.id,
+            agent_id: progress.agent_id,
+            requirement_id: requirements.id,
+            semantic_relevance: scores.semantic_relevance,
+            concept_coverage: scores.concept_coverage,
+            procedural_match: scores.procedural_match,
+            vocabulary_alignment: scores.vocabulary_alignment,
+            bibliographic_match: scores.bibliographic_match,
+            final_relevance_score: final,
+            analysis_model: 'openai/gpt-5-mini',
+            weights_used: progress.partial_results.weights,
+            analyzed_at: new Date().toISOString()
+          }, {
+            onConflict: 'chunk_id,requirement_id'
+          });
+
+        if (upsertError) throw upsertError;
         
         successfullyProcessed++;
         console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)}`);
       } catch (e: any) {
         failedChunks.push(chunk.id);
         console.error(`❌ Chunk ${chunk.id} failed:`, e.message);
+        if (e.message?.includes('duplicate key')) {
+          console.error(`   ⚠️ UPSERT conflict - questo non dovrebbe accadere!`);
+        }
       }
     }
 
