@@ -529,8 +529,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                 </Badge>
               )}
               
-              {/* Prerequisite Status Badge */}
-              {analysisLogs.length > 0 && (
+              {/* Prerequisite Status Badge - hide if dismissed */}
+              {analysisLogs.length > 0 && !dismissedLogIds.has(analysisLogs[0].id) && (
                 <>
                   {analysisLogs[0].prerequisite_check_passed ? (
                     <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-700">
