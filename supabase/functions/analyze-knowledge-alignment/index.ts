@@ -78,7 +78,7 @@ function normalizeFileName(fileName: string): string {
   return fileName.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
-const CHUNKS_PER_BATCH = 20;
+const CHUNKS_PER_BATCH = 10; // Reduced from 20 to prevent timeouts
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -298,35 +298,54 @@ serve(async (req) => {
       }
     }
 
-    for (const chunk of chunks) {
-      try {
-        const scores = await analyzeChunk(chunk, requirements);
-        const final = scores.semantic_relevance * progress.partial_results.weights.semantic_relevance +
-                     scores.concept_coverage * progress.partial_results.weights.concept_coverage +
-                     scores.procedural_match * progress.partial_results.weights.procedural_match +
-                     scores.vocabulary_alignment * progress.partial_results.weights.vocabulary_alignment +
-                     scores.bibliographic_match * progress.partial_results.weights.bibliographic_match;
-        
-        const { error: upsertError } = await supabase
-          .from('knowledge_relevance_scores')
-          .upsert({
-            chunk_id: chunk.id,
-            agent_id: progress.agent_id,
-            requirement_id: requirements.id,
-            semantic_relevance: scores.semantic_relevance,
-            concept_coverage: scores.concept_coverage,
-            procedural_match: scores.procedural_match,
-            vocabulary_alignment: scores.vocabulary_alignment,
-            bibliographic_match: scores.bibliographic_match,
-            final_relevance_score: final,
-            analysis_model: 'openai/gpt-5-mini',
-            weights_used: progress.partial_results.weights,
-            analyzed_at: new Date().toISOString()
-          }, {
-            onConflict: 'chunk_id,requirement_id'
-          });
+    // 🔥 TIMEOUT PROTECTION: Process batch with 50-second timeout
+    const BATCH_TIMEOUT_MS = 50000; // 50 seconds (safety margin before 60s edge function limit)
+    let timeoutTriggered = false;
 
-        if (upsertError) throw upsertError;
+    const processBatchWithTimeout = async () => {
+      try {
+        for (const chunk of chunks) {
+        try {
+          // Check timeout before processing each chunk
+          if (timeoutTriggered) {
+            console.log(`⏰ Timeout detected, stopping batch early at ${successfullyProcessed}/${chunks.length}`);
+            break;
+          }
+
+          const scores = await analyzeChunk(chunk, requirements);
+          const final = scores.semantic_relevance * progress.partial_results.weights.semantic_relevance +
+                       scores.concept_coverage * progress.partial_results.weights.concept_coverage +
+                       scores.procedural_match * progress.partial_results.weights.procedural_match +
+                       scores.vocabulary_alignment * progress.partial_results.weights.vocabulary_alignment +
+                       scores.bibliographic_match * progress.partial_results.weights.bibliographic_match;
+          
+          console.log(`💾 [UPSERT] Saving score for chunk ${chunk.id}...`);
+          
+          const { error: upsertError } = await supabase
+            .from('knowledge_relevance_scores')
+            .upsert({
+              chunk_id: chunk.id,
+              agent_id: progress.agent_id,
+              requirement_id: requirements.id,
+              semantic_relevance: scores.semantic_relevance,
+              concept_coverage: scores.concept_coverage,
+              procedural_match: scores.procedural_match,
+              vocabulary_alignment: scores.vocabulary_alignment,
+              bibliographic_match: scores.bibliographic_match,
+              final_relevance_score: final,
+              analysis_model: 'openai/gpt-5-mini',
+              weights_used: progress.partial_results.weights,
+              analyzed_at: new Date().toISOString()
+            }, {
+              onConflict: 'chunk_id,requirement_id'
+            });
+
+          if (upsertError) {
+            console.error(`❌ [UPSERT ERROR] Failed to save score for chunk ${chunk.id}:`, upsertError);
+            throw upsertError;
+          }
+          
+          console.log(`✅ [UPSERT OK] Score saved for chunk ${chunk.id}: ${final.toFixed(3)}`);
         
         successfullyProcessed++;
         
@@ -350,16 +369,17 @@ serve(async (req) => {
       }
     }
 
-    // ✅ AGGIORNAMENTO UNICO ALLA FINE DEL BATCH
+    // ✅ AGGIORNAMENTO FINALE DEL BATCH (garantito anche in caso di timeout)
     const newProcessed = currentProcessed + successfullyProcessed;
     const done = newProcessed >= progress.total_chunks;
     
     console.log(`
-📊 Batch Completed - Progress Update:
+📊 Batch ${timeoutTriggered ? '(INTERRUPTED BY TIMEOUT)' : 'Completed'} - Progress Update:
 - Chunks processed before: ${currentProcessed}
-- Successfully processed in batch: ${successfullyProcessed}
+- Successfully processed in batch: ${successfullyProcessed}/${chunks.length}
 - New total processed: ${newProcessed}/${progress.total_chunks} (${((newProcessed / progress.total_chunks) * 100).toFixed(1)}%)
 - Analysis ${done ? 'COMPLETED ✅' : 'CONTINUING ⏩'}
+- Timeout triggered: ${timeoutTriggered ? 'YES ⏰' : 'NO'}
     `);
 
     const { error: updateError } = await supabase.from('alignment_analysis_progress').update({
@@ -370,7 +390,8 @@ serve(async (req) => {
       partial_results: {
         ...progress.partial_results,
         failed_chunks: [...(progress.partial_results.failed_chunks || []), ...failedChunks],
-        last_batch_size: successfullyProcessed
+        last_batch_size: successfullyProcessed,
+        timeout_triggered: timeoutTriggered
       }
     }).eq('id', progress.id);
 
@@ -382,37 +403,50 @@ serve(async (req) => {
     console.log(`✅ Progress updated in DB: ${newProcessed}/${progress.total_chunks}`);
     console.log(`📊 Batch ${progress.current_batch + 1}: ${successfullyProcessed}/${chunks.length} chunks processed. Total: ${newProcessed}/${progress.total_chunks}`);
 
-    // 🔄 Schedule next batch BEFORE checking done to avoid timeout
+    // 🔄 ALWAYS schedule next batch if not done (even if timeout triggered)
     if (!done) {
-      console.log(`⏩ Auto-resuming: scheduling next batch for agent ${progress.agent_id}...`);
+      const reason = timeoutTriggered ? 'timeout protection' : 'normal completion';
+      console.log(`⏩ Auto-resuming (${reason}): scheduling next batch for agent ${progress.agent_id}...`);
     
       const supabaseUrl = Deno.env.get('SUPABASE_URL');
       const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
       
       if (supabaseUrl && serviceRoleKey) {
-        // Fire-and-forget: schedule next batch without waiting
-        fetch(
-          `${supabaseUrl}/functions/v1/analyze-knowledge-alignment`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${serviceRoleKey}`
-            },
-            body: JSON.stringify({
-              agentId: progress.agent_id,
-              progressId: progress.id
-            })
+        // Schedule next batch with retry logic
+        const scheduleNextBatch = async (retries = 2) => {
+          try {
+            const response = await fetch(
+              `${supabaseUrl}/functions/v1/analyze-knowledge-alignment`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${serviceRoleKey}`
+                },
+                body: JSON.stringify({
+                  agentId: progress.agent_id,
+                  progressId: progress.id
+                })
+              }
+            );
+            
+            if (response.ok) {
+              console.log('✅ Next batch scheduled successfully');
+            } else {
+              throw new Error(`HTTP ${response.status}`);
+            }
+          } catch (error) {
+            console.error(`❌ Auto-resume failed (${retries} retries left):`, error);
+            if (retries > 0) {
+              console.log('🔄 Retrying auto-resume in 1 second...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              await scheduleNextBatch(retries - 1);
+            }
           }
-        ).then(response => {
-          if (response.ok) {
-            console.log('✅ Next batch scheduled successfully');
-          } else {
-            console.error(`❌ Auto-resume failed: HTTP ${response.status}`);
-          }
-        }).catch(error => {
-          console.error('❌ Failed to auto-resume:', error);
-        });
+        };
+        
+        // Fire-and-forget with retry
+        scheduleNextBatch().catch(err => console.error('❌ All auto-resume attempts failed:', err));
       } else {
         console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for auto-resume');
       }
