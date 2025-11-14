@@ -380,42 +380,47 @@ serve(async (req) => {
     if (!done) {
       console.log(`⏩ Auto-resuming: scheduling next batch for agent ${progress.agent_id}...`);
     
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    
-    if (supabaseUrl && serviceRoleKey) {
-      // Fire-and-forget: schedule next batch without waiting
-      fetch(
-        `${supabaseUrl}/functions/v1/analyze-knowledge-alignment`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceRoleKey}`
-          },
-          body: JSON.stringify({
-            agentId: progress.agent_id,
-            progressId: progress.id
-          })
-        }
-      ).then(response => {
-        if (response.ok) {
-          console.log('✅ Next batch scheduled successfully');
-        } else {
-          console.error(`❌ Auto-resume failed: HTTP ${response.status}`);
-        }
-      }).catch(error => {
-        console.error('❌ Failed to auto-resume:', error);
-      });
-    } else {
-      console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for auto-resume');
+      const supabaseUrl = Deno.env.get('SUPABASE_URL');
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      
+      if (supabaseUrl && serviceRoleKey) {
+        // Fire-and-forget: schedule next batch without waiting
+        fetch(
+          `${supabaseUrl}/functions/v1/analyze-knowledge-alignment`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceRoleKey}`
+            },
+            body: JSON.stringify({
+              agentId: progress.agent_id,
+              progressId: progress.id
+            })
+          }
+        ).then(response => {
+          if (response.ok) {
+            console.log('✅ Next batch scheduled successfully');
+          } else {
+            console.error(`❌ Auto-resume failed: HTTP ${response.status}`);
+          }
+        }).catch(error => {
+          console.error('❌ Failed to auto-resume:', error);
+        });
+      } else {
+        console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for auto-resume');
+      }
+      
+      return new Response(JSON.stringify({ 
+        success: true, status: 'in_progress', chunks_processed: newProcessed, total_chunks: progress.total_chunks,
+        percentage: Math.round((newProcessed / progress.total_chunks) * 100),
+        batch_stats: { successful: successfullyProcessed, failed: failedChunks.length }
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-    
-    return new Response(JSON.stringify({ 
-      success: true, status: 'in_progress', chunks_processed: newProcessed, total_chunks: progress.total_chunks,
-      percentage: Math.round((newProcessed / progress.total_chunks) * 100),
-      batch_stats: { successful: successfullyProcessed, failed: failedChunks.length }
-    }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    // ✅ Analysis completed - finalize
+    await finalizeAnalysis(supabase, { ...progress, chunks_processed: newProcessed }, startTime);
+    return new Response(JSON.stringify({ success: true, status: 'completed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
     return new Response(JSON.stringify({ success: false, error: error.message }), 
