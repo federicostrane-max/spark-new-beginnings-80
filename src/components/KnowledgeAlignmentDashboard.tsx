@@ -68,6 +68,12 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [selectedChunks, setSelectedChunks] = useState<Set<string>>(new Set());
   const [isRestoring, setIsRestoring] = useState(false);
   const [safeModeActive, setSafeModeActive] = useState(false);
+  
+  // Track dismissed alerts using localStorage
+  const [dismissedLogIds, setDismissedLogIds] = useState<Set<string>>(() => {
+    const stored = localStorage.getItem('dismissedAlignmentLogs');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  });
   const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
   const [progressChunks, setProgressChunks] = useState(0);
   const [totalChunksInAnalysis, setTotalChunksInAnalysis] = useState(0);
@@ -365,11 +371,26 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           </Alert>
         )}
 
-        {/* Alert prerequisiti non passati - hide if currently analyzing */}
-        {analysisLogs.length > 0 && !analysisLogs[0].prerequisite_check_passed && !isAnalyzing && (
-          <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
+        {/* Alert prerequisiti non passati - hide if currently analyzing or dismissed */}
+        {analysisLogs.length > 0 && 
+         !analysisLogs[0].prerequisite_check_passed && 
+         !isAnalyzing && 
+         !dismissedLogIds.has(analysisLogs[0].id) && (
+          <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950 relative">
+            <button
+              onClick={() => {
+                const newDismissed = new Set(dismissedLogIds);
+                newDismissed.add(analysisLogs[0].id);
+                setDismissedLogIds(newDismissed);
+                localStorage.setItem('dismissedAlignmentLogs', JSON.stringify([...newDismissed]));
+              }}
+              className="absolute top-3 right-3 p-1 rounded hover:bg-red-200 dark:hover:bg-red-900 transition-colors"
+              title="Nascondi questo avviso"
+            >
+              <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+            </button>
             <XCircle className="h-5 w-5 text-red-600" />
-            <AlertTitle className="text-red-900 dark:text-red-100 font-bold text-lg">
+            <AlertTitle className="text-red-900 dark:text-red-100 font-bold text-lg pr-8">
               🚫 Prerequisiti Non Soddisfatti - Analisi Bloccata
             </AlertTitle>
             <AlertDescription className="text-red-800 dark:text-red-200">
