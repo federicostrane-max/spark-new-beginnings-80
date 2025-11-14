@@ -104,17 +104,37 @@ serve(async (req) => {
             // If decoding fails, manually replace %20 with spaces
             t = t.replace(/%20/g, ' ');
           }
-          // Remove special chars but keep alphanumeric, spaces, dots, hyphens
+          // Remove ALL special chars (including :, -, etc), keep only alphanumeric and spaces
           // Then normalize spaces and trim
-          return t.toLowerCase().replace(/[^\w\s.\-]/g, '').replace(/\s+/g, ' ').trim();
+          return t.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
         };
+        
         const missing = criticalSources.filter(s => {
           const ref = normalize(s.title);
-          return !docs?.some(d => {
+          console.log(`[prerequisite-check] Checking reference: "${s.title}" → normalized: "${ref}"`);
+          
+          const found = docs?.some(d => {
             const ext = d.extracted_title ? normalize(d.extracted_title) : null;
             const file = normalize(d.file_name);
-            return (ext && (ext.includes(ref) || ref.includes(ext))) || file.includes(ref) || ref.includes(file);
+            
+            console.log(`  - Checking doc: file="${d.file_name}" → "${file}", title="${d.extracted_title}" → "${ext}"`);
+            
+            // Check multiple match conditions
+            const fileMatch = file.includes(ref) || ref.includes(file);
+            const titleMatch = ext && (ext.includes(ref) || ref.includes(ext));
+            
+            if (fileMatch || titleMatch) {
+              console.log(`  ✓ Match found! (file=${fileMatch}, title=${titleMatch})`);
+              return true;
+            }
+            return false;
           });
+          
+          if (!found) {
+            console.log(`  ✗ No match found for "${s.title}"`);
+          }
+          
+          return !found;
         });
 
         if (missing.length > 0) {
