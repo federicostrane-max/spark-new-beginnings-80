@@ -59,6 +59,25 @@ function getRemovalConfig(agentType: string, crit: 'high' | 'medium' | 'low') {
   return base;
 }
 
+// Normalize file names for comparison (decode URL encoding, lowercase, trim)
+function normalizeFileName(fileName: string): string {
+  if (!fileName) return '';
+  
+  try {
+    // Decode URL encoding (e.g., %20 → space)
+    fileName = decodeURIComponent(fileName);
+  } catch {
+    // Fallback for malformed URL encoding
+    fileName = fileName.replace(/%20/g, ' ');
+  }
+  
+  // Remove common file extensions
+  fileName = fileName.replace(/\.(pdf|docx?|txt|epub)$/gi, '');
+  
+  // Lowercase, trim, and normalize whitespace
+  return fileName.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 const CHUNKS_PER_BATCH = 20;
 
 serve(async (req) => {
@@ -103,6 +122,21 @@ serve(async (req) => {
         const { data: docs } = await supabase.from('knowledge_documents').select('file_name, extracted_title').in('id', poolDocIds);
         console.log(`[prerequisite-check] Found ${docs?.length || 0} documents in pool:`, docs?.map(d => ({ file: d.file_name, title: d.extracted_title })));
         
+        // NEW: Log normalized document names for debugging
+        console.log('[prerequisite-check] Normalized available documents:');
+        const normalizedDocs = docs?.map(d => ({
+          original_file: d.file_name,
+          normalized_file: normalizeFileName(d.file_name),
+          original_title: d.extracted_title,
+          normalized_title: d.extracted_title ? normalizeFileName(d.extracted_title) : ''
+        })) || [];
+        normalizedDocs.forEach(nd => {
+          console.log(`  - "${nd.original_file}" → "${nd.normalized_file}"`);
+          if (nd.normalized_title) {
+            console.log(`    Title: "${nd.original_title}" → "${nd.normalized_title}"`);
+          }
+        });
+        
         // Token-based matching: estrae solo le parole significative
         const extractTokens = (text: string): string[] => {
           if (!text) return [];
@@ -146,13 +180,32 @@ serve(async (req) => {
         
         const missing = criticalSources.filter(s => {
           const refTokens = extractTokens(s.title);
-          console.log(`[prerequisite-check] Reference: "${s.title}" → tokens: [${refTokens.join(', ')}]`);
+          const refNormalized = normalizeFileName(s.title);
+          console.log(`[prerequisite-check] Reference: "${s.title}"`);
+          console.log(`  Normalized: "${refNormalized}"`);
+          console.log(`  Tokens: [${refTokens.join(', ')}]`);
           
           const found = docs?.some(d => {
+            const fileNormalized = normalizeFileName(d.file_name);
+            const titleNormalized = d.extracted_title ? normalizeFileName(d.extracted_title) : '';
+            
+            // NEW: Simple normalized string matching first (exact or contains)
+            if (fileNormalized.includes(refNormalized) || refNormalized.includes(fileNormalized)) {
+              console.log(`  ✅ MATCH via normalized file name: "${d.file_name}" contains "${s.title}"`);
+              return true;
+            }
+            
+            if (titleNormalized && (titleNormalized.includes(refNormalized) || refNormalized.includes(titleNormalized))) {
+              console.log(`  ✅ MATCH via normalized title: "${d.extracted_title}" contains "${s.title}"`);
+              return true;
+            }
+            
+            // Fallback to token-based matching
             const fileTokens = extractTokens(d.file_name);
             const titleTokens = d.extracted_title ? extractTokens(d.extracted_title) : [];
             
             console.log(`  - Document: "${d.file_name}"`);
+            console.log(`    Normalized: "${fileNormalized}"`);
             console.log(`    File tokens: [${fileTokens.join(', ')}]`);
             if (titleTokens.length > 0) {
               console.log(`    Title tokens: [${titleTokens.join(', ')}]`);
