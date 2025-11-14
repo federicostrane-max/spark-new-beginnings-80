@@ -122,25 +122,49 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     if (!isAnalyzing) return;
 
     const interval = setInterval(async () => {
-      // Fetch latest analysis log - include completed analyses from last 5 minutes
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      
-      const { data: log } = await supabase
-        .from('alignment_analysis_log')
-        .select('total_chunks_analyzed, completed_at')
+      // ✅ First check for running progress
+      const { data: progress, error: progressError } = await supabase
+        .from('alignment_analysis_progress' as any)
+        .select('chunks_processed, total_chunks, status, updated_at')
         .eq('agent_id', agentId)
-        .or(`completed_at.is.null,completed_at.gte.${fiveMinutesAgo}`)
-        .order('started_at', { ascending: false })
+        .eq('status', 'running')
+        .order('updated_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (log) {
-        const currentProgress = log.total_chunks_analyzed || 0;
-        setProgressChunks(currentProgress);
+      console.log('📊 Progress polling:', progress);
+
+      if (progress && !progressError) {
+        // Analysis is running - update progress
+        const chunksProcessed = (progress as any).chunks_processed || 0;
+        const totalChunks = (progress as any).total_chunks || 0;
         
-        // If analysis just completed, show success toast
-        if (log.completed_at && progressChunks !== currentProgress) {
-          toast.success(`Analisi completata! ${currentProgress} chunks analizzati.`);
+        setProgressChunks(chunksProcessed);
+        setTotalChunksInAnalysis(totalChunks);
+        setAnalysisProgress({
+          chunks_processed: chunksProcessed,
+          total_chunks: totalChunks,
+          percentage: totalChunks > 0 
+            ? (chunksProcessed / totalChunks) * 100 
+            : 0
+        });
+        console.log(`✅ Progress updated: ${chunksProcessed}/${totalChunks} (${((chunksProcessed / totalChunks) * 100).toFixed(1)}%)`);
+      } else {
+        // No running progress - check if completed
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        
+        const { data: log } = await supabase
+          .from('alignment_analysis_log')
+          .select('total_chunks_analyzed, completed_at')
+          .eq('agent_id', agentId)
+          .or(`completed_at.is.null,completed_at.gte.${fiveMinutesAgo}`)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (log?.completed_at && progressChunks !== log.total_chunks_analyzed) {
+          toast.success(`Analisi completata! ${log.total_chunks_analyzed} chunks analizzati.`);
+          setProgressChunks(log.total_chunks_analyzed || 0);
         }
       }
 
