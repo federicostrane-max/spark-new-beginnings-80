@@ -207,20 +207,33 @@ serve(async (req) => {
 
     const { data: requirements } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
     
+    // ✅ Ricarica il progress dal DB per avere il conteggio aggiornato
+    const { data: refreshedProgress } = await supabase
+      .from('alignment_analysis_progress')
+      .select('*')
+      .eq('id', progress.id)
+      .single();
+    
+    if (!refreshedProgress) {
+      throw new Error('Progress record not found after refresh');
+    }
+    
+    const currentProcessed = refreshedProgress.chunks_processed;
+    
     console.log(`
 🔍 Analysis Batch Started
 - Progress ID: ${progress.id}
 - Agent: ${progress.agent_id}
-- Batch: ${progress.current_batch + 1}
+- Batch: ${refreshedProgress.current_batch + 1}
 - Chunks in batch: ${chunks.length}
-- Total progress: ${progress.chunks_processed}/${progress.total_chunks}
+- Current progress from DB: ${currentProcessed}/${progress.total_chunks}
     `);
 
     let successfullyProcessed = 0;
     const failedChunks: string[] = [];
 
     // Clean previous scores only at the start of a fresh analysis
-    if (progress.current_batch === 0 && progress.chunks_processed === 0) {
+    if (refreshedProgress.current_batch === 0 && currentProcessed === 0) {
       const { error: deleteError } = await supabase
         .from('knowledge_relevance_scores')
         .delete()
@@ -264,14 +277,7 @@ serve(async (req) => {
         
         successfullyProcessed++;
         
-        // ✅ AGGIORNA PROGRESS IMMEDIATAMENTE DOPO OGNI CHUNK
-        const newProcessed = progress.chunks_processed + successfullyProcessed;
-        await supabase.from('alignment_analysis_progress').update({
-          chunks_processed: newProcessed,
-          updated_at: new Date().toISOString()
-        }).eq('id', progress.id);
-        
-        console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)} (Total: ${newProcessed}/${progress.total_chunks})`);
+        console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)} (Batch progress: ${successfullyProcessed}/${chunks.length})`);
       } catch (e: any) {
         failedChunks.push(chunk.id);
         console.error(`❌ Chunk ${chunk.id} failed:`, e.message);
@@ -281,8 +287,17 @@ serve(async (req) => {
       }
     }
 
-    const newProcessed = progress.chunks_processed + successfullyProcessed;
+    // ✅ AGGIORNAMENTO UNICO ALLA FINE DEL BATCH
+    const newProcessed = currentProcessed + successfullyProcessed;
     const done = newProcessed >= progress.total_chunks;
+    
+    console.log(`
+📊 Batch Completed - Progress Update:
+- Chunks processed before: ${currentProcessed}
+- Successfully processed in batch: ${successfullyProcessed}
+- New total processed: ${newProcessed}/${progress.total_chunks} (${((newProcessed / progress.total_chunks) * 100).toFixed(1)}%)
+- Analysis ${done ? 'COMPLETED ✅' : 'CONTINUING ⏩'}
+    `);
 
     await supabase.from('alignment_analysis_progress').update({
       chunks_processed: newProcessed, 
