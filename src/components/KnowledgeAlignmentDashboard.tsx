@@ -79,6 +79,11 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [totalChunksInAnalysis, setTotalChunksInAnalysis] = useState(0);
   const [isAnalyzingGaps, setIsAnalyzingGaps] = useState(false);
   const [gapAnalysisRefresh, setGapAnalysisRefresh] = useState(0);
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    chunks_processed: number;
+    total_chunks: number;
+    percentage: number;
+  } | null>(null);
   const [stats, setStats] = useState({
     totalChunks: 0,
     removedChunks: 0,
@@ -690,6 +695,25 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                 </div>
               </div>
             </div>
+
+            {isAnalyzing && analysisProgress && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                    Analisi in corso: {analysisProgress.chunks_processed}/{analysisProgress.total_chunks} chunks
+                  </span>
+                  <span className="text-blue-600 dark:text-blue-400 font-bold">
+                    {analysisProgress.percentage}%
+                  </span>
+                </div>
+                <div className="w-full bg-blue-900/20 rounded-full h-2.5">
+                  <div 
+                    className="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
+                    style={{ width: `${analysisProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {lastAnalysis && !isAnalyzing && (
               <div className="text-sm text-muted-foreground">
