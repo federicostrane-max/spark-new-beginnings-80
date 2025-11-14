@@ -174,7 +174,23 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     return () => clearInterval(interval);
   }, [isAnalyzing, agentId, progressChunks]);
 
+  const [prerequisiteCheckPassed, setPrerequisiteCheckPassed] = useState(true);
+
   const fetchData = async () => {
+    // Fetch latest prerequisite check (more recent than analysis log)
+    const { data: latestPrereqCheck } = await supabase
+      .from('prerequisite_checks')
+      .select('check_passed, checked_at')
+      .eq('agent_id', agentId)
+      .order('checked_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // If we have a recent prerequisite check, use that status
+    if (latestPrereqCheck) {
+      setPrerequisiteCheckPassed(latestPrereqCheck.check_passed);
+    }
+
     // Fetch agent safe mode status
     const { data: agent } = await supabase
       .from('agents')
@@ -400,9 +416,9 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           </Alert>
         )}
 
-        {/* Alert prerequisiti non passati - hide if currently analyzing or dismissed */}
+        {/* Alert prerequisiti non passati - use latest prerequisite check, not old analysis log */}
         {analysisLogs.length > 0 && 
-         !analysisLogs[0].prerequisite_check_passed && 
+         !prerequisiteCheckPassed && 
          !isAnalyzing && 
          !dismissedLogIds.has(analysisLogs[0].id) && (
           <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950 relative">
