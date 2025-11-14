@@ -95,38 +95,61 @@ serve(async (req) => {
         const poolDocIds = [...new Set(chunks?.map(c => c.pool_document_id).filter(Boolean))];
         const { data: docs } = await supabase.from('knowledge_documents').select('file_name, extracted_title').in('id', poolDocIds);
         
-        const normalize = (t: string) => {
-          if (!t) return '';
+        // Token-based matching: estrae solo le parole significative
+        const extractTokens = (text: string): string[] => {
+          if (!text) return [];
+          
           try {
-            // Decode URL-encoded strings (e.g., %20 → space)
-            t = decodeURIComponent(t);
+            // Decode URL encoding
+            text = decodeURIComponent(text);
           } catch {
-            // If decoding fails, manually replace %20 with spaces
-            t = t.replace(/%20/g, ' ');
+            // Fallback per URL encoding malformato
+            text = text.replace(/%20/g, ' ');
           }
-          // Remove ALL special chars (including :, -, etc), keep only alphanumeric and spaces
-          // Then normalize spaces and trim
-          return t.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+          
+          // Rimuovi estensioni file comuni
+          text = text.replace(/\.(pdf|docx?|txt|epub|doc)$/i, '');
+          
+          // Lowercase e rimuovi caratteri speciali
+          text = text.toLowerCase().replace(/[^\w\s]/g, ' ');
+          
+          // Split in parole e rimuovi spazi vuoti
+          const words = text.split(/\s+/).filter(w => w.length > 0);
+          
+          // Stop words (articoli, preposizioni) da ignorare
+          const stopWords = ['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but'];
+          
+          // Filtra stop words e parole troppo corte (< 2 caratteri)
+          return words.filter(w => !stopWords.includes(w) && w.length >= 2);
+        };
+        
+        // Verifica se tutti i tokens del reference sono presenti nel documento
+        const matchTokens = (refTokens: string[], docTokens: string[]): boolean => {
+          return refTokens.every(token => docTokens.includes(token));
         };
         
         const missing = criticalSources.filter(s => {
-          const ref = normalize(s.title);
-          console.log(`[prerequisite-check] Checking reference: "${s.title}" → normalized: "${ref}"`);
+          const refTokens = extractTokens(s.title);
+          console.log(`[prerequisite-check] Reference: "${s.title}" → tokens: [${refTokens.join(', ')}]`);
           
           const found = docs?.some(d => {
-            const ext = d.extracted_title ? normalize(d.extracted_title) : null;
-            const file = normalize(d.file_name);
+            const fileTokens = extractTokens(d.file_name);
+            const titleTokens = d.extracted_title ? extractTokens(d.extracted_title) : [];
             
-            console.log(`  - Checking doc: file="${d.file_name}" → "${file}", title="${d.extracted_title}" → "${ext}"`);
+            console.log(`  - Document: "${d.file_name}"`);
+            console.log(`    File tokens: [${fileTokens.join(', ')}]`);
+            if (titleTokens.length > 0) {
+              console.log(`    Title tokens: [${titleTokens.join(', ')}]`);
+            }
             
-            // Check multiple match conditions
-            const fileMatch = file.includes(ref) || ref.includes(file);
-            const titleMatch = ext && (ext.includes(ref) || ref.includes(ext));
+            const fileMatch = matchTokens(refTokens, fileTokens);
+            const titleMatch = titleTokens.length > 0 && matchTokens(refTokens, titleTokens);
             
             if (fileMatch || titleMatch) {
-              console.log(`  ✓ Match found! (file=${fileMatch}, title=${titleMatch})`);
+              console.log(`    ✓ Match found! (file=${fileMatch}, title=${titleMatch})`);
               return true;
             }
+            
             return false;
           });
           
