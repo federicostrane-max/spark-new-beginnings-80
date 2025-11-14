@@ -558,8 +558,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                 </Badge>
               )}
               
-              {/* Prerequisite Status Badge - hide if dismissed */}
-              {analysisLogs.length > 0 && !dismissedLogIds.has(analysisLogs[0].id) && (
+              {/* Prerequisite Status Badge - hide if dismissed OR if analysis is in progress */}
+              {analysisLogs.length > 0 && !dismissedLogIds.has(analysisLogs[0].id) && !isAnalyzing && (
                 <>
                   {analysisLogs[0].prerequisite_check_passed ? (
                     <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-700">
@@ -573,6 +573,14 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                     </Badge>
                   )}
                 </>
+              )}
+
+              {/* Badge Analisi in Corso - shown when analysis is active */}
+              {isAnalyzing && (
+                <Badge variant="secondary" className="gap-1.5 bg-blue-100 dark:bg-blue-900">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Analisi in Corso...
+                </Badge>
               )}
             </div>
 
