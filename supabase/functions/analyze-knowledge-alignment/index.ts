@@ -376,14 +376,9 @@ serve(async (req) => {
 
     console.log(`📊 Batch ${progress.current_batch + 1}: ${successfullyProcessed}/${chunks.length} chunks processed. Total: ${newProcessed}/${progress.total_chunks}`);
 
-    if (done) {
-      await finalizeAnalysis(supabase, { ...progress, chunks_processed: newProcessed }, startTime);
-      return new Response(JSON.stringify({ success: true, status: 'completed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // 🔄 CRITICAL: Schedule next batch IMMEDIATELY and return fast to avoid timeout
-    // This MUST happen before any slow operations or the return statement
-    console.log(`⏩ Auto-resuming: scheduling next batch for agent ${progress.agent_id}...`);
+    // 🔄 Schedule next batch BEFORE checking done to avoid timeout
+    if (!done) {
+      console.log(`⏩ Auto-resuming: scheduling next batch for agent ${progress.agent_id}...`);
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
