@@ -362,7 +362,7 @@ serve(async (req) => {
 - Analysis ${done ? 'COMPLETED ✅' : 'CONTINUING ⏩'}
     `);
 
-    await supabase.from('alignment_analysis_progress').update({
+    const { error: updateError } = await supabase.from('alignment_analysis_progress').update({
       chunks_processed: newProcessed, 
       current_batch: progress.current_batch + 1,
       updated_at: new Date().toISOString(), 
@@ -374,6 +374,12 @@ serve(async (req) => {
       }
     }).eq('id', progress.id);
 
+    if (updateError) {
+      console.error('❌ Failed to update progress in DB:', updateError);
+      throw new Error(`Progress update failed: ${updateError.message}`);
+    }
+
+    console.log(`✅ Progress updated in DB: ${newProcessed}/${progress.total_chunks}`);
     console.log(`📊 Batch ${progress.current_batch + 1}: ${successfullyProcessed}/${chunks.length} chunks processed. Total: ${newProcessed}/${progress.total_chunks}`);
 
     // 🔄 Schedule next batch BEFORE checking done to avoid timeout
