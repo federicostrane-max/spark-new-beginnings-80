@@ -32,7 +32,7 @@ serve(async (req) => {
   // NEVER use 'ai_assigned' - assignment is always done manually by users.
 
   try {
-    const { text, fileName, fileSize } = await req.json();
+    const { text, fileName, fileSize, fileData } = await req.json();
     
     console.log('=== UPLOAD PDF TO SHARED POOL ===');
     console.log(`File: ${fileName}`);
@@ -60,6 +60,37 @@ serve(async (req) => {
       throw new Error(`Il documento "${fileName}" è già presente nel pool (ID: ${existingDoc.id})`);
     }
     console.log('[DUPLICATE CHECK] ✓ No duplicate found');
+
+    // Step 0: Upload PDF file to storage if fileData is provided
+    if (fileData) {
+      console.log('[STEP 0] Uploading PDF to storage...');
+      try {
+        // Convert base64 to binary
+        const binaryString = atob(fileData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        const { error: uploadError } = await supabase.storage
+          .from('shared-pool-uploads')
+          .upload(fileName, bytes, {
+            contentType: 'application/pdf',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error('[STEP 0 ERROR]', uploadError);
+          throw new Error(`Failed to upload PDF to storage: ${uploadError.message}`);
+        }
+        console.log('[STEP 0] ✓ PDF uploaded to storage successfully');
+      } catch (storageError: any) {
+        console.error('[STEP 0 ERROR]', storageError);
+        throw new Error(`Failed to upload PDF: ${storageError?.message || 'Unknown error'}`);
+      }
+    } else {
+      console.warn('[STEP 0] ⚠️ No fileData provided, PDF will not be stored (text chunks only)');
+    }
 
     // Step 1: Create document in knowledge_documents
     console.log('[STEP 1] Creating document in knowledge_documents...');
