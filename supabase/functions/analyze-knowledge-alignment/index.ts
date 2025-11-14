@@ -381,21 +381,47 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, status: 'completed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Schedule next batch as guaranteed background task
+    // Schedule next batch as guaranteed background task using direct HTTP call
+    console.log(`⏩ Auto-resuming: scheduling next batch for agent ${progress.agent_id}...`);
     EdgeRuntime.waitUntil(
-      supabase.functions.invoke('analyze-knowledge-alignment', {
-        body: { agentId: progress.agent_id, progressId: progress.id }
-      }).then(({ error }: any) => {
-        if (error) {
-          console.error('❌ Failed to invoke next batch:', error);
-          supabase.from('alignment_analysis_progress').update({
+      (async () => {
+        try {
+          const supabaseUrl = Deno.env.get('SUPABASE_URL');
+          const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+          
+          if (!supabaseUrl || !serviceRoleKey) {
+            throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+          }
+
+          const response = await fetch(
+            `${supabaseUrl}/functions/v1/analyze-knowledge-alignment`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${serviceRoleKey}`
+              },
+              body: JSON.stringify({
+                agentId: progress.agent_id,
+                progressId: progress.id
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+          }
+
+          console.log('✅ Next batch scheduled successfully via HTTP');
+        } catch (error: any) {
+          console.error('❌ Failed to auto-resume next batch:', error);
+          await supabase.from('alignment_analysis_progress').update({
             status: 'failed',
-            error_message: `Auto-invocation failed: ${error.message}`
+            error_message: `Auto-resume failed: ${error.message}`
           }).eq('id', progress.id);
-        } else {
-          console.log('✅ Next batch scheduled');
         }
-      })
+      })()
     );
     
     return new Response(JSON.stringify({ 
