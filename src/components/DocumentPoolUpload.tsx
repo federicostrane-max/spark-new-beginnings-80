@@ -130,16 +130,21 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
             throw new Error('PDF vuoto o non leggibile');
           }
 
+          // Step 1.5: Convert PDF file to base64 for storage
+          const arrayBuffer = await file.arrayBuffer();
+          const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+
           // Step 2: Upload to shared pool (all processing happens in edge function)
           setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          console.log(`Uploading "${file.name}" to shared pool...`);
+          console.log(`Uploading "${file.name}" to shared pool (with PDF file)...`);
           
           const { data, error } = await supabase.functions.invoke('upload-pdf-to-shared-pool', {
             body: {
               text: text,
               fileName: file.name,
-              fileSize: file.size
+              fileSize: file.size,
+              fileData: base64Data
             }
           });
 
