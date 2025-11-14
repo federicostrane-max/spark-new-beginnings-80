@@ -634,6 +634,63 @@ export type Database = {
           },
         ]
       }
+      alignment_analysis_progress: {
+        Row: {
+          agent_id: string
+          chunks_processed: number | null
+          current_batch: number | null
+          error_message: string | null
+          id: string
+          partial_results: Json | null
+          requirement_id: string | null
+          started_at: string | null
+          status: string | null
+          total_chunks: number
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          chunks_processed?: number | null
+          current_batch?: number | null
+          error_message?: string | null
+          id?: string
+          partial_results?: Json | null
+          requirement_id?: string | null
+          started_at?: string | null
+          status?: string | null
+          total_chunks: number
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          chunks_processed?: number | null
+          current_batch?: number | null
+          error_message?: string | null
+          id?: string
+          partial_results?: Json | null
+          requirement_id?: string | null
+          started_at?: string | null
+          status?: string | null
+          total_chunks?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alignment_analysis_progress_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alignment_analysis_progress_requirement_id_fkey"
+            columns: ["requirement_id"]
+            isOneToOne: false
+            referencedRelation: "agent_task_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       document_processing_cache: {
         Row: {
           created_at: string | null
