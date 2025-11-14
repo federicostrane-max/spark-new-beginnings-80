@@ -264,12 +264,12 @@ serve(async (req) => {
         .select('id, file_name, extracted_title, extracted_authors')
         .in('id', poolDocIds);
 
-      // Helper function to normalize titles
+      // Helper function to normalize titles - preserves hyphens and periods for better matching
       function normalizeTitle(title: string): string {
         if (!title) return '';
         return decodeURIComponent(title)
           .toLowerCase()
-          .replace(/[^\w\s.-]/g, '')
+          .replace(/[^\w\s.\-]/g, '') // Keep periods and hyphens
           .replace(/\s+/g, ' ')
           .trim();
       }
@@ -278,7 +278,7 @@ serve(async (req) => {
         const refTitleNormalized = normalizeTitle(source.title);
         
         // Check against both extracted_title AND file_name
-        return !documents?.some(doc => {
+        const found = documents?.some(doc => {
           const extractedTitleNormalized = doc.extracted_title 
             ? normalizeTitle(doc.extracted_title)
             : null;
@@ -294,8 +294,23 @@ serve(async (req) => {
             fileNameNormalized.includes(refTitleNormalized) || 
             refTitleNormalized.includes(fileNameNormalized);
           
+          if (matchExtractedTitle || matchFileName) {
+            console.log(`✅ [prerequisite] Found match for "${source.title}":`, {
+              docId: doc.id,
+              fileName: doc.file_name,
+              extractedTitle: doc.extracted_title,
+              matchType: matchExtractedTitle ? 'extracted_title' : 'file_name'
+            });
+          }
+          
           return matchExtractedTitle || matchFileName;
         });
+        
+        if (!found) {
+          console.log(`❌ [prerequisite] Missing critical source: "${source.title}"`);
+        }
+        
+        return !found;
       });
 
       prerequisiteCheck.passed = prerequisiteCheck.missing_sources.length === 0;
