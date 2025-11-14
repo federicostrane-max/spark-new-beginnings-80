@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.78.0";
 
+declare const EdgeRuntime: any;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -143,6 +145,18 @@ serve(async (req) => {
 
     const { data: requirements } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
     
+    console.log(`
+🔍 Analysis Batch Started
+- Progress ID: ${progress.id}
+- Agent: ${progress.agent_id}
+- Batch: ${progress.current_batch + 1}
+- Chunks in batch: ${chunks.length}
+- Total progress: ${progress.chunks_processed}/${progress.total_chunks}
+    `);
+
+    let successfullyProcessed = 0;
+    const failedChunks: string[] = [];
+
     for (const chunk of chunks) {
       try {
         const scores = await analyzeChunk(chunk, requirements);
@@ -159,27 +173,58 @@ serve(async (req) => {
           bibliographic_match: scores.bibliographic_match, final_relevance_score: final,
           analysis_model: 'openai/gpt-5-mini', weights_used: progress.partial_results.weights
         });
-      } catch (e) { console.error('Chunk error:', e); }
+        
+        successfullyProcessed++;
+        console.log(`✅ Chunk ${chunk.id} analyzed: ${final.toFixed(3)}`);
+      } catch (e: any) {
+        failedChunks.push(chunk.id);
+        console.error(`❌ Chunk ${chunk.id} failed:`, e.message);
+      }
     }
 
-    const newProcessed = progress.chunks_processed + chunks.length;
+    const newProcessed = progress.chunks_processed + successfullyProcessed;
     const done = newProcessed >= progress.total_chunks;
 
     await supabase.from('alignment_analysis_progress').update({
-      chunks_processed: newProcessed, current_batch: progress.current_batch + 1,
-      updated_at: new Date().toISOString(), status: done ? 'completed' : 'running'
+      chunks_processed: newProcessed, 
+      current_batch: progress.current_batch + 1,
+      updated_at: new Date().toISOString(), 
+      status: done ? 'completed' : 'running',
+      partial_results: {
+        ...progress.partial_results,
+        failed_chunks: [...(progress.partial_results.failed_chunks || []), ...failedChunks],
+        last_batch_size: successfullyProcessed
+      }
     }).eq('id', progress.id);
+
+    console.log(`📊 Batch ${progress.current_batch + 1}: ${successfullyProcessed}/${chunks.length} chunks processed. Total: ${newProcessed}/${progress.total_chunks}`);
 
     if (done) {
       await finalizeAnalysis(supabase, { ...progress, chunks_processed: newProcessed }, startTime);
       return new Response(JSON.stringify({ success: true, status: 'completed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    supabase.functions.invoke('analyze-knowledge-alignment', { body: { agentId: progress.agent_id, progressId: progress.id } });
+    // Schedule next batch as guaranteed background task
+    EdgeRuntime.waitUntil(
+      supabase.functions.invoke('analyze-knowledge-alignment', {
+        body: { agentId: progress.agent_id, progressId: progress.id }
+      }).then(({ error }: any) => {
+        if (error) {
+          console.error('❌ Failed to invoke next batch:', error);
+          supabase.from('alignment_analysis_progress').update({
+            status: 'failed',
+            error_message: `Auto-invocation failed: ${error.message}`
+          }).eq('id', progress.id);
+        } else {
+          console.log('✅ Next batch scheduled');
+        }
+      })
+    );
     
     return new Response(JSON.stringify({ 
       success: true, status: 'in_progress', chunks_processed: newProcessed, total_chunks: progress.total_chunks,
-      percentage: Math.round((newProcessed / progress.total_chunks) * 100)
+      percentage: Math.round((newProcessed / progress.total_chunks) * 100),
+      batch_stats: { successful: successfullyProcessed, failed: failedChunks.length }
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
@@ -221,24 +266,48 @@ async function finalizeAnalysis(supabase: any, progress: any, startTime: number)
   });
 }
 
-async function analyzeChunk(chunk: any, requirements: any) {
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`,
-      'HTTP-Referer': Deno.env.get('SUPABASE_URL') || '',
-    },
-    body: JSON.stringify({
-      model: 'openai/gpt-5-mini',
-      messages: [{ role: 'user', content: `Score chunk (0-1 per dimension): ${JSON.stringify({
-        concepts: requirements.theoretical_concepts, procedures: requirements.procedural_knowledge, vocab: requirements.domain_vocabulary,
-        chunk: { doc: chunk.document_name, content: chunk.content.substring(0, 500) }
-      })}. Return JSON: {"semantic_relevance":0-1,"concept_coverage":0-1,"procedural_match":0-1,"vocabulary_alignment":0-1,"bibliographic_match":0-1,"reasoning":""}` }],
-      temperature: 0.3,
-      response_format: { type: 'json_object' }
-    })
-  });
-  const data = await res.json();
-  return JSON.parse(data.choices[0]?.message?.content);
+async function analyzeChunk(chunk: any, requirements: any, retries = 2): Promise<any> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`,
+          'HTTP-Referer': Deno.env.get('SUPABASE_URL') || '',
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-5-mini',
+          messages: [{ role: 'user', content: `Score chunk (0-1 per dimension): ${JSON.stringify({
+            concepts: requirements.theoretical_concepts, procedures: requirements.procedural_knowledge, vocab: requirements.domain_vocabulary,
+            chunk: { doc: chunk.document_name, content: chunk.content.substring(0, 500) }
+          })}. Return JSON: {"semantic_relevance":0-1,"concept_coverage":0-1,"procedural_match":0-1,"vocabulary_alignment":0-1,"bibliographic_match":0-1,"reasoning":""}` }],
+          temperature: 0.3,
+          response_format: { type: 'json_object' }
+        }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      return JSON.parse(data.choices[0]?.message?.content);
+      
+    } catch (e: any) {
+      if (attempt < retries) {
+        console.log(`⚠️ Retry ${attempt + 1}/${retries} for chunk ${chunk.id}`);
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // Exponential backoff
+        continue;
+      }
+      throw e; // Final attempt failed
+    }
+  }
+  throw new Error('All retry attempts exhausted');
 }
