@@ -365,8 +365,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
           </Alert>
         )}
 
-        {/* Alert prerequisiti non passati */}
-        {analysisLogs.length > 0 && !analysisLogs[0].prerequisite_check_passed && (
+        {/* Alert prerequisiti non passati - hide if currently analyzing */}
+        {analysisLogs.length > 0 && !analysisLogs[0].prerequisite_check_passed && !isAnalyzing && (
           <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
             <XCircle className="h-5 w-5 text-red-600" />
             <AlertTitle className="text-red-900 dark:text-red-100 font-bold text-lg">
