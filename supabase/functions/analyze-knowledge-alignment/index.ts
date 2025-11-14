@@ -89,11 +89,19 @@ serve(async (req) => {
       const removalConfig = getRemovalConfig(agentType, domainCriticality);
 
       // Check prerequisites
+      console.log('[prerequisite-check] Starting prerequisite check...');
       const criticalSources = (requirements.bibliographic_references as any[]).filter(r => r.importance === 'critical');
+      console.log(`[prerequisite-check] Found ${criticalSources.length} critical sources:`, JSON.stringify(criticalSources, null, 2));
+      
       if (criticalSources.length > 0) {
         const { data: chunks } = await supabase.from('agent_knowledge').select('pool_document_id').eq('agent_id', agentId).eq('is_active', true);
+        console.log(`[prerequisite-check] Found ${chunks?.length || 0} active chunks`);
+        
         const poolDocIds = [...new Set(chunks?.map(c => c.pool_document_id).filter(Boolean))];
+        console.log(`[prerequisite-check] Found ${poolDocIds.length} unique pool document IDs:`, poolDocIds);
+        
         const { data: docs } = await supabase.from('knowledge_documents').select('file_name, extracted_title').in('id', poolDocIds);
+        console.log(`[prerequisite-check] Found ${docs?.length || 0} documents in pool:`, docs?.map(d => ({ file: d.file_name, title: d.extracted_title })));
         
         // Token-based matching: estrae solo le parole significative
         const extractTokens = (text: string): string[] => {
@@ -107,25 +115,33 @@ serve(async (req) => {
             text = text.replace(/%20/g, ' ');
           }
           
-          // Rimuovi estensioni file comuni
-          text = text.replace(/\.(pdf|docx?|txt|epub|doc)$/i, '');
+          // Rimuovi estensioni file comuni (anche se in mezzo al testo)
+          text = text.replace(/\.pdf/gi, '').replace(/\.docx?/gi, '').replace(/\.txt/gi, '').replace(/\.epub/gi, '');
           
-          // Lowercase e rimuovi caratteri speciali
+          // Lowercase e rimuovi caratteri speciali (sostituisci con spazi per mantenere separazione)
           text = text.toLowerCase().replace(/[^\w\s]/g, ' ');
           
           // Split in parole e rimuovi spazi vuoti
           const words = text.split(/\s+/).filter(w => w.length > 0);
           
           // Stop words (articoli, preposizioni) da ignorare
-          const stopWords = ['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but'];
+          const stopWords = ['a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but', 'is', 'are', 'was', 'were'];
           
           // Filtra stop words e parole troppo corte (< 2 caratteri)
           return words.filter(w => !stopWords.includes(w) && w.length >= 2);
         };
         
-        // Verifica se tutti i tokens del reference sono presenti nel documento
+        // Verifica matching con threshold flessibile: almeno 70% dei token devono matchare
         const matchTokens = (refTokens: string[], docTokens: string[]): boolean => {
-          return refTokens.every(token => docTokens.includes(token));
+          if (refTokens.length === 0) return false;
+          
+          const matchedTokens = refTokens.filter(token => docTokens.includes(token));
+          const matchPercentage = matchedTokens.length / refTokens.length;
+          
+          console.log(`    Token match: ${matchedTokens.length}/${refTokens.length} (${(matchPercentage * 100).toFixed(0)}%) - matched: [${matchedTokens.join(', ')}]`);
+          
+          // Match se almeno 70% dei token sono presenti (o tutti se sono pochi token)
+          return matchPercentage >= 0.7 || (refTokens.length <= 3 && matchedTokens.length === refTokens.length);
         };
         
         const missing = criticalSources.filter(s => {
