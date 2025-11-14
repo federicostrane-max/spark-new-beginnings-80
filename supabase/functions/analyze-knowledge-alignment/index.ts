@@ -132,11 +132,11 @@ serve(async (req) => {
       return new Response(JSON.stringify({ success: true, status: 'completed' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const { data: req } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
+    const { data: requirements } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
     
     for (const chunk of chunks) {
       try {
-        const scores = await analyzeChunk(chunk, req);
+        const scores = await analyzeChunk(chunk, requirements);
         const final = scores.semantic_relevance * progress.partial_results.weights.semantic_relevance +
                      scores.concept_coverage * progress.partial_results.weights.concept_coverage +
                      scores.procedural_match * progress.partial_results.weights.procedural_match +
@@ -144,7 +144,7 @@ serve(async (req) => {
                      scores.bibliographic_match * progress.partial_results.weights.bibliographic_match;
         
         await supabase.from('knowledge_relevance_scores').insert({
-          chunk_id: chunk.id, agent_id: progress.agent_id, requirement_id: req.id,
+          chunk_id: chunk.id, agent_id: progress.agent_id, requirement_id: requirements.id,
           semantic_relevance: scores.semantic_relevance, concept_coverage: scores.concept_coverage,
           procedural_match: scores.procedural_match, vocabulary_alignment: scores.vocabulary_alignment,
           bibliographic_match: scores.bibliographic_match, final_relevance_score: final,
@@ -180,8 +180,8 @@ serve(async (req) => {
 });
 
 async function finalizeAnalysis(supabase: any, progress: any, startTime: number) {
-  const { data: req } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
-  const { data: scores } = await supabase.from('knowledge_relevance_scores').select('*').eq('requirement_id', req.id);
+  const { data: requirements } = await supabase.from('agent_task_requirements').select('*').eq('id', progress.requirement_id).single();
+  const { data: scores } = await supabase.from('knowledge_relevance_scores').select('*').eq('requirement_id', requirements.id);
 
   const avg = (field: string) => scores?.length ? (scores.reduce((s: number, x: any) => s + (x[field] || 0), 0) / scores.length) * 100 : 0;
   const overall = scores?.length ? (scores.reduce((s: number, x: any) => s + (x.final_relevance_score || 0), 0) / scores.length) * 100 : 0;
@@ -201,7 +201,7 @@ async function finalizeAnalysis(supabase: any, progress: any, startTime: number)
   }
 
   await supabase.from('alignment_analysis_log').insert({
-    agent_id: progress.agent_id, requirement_id: req.id, prerequisite_check_passed: true,
+    agent_id: progress.agent_id, requirement_id: requirements.id, prerequisite_check_passed: true,
     overall_alignment_percentage: Math.round(overall * 100) / 100,
     dimension_breakdown: { semantic_relevance: avg('semantic_relevance'), concept_coverage: avg('concept_coverage'),
       procedural_match: avg('procedural_match'), vocabulary_alignment: avg('vocabulary_alignment'),
@@ -212,18 +212,18 @@ async function finalizeAnalysis(supabase: any, progress: any, startTime: number)
   });
 }
 
-async function analyzeChunk(chunk: any, req: any) {
+async function analyzeChunk(chunk: any, requirements: any) {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${Deno.env.get('OPENROUTER_API_KEY')}`,
-      'HTTP-Referer': Deno.env.get('SUPABASE_URL'),
+      'HTTP-Referer': Deno.env.get('SUPABASE_URL') || '',
     },
     body: JSON.stringify({
       model: 'openai/gpt-5-mini',
       messages: [{ role: 'user', content: `Score chunk (0-1 per dimension): ${JSON.stringify({
-        concepts: req.theoretical_concepts, procedures: req.procedural_knowledge, vocab: req.domain_vocabulary,
+        concepts: requirements.theoretical_concepts, procedures: requirements.procedural_knowledge, vocab: requirements.domain_vocabulary,
         chunk: { doc: chunk.document_name, content: chunk.content.substring(0, 500) }
       })}. Return JSON: {"semantic_relevance":0-1,"concept_coverage":0-1,"procedural_match":0-1,"vocabulary_alignment":0-1,"bibliographic_match":0-1,"reasoning":""}` }],
       temperature: 0.3,
