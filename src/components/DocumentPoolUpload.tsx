@@ -130,9 +130,17 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
             throw new Error('PDF vuoto o non leggibile');
           }
 
-          // Step 1.5: Convert PDF file to base64 for storage
-          const arrayBuffer = await file.arrayBuffer();
-          const base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+          // Step 1.5: Convert PDF file to base64 for storage (using FileReader to avoid stack overflow)
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              // Remove the "data:application/pdf;base64," prefix
+              resolve(result.split(',')[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
 
           // Step 2: Upload to shared pool (all processing happens in edge function)
           setProgress((fileIndex / totalFiles) * 100 + 30);
