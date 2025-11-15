@@ -27,10 +27,11 @@ import { ExtractionPromptDialog } from "@/components/ExtractionPromptDialog";
 
 interface BibliographicReference {
   title: string;
-  author?: string;
+  authors: string[] | null;
   type: string;
   importance: 'critical' | 'supporting';
   version_specific: boolean;
+  abbreviation?: string | null;
 }
 
 interface TaskRequirements {
@@ -291,9 +292,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
             </Button>
           </div>
           <Input
-            value={ref.author || ''}
-            onChange={(e) => handleBibliographicChange(idx, 'author', e.target.value)}
-            placeholder="Autore (opzionale)"
+            value={ref.authors?.join(', ') || ''}
+            onChange={(e) => handleBibliographicChange(idx, 'authors', e.target.value ? e.target.value.split(',').map(a => a.trim()) : null)}
+            placeholder="Autori separati da virgola (opzionale)"
+          />
+          <Input
+            value={ref.abbreviation || ''}
+            onChange={(e) => handleBibliographicChange(idx, 'abbreviation', e.target.value || null)}
+            placeholder="Abbreviazione citazione (es: [THEORY])"
           />
           <div className="flex gap-2">
             <Input
@@ -321,9 +327,11 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
             ...prev,
             {
               title: '',
+              authors: null,
               type: '',
               importance: 'supporting',
-              version_specific: false
+              version_specific: false,
+              abbreviation: null
             }
           ]);
           setHasUnsavedChanges(true);
@@ -340,8 +348,17 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     <div className="space-y-2">
       {items.map((ref, idx) => (
         <div key={idx} className="border-l-2 border-primary pl-3 py-1">
-          <p className="font-medium text-sm">{ref.title}</p>
-          {ref.author && <p className="text-xs text-muted-foreground">{ref.author}</p>}
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium text-sm flex-1">{ref.title}</p>
+            {ref.abbreviation && (
+              <Badge variant="outline" className="text-xs shrink-0">
+                {ref.abbreviation}
+              </Badge>
+            )}
+          </div>
+          {ref.authors && ref.authors.length > 0 && (
+            <p className="text-xs text-muted-foreground">{ref.authors.join(', ')}</p>
+          )}
           <div className="flex gap-2 mt-1">
             <Badge variant="outline" className="text-xs">{ref.type}</Badge>
             <Badge
