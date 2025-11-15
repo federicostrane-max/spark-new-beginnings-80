@@ -7,6 +7,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Sanitize text by removing NULL characters and other invalid characters
+function sanitizeText(text: string): string {
+  // Remove NULL bytes (\u0000) and other control characters that PostgreSQL can't handle
+  return text
+    .replace(/\u0000/g, '') // Remove NULL bytes
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''); // Remove other control characters
+}
+
 function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
   const chunks: string[] = [];
   let start = 0;
@@ -32,16 +40,20 @@ serve(async (req) => {
   // NEVER use 'ai_assigned' - assignment is always done manually by users.
 
   try {
-    const { text, fileName, fileSize, fileData } = await req.json();
+    let { text, fileName, fileSize, fileData } = await req.json();
     
     console.log('=== UPLOAD PDF TO SHARED POOL ===');
     console.log(`File: ${fileName}`);
-    console.log(`Text length: ${text?.length || 0} chars`);
+    console.log(`Text length (raw): ${text?.length || 0} chars`);
     console.log(`File size: ${fileSize || 0} bytes`);
 
     if (!text || !fileName) {
       throw new Error('Missing required parameters: text or fileName');
     }
+
+    // Sanitize text to remove NULL bytes and control characters
+    text = sanitizeText(text);
+    console.log(`Text length (sanitized): ${text.length} chars`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
