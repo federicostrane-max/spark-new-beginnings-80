@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
@@ -39,6 +39,7 @@ export const ChatMessage = ({
   // null = segui forceExpanded, true/false = override manuale
   const [isManuallyExpanded, setIsManuallyExpanded] = useState<boolean | null>(null);
   const [justReceivedLongContent, setJustReceivedLongContent] = useState(false);
+  const [reloadingContent, setReloadingContent] = useState(false);
   const prevContentLengthRef = useRef(content.length);
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -123,6 +124,30 @@ export const ChatMessage = ({
     await navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleReloadFullMessage = async () => {
+    if (!agentId) return;
+    setReloadingContent(true);
+    
+    try {
+      const { supabase } = await import("@/integrations/supabase/client");
+      const { data: dbMessage } = await supabase
+        .from('agent_messages')
+        .select('content')
+        .eq('id', id)
+        .single();
+      
+      if (dbMessage && dbMessage.content !== content) {
+        console.log(`🔄 [RELOAD] Reloaded full message (${dbMessage.content.length} chars)`);
+        // This will trigger parent component to update
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('[RELOAD] Error reloading message:', error);
+    } finally {
+      setReloadingContent(false);
+    }
   };
 
   const handleTTS = () => {
@@ -262,6 +287,15 @@ export const ChatMessage = ({
     ? content.slice(0, COLLAPSE_THRESHOLD) + "..."
     : content;
   
+  // Detect potentially truncated messages (stopped mid-sentence)
+  const isPotentiallyTruncated = !isStreaming && 
+    content.length > 10000 && 
+    !content.endsWith('.') && 
+    !content.endsWith('!') && 
+    !content.endsWith('?') &&
+    !content.endsWith('"') &&
+    !content.endsWith("'");
+  
   // Diagnostic logging per messaggi lunghi
   useEffect(() => {
     if (!isUser && content.length > 1000) {
@@ -388,6 +422,31 @@ export const ChatMessage = ({
 
         {content && (
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
+            {/* Show reload button for potentially truncated messages */}
+            {isPotentiallyTruncated && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReloadFullMessage}
+                disabled={reloadingContent}
+                className="h-8 px-2 gap-1 text-xs border-yellow-500/20 bg-yellow-500/5 hover:bg-yellow-500/10"
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+              >
+                {reloadingContent ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Caricamento...
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-3 w-3" />
+                    Ricarica completo
+                  </>
+                )}
+              </Button>
+            )}
+            
             {content.length > COLLAPSE_THRESHOLD && (
               <Button
                 variant="ghost"

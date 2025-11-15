@@ -700,12 +700,12 @@ export default function MultiAgentConsultant() {
     let stallDetectionInterval: NodeJS.Timeout | undefined;
 
     try {
-      // Create abort controller with 6 minute timeout (slightly longer than edge function)
+      // Increased timeout to 120 seconds (2 minutes) for long responses
       const controller = new AbortController();
       timeout = setTimeout(() => {
         controller.abort();
-        console.error('Request timeout after 6 minutes');
-      }, 360000);
+        console.error('Request timeout after 2 minutes');
+      }, 120000);
       
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
@@ -894,6 +894,24 @@ export default function MultiAgentConsultant() {
                   )
                 );
               }
+              
+              // Recovery mechanism: verify message was saved completely to DB
+              setTimeout(async () => {
+                const { data: dbMessage } = await supabase
+                  .from('agent_messages')
+                  .select('content')
+                  .eq('id', assistantId)
+                  .single();
+                
+                if (dbMessage && dbMessage.content.length > accumulatedText.length) {
+                  console.log(`🔄 [RECOVERY] Message in DB is longer (${dbMessage.content.length} vs ${accumulatedText.length}), updating UI`);
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantId 
+                      ? { ...msg, content: dbMessage.content }
+                      : msg
+                  ));
+                }
+              }, 1000);
               
               if (parsed.conversationId && !currentConversation) {
                 setCurrentConversation({
