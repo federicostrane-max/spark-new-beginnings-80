@@ -390,6 +390,28 @@ export const FilterPromptEditor = () => {
                             Non specificata
                           </Badge>
                         )}
+                        {version.llm_model && (
+                          <Badge 
+                            variant="secondary" 
+                            className={`text-xs ${
+                              version.llm_model.startsWith('deepseek/') 
+                                ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                                : version.llm_model.startsWith('google/')
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                                : version.llm_model.startsWith('openai/')
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                : version.llm_model.startsWith('anthropic/')
+                                ? 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200'
+                                : ''
+                            }`}
+                          >
+                            {version.llm_model.startsWith('deepseek/') && '🧠 '}
+                            {version.llm_model.startsWith('google/') && '🔷 '}
+                            {version.llm_model.startsWith('openai/') && '🤖 '}
+                            {version.llm_model.startsWith('anthropic/') && '🔶 '}
+                            {version.llm_model.split('/')[1] || version.llm_model}
+                          </Badge>
+                        )}
                         {version.is_active && (
                           <Badge variant="default" className="bg-green-600">
                             ATTIVO
