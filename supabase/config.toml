@@ -139,3 +139,22 @@ timeout = 180
 [functions.reprocess-all-metadata]
 verify_jwt = false
 timeout = 300
+
+[functions.check-and-sync-all]
+verify_jwt = true
+timeout = 300
+
+[functions.cleanup-orphaned-chunks]
+verify_jwt = true
+
+[functions.fix-stuck-documents]
+verify_jwt = true
+
+[functions.search-pdfs-only]
+verify_jwt = true
+
+[functions.export-chat-pdf]
+verify_jwt = true
+
+[functions.openrouter-chat]
+verify_jwt = true

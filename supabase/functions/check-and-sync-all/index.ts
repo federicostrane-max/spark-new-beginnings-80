@@ -247,18 +247,28 @@ serve(async (req) => {
         }
       }
 
-      // Sync missing documents
+      // Sync missing documents with timeout per document
       if (missingDocs.length > 0) {
         console.log(`[check-and-sync-all] Syncing ${missingDocs.length} missing documents`);
         
         for (const docId of missingDocs) {
           try {
-            const { data: syncResult, error: syncError } = await supabase.functions.invoke('sync-pool-document', {
+            // Add timeout for each sync operation (60 seconds per document)
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Sync timeout after 60s')), 60000)
+            );
+            
+            const syncPromise = supabase.functions.invoke('sync-pool-document', {
               body: {
                 documentId: docId,
                 agentId: agentId,
               },
             });
+
+            const { data: syncResult, error: syncError } = await Promise.race([
+              syncPromise,
+              timeoutPromise
+            ]) as any;
 
             if (syncError) {
               console.error(`[check-and-sync-all] Error syncing ${docId}:`, syncError);
@@ -275,8 +285,9 @@ serve(async (req) => {
             console.log(`[check-and-sync-all] Synced ${docId}: ${syncResult?.chunksCount || 0} chunks`);
             fixedCount++;
           } catch (syncErr) {
+            const errorMsg = syncErr instanceof Error ? syncErr.message : 'Unknown error';
             console.error(`[check-and-sync-all] Exception syncing ${docId}:`, syncErr);
-            errors.push(`Failed to sync ${docNameMap.get(docId)}: ${syncErr instanceof Error ? syncErr.message : 'Unknown error'}`);
+            errors.push(`Failed to sync ${docNameMap.get(docId)}: ${errorMsg}`);
           }
         }
       }
@@ -304,27 +315,27 @@ serve(async (req) => {
     console.error('[check-and-sync-all] Error:', error);
     console.error('[check-and-sync-all] Error stack:', error instanceof Error ? error.stack : 'N/A');
     
-    // Better error serialization
-    let errorMessage = 'Check sync error';
-    let errorDetails = 'Unknown error';
+    // Categorize error type for better debugging
+    let errorType = 'UNKNOWN_ERROR';
+    let errorDetails = error instanceof Error ? error.message : 'Unknown error';
     
     if (error instanceof Error) {
-      errorMessage = error.message;
-      errorDetails = error.stack || error.message;
-    } else if (typeof error === 'object' && error !== null) {
-      try {
-        errorDetails = JSON.stringify(error, null, 2);
-        errorMessage = (error as any).message || errorMessage;
-      } catch {
-        errorDetails = String(error);
+      if (error.message.includes('timeout') || error.message.includes('Sync timeout')) {
+        errorType = 'TIMEOUT';
+        errorDetails = 'Operation timed out. Try processing fewer documents at once.';
+      } else if (error.message.includes('network') || error.message.includes('connection')) {
+        errorType = 'NETWORK_ERROR';
+        errorDetails = 'Network connection error. Please try again.';
+      } else if (error.message.includes('database') || error.message.includes('postgres')) {
+        errorType = 'DATABASE_ERROR';
       }
-    } else {
-      errorDetails = String(error);
     }
     
     return new Response(JSON.stringify({ 
-      error: errorMessage,
-      details: errorDetails
+      error: 'Check sync error',
+      errorType,
+      details: errorDetails,
+      stack: error instanceof Error ? error.stack : undefined
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
