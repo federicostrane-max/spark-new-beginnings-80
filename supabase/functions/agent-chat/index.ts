@@ -3672,14 +3672,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 console.log(`✅ [REQ-${requestId}] Stream ended. Provider: ${llmProvider}, Total response length: ${fullResponse.length} chars`);
                 console.log(`   Duration: ${totalDuration}s, Chunks: ${chunkCount}`);
                 clearInterval(keepAliveInterval);
-                // Save before breaking
-                await supabase
-                  .from('agent_messages')
-                  .update({ 
-                    content: fullResponse,
-                    llm_provider: llmProvider 
-                  })
-                  .eq('id', placeholderMsg.id);
+                // Progressive save every 5k chars during streaming
+                if (fullResponse.length > 0) {
+                  await supabase
+                    .from('agent_messages')
+                    .update({ 
+                      content: fullResponse,
+                      llm_provider: llmProvider 
+                    })
+                    .eq('id', placeholderMsg.id);
+                }
                 break;
               }
 
@@ -3719,9 +3721,18 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
-                      // Log progress every 500 chars
+                      // Progressive save every 5k chars
+                      if (fullResponse.length > 0 && fullResponse.length % 5000 < newText.length) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse, llm_provider: llmProvider })
+                          .eq('id', placeholderMsg.id);
+                        console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                      }
+                      
+                      // Log progress every 1000 chars
                       const now = Date.now();
-                      if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
+                      if (fullResponse.length > 0 && fullResponse.length % 1000 < newText.length) {
                         const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
                         console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
                         lastProgressLog = now;
@@ -3747,6 +3758,23 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       if (!skipAgentResponse) {
                         fullResponse += newText;
                         await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                        
+                        // Progressive save every 5k chars
+                        const now = Date.now();
+                        if (fullResponse.length > 0 && fullResponse.length % 5000 < newText.length) {
+                          await supabase
+                            .from('agent_messages')
+                            .update({ content: fullResponse, llm_provider: llmProvider })
+                            .eq('id', placeholderMsg.id);
+                          console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                        }
+                        
+                        // Log progress every 1000 chars
+                        if (fullResponse.length > 0 && fullResponse.length % 1000 < newText.length) {
+                          const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
+                          console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
+                          lastProgressLog = now;
+                        }
                       }
                       
                       // ========================================
@@ -3761,22 +3789,6 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                             waitingForConfirmation: true
                           }, supabase);
                         }
-                      }
-                      
-                      // Log progress every 500 chars
-                      const now = Date.now();
-                      if (fullResponse.length > 0 && fullResponse.length % 500 < newText.length) {
-                        const elapsed = ((now - requestStartTime) / 1000).toFixed(1);
-                        console.log(`📊 [REQ-${requestId}] Progress: ${fullResponse.length} chars (${elapsed}s elapsed)`);
-                        lastProgressLog = now;
-                      }
-                      
-                      if (now - lastUpdateTime > 5000) {
-                        await supabase
-                          .from('agent_messages')
-                          .update({ content: fullResponse })
-                          .eq('id', placeholderMsg.id);
-                        lastUpdateTime = now;
                       }
                     }
                     continue; // Skip Anthropic-specific handling
@@ -4910,6 +4922,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     if (!skipAgentResponse) {
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      // Progressive save every 5k chars
+                      const now = Date.now();
+                      if (fullResponse.length > 0 && fullResponse.length % 5000 < newText.length) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse, llm_provider: llmProvider })
+                          .eq('id', placeholderMsg.id);
+                        console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                      }
                     } else {
                       console.log(`🚫 [REQ-${requestId}] Blocked agent text: "${newText}"`);
                     }
