@@ -100,17 +100,53 @@ ${agent.system_prompt}`;
 
     // 6. Call AI with filter prompt
     console.log('[extract-task-requirements] Calling AI for extraction...');
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: llmModel,
-        messages: [{ role: 'user', content: aiPrompt }],
-      }),
-    });
+    
+    let response;
+    
+    // Determine which API to use based on model
+    if (llmModel.startsWith('deepseek/')) {
+      // DeepSeek API
+      const deepseekModel = llmModel.replace('deepseek/', '');
+      response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('DEEPSEEK_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: deepseekModel,
+          messages: [{ role: 'user', content: aiPrompt }],
+        }),
+      });
+    } else if (llmModel.startsWith('claude-')) {
+      // Anthropic API
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: llmModel,
+          max_tokens: 4096,
+          messages: [{ role: 'user', content: aiPrompt }],
+        }),
+      });
+    } else {
+      // Lovable AI Gateway (default for google/openai models)
+      response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('LOVABLE_API_KEY')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: llmModel,
+          messages: [{ role: 'user', content: aiPrompt }],
+        }),
+      });
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -118,7 +154,16 @@ ${agent.system_prompt}`;
     }
 
     const aiData = await response.json();
-    const content = aiData.choices[0].message.content;
+    
+    // Extract content based on API response format
+    let content;
+    if (llmModel.startsWith('claude-')) {
+      // Anthropic format: { content: [{ text: "..." }] }
+      content = aiData.content[0].text;
+    } else {
+      // OpenAI/DeepSeek format: { choices: [{ message: { content: "..." } }] }
+      content = aiData.choices[0].message.content;
+    }
 
     // 7. Parse JSON (supporta sia raw JSON che markdown ```json)
     let extracted;
