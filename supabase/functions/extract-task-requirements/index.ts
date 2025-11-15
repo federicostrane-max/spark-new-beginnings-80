@@ -44,7 +44,7 @@ serve(async (req) => {
     // 3. Fetch active filter prompt (BEFORE cache check)
     const { data: filterPrompt, error: filterError } = await supabase
       .from('filter_agent_prompts')
-      .select('prompt_content, filter_version')
+      .select('prompt_content, filter_version, llm_model')
       .eq('is_active', true)
       .single();
 
@@ -52,10 +52,12 @@ serve(async (req) => {
       throw new Error('No active filter prompt found');
     }
 
+    const llmModel = filterPrompt.llm_model || 'google/gemini-2.5-flash';
     console.log('[extract-task-requirements] Using filter prompt version:', filterPrompt.filter_version);
+    console.log('[extract-task-requirements] Using LLM model:', llmModel);
 
     // 4. Check cache (includes filter_version via extraction_model)
-    const expectedExtractionModel = `google/gemini-2.5-flash-${filterPrompt.filter_version}`;
+    const expectedExtractionModel = `${llmModel}-${filterPrompt.filter_version}`;
     
     const { data: existing } = await supabase
       .from('agent_task_requirements')
@@ -70,6 +72,8 @@ serve(async (req) => {
         agent_id: agentId,
         system_prompt_hash: promptHash.substring(0, 8) + '...',
         expected_extraction_model: expectedExtractionModel,
+        llm_model: llmModel,
+        filter_version: filterPrompt.filter_version,
         found_cache: true
       });
       console.log('[extract-task-requirements] Using cached requirements for filter version:', filterPrompt.filter_version);
@@ -83,6 +87,8 @@ serve(async (req) => {
       agent_id: agentId,
       system_prompt_hash: promptHash.substring(0, 8) + '...',
       expected_extraction_model: expectedExtractionModel,
+      llm_model: llmModel,
+      filter_version: filterPrompt.filter_version,
       found_cache: false
     });
 
@@ -101,7 +107,7 @@ ${agent.system_prompt}`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: llmModel,
         messages: [{ role: 'user', content: aiPrompt }],
       }),
     });

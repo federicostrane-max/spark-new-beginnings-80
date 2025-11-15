@@ -751,6 +751,7 @@ export type Database = {
           filter_version: string | null
           id: string
           is_active: boolean | null
+          llm_model: string | null
           notes: string | null
           prompt_content: string
           version_number: number
@@ -761,6 +762,7 @@ export type Database = {
           filter_version?: string | null
           id?: string
           is_active?: boolean | null
+          llm_model?: string | null
           notes?: string | null
           prompt_content: string
           version_number?: number
@@ -771,6 +773,7 @@ export type Database = {
           filter_version?: string | null
           id?: string
           is_active?: boolean | null
+          llm_model?: string | null
           notes?: string | null
           prompt_content?: string
           version_number?: number

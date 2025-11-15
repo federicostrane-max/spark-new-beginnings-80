@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, History, Save, Info, AlertTriangle } from 'lucide-react';
@@ -19,12 +20,14 @@ interface FilterPrompt {
   is_active: boolean;
   created_at: string;
   notes?: string;
+  llm_model?: string;
 }
 
 export const FilterPromptEditor = () => {
   const [activePrompt, setActivePrompt] = useState<FilterPrompt | null>(null);
   const [editedContent, setEditedContent] = useState('');
   const [filterVersion, setFilterVersion] = useState('');
+  const [llmModel, setLlmModel] = useState('google/gemini-2.5-flash');
   const [notes, setNotes] = useState('');
   const [history, setHistory] = useState<FilterPrompt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +62,7 @@ export const FilterPromptEditor = () => {
       setActivePrompt(data as FilterPrompt);
       setEditedContent(data.prompt_content);
       setFilterVersion(data.filter_version || '');
+      setLlmModel(data.llm_model || 'google/gemini-2.5-flash');
     }
     setLoading(false);
   };
@@ -107,6 +111,7 @@ export const FilterPromptEditor = () => {
         body: {
           newPromptContent: editedContent,
           filterVersion: filterVersion || undefined,
+          llmModel: llmModel,
           notes: notes || undefined,
           updatedBy: userData.user?.id,
         },
@@ -251,14 +256,61 @@ export const FilterPromptEditor = () => {
             />
           </div>
           <div>
-            <Label className="text-xs">Note sulla modifica</Label>
-            <Input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Breve descrizione delle modifiche..."
-              className="text-sm"
-            />
+            <Label className="text-xs">Modello LLM per Estrazione</Label>
+            <Select value={llmModel} onValueChange={setLlmModel} disabled={loading}>
+              <SelectTrigger className="text-sm">
+                <SelectValue placeholder="Seleziona modello" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="google/gemini-2.5-flash">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Gemini 2.5 Flash (Consigliato)</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Veloce • Bilanciato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-2.5-pro">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Gemini 2.5 Pro</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Ragionamento avanzato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-2.5-flash-lite">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Gemini 2.5 Flash Lite</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Ultra veloce</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">GPT-5</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Flagship model</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5-mini">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">GPT-5 Mini</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Veloce</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5-nano">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">GPT-5 Nano</span>
+                    <span className="text-xs text-muted-foreground">Gratuito • Ultra veloce</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+        </div>
+
+        <div>
+          <Label className="text-xs">Note sulla modifica</Label>
+          <Input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Breve descrizione delle modifiche..."
+            className="text-sm"
+          />
         </div>
 
         <Button onClick={handleSave} disabled={saving} className="w-full">

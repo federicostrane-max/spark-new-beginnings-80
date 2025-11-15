@@ -13,11 +13,12 @@ serve(async (req) => {
   }
 
   try {
-    const { newPromptContent, filterVersion, notes, updatedBy } = await req.json();
+    const { newPromptContent, filterVersion, llmModel, notes, updatedBy } = await req.json();
 
     console.log('[update-filter-prompt] Request:', { 
       updatedBy, 
       filterVersion,
+      llmModel,
       promptLength: newPromptContent?.length 
     });
 
@@ -68,6 +69,7 @@ serve(async (req) => {
         prompt_content: newPromptContent,
         is_active: true,
         filter_version: nextFilterVersion,
+        llm_model: llmModel || 'google/gemini-2.5-flash',
         notes: notes || null,
         created_by: updatedBy || null,
       })
