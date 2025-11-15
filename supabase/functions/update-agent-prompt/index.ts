@@ -77,46 +77,85 @@ serve(async (req) => {
     console.log('[update-agent-prompt] Next version number:', nextVersionNumber);
 
     // Save old prompt to history before updating
-    const { error: historyInsertError } = await supabase
-      .from('agent_prompt_history')
-      .insert({
-        agent_id: agent.id,
-        system_prompt: oldPrompt,
-        version_number: nextVersionNumber - 1 > 0 ? nextVersionNumber - 1 : 1,
-        created_by: updatedBy || null
-      });
+    if (oldPrompt) {
+      const oldVersionNumber = nextVersionNumber - 1 > 0 ? nextVersionNumber - 1 : 1;
+      console.log('[update-agent-prompt] Saving old prompt to history (version:', oldVersionNumber, ')');
+      
+      const { data: oldHistoryData, error: historyInsertError } = await supabase
+        .from('agent_prompt_history')
+        .insert({
+          agent_id: agent.id,
+          system_prompt: oldPrompt,
+          version_number: oldVersionNumber,
+          created_by: updatedBy || null
+        })
+        .select();
 
-    if (historyInsertError) {
-      console.error('[update-agent-prompt] Error saving to history:', historyInsertError);
-      // Continue anyway - history is nice to have but not critical
+      if (historyInsertError) {
+        console.error('[update-agent-prompt] ❌ CRITICAL: Failed to save old prompt to history:', historyInsertError);
+        throw new Error(`Failed to save old prompt to history: ${historyInsertError.message}`);
+      }
+      
+      console.log('[update-agent-prompt] ✅ Old prompt saved to history:', oldHistoryData);
+    } else {
+      console.log('[update-agent-prompt] ⚠️ No old prompt to save (first version)');
     }
 
     // Update the agent's system prompt
-    const { error: updateError } = await supabase
+    console.log('[update-agent-prompt] Updating agent system prompt...');
+    const { data: updateData, error: updateError } = await supabase
       .from('agents')
       .update({ 
         system_prompt: newSystemPrompt
       })
-      .eq('id', agent.id);
+      .eq('id', agent.id)
+      .select();
 
     if (updateError) {
-      console.error('[update-agent-prompt] Error updating agent:', updateError);
+      console.error('[update-agent-prompt] ❌ CRITICAL: Failed to update agent:', updateError);
       throw new Error(`Failed to update agent prompt: ${updateError.message}`);
     }
+    
+    if (!updateData || updateData.length === 0) {
+      console.error('[update-agent-prompt] ❌ CRITICAL: No agent was updated');
+      throw new Error('Agent update returned no data - agent may not exist');
+    }
+    
+    console.log('[update-agent-prompt] ✅ Agent prompt updated successfully');
 
     // Save new prompt to history
-    const { error: newHistoryError } = await supabase
+    console.log('[update-agent-prompt] Saving new prompt to history (version:', nextVersionNumber, ')');
+    const { data: newHistoryData, error: newHistoryError } = await supabase
       .from('agent_prompt_history')
       .insert({
         agent_id: agent.id,
         system_prompt: newSystemPrompt,
         version_number: nextVersionNumber,
         created_by: updatedBy || null
-      });
+      })
+      .select();
 
     if (newHistoryError) {
-      console.error('[update-agent-prompt] Error saving new version to history:', newHistoryError);
+      console.error('[update-agent-prompt] ❌ CRITICAL: Failed to save new version to history:', newHistoryError);
+      // Rollback the agent update
+      await supabase
+        .from('agents')
+        .update({ system_prompt: oldPrompt })
+        .eq('id', agent.id);
+      throw new Error(`Failed to save new version to history: ${newHistoryError.message}`);
     }
+    
+    if (!newHistoryData || newHistoryData.length === 0) {
+      console.error('[update-agent-prompt] ❌ CRITICAL: History insert returned no data');
+      // Rollback the agent update
+      await supabase
+        .from('agents')
+        .update({ system_prompt: oldPrompt })
+        .eq('id', agent.id);
+      throw new Error('History insert returned no data');
+    }
+    
+    console.log('[update-agent-prompt] ✅ New prompt saved to history:', newHistoryData);
 
     console.log('[update-agent-prompt] Successfully updated agent prompt');
 
