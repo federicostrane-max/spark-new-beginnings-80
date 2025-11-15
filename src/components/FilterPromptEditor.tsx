@@ -301,7 +301,7 @@ export const FilterPromptEditor = () => {
                 </SelectItem>
                 
                 {/* External Models (Require API Keys) */}
-                <SelectItem value="deepseek/deepseek-r1">
+                <SelectItem value="deepseek/deepseek-reasoner">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">DeepSeek R1 ⭐</span>
                     <span className="text-xs text-muted-foreground">API DeepSeek • Reasoning profondo • Economico</span>
