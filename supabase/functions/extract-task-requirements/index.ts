@@ -41,23 +41,7 @@ serve(async (req) => {
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
 
-    // 3. Check cache
-    const { data: existing } = await supabase
-      .from('agent_task_requirements')
-      .select('*')
-      .eq('agent_id', agentId)
-      .eq('system_prompt_hash', promptHash)
-      .maybeSingle();
-
-    if (existing) {
-      console.log('[extract-task-requirements] Using cached requirements');
-      return new Response(
-        JSON.stringify({ success: true, cached: true, requirement_id: existing.id, data: existing }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // 4. Fetch active filter prompt
+    // 3. Fetch active filter prompt (BEFORE cache check)
     const { data: filterPrompt, error: filterError } = await supabase
       .from('filter_agent_prompts')
       .select('prompt_content, filter_version')
@@ -69,6 +53,38 @@ serve(async (req) => {
     }
 
     console.log('[extract-task-requirements] Using filter prompt version:', filterPrompt.filter_version);
+
+    // 4. Check cache (includes filter_version via extraction_model)
+    const expectedExtractionModel = `openai/gpt-5-mini-${filterPrompt.filter_version}`;
+    
+    const { data: existing } = await supabase
+      .from('agent_task_requirements')
+      .select('*')
+      .eq('agent_id', agentId)
+      .eq('system_prompt_hash', promptHash)
+      .eq('extraction_model', expectedExtractionModel)
+      .maybeSingle();
+
+    if (existing) {
+      console.log('[extract-task-requirements] Cache lookup:', {
+        agent_id: agentId,
+        system_prompt_hash: promptHash.substring(0, 8) + '...',
+        expected_extraction_model: expectedExtractionModel,
+        found_cache: true
+      });
+      console.log('[extract-task-requirements] Using cached requirements for filter version:', filterPrompt.filter_version);
+      return new Response(
+        JSON.stringify({ success: true, cached: true, requirement_id: existing.id, data: existing }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('[extract-task-requirements] Cache lookup:', {
+      agent_id: agentId,
+      system_prompt_hash: promptHash.substring(0, 8) + '...',
+      expected_extraction_model: expectedExtractionModel,
+      found_cache: false
+    });
 
     // 5. Prepare AI prompt
     const aiPrompt = `${filterPrompt.prompt_content}
@@ -147,7 +163,7 @@ ${agent.system_prompt}`;
         explicit_rules: extracted.explicit_rules,
         domain_vocabulary: extracted.domain_vocabulary,
         bibliographic_references: extracted.bibliographic_references,
-        extraction_model: `openai/gpt-5-mini-${filterPrompt.filter_version}`,
+        extraction_model: expectedExtractionModel,
         system_prompt_hash: promptHash,
       }, { onConflict: 'agent_id' })
       .select()
