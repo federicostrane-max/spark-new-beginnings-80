@@ -44,7 +44,7 @@ serve(async (req) => {
     // 3. Fetch active filter prompt (BEFORE cache check)
     const { data: filterPrompt, error: filterError } = await supabase
       .from('filter_agent_prompts')
-      .select('prompt_content, filter_version, llm_model')
+      .select('id, prompt_content, filter_version, llm_model')
       .eq('is_active', true)
       .single();
 
@@ -53,30 +53,30 @@ serve(async (req) => {
     }
 
     const llmModel = filterPrompt.llm_model || 'google/gemini-2.5-flash';
+    console.log('[extract-task-requirements] Using filter prompt ID:', filterPrompt.id);
     console.log('[extract-task-requirements] Using filter prompt version:', filterPrompt.filter_version);
     console.log('[extract-task-requirements] Using LLM model:', llmModel);
 
-    // 4. Check cache (includes filter_version via extraction_model)
-    const expectedExtractionModel = `${llmModel}-${filterPrompt.filter_version}`;
-    
+    // 4. Check cache using filter_prompt_id for proper version tracking
     const { data: existing } = await supabase
       .from('agent_task_requirements')
       .select('*')
       .eq('agent_id', agentId)
       .eq('system_prompt_hash', promptHash)
-      .eq('extraction_model', expectedExtractionModel)
+      .eq('extraction_model', llmModel)
+      .eq('filter_prompt_id', filterPrompt.id)
       .maybeSingle();
 
     if (existing) {
       console.log('[extract-task-requirements] Cache lookup:', {
         agent_id: agentId,
         system_prompt_hash: promptHash.substring(0, 8) + '...',
-        expected_extraction_model: expectedExtractionModel,
+        filter_prompt_id: filterPrompt.id,
         llm_model: llmModel,
         filter_version: filterPrompt.filter_version,
         found_cache: true
       });
-      console.log('[extract-task-requirements] Using cached requirements for filter version:', filterPrompt.filter_version);
+      console.log('[extract-task-requirements] Using cached requirements for filter prompt ID:', filterPrompt.id);
       return new Response(
         JSON.stringify({ success: true, cached: true, requirement_id: existing.id, data: existing }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -86,7 +86,7 @@ serve(async (req) => {
     console.log('[extract-task-requirements] Cache lookup:', {
       agent_id: agentId,
       system_prompt_hash: promptHash.substring(0, 8) + '...',
-      expected_extraction_model: expectedExtractionModel,
+      filter_prompt_id: filterPrompt.id,
       llm_model: llmModel,
       filter_version: filterPrompt.filter_version,
       found_cache: false
@@ -233,20 +233,23 @@ ${agent.system_prompt}`;
       bibliographic_references: extracted.bibliographic_references.length
     });
 
-    // 9. Save to database
+    // 9. Save to database with filter_prompt_id for version tracking
     const { data: requirement, error: insertError } = await supabase
       .from('agent_task_requirements')
       .upsert({
         agent_id: agentId,
+        filter_prompt_id: filterPrompt.id,
         theoretical_concepts: extracted.theoretical_concepts,
         operational_concepts: extracted.operational_concepts,
         procedural_knowledge: extracted.procedural_knowledge,
         explicit_rules: extracted.explicit_rules,
         domain_vocabulary: extracted.domain_vocabulary,
         bibliographic_references: extracted.bibliographic_references,
-        extraction_model: expectedExtractionModel,
+        extraction_model: llmModel,
         system_prompt_hash: promptHash,
-      }, { onConflict: 'agent_id' })
+      }, { 
+        onConflict: 'agent_id,system_prompt_hash,extraction_model,filter_prompt_id' 
+      })
       .select()
       .single();
 
