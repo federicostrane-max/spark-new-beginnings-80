@@ -3002,13 +3002,33 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // ========================================
           // DETECT @AGENT MENTIONS FOR INTER-AGENT COMMUNICATION
           // ========================================
-          const agentMentionRegex = /@([a-zA-Z0-9\-_]+)/g;
+          // Enhanced regex: Only match @ at word boundaries in user input (not in examples/documentation)
+          // Exclude @mentions inside square brackets [@...] or curly braces {@...}
+          const agentMentionRegex = /(?<![{\[])\b@([a-zA-Z0-9\-_]+)\b(?![}\]])/g;
           const mentions: string[] = [];
           let match;
           let mentionInstruction = '';
           
-          while ((match = agentMentionRegex.exec(message)) !== null) {
-            mentions.push(match[1]); // Extract agent slug/name
+          // Only scan the actual user message, not the entire conversation context
+          const userMessage = message.trim();
+          
+          while ((match = agentMentionRegex.exec(userMessage)) !== null) {
+            const mentionedSlug = match[1];
+            
+            // Verify the agent exists and is active before adding to mentions
+            const { data: mentionedAgent } = await supabase
+              .from('agents')
+              .select('id, slug, active')
+              .eq('slug', mentionedSlug)
+              .eq('active', true)
+              .single();
+            
+            if (mentionedAgent) {
+              mentions.push(mentionedSlug);
+              console.log(`✅ [MENTION] Valid agent found: @${mentionedSlug}`);
+            } else {
+              console.log(`⚠️ [MENTION] Ignored invalid/inactive agent: @${mentionedSlug}`);
+            }
           }
           
           console.log(`📧 [MENTIONS] Detected ${mentions.length} agent mention(s):`, mentions);
