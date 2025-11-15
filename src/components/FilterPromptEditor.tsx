@@ -174,24 +174,24 @@ export const FilterPromptEditor = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Filter Agent Prompt</h2>
-          <p className="text-sm text-muted-foreground">
-            Prompt utilizzato per estrarre requisiti strutturati dai prompt degli agenti
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {activePrompt && (
-            <>
-              <Badge variant="outline">
-                Versione {activePrompt.version_number}
-              </Badge>
-              {activePrompt.filter_version && (
-                <Badge>{activePrompt.filter_version}</Badge>
-              )}
-            </>
-          )}
-        </div>
+      <div>
+        <h2 className="text-2xl font-bold">Filter Agent Prompt</h2>
+        <p className="text-sm text-muted-foreground">
+          Prompt utilizzato per estrarre requisiti strutturati dai prompt degli agenti
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        {activePrompt && (
+          <>
+            {activePrompt.filter_version && (
+              <Badge>{activePrompt.filter_version}</Badge>
+            )}
+            <Badge variant="default" className="bg-green-600">
+              ATTIVO
+            </Badge>
+          </>
+        )}
+      </div>
       </div>
 
       <Alert>
@@ -218,19 +218,9 @@ export const FilterPromptEditor = () => {
       </Card>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-sm font-semibold">
-            📝 PROMPT COMPLETO (Editabile)
-          </Label>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowHistory(!showHistory)}
-          >
-            <History className="mr-2 h-4 w-4" />
-            {showHistory ? 'Nascondi' : 'Mostra'} Storico
-          </Button>
-        </div>
+        <Label className="text-sm font-semibold">
+          📝 PROMPT COMPLETO (Editabile)
+        </Label>
 
         <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
           <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -286,10 +276,20 @@ export const FilterPromptEditor = () => {
         </Button>
       </div>
 
-      {showHistory && (
-        <Card className="p-4">
-          <h3 className="font-semibold mb-3">📚 Storia delle Versioni</h3>
-          <ScrollArea className="h-[400px]">
+      <Card className="p-4">
+        <div 
+          className="flex items-center justify-between cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={() => setShowHistory(!showHistory)}
+        >
+          <h3 className="font-semibold">📚 Storia delle Versioni</h3>
+          <Button variant="ghost" size="sm">
+            <History className="mr-2 h-4 w-4" />
+            {showHistory ? 'Nascondi' : 'Mostra'}
+          </Button>
+        </div>
+        
+        {showHistory && (
+          <ScrollArea className="h-[400px] mt-4">
             <div className="space-y-3">
               {history.map((version) => (
                 <Card
@@ -299,14 +299,19 @@ export const FilterPromptEditor = () => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <Badge variant={version.is_active ? 'default' : 'outline'}>
-                          v{version.version_number}
-                        </Badge>
-                        {version.filter_version && (
-                          <Badge variant="secondary">{version.filter_version}</Badge>
+                        {version.filter_version ? (
+                          <Badge variant={version.is_active ? 'default' : 'outline'}>
+                            {version.filter_version}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">
+                            Non specificata
+                          </Badge>
                         )}
                         {version.is_active && (
-                          <Badge variant="default">ATTIVO</Badge>
+                          <Badge variant="default" className="bg-green-600">
+                            ATTIVO
+                          </Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
@@ -330,21 +335,7 @@ export const FilterPromptEditor = () => {
               ))}
             </div>
           </ScrollArea>
-        </Card>
-      )}
-
-      <Card className="p-4 bg-muted/30">
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground">
-            📚 STORIA DELLE VERSIONI (informativa)
-          </p>
-          <ul className="text-sm space-y-1 list-disc list-inside">
-            <li>v6 (2025-01-12): Aggiunto bibliographic_references come prerequisito bloccante</li>
-            <li>v5 (2025-01-10): Migliorati filtri domain_vocabulary aggressivi</li>
-            <li>v4 (2025-01-08): Aggiunta estrazione decision_patterns</li>
-            <li>v3 (2025-01-05): Ottimizzazione core_concepts con importance levels</li>
-          </ul>
-        </div>
+        )}
       </Card>
     </div>
   );
