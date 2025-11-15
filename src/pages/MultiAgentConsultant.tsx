@@ -10,6 +10,7 @@ import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { GlobalAlerts } from "@/components/GlobalAlerts";
 import { ExportChatPDF } from "@/components/ExportChatPDF";
+import ExportSelectedMessagesPDF from "@/components/ExportSelectedMessagesPDF";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -1234,6 +1235,13 @@ export default function MultiAgentConsultant() {
                         <span className="hidden md:inline">{selectedMessages.length === 1 ? 'Elimina' : 'Elimina tutti'}</span>
                         <span className="md:hidden">Elimina</span>
                       </Button>
+                      
+                      <ExportSelectedMessagesPDF
+                        conversationId={currentConversation.id}
+                        agentName={currentAgent.name}
+                        selectedMessageIds={selectedMessages}
+                        allMessages={messages}
+                      />
                       {selectedMessages.length === 1 && (
                         <Button
                           onClick={handleForward}
