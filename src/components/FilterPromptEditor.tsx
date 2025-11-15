@@ -303,7 +303,7 @@ export const FilterPromptEditor = () => {
                 {/* External Models (Require API Keys) */}
                 <SelectItem value="deepseek/deepseek-reasoner">
                   <div className="flex flex-col">
-                    <span className="font-medium text-sm">DeepSeek R1 ⭐</span>
+                    <span className="font-medium text-sm">DeepSeek Reasoner ⭐</span>
                     <span className="text-xs text-muted-foreground">API DeepSeek • Reasoning profondo • Economico</span>
                   </div>
                 </SelectItem>
@@ -409,7 +409,12 @@ export const FilterPromptEditor = () => {
                             {version.llm_model.startsWith('google/') && '🔷 '}
                             {version.llm_model.startsWith('openai/') && '🤖 '}
                             {version.llm_model.startsWith('anthropic/') && '🔶 '}
-                            {version.llm_model.split('/')[1] || version.llm_model}
+                            {(() => {
+                              const model = version.llm_model.split('/')[1] || version.llm_model;
+                              // Map old model names to new ones for display
+                              if (model === 'deepseek-r1') return 'deepseek-reasoner';
+                              return model;
+                            })()}
                           </Badge>
                         )}
                         {version.is_active && (
