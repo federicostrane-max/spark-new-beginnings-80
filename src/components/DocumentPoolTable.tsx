@@ -107,6 +107,28 @@ export const DocumentPoolTable = () => {
   useEffect(() => {
     loadDocuments();
     loadAvailableAgents();
+
+    // Setup realtime subscription for knowledge_documents
+    const channel = supabase
+      .channel('knowledge-documents-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'knowledge_documents'
+        },
+        (payload) => {
+          console.log('[DocumentPoolTable] Realtime update:', payload);
+          // Reload documents on any change
+          loadDocuments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
