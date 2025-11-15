@@ -71,7 +71,7 @@ export const FilterPromptEditor = () => {
     const { data, error } = await supabase
       .from('filter_agent_prompts')
       .select('*')
-      .order('version_number', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(20);
 
     if (error) {
