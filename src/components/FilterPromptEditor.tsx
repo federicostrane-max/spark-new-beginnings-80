@@ -262,44 +262,74 @@ export const FilterPromptEditor = () => {
                 <SelectValue placeholder="Seleziona modello" />
               </SelectTrigger>
               <SelectContent>
+                {/* Lovable AI Models (Gratuiti) */}
                 <SelectItem value="google/gemini-2.5-flash">
                   <div className="flex flex-col">
-                    <span className="font-medium text-sm">Gemini 2.5 Flash (Consigliato)</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Veloce • Bilanciato</span>
+                    <span className="font-medium text-sm">Gemini 2.5 Flash</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Veloce</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="google/gemini-2.5-pro">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Pro</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Ragionamento avanzato</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Avanzato</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="google/gemini-2.5-flash-lite">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Flash Lite</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Ultra veloce</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Ultra veloce</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="openai/gpt-5">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">GPT-5</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Flagship model</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Flagship</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="openai/gpt-5-mini">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">GPT-5 Mini</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Veloce</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Veloce</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="openai/gpt-5-nano">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">GPT-5 Nano</span>
-                    <span className="text-xs text-muted-foreground">Gratuito • Ultra veloce</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Ultra veloce</span>
+                  </div>
+                </SelectItem>
+                
+                {/* External Models (Require API Keys) */}
+                <SelectItem value="deepseek/deepseek-r1">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">DeepSeek R1 ⭐</span>
+                    <span className="text-xs text-muted-foreground">API DeepSeek • Reasoning profondo • Economico</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="deepseek/deepseek-chat">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">DeepSeek Chat</span>
+                    <span className="text-xs text-muted-foreground">API DeepSeek • Veloce • Economico</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="claude-sonnet-4-5">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Claude Sonnet 4.5</span>
+                    <span className="text-xs text-muted-foreground">Anthropic • Top qualità • Reasoning superiore</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="claude-opus-4-1-20250805">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Claude Opus 4</span>
+                    <span className="text-xs text-muted-foreground">Anthropic • Altissima intelligenza</span>
                   </div>
                 </SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Modelli Lovable AI gratuiti • DeepSeek/Claude richiedono API key
+            </p>
           </div>
         </div>
 
