@@ -55,7 +55,7 @@ serve(async (req) => {
     console.log('[extract-task-requirements] Using filter prompt version:', filterPrompt.filter_version);
 
     // 4. Check cache (includes filter_version via extraction_model)
-    const expectedExtractionModel = `openai/gpt-5-mini-${filterPrompt.filter_version}`;
+    const expectedExtractionModel = `google/gemini-2.5-flash-${filterPrompt.filter_version}`;
     
     const { data: existing } = await supabase
       .from('agent_task_requirements')
@@ -101,7 +101,7 @@ ${agent.system_prompt}`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-5-mini',
+        model: 'google/gemini-2.5-flash',
         messages: [{ role: 'user', content: aiPrompt }],
       }),
     });
