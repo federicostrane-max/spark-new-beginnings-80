@@ -127,24 +127,32 @@ export const ChatMessage = ({
   };
 
   const handleReloadFullMessage = async () => {
-    if (!agentId) return;
+    if (!id) return;
     setReloadingContent(true);
+    
+    console.log(`🔄 [Reload] Fetching full content for message ${id.slice(0,8)} (current: ${content.length} chars)`);
     
     try {
       const { supabase } = await import("@/integrations/supabase/client");
-      const { data: dbMessage } = await supabase
+      const { data, error } = await supabase
         .from('agent_messages')
         .select('content')
         .eq('id', id)
         .single();
       
-      if (dbMessage && dbMessage.content !== content) {
-        console.log(`🔄 [RELOAD] Reloaded full message (${dbMessage.content.length} chars)`);
-        // This will trigger parent component to update
+      if (error) throw error;
+      
+      const dbContentLength = data?.content?.length || 0;
+      console.log(`📊 [Reload] DB content length: ${dbContentLength} vs displayed: ${content.length}`);
+      
+      if (data && dbContentLength > content.length) {
+        console.log(`✅ [Reload] Found ${dbContentLength - content.length} more chars in DB, reloading page...`);
         window.location.reload();
+      } else {
+        console.log(`ℹ️ [Reload] No additional content found in DB`);
       }
-    } catch (error) {
-      console.error('[RELOAD] Error reloading message:', error);
+    } catch (err) {
+      console.error('❌ [Reload] Error:', err);
     } finally {
       setReloadingContent(false);
     }

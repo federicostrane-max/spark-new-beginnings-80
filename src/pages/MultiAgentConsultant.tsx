@@ -759,8 +759,39 @@ export default function MultiAgentConsultant() {
         }
       }, 5000); // Check ogni 5 secondi
 
+      let heartbeatCheckInterval: NodeJS.Timeout | null = null;
+      let lastRealtimeContentLength = 0;
+      
       const setupRealtimeSubscription = (messageId: string) => {
-        console.log(`📡 Setting up realtime for message ${messageId.slice(0, 8)}`);
+        console.log(`📡 [Realtime] Setting up subscription for message ${messageId.slice(0, 8)}`);
+        
+        // Heartbeat check ogni 10 secondi per monitorare la crescita del messaggio
+        heartbeatCheckInterval = setInterval(async () => {
+          const { data: currentMessage } = await supabase
+            .from('agent_messages')
+            .select('content')
+            .eq('id', messageId)
+            .single();
+          
+          if (currentMessage) {
+            const currentLength = currentMessage.content.length;
+            console.log(`💓 [Heartbeat] DB check: ${currentLength} chars (was ${lastRealtimeContentLength})`);
+            
+            // Se il DB ha più contenuto di quello visualizzato, aggiorna
+            if (currentLength > accumulatedText.length + 500) {
+              console.log(`🔄 [Heartbeat] DB has ${currentLength - accumulatedText.length} more chars, resyncing...`);
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId 
+                    ? { ...m, content: currentMessage.content }
+                    : m
+                )
+              );
+              accumulatedText = currentMessage.content;
+            }
+            lastRealtimeContentLength = currentLength;
+          }
+        }, 10000);
         
         const channel = supabase
           .channel(`message-${messageId}`)
@@ -773,7 +804,7 @@ export default function MultiAgentConsultant() {
               filter: `id=eq.${messageId}`
             },
             (payload: any) => {
-              console.log('📨 Realtime update:', payload.new.id.slice(0, 8));
+              console.log('📨 [Realtime] Update received:', payload.new.id.slice(0, 8));
               console.log('   Content length:', payload.new.content.length);
               
               setMessages((prev) => 
@@ -801,7 +832,8 @@ export default function MultiAgentConsultant() {
           });
         
         setTimeout(() => {
-          console.log('🔌 Cleaning up realtime subscription');
+          console.log('🔌 [Realtime] Cleaning up subscription and heartbeat');
+          if (heartbeatCheckInterval) clearInterval(heartbeatCheckInterval);
           supabase.removeChannel(channel);
         }, 600000);
       };
