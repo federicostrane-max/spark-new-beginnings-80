@@ -4923,14 +4923,15 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       fullResponse += newText;
                       await sendSSE(JSON.stringify({ type: 'content', text: newText }));
                       
-                      // Progressive save every 5k chars
+                      // Progressive save more frequently: every 2000 chars instead of 5000
                       const now = Date.now();
-                      if (fullResponse.length > 0 && fullResponse.length % 5000 < newText.length) {
+                      if (fullResponse.length > 0 && fullResponse.length % 2000 < newText.length) {
+                        const chunkNumber = Math.floor(fullResponse.length / 2000);
                         await supabase
                           .from('agent_messages')
                           .update({ content: fullResponse, llm_provider: llmProvider })
                           .eq('id', placeholderMsg.id);
-                        console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                        console.log(`💾 [REQ-${requestId}] Checkpoint #${chunkNumber}: ${fullResponse.length} chars saved`);
                       }
                     } else {
                       console.log(`🚫 [REQ-${requestId}] Blocked agent text: "${newText}"`);
@@ -5102,7 +5103,29 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               }
             }
             
-            console.log(`✅ [REQ-${requestId}] Stream completed successfully`);
+            // Final save with integrity check
+            const finalContentLength = fullResponse.length;
+            console.log(`💾 [REQ-${requestId}] Final save: ${finalContentLength} chars`);
+            
+            await supabase
+              .from('agent_messages')
+              .update({ content: fullResponse, llm_provider: llmProvider })
+              .eq('id', placeholderMsg.id);
+            
+            // Verify integrity
+            const { data: verifyData } = await supabase
+              .from('agent_messages')
+              .select('content')
+              .eq('id', placeholderMsg.id)
+              .single();
+            
+            const savedLength = verifyData?.content?.length || 0;
+            if (savedLength === finalContentLength) {
+              console.log(`✅ [REQ-${requestId}] Stream completed successfully - Integrity verified`);
+            } else {
+              console.error(`❌ [REQ-${requestId}] Integrity check FAILED: expected ${finalContentLength}, got ${savedLength}`);
+            }
+            
             clearInterval(keepAliveInterval);
           } catch (error) {
             const errorDuration = ((Date.now() - requestStartTime) / 1000).toFixed(2);
