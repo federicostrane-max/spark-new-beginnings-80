@@ -517,7 +517,7 @@ export type Database = {
           {
             foreignKeyName: "agent_task_requirements_agent_id_fkey"
             columns: ["agent_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "agents"
             referencedColumns: ["id"]
           },
