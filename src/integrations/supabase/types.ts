@@ -473,6 +473,7 @@ export type Database = {
           explicit_rules: string[]
           extracted_at: string | null
           extraction_model: string
+          filter_prompt_id: string | null
           id: string
           operational_concepts: string[]
           procedural_knowledge: string[]
@@ -488,6 +489,7 @@ export type Database = {
           explicit_rules?: string[]
           extracted_at?: string | null
           extraction_model: string
+          filter_prompt_id?: string | null
           id?: string
           operational_concepts?: string[]
           procedural_knowledge?: string[]
@@ -503,6 +505,7 @@ export type Database = {
           explicit_rules?: string[]
           extracted_at?: string | null
           extraction_model?: string
+          filter_prompt_id?: string | null
           id?: string
           operational_concepts?: string[]
           procedural_knowledge?: string[]
@@ -516,6 +519,13 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: true
             referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_task_requirements_filter_prompt_id_fkey"
+            columns: ["filter_prompt_id"]
+            isOneToOne: false
+            referencedRelation: "filter_agent_prompts"
             referencedColumns: ["id"]
           },
         ]
