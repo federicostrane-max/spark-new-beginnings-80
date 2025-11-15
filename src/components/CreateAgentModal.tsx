@@ -613,8 +613,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 </SelectItem>
                 <SelectItem value="deepseek">
                   <div className="flex flex-col">
-                    <span className="font-medium">DeepSeek R1</span>
-                    <span className="text-xs text-muted-foreground">Cost-effective, excellent reasoning</span>
+                    <span className="font-medium">DeepSeek Reasoner</span>
+                    <span className="text-xs text-muted-foreground">Reasoning profondo con Chain-of-Thought • Economico</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="openai">
