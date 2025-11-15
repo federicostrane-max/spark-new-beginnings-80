@@ -9,7 +9,6 @@ import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { AgentsSidebar } from "@/components/AgentsSidebar";
 import { GlobalAlerts } from "@/components/GlobalAlerts";
-import { ExportChatPDF } from "@/components/ExportChatPDF";
 import ExportSelectedMessagesPDF from "@/components/ExportSelectedMessagesPDF";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
@@ -1169,13 +1168,6 @@ export default function MultiAgentConsultant() {
                               </Button>
                             </>
                           )}
-                            {currentConversation && (
-                              <ExportChatPDF
-                                conversationId={currentConversation.id}
-                                agentName={currentAgent.name}
-                                messages={messages as any}
-                              />
-                            )}
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
