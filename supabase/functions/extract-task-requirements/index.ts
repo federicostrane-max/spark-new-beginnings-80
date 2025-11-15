@@ -165,18 +165,48 @@ ${agent.system_prompt}`;
       content = aiData.choices[0].message.content;
     }
 
-    // 7. Parse JSON (supporta sia raw JSON che markdown ```json)
+    // 7. Parse JSON (supporta sia raw JSON che markdown ```json che reasoning tags)
+    console.log('[extract-task-requirements] Raw AI response length:', content.length);
+    console.log('[extract-task-requirements] First 500 chars:', content.substring(0, 500));
+    
     let extracted;
     try {
+      // Try parsing as direct JSON first
       extracted = JSON.parse(content);
     } catch {
+      // Try extracting from markdown code block
       const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         extracted = JSON.parse(jsonMatch[1]);
       } else {
-        throw new Error('Invalid AI response format - not valid JSON');
+        // Try extracting from DeepSeek reasoning format
+        // DeepSeek Reasoner may wrap content in <think>...</think> tags
+        const thinkMatch = content.match(/<think>[\s\S]*?<\/think>\s*([\s\S]*)/);
+        if (thinkMatch) {
+          const afterThink = thinkMatch[1].trim();
+          console.log('[extract-task-requirements] Found reasoning tags, extracting JSON after...');
+          
+          // Try parsing what's after the think tags
+          try {
+            extracted = JSON.parse(afterThink);
+          } catch {
+            // Maybe it's in a code block after think tags
+            const jsonAfterThink = afterThink.match(/```json\s*([\s\S]*?)\s*```/);
+            if (jsonAfterThink) {
+              extracted = JSON.parse(jsonAfterThink[1]);
+            } else {
+              console.error('[extract-task-requirements] Failed to parse content:', content.substring(0, 1000));
+              throw new Error('Invalid AI response format - JSON not found after reasoning tags');
+            }
+          }
+        } else {
+          console.error('[extract-task-requirements] Failed to parse content:', content.substring(0, 1000));
+          throw new Error('Invalid AI response format - not valid JSON');
+        }
       }
     }
+    
+    console.log('[extract-task-requirements] Successfully parsed JSON structure');
 
     // 8. Validate structure
     const requiredFields = [
