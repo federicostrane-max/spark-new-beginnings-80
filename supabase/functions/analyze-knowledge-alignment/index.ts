@@ -220,20 +220,20 @@ serve(async (req) => {
 
     console.log(`[analyze-knowledge-alignment] Agent type: ${agentType}, Criticality: ${domainCriticality}`);
 
-    // ✅ FIX: Pulisci i progress record bloccati prima di procedere
+    // ✅ FIX: Recupera progress record e aggiornalo se necessario (usa 'running' come status valido)
     const { data: existingProgress } = await supabase
       .from('alignment_analysis_progress')
       .select('*')
       .eq('agent_id', agentId)
       .order('started_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     let startFromBatch = 0;
     let progressId = existingProgress?.id;
 
-    // Se c'è un progress esistente, aggiorniamolo o usiamolo per il resume
-    if (existingProgress && existingProgress.requirement_id === requirements.id && existingProgress.status === 'analyzing' && !forceReanalysis) {
+    // Se c'è un progress esistente con stesso requirement_id e status 'running', riprendi
+    if (existingProgress && existingProgress.requirement_id === requirements.id && existingProgress.status === 'running' && !forceReanalysis) {
       startFromBatch = existingProgress.current_batch || 0;
       console.log(`[analyze-knowledge-alignment] Resuming from batch ${startFromBatch}`);
     } else {
@@ -247,13 +247,13 @@ serve(async (req) => {
             total_chunks: chunks.length,
             chunks_processed: 0,
             current_batch: 0,
-            status: 'analyzing',
+            status: 'running', // ✅ FIXED: Usa 'running' invece di 'analyzing'
             started_at: new Date().toISOString(),
             error_message: null
           })
           .eq('id', existingProgress.id)
           .select()
-          .single();
+          .maybeSingle();
 
         if (updateError || !updatedProgress) {
           console.error('[analyze-knowledge-alignment] Failed to update progress:', updateError);
@@ -271,11 +271,11 @@ serve(async (req) => {
             total_chunks: chunks.length,
             chunks_processed: 0,
             current_batch: 0,
-            status: 'analyzing',
+            status: 'running', // ✅ FIXED: Usa 'running' invece di 'analyzing'
             started_at: new Date().toISOString()
           })
           .select()
-          .single();
+          .maybeSingle();
 
         if (progressError || !newProgress) {
           console.error('[analyze-knowledge-alignment] Failed to create progress:', progressError);
@@ -333,7 +333,7 @@ serve(async (req) => {
 
       const chunksProcessed = (startBatch + 1) * CHUNKS_PER_BATCH;
       const isComplete = chunksProcessed >= chunks.length;
-      const newStatus = timeoutOccurred ? 'timeout' : (isComplete ? 'completed' : 'analyzing');
+      const newStatus = timeoutOccurred ? 'timeout' : (isComplete ? 'completed' : 'running');
 
       console.log(`[analyze-knowledge-alignment] Updating progress: ${chunksProcessed}/${chunks.length} chunks, status: ${newStatus}`);
 
