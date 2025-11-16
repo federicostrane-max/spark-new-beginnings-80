@@ -64,6 +64,14 @@ export const AgentsSidebar = ({
   const { healthStatus, getAgentStatus } = useAgentHealth(agentIds);
   const poolHealth = usePoolDocumentsHealth();
 
+  // Log agents state changes
+  useEffect(() => {
+    console.log(`📊 [AgentsSidebar] Agents state updated: ${agents.length} agents`);
+    if (agents.length > 0) {
+      console.log('  - First 5 agents:', agents.slice(0, 5).map(a => ({ name: a.name, slug: a.slug })));
+    }
+  }, [agents]);
+
   useEffect(() => {
     loadAgents();
   }, []);
@@ -81,7 +89,7 @@ export const AgentsSidebar = ({
 
   // Realtime subscription for agents table
   useEffect(() => {
-    console.log('[AgentsSidebar] Setting up realtime subscription');
+    console.log('🔌 [AgentsSidebar] Setting up realtime subscription');
     
     const channel = supabase
       .channel('agents-sidebar-updates')
@@ -94,17 +102,23 @@ export const AgentsSidebar = ({
           // NO FILTER - we need to capture DELETE events too
         },
         (payload) => {
-          console.log('[AgentsSidebar] Realtime agent change:', payload.eventType, payload);
+          console.log('📡 [AgentsSidebar] Realtime event received:');
+          console.log('  - Event type:', payload.eventType);
+          console.log('  - Table:', payload.table);
+          console.log('  - New data:', payload.new);
+          console.log('  - Old data:', payload.old);
+          console.log('  - Timestamp:', new Date().toISOString());
+          
           // Reload agents on any change (INSERT, UPDATE, DELETE)
           loadAgents();
         }
       )
       .subscribe((status) => {
-        console.log('[AgentsSidebar] Subscription status:', status);
+        console.log('🔌 [AgentsSidebar] Subscription status:', status);
       });
 
     return () => {
-      console.log('[AgentsSidebar] Cleaning up subscription');
+      console.log('🔌 [AgentsSidebar] Cleaning up subscription');
       supabase.removeChannel(channel);
     };
   }, []);
@@ -269,18 +283,28 @@ export const AgentsSidebar = ({
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
           <div className="space-y-1 p-2">
-          {loading ? (
-            <div className="text-sm text-sidebar-foreground/70 text-center py-4">Loading...</div>
-          ) : agents.filter(agent => 
+          {(() => {
+            const filteredAgents = agents.filter(agent => 
               agent.name.toLowerCase().includes(searchQuery.toLowerCase())
-            ).length === 0 ? (
-            <div className="text-sm text-sidebar-foreground/70 text-center py-4">
-              {searchQuery ? "Nessun agente trovato" : "No agents yet"}
-            </div>
-          ) : (
-            agents
-              .filter(agent => agent.name.toLowerCase().includes(searchQuery.toLowerCase()))
-              .map((agent) => {
+            );
+            
+            console.log(`🔍 [AgentsSidebar] Filter applied:`);
+            console.log(`  - Search query: "${searchQuery}"`);
+            console.log(`  - Total agents in state: ${agents.length}`);
+            console.log(`  - Agents after filter: ${filteredAgents.length}`);
+            console.log(`  - Hidden by filter: ${agents.length - filteredAgents.length}`);
+            if (filteredAgents.length > 0) {
+              console.log('  - Displayed agents:', filteredAgents.map(a => ({ name: a.name, slug: a.slug })));
+            }
+            
+            return loading ? (
+              <div className="text-sm text-sidebar-foreground/70 text-center py-4">Loading...</div>
+            ) : filteredAgents.length === 0 ? (
+              <div className="text-sm text-sidebar-foreground/70 text-center py-4">
+                {searchQuery ? "Nessun agente trovato" : "No agents yet"}
+              </div>
+            ) : (
+              filteredAgents.map((agent) => {
               const agentHealth = getAgentStatus(agent.id);
               const showHealthBadge = agentHealth?.hasIssues;
               
@@ -332,9 +356,9 @@ export const AgentsSidebar = ({
                   </div>
                 </TooltipProvider>
               );
-            })
-          )}
-        </div>
+            }));
+          })()}
+          </div>
         </ScrollArea>
       </div>
 
