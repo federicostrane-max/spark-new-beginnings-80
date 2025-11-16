@@ -90,11 +90,7 @@ export const ChatMessage = ({
     if (!isStreaming && content.length > COLLAPSE_THRESHOLD && prevContentLengthRef.current < content.length) {
       console.log(`✅ [Message ${id.slice(0,8)}] Streaming completed with ${content.length} chars - auto-expanding`);
       setIsManuallyExpanded(true);
-      setJustReceivedLongContent(true);
-      
-      setTimeout(() => {
-        setJustReceivedLongContent(false);
-      }, 2000);
+      // Non usiamo più justReceivedLongContent per evitare interferenze con l'espansione manuale
     }
     
     prevContentLengthRef.current = content.length;
@@ -109,12 +105,8 @@ export const ChatMessage = ({
     // SOGLIA RIDOTTA: da 5000 a 2000 caratteri
     if (currentLength > prevLength + 2000 && currentLength > COLLAPSE_THRESHOLD) {
       console.log(`🔄 [Message ${id.slice(0,8)}] Content grew from ${prevLength} to ${currentLength} - forcing expand`);
-      setJustReceivedLongContent(true);
       setIsManuallyExpanded(true);
-      
-      setTimeout(() => {
-        setJustReceivedLongContent(false);
-      }, 2000);
+      // Non usiamo più justReceivedLongContent per evitare interferenze con l'espansione manuale
     }
     
     prevContentLengthRef.current = currentLength;
@@ -288,7 +280,10 @@ export const ChatMessage = ({
   }, [isStreaming, id, isUser, content.length]);
   
   const COLLAPSE_THRESHOLD = 1000;
-  const isExpanded = isManuallyExpanded ?? (justReceivedLongContent ? true : forceExpanded) ?? true;
+  // Priorità assoluta a isManuallyExpanded quando non è null
+  const isExpanded = isManuallyExpanded !== null 
+    ? isManuallyExpanded 
+    : (justReceivedLongContent ? true : forceExpanded ?? true);
   
   const shouldCollapse = !isExpanded && content.length > COLLAPSE_THRESHOLD;
   const displayContent = shouldCollapse 
@@ -463,7 +458,9 @@ export const ChatMessage = ({
                 onTouchStart={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setIsManuallyExpanded(!isExpanded);
+                  // Toggle esplicito basato su isManuallyExpanded, non su isExpanded calcolato
+                  const currentState = isManuallyExpanded ?? false;
+                  setIsManuallyExpanded(!currentState);
                 }}
                 className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
               >
