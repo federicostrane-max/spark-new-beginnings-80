@@ -220,28 +220,70 @@ serve(async (req) => {
 
     console.log(`[analyze-knowledge-alignment] Agent type: ${agentType}, Criticality: ${domainCriticality}`);
 
-    const { data: existingProgress } = await supabase.from('alignment_analysis_progress').select('*').eq('agent_id', agentId).order('started_at', { ascending: false }).limit(1).single();
+    // ✅ FIX: Pulisci i progress record bloccati prima di procedere
+    const { data: existingProgress } = await supabase
+      .from('alignment_analysis_progress')
+      .select('*')
+      .eq('agent_id', agentId)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
 
     let startFromBatch = 0;
     let progressId = existingProgress?.id;
 
-    if (existingProgress && existingProgress.status === 'analyzing' && !forceReanalysis) {
+    // Se c'è un progress esistente, aggiorniamolo o usiamolo per il resume
+    if (existingProgress && existingProgress.requirement_id === requirements.id && existingProgress.status === 'analyzing' && !forceReanalysis) {
       startFromBatch = existingProgress.current_batch || 0;
       console.log(`[analyze-knowledge-alignment] Resuming from batch ${startFromBatch}`);
     } else {
-      const { data: newProgress, error: progressError } = await supabase.from('alignment_analysis_progress').insert({
-        agent_id: agentId,
-        requirement_id: requirements.id,
-        total_chunks: chunks.length,
-        chunks_processed: 0,
-        current_batch: 0,
-        status: 'analyzing',
-        started_at: new Date().toISOString()
-      }).select().single();
+      // ✅ Se forziamo o se il requirement_id è cambiato, aggiorna o crea nuovo progress
+      if (existingProgress) {
+        // Aggiorna il record esistente invece di crearne uno nuovo
+        const { data: updatedProgress, error: updateError } = await supabase
+          .from('alignment_analysis_progress')
+          .update({
+            requirement_id: requirements.id,
+            total_chunks: chunks.length,
+            chunks_processed: 0,
+            current_batch: 0,
+            status: 'analyzing',
+            started_at: new Date().toISOString(),
+            error_message: null
+          })
+          .eq('id', existingProgress.id)
+          .select()
+          .single();
 
-      if (progressError || !newProgress) throw new Error('Failed to create progress record');
-      progressId = newProgress.id;
-      console.log(`[analyze-knowledge-alignment] Created new progress record: ${progressId}`);
+        if (updateError || !updatedProgress) {
+          console.error('[analyze-knowledge-alignment] Failed to update progress:', updateError);
+          throw new Error('Failed to update progress record');
+        }
+        progressId = updatedProgress.id;
+        console.log(`[analyze-knowledge-alignment] Updated progress record: ${progressId}`);
+      } else {
+        // Crea nuovo solo se non esiste
+        const { data: newProgress, error: progressError } = await supabase
+          .from('alignment_analysis_progress')
+          .insert({
+            agent_id: agentId,
+            requirement_id: requirements.id,
+            total_chunks: chunks.length,
+            chunks_processed: 0,
+            current_batch: 0,
+            status: 'analyzing',
+            started_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (progressError || !newProgress) {
+          console.error('[analyze-knowledge-alignment] Failed to create progress:', progressError);
+          throw new Error('Failed to create progress record');
+        }
+        progressId = newProgress.id;
+        console.log(`[analyze-knowledge-alignment] Created new progress record: ${progressId}`);
+      }
     }
 
     const totalBatches = Math.ceil(chunks.length / CHUNKS_PER_BATCH);
