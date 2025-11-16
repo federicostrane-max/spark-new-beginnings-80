@@ -1,18 +1,19 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, lazy, Suspense } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { TTSProvider } from "@/contexts/TTSContext";
 import { useAuth } from "@/hooks/useAuth";
-import MultiAgentConsultant from "./pages/MultiAgentConsultant";
-import DocumentPool from "./pages/DocumentPool";
-import Presentation from "./pages/Presentation";
-import Auth from "./pages/Auth";
-import Admin from "./pages/Admin";
-import UpdateChePrompt from "./pages/UpdateChePrompt";
-import UpdateDocumentFinderPrompt from "./pages/UpdateDocumentFinderPrompt";
-import NotFound from "./pages/NotFound";
+
+const MultiAgentConsultant = lazy(() => import("./pages/MultiAgentConsultant"));
+const DocumentPool = lazy(() => import("./pages/DocumentPool"));
+const Presentation = lazy(() => import("./pages/Presentation"));
+const Auth = lazy(() => import("./pages/Auth"));
+const Admin = lazy(() => import("./pages/Admin"));
+const UpdateChePrompt = lazy(() => import("./pages/UpdateChePrompt"));
+const UpdateDocumentFinderPrompt = lazy(() => import("./pages/UpdateDocumentFinderPrompt"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 
 
@@ -35,58 +36,60 @@ const App = () => {
       <AuthProvider>
         <TTSProvider>
           <TooltipProvider>
-            <Routes>
-              <Route path="/auth" element={<Auth />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <MultiAgentConsultant />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/documents"
-                element={
-                  <ProtectedRoute>
-                    <DocumentPool />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/presentation"
-                element={
-                  <ProtectedRoute>
-                    <Presentation />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin"
-                element={
-                  <ProtectedRoute>
-                    <Admin />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/update-che-prompt"
-                element={
-                  <ProtectedRoute>
-                    <UpdateChePrompt />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/update-document-finder-prompt"
-                element={
-                  <ProtectedRoute>
-                    <UpdateDocumentFinderPrompt />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <Suspense fallback={<div className="flex h-screen items-center justify-center">Loading...</div>}>
+              <Routes>
+                <Route path="/auth" element={<Auth />} />
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute>
+                      <MultiAgentConsultant />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/documents"
+                  element={
+                    <ProtectedRoute>
+                      <DocumentPool />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/presentation"
+                  element={
+                    <ProtectedRoute>
+                      <Presentation />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute>
+                      <Admin />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/update-che-prompt"
+                  element={
+                    <ProtectedRoute>
+                      <UpdateChePrompt />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/update-document-finder-prompt"
+                  element={
+                    <ProtectedRoute>
+                      <UpdateDocumentFinderPrompt />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
           </TooltipProvider>
         </TTSProvider>
       </AuthProvider>
