@@ -42,7 +42,7 @@ interface TaskRequirements {
   procedural_knowledge: string[];
   explicit_rules: string[];
   domain_vocabulary: string[];
-  bibliographic_references: BibliographicReference[];
+  bibliographic_references: { [key: string]: BibliographicReference };
   system_prompt_hash: string;
   extracted_at: string;
   extraction_model: string;
@@ -68,7 +68,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
   const [editedProcedural, setEditedProcedural] = useState<string[]>([]);
   const [editedRules, setEditedRules] = useState<string[]>([]);
   const [editedVocabulary, setEditedVocabulary] = useState<string[]>([]);
-  const [editedBibliographic, setEditedBibliographic] = useState<BibliographicReference[]>([]);
+  const [editedBibliographic, setEditedBibliographic] = useState<{ [key: string]: BibliographicReference }>({});
 
   useEffect(() => {
     fetchRequirements();
@@ -94,7 +94,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
           procedural_knowledge: data.procedural_knowledge || [],
           explicit_rules: data.explicit_rules || [],
           domain_vocabulary: data.domain_vocabulary || [],
-          bibliographic_references: (data.bibliographic_references as any) || []
+          bibliographic_references: (data.bibliographic_references as any) || {}
         });
       }
     } catch (error) {
@@ -150,7 +150,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
       setEditedProcedural([...requirements.procedural_knowledge]);
       setEditedRules([...requirements.explicit_rules]);
       setEditedVocabulary([...requirements.domain_vocabulary]);
-      setEditedBibliographic([...requirements.bibliographic_references]);
+      setEditedBibliographic({ ...requirements.bibliographic_references });
     }
     setEditMode(!editMode);
     setHasUnsavedChanges(false);
@@ -258,120 +258,156 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
     </ul>
   );
 
-  // Bibliographic references handlers
-  const handleBibliographicChange = (
-    index: number,
-    field: keyof BibliographicReference,
-    value: any
-  ) => {
-    setEditedBibliographic(prev => {
-      const newArr = [...prev];
-      newArr[index] = { ...newArr[index], [field]: value };
-      return newArr;
-    });
-    setHasUnsavedChanges(true);
+  // This old handler is no longer used since we handle changes inline now
+  // Keeping for reference, but all onChange handlers are now inline in renderBibliographicEdit
+
+  const renderBibliographicEdit = () => {
+    const refs = Object.entries(editedBibliographic);
+    return (
+      <div className="space-y-4">
+        {refs.map(([key, ref], idx) => (
+          <div key={key} className="border rounded-lg p-3 space-y-2">
+            <div className="flex gap-2">
+              <Input
+                value={ref.title}
+                onChange={(e) => {
+                  setEditedBibliographic(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], title: e.target.value }
+                  }));
+                  setHasUnsavedChanges(true);
+                }}
+                placeholder="Titolo"
+                className="flex-1"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setEditedBibliographic(prev => {
+                    const newObj = { ...prev };
+                    delete newObj[key];
+                    return newObj;
+                  });
+                  setHasUnsavedChanges(true);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+            <Input
+              value={ref.authors?.join(', ') || ''}
+              onChange={(e) => {
+                setEditedBibliographic(prev => ({
+                  ...prev,
+                  [key]: { 
+                    ...prev[key], 
+                    authors: e.target.value ? e.target.value.split(',').map(a => a.trim()) : null 
+                  }
+                }));
+                setHasUnsavedChanges(true);
+              }}
+              placeholder="Autori separati da virgola (opzionale)"
+            />
+            <Input
+              value={ref.abbreviation || ''}
+              onChange={(e) => {
+                setEditedBibliographic(prev => ({
+                  ...prev,
+                  [key]: { ...prev[key], abbreviation: e.target.value || null }
+                }));
+                setHasUnsavedChanges(true);
+              }}
+              placeholder="Abbreviazione citazione (es: [THEORY])"
+            />
+            <div className="flex gap-2">
+              <Input
+                value={ref.type}
+                onChange={(e) => {
+                  setEditedBibliographic(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], type: e.target.value }
+                  }));
+                  setHasUnsavedChanges(true);
+                }}
+                placeholder="Tipo (es: manuale, linee guida)"
+                className="flex-1"
+              />
+              <select
+                value={ref.importance}
+                onChange={(e) => {
+                  setEditedBibliographic(prev => ({
+                    ...prev,
+                    [key]: { ...prev[key], importance: e.target.value as 'critical' | 'supporting' }
+                  }));
+                  setHasUnsavedChanges(true);
+                }}
+                className="border rounded px-2"
+              >
+                <option value="critical">Critico</option>
+                <option value="supporting">Supporto</option>
+              </select>
+            </div>
+          </div>
+        ))}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const newKey = `ref_${Date.now()}`;
+            setEditedBibliographic(prev => ({
+              ...prev,
+              [newKey]: {
+                title: '',
+                authors: null,
+                type: '',
+                importance: 'supporting',
+                version_specific: false,
+                abbreviation: null
+              }
+            }));
+            setHasUnsavedChanges(true);
+          }}
+          className="w-full"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Aggiungi Riferimento
+        </Button>
+      </div>
+    );
   };
 
-  const renderBibliographicEdit = () => (
-    <div className="space-y-4">
-      {editedBibliographic.map((ref, idx) => (
-        <div key={idx} className="border rounded-lg p-3 space-y-2">
-          <div className="flex gap-2">
-            <Input
-              value={ref.title}
-              onChange={(e) => handleBibliographicChange(idx, 'title', e.target.value)}
-              placeholder="Titolo"
-              className="flex-1"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setEditedBibliographic(prev => prev.filter((_, i) => i !== idx))}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-          <Input
-            value={ref.authors?.join(', ') || ''}
-            onChange={(e) => handleBibliographicChange(idx, 'authors', e.target.value ? e.target.value.split(',').map(a => a.trim()) : null)}
-            placeholder="Autori separati da virgola (opzionale)"
-          />
-          <Input
-            value={ref.abbreviation || ''}
-            onChange={(e) => handleBibliographicChange(idx, 'abbreviation', e.target.value || null)}
-            placeholder="Abbreviazione citazione (es: [THEORY])"
-          />
-          <div className="flex gap-2">
-            <Input
-              value={ref.type}
-              onChange={(e) => handleBibliographicChange(idx, 'type', e.target.value)}
-              placeholder="Tipo (es: manuale, linee guida)"
-              className="flex-1"
-            />
-            <select
-              value={ref.importance}
-              onChange={(e) => handleBibliographicChange(idx, 'importance', e.target.value)}
-              className="border rounded px-2"
-            >
-              <option value="critical">Critico</option>
-              <option value="supporting">Supporto</option>
-            </select>
-          </div>
-        </div>
-      ))}
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          setEditedBibliographic(prev => [
-            ...prev,
-            {
-              title: '',
-              authors: null,
-              type: '',
-              importance: 'supporting',
-              version_specific: false,
-              abbreviation: null
-            }
-          ]);
-          setHasUnsavedChanges(true);
-        }}
-        className="w-full"
-      >
-        <Plus className="h-4 w-4 mr-2" />
-        Aggiungi Riferimento
-      </Button>
-    </div>
-  );
-
-  const renderBibliographicReadOnly = (items: BibliographicReference[]) => (
-    <div className="space-y-2">
-      {items.map((ref, idx) => (
-        <div key={idx} className="border-l-2 border-primary pl-3 py-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="font-medium text-sm flex-1">{ref.title}</p>
-            {ref.abbreviation && (
-              <Badge variant="outline" className="text-xs shrink-0">
-                {ref.abbreviation}
-              </Badge>
+  const renderBibliographicReadOnly = (items: { [key: string]: BibliographicReference }) => {
+    const refs = Object.entries(items);
+    return (
+      <div className="space-y-2">
+        {refs.map(([key, ref]) => (
+          <div key={key} className="border-l-2 border-primary pl-3 py-1">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-sm flex-1">{ref.title}</p>
+              {ref.abbreviation && (
+                <Badge variant="outline" className="text-xs shrink-0">
+                  {ref.abbreviation}
+                </Badge>
+              )}
+            </div>
+            {ref.authors && ref.authors.length > 0 && (
+              <p className="text-xs text-muted-foreground">{ref.authors.join(', ')}</p>
             )}
+            <div className="flex gap-2 mt-1">
+              <Badge variant="outline" className="text-xs">{ref.type}</Badge>
+              <Badge
+                variant={ref.importance === 'critical' ? 'default' : 'secondary'}
+                className="text-xs"
+              >
+                {ref.importance}
+              </Badge>
+            </div>
           </div>
-          {ref.authors && ref.authors.length > 0 && (
-            <p className="text-xs text-muted-foreground">{ref.authors.join(', ')}</p>
-          )}
-          <div className="flex gap-2 mt-1">
-            <Badge variant="outline" className="text-xs">{ref.type}</Badge>
-            <Badge
-              variant={ref.importance === 'critical' ? 'default' : 'secondary'}
-              className="text-xs"
-            >
-              {ref.importance}
-            </Badge>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+        ))}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -534,7 +570,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="bibliographic">
             <AccordionTrigger>
-              Riferimenti Bibliografici ({requirements.bibliographic_references.length})
+              Riferimenti Bibliografici ({Object.keys(requirements.bibliographic_references).length})
             </AccordionTrigger>
             <AccordionContent>
               {editMode
