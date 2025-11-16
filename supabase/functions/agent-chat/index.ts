@@ -2127,9 +2127,11 @@ Deno.serve(async (req) => {
     // Validate that user message doesn't contain system-generated patterns
     // Skip validation for messages with @tags (meta-discussion about the system)
     // Skip validation for inter-agent consultations (skipSystemValidation flag)
+    // VALIDATION DISABLED: Era troppo restrittiva e bloccava messaggi legittimi contenenti
+    // output di analisi o testo strutturato che casualmente matchava i pattern
     const hasAgentTags = mentionedAgentSlugs.length > 0;
     
-    if (!hasAgentTags && !skipSystemValidation) {
+    if (false && !hasAgentTags && !skipSystemValidation) {
       const systemPatterns = [
         /^Ho trovato \d+ PDF/i,
         /Confermi il download/i,
