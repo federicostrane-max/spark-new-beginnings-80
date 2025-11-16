@@ -378,10 +378,27 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
   };
 
   const renderBibliographicReadOnly = (items: { [key: string]: BibliographicReference }) => {
-    const refs = Object.entries(items);
+    if (!items || typeof items !== 'object' || Object.keys(items).length === 0) {
+      return <p className="text-sm text-muted-foreground">Nessun riferimento bibliografico trovato</p>;
+    }
+
+    // Validate that refs actually contains valid reference objects
+    const validRefs = Object.entries(items).filter(([_, ref]) => 
+      ref && typeof ref === 'object' && ref.title
+    );
+
+    if (validRefs.length === 0) {
+      return (
+        <div className="space-y-2">
+          <p className="text-sm text-destructive">⚠️ Struttura non valida: i riferimenti bibliografici non sono nel formato corretto</p>
+          <p className="text-xs text-muted-foreground">Ri-estrai i task requirements per risolvere il problema</p>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-2">
-        {refs.map(([key, ref]) => (
+        {validRefs.map(([key, ref]) => (
           <div key={key} className="border-l-2 border-primary pl-3 py-1">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium text-sm flex-1">{ref.title}</p>
