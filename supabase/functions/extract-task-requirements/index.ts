@@ -275,19 +275,23 @@ ${agent.system_prompt}`;
     console.log('[extract-task-requirements] Successfully parsed JSON structure');
 
     // 8. Validate structure
-    const requiredFields = [
+    const arrayFields = [
       'theoretical_concepts',
       'operational_concepts',
       'procedural_knowledge',
       'explicit_rules',
-      'domain_vocabulary',
-      'bibliographic_references'
+      'domain_vocabulary'
     ];
 
-    for (const field of requiredFields) {
+    for (const field of arrayFields) {
       if (!Array.isArray(extracted[field])) {
         throw new Error(`Missing or invalid field: ${field}`);
       }
+    }
+
+    // bibliographic_references should be an object, not an array
+    if (!extracted.bibliographic_references || typeof extracted.bibliographic_references !== 'object') {
+      throw new Error('Missing or invalid field: bibliographic_references');
     }
 
     console.log('[extract-task-requirements] Extraction successful:', {
@@ -296,7 +300,7 @@ ${agent.system_prompt}`;
       procedural_knowledge: extracted.procedural_knowledge.length,
       explicit_rules: extracted.explicit_rules.length,
       domain_vocabulary: extracted.domain_vocabulary.length,
-      bibliographic_references: extracted.bibliographic_references.length
+      bibliographic_references: Object.keys(extracted.bibliographic_references).length
     });
 
     // 9. Save to database with filter_prompt_id for version tracking
