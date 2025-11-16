@@ -103,9 +103,54 @@ ${agent.system_prompt}`;
     
     let response;
     
+    // Define the tool schema for structured extraction
+    const extractionTool = {
+      type: "function",
+      function: {
+        name: "extract_requirements",
+        description: "Extract structured task requirements from an agent system prompt",
+        parameters: {
+          type: "object",
+          properties: {
+            theoretical_concepts: {
+              type: "array",
+              items: { type: "string" },
+              description: "Theoretical concepts from the prompt"
+            },
+            operational_concepts: {
+              type: "array",
+              items: { type: "string" },
+              description: "Operational concepts from the prompt"
+            },
+            procedural_knowledge: {
+              type: "array",
+              items: { type: "string" },
+              description: "Procedural knowledge from the prompt"
+            },
+            explicit_rules: {
+              type: "array",
+              items: { type: "string" },
+              description: "Explicit rules from the prompt"
+            },
+            domain_vocabulary: {
+              type: "array",
+              items: { type: "string" },
+              description: "Domain-specific vocabulary"
+            },
+            bibliographic_references: {
+              type: "object",
+              description: "Bibliographic references found in the prompt"
+            }
+          },
+          required: ["theoretical_concepts", "operational_concepts", "procedural_knowledge", "explicit_rules", "domain_vocabulary", "bibliographic_references"],
+          additionalProperties: false
+        }
+      }
+    };
+
     // Determine which API to use based on model
     if (llmModel.startsWith('deepseek/')) {
-      // DeepSeek API
+      // DeepSeek API with tool calling
       const deepseekModel = llmModel.replace('deepseek/', '');
       response = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
@@ -116,10 +161,12 @@ ${agent.system_prompt}`;
         body: JSON.stringify({
           model: deepseekModel,
           messages: [{ role: 'user', content: aiPrompt }],
+          tools: [extractionTool],
+          tool_choice: { type: "function", function: { name: "extract_requirements" } }
         }),
       });
     } else if (llmModel.startsWith('claude-')) {
-      // Anthropic API
+      // Anthropic API with tool calling
       response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -131,10 +178,16 @@ ${agent.system_prompt}`;
           model: llmModel,
           max_tokens: 4096,
           messages: [{ role: 'user', content: aiPrompt }],
+          tools: [{
+            name: "extract_requirements",
+            description: "Extract structured task requirements from an agent system prompt",
+            input_schema: extractionTool.function.parameters
+          }],
+          tool_choice: { type: "tool", name: "extract_requirements" }
         }),
       });
     } else {
-      // Lovable AI Gateway (default for google/openai models)
+      // Lovable AI Gateway (default for google/openai models) with tool calling
       response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -144,6 +197,8 @@ ${agent.system_prompt}`;
         body: JSON.stringify({
           model: llmModel,
           messages: [{ role: 'user', content: aiPrompt }],
+          tools: [extractionTool],
+          tool_choice: { type: "function", function: { name: "extract_requirements" } }
         }),
       });
     }
@@ -155,55 +210,26 @@ ${agent.system_prompt}`;
 
     const aiData = await response.json();
     
-    // Extract content based on API response format
-    let content;
-    if (llmModel.startsWith('claude-')) {
-      // Anthropic format: { content: [{ text: "..." }] }
-      content = aiData.content[0].text;
-    } else {
-      // OpenAI/DeepSeek format: { choices: [{ message: { content: "..." } }] }
-      content = aiData.choices[0].message.content;
-    }
-
-    // 7. Parse JSON (supporta sia raw JSON che markdown ```json che reasoning tags)
-    console.log('[extract-task-requirements] Raw AI response length:', content.length);
-    console.log('[extract-task-requirements] First 500 chars:', content.substring(0, 500));
-    
+    // Extract tool call results based on API response format
     let extracted;
-    try {
-      // Try parsing as direct JSON first
-      extracted = JSON.parse(content);
-    } catch {
-      // Try extracting from markdown code block
-      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        extracted = JSON.parse(jsonMatch[1]);
-      } else {
-        // Try extracting from DeepSeek reasoning format
-        // DeepSeek Reasoner may wrap content in <think>...</think> tags
-        const thinkMatch = content.match(/<think>[\s\S]*?<\/think>\s*([\s\S]*)/);
-        if (thinkMatch) {
-          const afterThink = thinkMatch[1].trim();
-          console.log('[extract-task-requirements] Found reasoning tags, extracting JSON after...');
-          
-          // Try parsing what's after the think tags
-          try {
-            extracted = JSON.parse(afterThink);
-          } catch {
-            // Maybe it's in a code block after think tags
-            const jsonAfterThink = afterThink.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonAfterThink) {
-              extracted = JSON.parse(jsonAfterThink[1]);
-            } else {
-              console.error('[extract-task-requirements] Failed to parse content:', content.substring(0, 1000));
-              throw new Error('Invalid AI response format - JSON not found after reasoning tags');
-            }
-          }
-        } else {
-          console.error('[extract-task-requirements] Failed to parse content:', content.substring(0, 1000));
-          throw new Error('Invalid AI response format - not valid JSON');
-        }
+    
+    if (llmModel.startsWith('claude-')) {
+      // Anthropic format: { content: [{ type: "tool_use", input: {...} }] }
+      const toolUse = aiData.content.find((c: any) => c.type === 'tool_use');
+      if (!toolUse) {
+        throw new Error('No tool call found in Anthropic response');
       }
+      extracted = toolUse.input;
+      console.log('[extract-task-requirements] Extracted from Anthropic tool call');
+    } else {
+      // OpenAI/DeepSeek format: { choices: [{ message: { tool_calls: [{function: {arguments: "..."}}] } }] }
+      const message = aiData.choices[0].message;
+      if (!message.tool_calls || message.tool_calls.length === 0) {
+        throw new Error('No tool calls found in response');
+      }
+      const toolCall = message.tool_calls[0];
+      extracted = JSON.parse(toolCall.function.arguments);
+      console.log('[extract-task-requirements] Extracted from tool call');
     }
     
     console.log('[extract-task-requirements] Successfully parsed JSON structure');
