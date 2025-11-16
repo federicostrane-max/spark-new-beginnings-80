@@ -103,7 +103,7 @@ ${agent.system_prompt}`;
     
     let response;
     
-    // Define the tool schema for structured extraction
+    // Define the tool schema for structured extraction (only for supported models)
     const extractionTool = {
       type: "function",
       function: {
@@ -149,21 +149,33 @@ ${agent.system_prompt}`;
     };
 
     // Determine which API to use based on model
+    // Note: deepseek-reasoner doesn't support tool calling, so we need to use text for it
+    const isReasonerModel = llmModel === 'deepseek/deepseek-reasoner';
+    
     if (llmModel.startsWith('deepseek/')) {
-      // DeepSeek API with tool calling
+      // DeepSeek API
       const deepseekModel = llmModel.replace('deepseek/', '');
+      const requestBody: any = {
+        model: deepseekModel,
+        messages: [{ role: 'user', content: aiPrompt }],
+      };
+      
+      // Only add tool calling for non-reasoner models
+      if (!isReasonerModel) {
+        requestBody.tools = [extractionTool];
+        requestBody.tool_choice = { type: "function", function: { name: "extract_requirements" } };
+      } else {
+        // For reasoner, explicitly request JSON in the prompt
+        requestBody.messages[0].content += '\n\nYou MUST respond with ONLY a valid JSON object in this exact format, with no additional text:\n```json\n{\n  "theoretical_concepts": [...],\n  "operational_concepts": [...],\n  "procedural_knowledge": [...],\n  "explicit_rules": [...],\n  "domain_vocabulary": [...],\n  "bibliographic_references": {...}\n}\n```';
+      }
+      
       response = await fetch('https://api.deepseek.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${Deno.env.get('DEEPSEEK_API_KEY')}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: deepseekModel,
-          messages: [{ role: 'user', content: aiPrompt }],
-          tools: [extractionTool],
-          tool_choice: { type: "function", function: { name: "extract_requirements" } }
-        }),
+        body: JSON.stringify(requestBody),
       });
     } else if (llmModel.startsWith('claude-')) {
       // Anthropic API with tool calling
@@ -213,7 +225,35 @@ ${agent.system_prompt}`;
     // Extract tool call results based on API response format
     let extracted;
     
-    if (llmModel.startsWith('claude-')) {
+    if (isReasonerModel) {
+      // DeepSeek Reasoner returns text, not tool calls - parse it
+      const content = aiData.choices[0].message.content;
+      console.log('[extract-task-requirements] Raw reasoner response length:', content.length);
+      console.log('[extract-task-requirements] First 500 chars:', content.substring(0, 500));
+      
+      // Try extracting JSON from markdown code block
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        extracted = JSON.parse(jsonMatch[1]);
+        console.log('[extract-task-requirements] Extracted from JSON code block');
+      } else {
+        // Try direct JSON parse
+        try {
+          extracted = JSON.parse(content);
+          console.log('[extract-task-requirements] Extracted from direct JSON');
+        } catch {
+          // Last resort: try to find JSON object in the text
+          const jsonObjectMatch = content.match(/\{[\s\S]*"theoretical_concepts"[\s\S]*\}/);
+          if (jsonObjectMatch) {
+            extracted = JSON.parse(jsonObjectMatch[0]);
+            console.log('[extract-task-requirements] Extracted from found JSON object');
+          } else {
+            console.error('[extract-task-requirements] Failed to find JSON. Content:', content.substring(0, 1000));
+            throw new Error('Could not extract JSON from reasoner response');
+          }
+        }
+      }
+    } else if (llmModel.startsWith('claude-')) {
       // Anthropic format: { content: [{ type: "tool_use", input: {...} }] }
       const toolUse = aiData.content.find((c: any) => c.type === 'tool_use');
       if (!toolUse) {
