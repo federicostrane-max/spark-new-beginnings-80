@@ -139,7 +139,19 @@ ${agent.system_prompt}`;
             },
             bibliographic_references: {
               type: "object",
-              description: "Bibliographic references found in the prompt"
+              description: "Bibliographic references as key-value pairs where each key is 'ref_X' and value contains title, authors, type, importance, version_specific, and abbreviation. Example: { 'ref_theory': { 'title': 'Theory Manual', 'authors': ['Author'], 'type': 'manual', 'importance': 'critical', 'version_specific': false, 'abbreviation': '[THEORY]' } }",
+              additionalProperties: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  authors: { type: "array", items: { type: "string" } },
+                  type: { type: "string", enum: ["manual", "tutorial", "article", "book", "documentation"] },
+                  importance: { type: "string", enum: ["critical", "supporting"] },
+                  version_specific: { type: "boolean" },
+                  abbreviation: { type: "string", pattern: "^\\[.+\\]$" }
+                },
+                required: ["title", "authors", "type", "importance", "version_specific", "abbreviation"]
+              }
             }
           },
           required: ["theoretical_concepts", "operational_concepts", "procedural_knowledge", "explicit_rules", "domain_vocabulary", "bibliographic_references"],
@@ -273,6 +285,48 @@ ${agent.system_prompt}`;
     }
     
     console.log('[extract-task-requirements] Successfully parsed JSON structure');
+
+    // 7.5 Transform bibliographic_references if in incorrect format
+    if (extracted.bibliographic_references) {
+      const bibRefs = extracted.bibliographic_references;
+      
+      // Check if it has incorrect structure (primary_sources array or other custom keys)
+      if (Array.isArray(bibRefs.primary_sources)) {
+        console.log('[extract-task-requirements] Detected incorrect bibliographic_references structure, transforming...');
+        const transformedRefs: any = {};
+        
+        bibRefs.primary_sources.forEach((source: any, index: number) => {
+          const refKey = `ref_${index + 1}`;
+          transformedRefs[refKey] = {
+            title: source.title || source.name || 'Unknown',
+            authors: source.authors || source.author ? [source.author] : [],
+            type: source.type || 'documentation',
+            importance: source.importance || 'supporting',
+            version_specific: source.version_specific !== undefined ? source.version_specific : false,
+            abbreviation: source.abbreviation || source.tag || `[REF${index + 1}]`
+          };
+        });
+        
+        extracted.bibliographic_references = transformedRefs;
+        console.log('[extract-task-requirements] Transformed bibliographic_references:', Object.keys(transformedRefs).length, 'references');
+      }
+      
+      // Remove any custom top-level keys like citation_requirements
+      const validRefKeys = Object.keys(bibRefs).filter(key => 
+        key.startsWith('ref_') || 
+        (typeof bibRefs[key] === 'object' && 
+         bibRefs[key].title !== undefined)
+      );
+      
+      if (validRefKeys.length !== Object.keys(bibRefs).length) {
+        console.log('[extract-task-requirements] Removing invalid bibliographic_references keys');
+        const cleanedRefs: any = {};
+        validRefKeys.forEach(key => {
+          cleanedRefs[key] = bibRefs[key];
+        });
+        extracted.bibliographic_references = cleanedRefs;
+      }
+    }
 
     // 8. Validate structure
     const arrayFields = [
