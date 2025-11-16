@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, updateAgentPrompt } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,25 +95,23 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
     setLoading(true);
     try {
       if (editingAgent) {
-        // Save to history if prompt changed
-        if (systemPrompt !== previousPromptRef.current) {
-          await savePromptToHistory(editingAgent.id, previousPromptRef.current);
-        }
-
         console.log("[CreateAgentModal] Updating agent:", {
           id: editingAgent.id,
           name,
           newPromptLength: systemPrompt.length,
-          oldPromptLength: previousPromptRef.current.length
+          oldPromptLength: previousPromptRef.current.length,
+          promptChanged: previousPromptRef.current !== systemPrompt
         });
 
-        // Update existing agent
-        const { data, error } = await supabase
+        // Check if prompt has changed
+        const promptChanged = previousPromptRef.current !== systemPrompt;
+
+        // Update agent metadata (name, description, llm_provider, ai_model)
+        const { data: metadataUpdate, error: metadataError } = await supabase
           .from("agents")
           .update({
             name,
             description,
-            system_prompt: systemPrompt,
             llm_provider: llmProvider,
             ai_model: aiModel || null,
           })
@@ -121,57 +119,56 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           .select()
           .single();
 
-        if (error) {
-          console.error("[CreateAgentModal] Error updating agent:", error);
-          toast.error("Errore durante il salvataggio dell'agente");
-          throw error;
+        if (metadataError) {
+          console.error("[CreateAgentModal] Error updating agent metadata:", metadataError);
+          toast.error("Errore durante il salvataggio dei metadati dell'agente");
+          throw metadataError;
         }
 
-        if (!data) {
-          console.error("[CreateAgentModal] No data returned from update");
-          toast.error("Errore: nessun dato tornato dal database");
-          throw new Error("No data returned from update");
+        let finalData = metadataUpdate;
+
+        // If prompt changed, use the update-agent-prompt function to update it
+        if (promptChanged) {
+          console.log("[CreateAgentModal] Prompt changed, using update-agent-prompt function");
+          
+          const { data: userData } = await supabase.auth.getUser();
+          const { data: promptUpdateData, error: promptError } = await updateAgentPrompt(
+            editingAgent.id,
+            systemPrompt,
+            userData.user?.id
+          );
+
+          if (promptError) {
+            console.error("[CreateAgentModal] Error updating prompt via function:", promptError);
+            toast.error("Errore durante l'aggiornamento del prompt");
+            throw promptError;
+          }
+
+          console.log("[CreateAgentModal] Prompt updated via function:", promptUpdateData);
+
+          // Re-fetch the agent to get the updated data
+          const { data: refetchedData, error: refetchError } = await supabase
+            .from("agents")
+            .select("*")
+            .eq("id", editingAgent.id)
+            .single();
+
+          if (refetchError) {
+            console.error("[CreateAgentModal] Error refetching agent:", refetchError);
+            throw refetchError;
+          }
+
+          finalData = refetchedData;
+        } else {
+          console.log("[CreateAgentModal] Prompt unchanged, skipping update-agent-prompt");
         }
 
-        console.log("[CreateAgentModal] Agent updated, verifying data:", {
-          id: data.id,
-          name: data.name,
-          promptLength: data.system_prompt?.length,
-          promptMatches: data.system_prompt === systemPrompt
-        });
-
-        // Verify the update was successful
-        if (data.system_prompt !== systemPrompt) {
-          console.error("[CreateAgentModal] Prompt mismatch after update!");
-          toast.error("Errore: il prompt non è stato salvato correttamente");
-          throw new Error("Prompt mismatch after update");
-        }
-
-        // Double-check by reading from database
-        const { data: verifyData, error: verifyError } = await supabase
-          .from("agents")
-          .select("system_prompt")
-          .eq("id", editingAgent.id)
-          .single();
-
-        if (verifyError) {
-          console.error("[CreateAgentModal] Error verifying update:", verifyError);
-          toast.error("Errore durante la verifica del salvataggio");
-          throw verifyError;
-        }
-
-        if (verifyData.system_prompt !== systemPrompt) {
-          console.error("[CreateAgentModal] Database verification failed! Prompt not saved correctly");
-          toast.error("Errore: il prompt non è stato salvato nel database");
-          throw new Error("Database verification failed");
-        }
-
-        console.log("[CreateAgentModal] ✅ Agent updated and verified successfully");
+        console.log("[CreateAgentModal] ✅ Agent updated successfully");
         previousPromptRef.current = systemPrompt; // Update ref after successful save
         toast.success("Agente aggiornato con successo!");
         
         // Call onSuccess immediately (no delay)
-        onSuccess(data);
+        onSuccess(finalData);
         onOpenChange(false);
       } else {
         // Create new agent
