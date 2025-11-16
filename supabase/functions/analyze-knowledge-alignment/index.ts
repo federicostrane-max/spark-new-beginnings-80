@@ -184,11 +184,26 @@ serve(async (req) => {
     const { data: agent, error: agentError } = await supabase.from('agents').select('id, name, system_prompt').eq('id', agentId).single();
     if (agentError || !agent) throw new Error(`Agent not found: ${agentId}`);
 
-    const { data: requirements, error: reqError } = await supabase.from('agent_task_requirements').select('*').eq('agent_id', agentId).single();
+    // ✅ FIX: Recupera i requirements PIÙ RECENTI ordinando per created_at DESC
+    const { data: requirements, error: reqError } = await supabase
+      .from('agent_task_requirements')
+      .select('*')
+      .eq('agent_id', agentId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
     if (reqError || !requirements) {
-      await supabase.from('prerequisite_checks').insert({ agent_id: agentId, check_passed: false, missing_critical_sources: { error: 'Requirements not extracted' } });
+      console.error(`[analyze-knowledge-alignment] Requirements error:`, reqError);
+      await supabase.from('prerequisite_checks').insert({ 
+        agent_id: agentId, 
+        check_passed: false, 
+        missing_critical_sources: { error: 'Requirements not extracted' } 
+      });
       throw new Error('Requirements not found. Run extract-task-requirements first.');
     }
+    
+    console.log(`[analyze-knowledge-alignment] Using requirement ID: ${requirements.id}, created at: ${requirements.created_at}`);
 
     const { data: chunks, error: chunksError } = await supabase.from('agent_knowledge').select('id, content, document_name, category, summary, pool_document_id').eq('agent_id', agentId).eq('is_active', true);
     if (chunksError || !chunks || chunks.length === 0) {
