@@ -87,7 +87,7 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
       if (error) throw error;
       
       if (data) {
-        setRequirements({
+        const loadedRequirements = {
           ...data,
           theoretical_concepts: data.theoretical_concepts || [],
           operational_concepts: data.operational_concepts || [],
@@ -95,7 +95,22 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
           explicit_rules: data.explicit_rules || [],
           domain_vocabulary: data.domain_vocabulary || [],
           bibliographic_references: (data.bibliographic_references as any) || {}
+        };
+        
+        setRequirements(loadedRequirements);
+        
+        // 📊 DETAILED LOGGING
+        console.log('📊 Task Requirements caricati per agent:', agentId);
+        console.log('  📈 Conteggi:', {
+          theoretical_concepts: loadedRequirements.theoretical_concepts.length,
+          operational_concepts: loadedRequirements.operational_concepts.length,
+          procedural_knowledge: loadedRequirements.procedural_knowledge.length,
+          explicit_rules: loadedRequirements.explicit_rules.length,
+          domain_vocabulary: loadedRequirements.domain_vocabulary.length,
+          bibliographic_references: Object.keys(loadedRequirements.bibliographic_references).length,
         });
+        console.log('  📝 Explicit Rules (primi 3):', loadedRequirements.explicit_rules.slice(0, 3));
+        console.log('  📚 Bibliographic References:', Object.keys(loadedRequirements.bibliographic_references));
       }
     } catch (error) {
       console.error("Error fetching task requirements:", error);
@@ -251,8 +266,8 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
   const renderStringArrayReadOnly = (items: string[]) => (
     <ul className="list-disc list-inside space-y-1">
       {items.map((item, idx) => (
-        <li key={idx} className="text-sm text-muted-foreground">
-          {item}
+        <li key={idx} className="text-sm text-muted-foreground mb-2">
+          <span className="font-semibold text-foreground">{idx + 1}.</span> {item}
         </li>
       ))}
     </ul>
@@ -523,16 +538,48 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
                   <Edit className="mr-2 h-4 w-4" />
                   Modifica
                 </Button>
+                {/* 🔍 Debug Button - Development Only */}
+                {import.meta.env.DEV && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      console.log('🔍 DEBUG - Full Requirements Object:', requirements);
+                      console.log('🔍 DEBUG - Explicit Rules:', requirements.explicit_rules);
+                      toast.info('Dati stampati in console (F12)');
+                    }}
+                  >
+                    🔍 Debug
+                  </Button>
+                )}
               </>
             )}
             <ExtractionPromptDialog />
           </div>
         </div>
 
-        <Accordion type="multiple" className="w-full" defaultValue={["theoretical", "operational"]}>
+        <Accordion 
+          type="multiple" 
+          className="w-full" 
+          defaultValue={[
+            requirements.theoretical_concepts.length > 0 ? 'theoretical' : '',
+            requirements.operational_concepts.length > 0 ? 'operational' : '',
+            requirements.procedural_knowledge.length > 0 ? 'procedural' : '',
+            requirements.explicit_rules.length > 0 ? 'rules' : '',
+            requirements.domain_vocabulary.length > 0 ? 'vocabulary' : '',
+            Object.keys(requirements.bibliographic_references).length > 0 ? 'bibliographic' : ''
+          ].filter(Boolean)}
+        >
           <AccordionItem value="theoretical">
             <AccordionTrigger>
-              Concetti Teorici ({requirements.theoretical_concepts.length})
+              <div className="flex items-center gap-2">
+                <span>Concetti Teorici ({requirements.theoretical_concepts.length})</span>
+                {requirements.theoretical_concepts.length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
@@ -543,7 +590,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="operational">
             <AccordionTrigger>
-              Concetti Operativi ({requirements.operational_concepts.length})
+              <div className="flex items-center gap-2">
+                <span>Concetti Operativi ({requirements.operational_concepts.length})</span>
+                {requirements.operational_concepts.length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
@@ -554,7 +608,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="procedural">
             <AccordionTrigger>
-              Conoscenza Procedurale ({requirements.procedural_knowledge.length})
+              <div className="flex items-center gap-2">
+                <span>Conoscenza Procedurale ({requirements.procedural_knowledge.length})</span>
+                {requirements.procedural_knowledge.length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
@@ -565,7 +626,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="rules">
             <AccordionTrigger>
-              Regole Esplicite ({requirements.explicit_rules.length})
+              <div className="flex items-center gap-2">
+                <span>Regole Esplicite ({requirements.explicit_rules.length})</span>
+                {requirements.explicit_rules.length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
@@ -576,7 +644,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="vocabulary">
             <AccordionTrigger>
-              Vocabolario di Dominio ({requirements.domain_vocabulary.length})
+              <div className="flex items-center gap-2">
+                <span>Vocabolario di Dominio ({requirements.domain_vocabulary.length})</span>
+                {requirements.domain_vocabulary.length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
@@ -587,7 +662,14 @@ export const AgentTaskRequirementsView = ({ agentId, systemPrompt }: AgentTaskRe
 
           <AccordionItem value="bibliographic">
             <AccordionTrigger>
-              Riferimenti Bibliografici ({Object.keys(requirements.bibliographic_references).length})
+              <div className="flex items-center gap-2">
+                <span>Riferimenti Bibliografici ({Object.keys(requirements.bibliographic_references).length})</span>
+                {Object.keys(requirements.bibliographic_references).length > 0 ? (
+                  <Badge variant="default" className="bg-green-600 text-white">✓</Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-red-600 text-white">✗</Badge>
+                )}
+              </div>
             </AccordionTrigger>
             <AccordionContent>
               {editMode
