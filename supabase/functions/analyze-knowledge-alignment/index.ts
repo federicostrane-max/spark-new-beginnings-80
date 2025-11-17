@@ -183,21 +183,31 @@ function normalizeFileName(fileName: string): string {
   return fileName.toLowerCase().replace(/[_\s-]+/g, ' ').replace(/\.pdf$/i, '').trim();
 }
 
-async function analyzeChunk(chunk: KnowledgeChunk, requirements: AgentRequirements, weights: ScoringWeights): Promise<any> {
-  const prompt = `You are an AI knowledge alignment analyst. Analyze the relevance of this knowledge chunk to the agent's requirements.
+// Helper to load active alignment prompt from database
+async function getActiveAlignmentPrompt(supabase: any): Promise<{ content: string, model: string }> {
+  const { data, error } = await supabase
+    .from('alignment_agent_prompts')
+    .select('prompt_content, llm_model')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error || !data) {
+    console.warn('[analyze-knowledge-alignment] No active prompt found, using hardcoded fallback');
+    return {
+      content: `You are an AI knowledge alignment analyst. Analyze the relevance of this knowledge chunk to the agent's requirements.
 
 AGENT REQUIREMENTS:
-- Theoretical Concepts: ${requirements.theoretical_concepts?.join(', ') || 'None'}
-- Operational Concepts: ${requirements.operational_concepts?.join(', ') || 'None'}
-- Procedural Knowledge: ${requirements.procedural_knowledge?.join(', ') || 'None'}
-- Domain Vocabulary: ${requirements.domain_vocabulary?.join(', ') || 'None'}
-- Critical References: ${JSON.stringify(requirements.bibliographic_references || {}, null, 2)}
+- Theoretical Concepts: \${requirements.theoretical_concepts?.join(', ') || 'None'}
+- Operational Concepts: \${requirements.operational_concepts?.join(', ') || 'None'}
+- Procedural Knowledge: \${requirements.procedural_knowledge?.join(', ') || 'None'}
+- Domain Vocabulary: \${requirements.domain_vocabulary?.join(', ') || 'None'}
+- Critical References: \${JSON.stringify(requirements.bibliographic_references || {}, null, 2)}
 
 KNOWLEDGE CHUNK:
-Document: ${chunk.document_name}
-Category: ${chunk.category}
-Summary: ${chunk.summary || 'N/A'}
-Content: ${chunk.content.substring(0, 1500)}...
+Document: \${chunk.document_name}
+Category: \${chunk.category}
+Summary: \${chunk.summary || 'N/A'}
+Content: \${chunk.content.substring(0, 1500)}...
 
 Analyze this chunk across these dimensions (0-100 scale):
 1. SEMANTIC_RELEVANCE: How closely the chunk's meaning aligns with agent requirements
@@ -214,23 +224,96 @@ Respond ONLY with valid JSON:
   "vocabulary_alignment": <0-100>,
   "bibliographic_match": <0-100>,
   "reasoning": "<brief explanation>"
-}`;
+}`,
+      model: 'gpt-4o-mini'
+    };
+  }
 
-  const response = await fetch(OPENAI_ENDPOINT, {
+  console.log('[analyze-knowledge-alignment] Using prompt version with model:', data.llm_model);
+  return {
+    content: data.prompt_content,
+    model: data.llm_model || 'google/gemini-2.5-flash'
+  };
+}
+
+async function analyzeChunk(
+  chunk: KnowledgeChunk, 
+  requirements: AgentRequirements, 
+  weights: ScoringWeights,
+  promptTemplate: string,
+  llmModel: string
+): Promise<any> {
+  // Replace placeholders in template using eval (safe context)
+  const prompt = eval('`' + promptTemplate + '`');
+
+  // Determine endpoint and API key based on model
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+  const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+  
+  const isLovableAI = llmModel.startsWith('google/') || llmModel.startsWith('openai/');
+  const isDeepSeek = llmModel.startsWith('deepseek/');
+  const isClaude = llmModel.startsWith('claude') || llmModel.startsWith('anthropic/');
+  
+  const endpoint = isLovableAI 
+    ? 'https://ai.gateway.lovable.dev/v1/chat/completions'
+    : isDeepSeek
+    ? 'https://api.deepseek.com/v1/chat/completions'
+    : isClaude
+    ? 'https://api.anthropic.com/v1/messages'
+    : OPENAI_ENDPOINT;
+  
+  const apiKey = isLovableAI
+    ? LOVABLE_API_KEY
+    : isDeepSeek
+    ? DEEPSEEK_API_KEY
+    : isClaude
+    ? ANTHROPIC_API_KEY
+    : OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(`API key not configured for model: ${llmModel}`);
+  }
+
+  const requestBody = isClaude ? {
+    model: llmModel,
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }]
+  } : {
+    model: llmModel,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+    max_tokens: 500
+  };
+
+  const headers: Record<string, string> = isClaude ? {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'Content-Type': 'application/json'
+  } : {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  };
+
+  const response = await fetch(endpoint, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OPENAI_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 500
-    })
+    headers,
+    body: JSON.stringify(requestBody)
   });
 
-  if (!response.ok) throw new Error(`OpenAI API error: ${response.statusText}`);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM API error (${llmModel}): ${response.statusText} - ${errorText}`);
+  }
 
   const data = await response.json();
-  const scores = JSON.parse(data.choices[0].message.content);
+  
+  // Extract content based on provider
+  const content = isClaude 
+    ? data.content[0].text
+    : data.choices[0].message.content;
+  
+  const scores = JSON.parse(content);
 
   const finalScore = (
     (scores.semantic_relevance / 100) * weights.semantic_relevance +
@@ -250,7 +333,7 @@ Respond ONLY with valid JSON:
     vocabulary_alignment: scores.vocabulary_alignment / 100,
     bibliographic_match: scores.bibliographic_match / 100,
     final_relevance_score: finalScore,
-    analysis_model: OPENAI_MODEL,
+    analysis_model: llmModel,
     analysis_reasoning: scores.reasoning,
     weights_used: weights,
     analyzed_at: new Date().toISOString()
@@ -303,6 +386,10 @@ serve(async (req) => {
     }
 
     console.log(`[analyze-knowledge-alignment] Found ${chunks.length} active chunks to analyze`);
+
+    // Load active alignment prompt and model
+    const { content: promptTemplate, model: llmModel } = await getActiveAlignmentPrompt(supabase);
+    console.log(`[analyze-knowledge-alignment] Using LLM model: ${llmModel}`);
 
     // Determine agent type and get weights from shared constant
     const agentType = detectAgentType(agent.system_prompt);
@@ -401,7 +488,7 @@ serve(async (req) => {
           const chunkIndex = batchNum * CHUNKS_PER_BATCH + i + 1;
           console.log(`[analyze-knowledge-alignment] Analyzing chunk ${chunkIndex}/${chunks.length}: ${chunk.document_name}`);
           try {
-            const score = await analyzeChunk(chunk, requirements, weights);
+            const score = await analyzeChunk(chunk, requirements, weights, promptTemplate, llmModel);
             batchScores.push(score);
             console.log(`[analyze-knowledge-alignment] ✓ Chunk analyzed, final score: ${score.final_relevance_score.toFixed(3)}`);
           } catch (error) {

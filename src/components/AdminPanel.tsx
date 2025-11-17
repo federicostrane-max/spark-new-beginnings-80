@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MaintenanceMonitor } from "./MaintenanceMonitor";
 import { OperationsDashboard } from "./OperationsDashboard";
 import { FilterPromptEditor } from "./FilterPromptEditor";
+import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
 
 interface ProcessingResult {
   id: string;
@@ -108,12 +109,13 @@ export const AdminPanel = () => {
 
   return (
     <Tabs defaultValue="tools" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-5">
+      <TabsList className="grid w-full grid-cols-6">
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
         <TabsTrigger value="logs">Log Processing</TabsTrigger>
         <TabsTrigger value="maintenance">Manutenzione Auto</TabsTrigger>
         <TabsTrigger value="operations">Operazioni</TabsTrigger>
         <TabsTrigger value="filter-prompt">Filter Prompt</TabsTrigger>
+        <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
       </TabsList>
 
       <TabsContent value="tools">
@@ -298,17 +300,11 @@ export const AdminPanel = () => {
       </TabsContent>
 
       <TabsContent value="filter-prompt">
-        <Card>
-          <CardHeader>
-            <CardTitle>Filter Agent Prompt</CardTitle>
-            <CardDescription>
-              Gestisci il prompt utilizzato per estrarre requisiti strutturati dai prompt degli agenti
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FilterPromptEditor />
-          </CardContent>
-        </Card>
+        <FilterPromptEditor />
+      </TabsContent>
+
+      <TabsContent value="alignment-prompt">
+        <AlignmentPromptEditor />
       </TabsContent>
     </Tabs>
   );
