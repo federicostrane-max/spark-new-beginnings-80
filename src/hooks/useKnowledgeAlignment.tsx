@@ -121,14 +121,20 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
       // Step 2: Multi-invocation analysis with auto-resume
       console.log('[useKnowledgeAlignment] Starting multi-invocation analysis');
       
+      // ✅ Flag to send forceReanalysis: true only for the first batch
+      let isFirstBatch = true;
+      
       const processNextBatch = async (): Promise<void> => {
         const { data: analysisData, error: analysisError } = await invokeWithTimeout(
           'analyze-knowledge-alignment',
-          { agentId, forceReanalysis: true },
+          { agentId, forceReanalysis: isFirstBatch }, // ✅ true only for first invocation
           180000 // 3 minutes client-side timeout
         );
 
         if (analysisError) throw analysisError;
+
+        // ✅ After first call, subsequent calls will use forceReanalysis: false
+        isFirstBatch = false;
 
         // Check if blocked
         if (analysisData.blocked) {
