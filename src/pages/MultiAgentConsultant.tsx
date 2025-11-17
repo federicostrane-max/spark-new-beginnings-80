@@ -92,6 +92,10 @@ export default function MultiAgentConsultant() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const currentConversationRef = useRef<string | null>(null);
+  
+  // ✅ Refs per throttling degli update UI durante streaming
+  const accumulatedTextRef = useRef<string>("");
+  const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
   const agentHealth = useAgentHealth(agents.map(a => a.id));
@@ -875,7 +879,9 @@ export default function MultiAgentConsultant() {
               console.log("📨 Message started:", lastMessageId.slice(0, 8));
               
             } else if (parsed.type === "content" && parsed.text) {
+              // ✅ THROTTLING: Accumula in ref invece di aggiornare subito React
               accumulatedText += parsed.text;
+              accumulatedTextRef.current = accumulatedText; // Salva in ref per throttling
               chunkCount++; // 🔍 Incrementa contatore chunk
               lastChunkTime = Date.now(); // 🔍 Aggiorna timestamp ultimo chunk
               
@@ -884,13 +890,20 @@ export default function MultiAgentConsultant() {
                 console.log(`📊 [${new Date().toISOString()}] Accumulated ${accumulatedText.length} chars (chunk #${chunkCount})`);
               }
               
-              setMessages((prev) => 
-                prev.map((m) =>
-                  m.id === assistantId 
-                    ? { ...m, content: accumulatedText } 
-                    : m
-                )
-              );
+              // ✅ Aggiorna UI ogni 100ms invece che ad ogni chunk (riduce da ~1365 a ~560 update)
+              if (!throttleTimeoutRef.current) {
+                throttleTimeoutRef.current = setTimeout(() => {
+                  const currentText = accumulatedTextRef.current;
+                  setMessages((prev) => 
+                    prev.map((m) =>
+                      m.id === assistantId 
+                        ? { ...m, content: currentText } 
+                        : m
+                    )
+                  );
+                  throttleTimeoutRef.current = null;
+                }, 100); // Update UI ogni 100ms
+              }
               
             } else if (parsed.type === "switching_to_background") {
               console.log("⏰ Switching to background - accumulated:", accumulatedText.length, "chars");
@@ -916,16 +929,27 @@ export default function MultiAgentConsultant() {
               console.log("✅ Streaming complete");
               clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
               
-              if (parsed.llmProvider) {
-                console.log('🤖 LLM Provider:', parsed.llmProvider.toUpperCase());
-                setMessages((prev) => 
-                  prev.map((m) =>
-                    m.id === assistantId 
-                      ? { ...m, llm_provider: parsed.llmProvider } 
-                      : m
-                  )
-                );
+              // ✅ FLUSH FINALE: Cancella timeout pendente e forza update con testo completo
+              if (throttleTimeoutRef.current) {
+                clearTimeout(throttleTimeoutRef.current);
+                throttleTimeoutRef.current = null;
               }
+              
+              // Forza update finale con tutto il testo accumulato
+              const finalText = accumulatedTextRef.current;
+              console.log(`🏁 Final flush: ${finalText.length} chars`);
+              
+              setMessages((prev) => 
+                prev.map((m) =>
+                  m.id === assistantId 
+                    ? { 
+                        ...m, 
+                        content: finalText, // ✅ Usa testo completo dalla ref
+                        llm_provider: parsed.llmProvider 
+                      } 
+                    : m
+                )
+              );
               
               // Recovery mechanism: verify message was saved completely to DB
               setTimeout(async () => {
@@ -988,6 +1012,11 @@ export default function MultiAgentConsultant() {
       }
       if (timeout) {
         clearTimeout(timeout);
+      }
+      // ✅ Cleanup throttle timeout
+      if (throttleTimeoutRef.current) {
+        clearTimeout(throttleTimeoutRef.current);
+        throttleTimeoutRef.current = null;
       }
       setStreamingConversationId(null);
     }
