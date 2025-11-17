@@ -513,6 +513,74 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
 
   console.log(`[analyze-knowledge-alignment] Statistics: avg=${avgScore.toFixed(3)}, auto_remove=${belowAutoRemove.length}, flagged=${belowFlagThreshold.length}`);
 
+  // ✅ AUTO-REMOVAL LOGIC: Remove low-quality chunks
+  let actuallyRemoved = 0;
+  
+  if (belowAutoRemove.length > 0) {
+    const MAX_REMOVALS_PER_RUN = 50;
+    
+    // Safety check: if too many chunks to remove, skip auto-removal
+    if (belowAutoRemove.length > MAX_REMOVALS_PER_RUN) {
+      console.log(`[analyze-knowledge-alignment] ⚠️ ${belowAutoRemove.length} chunks flagged for removal (> ${MAX_REMOVALS_PER_RUN} max), requires manual approval`);
+    } else {
+      console.log(`[analyze-knowledge-alignment] 🗑️ Auto-removing ${belowAutoRemove.length} chunks...`);
+      
+      for (const score of belowAutoRemove) {
+        try {
+          // 1. Get chunk details before removal
+          const { data: chunkData } = await supabase
+            .from('agent_knowledge')
+            .select('content, document_name, category, summary, pool_document_id, source_type, embedding')
+            .eq('id', score.chunk_id)
+            .single();
+          
+          if (!chunkData) {
+            console.warn(`[analyze-knowledge-alignment] Chunk ${score.chunk_id} not found, skipping`);
+            continue;
+          }
+          
+          const removalReason = `Auto-removed: relevance score ${(score.final_relevance_score * 100).toFixed(1)}% < ${(removalConfig.auto_remove_threshold * 100)}% threshold`;
+          
+          // 2. Archive to removal history
+          await supabase
+            .from('knowledge_removal_history')
+            .insert({
+              chunk_id: score.chunk_id,
+              agent_id: agentId,
+              document_name: chunkData.document_name,
+              category: chunkData.category,
+              content: chunkData.content,
+              summary: chunkData.summary,
+              embedding: chunkData.embedding,
+              pool_document_id: chunkData.pool_document_id,
+              source_type: chunkData.source_type,
+              removal_type: 'auto',
+              removal_reason: removalReason,
+              final_relevance_score: score.final_relevance_score,
+              removed_at: new Date().toISOString()
+            });
+          
+          // 3. Mark chunk as inactive in agent_knowledge
+          await supabase
+            .from('agent_knowledge')
+            .update({
+              is_active: false,
+              removed_at: new Date().toISOString(),
+              removal_reason: removalReason
+            })
+            .eq('id', score.chunk_id);
+          
+          actuallyRemoved++;
+          console.log(`[analyze-knowledge-alignment] ✅ Removed chunk ${score.chunk_id} (score: ${(score.final_relevance_score * 100).toFixed(1)}%)`);
+        } catch (error) {
+          console.error(`[analyze-knowledge-alignment] ❌ Error removing chunk ${score.chunk_id}:`, error);
+        }
+      }
+      
+      console.log(`[analyze-knowledge-alignment] 🎉 Successfully removed ${actuallyRemoved}/${belowAutoRemove.length} chunks`);
+    }
+  }
+
   await supabase.from('alignment_analysis_log').insert({
     agent_id: agentId,
     requirement_id: requirementId,
@@ -520,7 +588,7 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
     completed_at: new Date().toISOString(),
     total_chunks_analyzed: totalChunks,
     chunks_flagged_for_removal: belowFlagThreshold.length,
-    chunks_auto_removed: belowAutoRemove.length,
+    chunks_auto_removed: actuallyRemoved,
     overall_alignment_percentage: avgScore * 100,
     prerequisite_check_passed: true
   });
