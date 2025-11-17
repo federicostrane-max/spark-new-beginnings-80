@@ -3,6 +3,8 @@
  * 
  * Universal categorization system that covers all possible agent types.
  * This is the SINGLE SOURCE OF TRUTH for agent classification and scoring weights.
+ * 
+ * SHARED MODULE: Used by both frontend and edge functions.
  */
 
 export interface ScoringWeights {
