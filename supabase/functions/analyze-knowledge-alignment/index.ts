@@ -242,7 +242,8 @@ async function analyzeChunk(
   requirements: AgentRequirements, 
   weights: ScoringWeights,
   promptTemplate: string,
-  llmModel: string
+  llmModel: string,
+  agentType: string  // ✅ Phase 2: Added for ${agentType} placeholder support
 ): Promise<any> {
   // Replace placeholders in template using eval (safe context)
   const prompt = eval('`' + promptTemplate + '`');
@@ -491,7 +492,7 @@ serve(async (req) => {
           const chunkIndex = batchNum * CHUNKS_PER_BATCH + i + 1;
           console.log(`[analyze-knowledge-alignment] Analyzing chunk ${chunkIndex}/${chunks.length}: ${chunk.document_name}`);
           try {
-            const score = await analyzeChunk(chunk, requirements, weights, promptTemplate, llmModel);
+            const score = await analyzeChunk(chunk, requirements, weights, promptTemplate, llmModel, agentType);  // ✅ Phase 2: Pass agentType
             batchScores.push(score);
             console.log(`[analyze-knowledge-alignment] ✓ Chunk analyzed, final score: ${score.final_relevance_score.toFixed(3)}`);
           } catch (error) {
