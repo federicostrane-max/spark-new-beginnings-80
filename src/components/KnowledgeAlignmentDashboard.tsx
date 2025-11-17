@@ -177,18 +177,31 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   const [prerequisiteCheckPassed, setPrerequisiteCheckPassed] = useState(true);
 
   const fetchData = async () => {
-    // Fetch latest prerequisite check (more recent than analysis log)
-    const { data: latestPrereqCheck } = await supabase
-      .from('prerequisite_checks')
-      .select('check_passed, checked_at')
+    // Step 1: Check latest alignment_analysis_log first (most reliable source)
+    const { data: latestAnalysisLog } = await supabase
+      .from('alignment_analysis_log')
+      .select('prerequisite_check_passed, completed_at, missing_critical_sources')
       .eq('agent_id', agentId)
-      .order('checked_at', { ascending: false })
+      .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    // If we have a recent prerequisite check, use that status
-    if (latestPrereqCheck) {
-      setPrerequisiteCheckPassed(latestPrereqCheck.check_passed);
+    // Step 2: If there's a completed analysis, use that status
+    if (latestAnalysisLog?.completed_at) {
+      setPrerequisiteCheckPassed(latestAnalysisLog.prerequisite_check_passed);
+    } else {
+      // Step 3: Fallback to prerequisite_checks only if no completed analysis exists
+      const { data: latestPrereqCheck } = await supabase
+        .from('prerequisite_checks')
+        .select('check_passed, checked_at')
+        .eq('agent_id', agentId)
+        .order('checked_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestPrereqCheck) {
+        setPrerequisiteCheckPassed(latestPrereqCheck.check_passed);
+      }
     }
 
     // Fetch agent safe mode status
