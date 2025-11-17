@@ -50,7 +50,8 @@ interface KnowledgeChunk {
 
 function detectAgentType(systemPrompt: string): string {
   const prompt = systemPrompt.toLowerCase();
-  if (prompt.includes('research') || prompt.includes('academic') || prompt.includes('paper')) return 'research';
+  if (prompt.includes('research') || prompt.includes('academic') || prompt.includes('paper') || 
+      prompt.includes('biography') || prompt.includes('biographical')) return 'research';
   if (prompt.includes('technical') || prompt.includes('engineering') || prompt.includes('code')) return 'technical';
   if (prompt.includes('creative') || prompt.includes('writing') || prompt.includes('story')) return 'creative';
   return 'general';
