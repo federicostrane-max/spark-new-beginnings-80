@@ -528,7 +528,13 @@ serve(async (req) => {
 
     // ✅ MULTI-INVOCATION: Processa SOLO 1 batch per invocazione
     const batchNum = startFromBatch;
-    const batchChunks = chunks.slice(batchNum * CHUNKS_PER_BATCH, Math.min((batchNum + 1) * CHUNKS_PER_BATCH, chunks.length));
+    // ✅ FIX PREVENTIVO: Ridurre batch size se chunk rimanenti < CHUNKS_PER_BATCH
+    const remainingChunks = chunks.length - (batchNum * CHUNKS_PER_BATCH);
+    const effectiveBatchSize = Math.min(CHUNKS_PER_BATCH, remainingChunks);
+    const batchChunks = chunks.slice(
+      batchNum * CHUNKS_PER_BATCH, 
+      batchNum * CHUNKS_PER_BATCH + effectiveBatchSize
+    );
     const batchScores: any[] = [];
     let timeoutOccurred = false;
 
