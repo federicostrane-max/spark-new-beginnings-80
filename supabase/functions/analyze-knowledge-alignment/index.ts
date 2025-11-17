@@ -407,12 +407,27 @@ serve(async (req) => {
   const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
 
   try {
-    const { agentId, forceReanalysis = false, freshStart = false } = await req.json();
-    console.log(`[analyze-knowledge-alignment] Starting for agent: ${agentId}, force: ${forceReanalysis}, freshStart: ${freshStart}`);
+    const requestBody = await req.json();
+    const { agentId, forceReanalysis = false, freshStart = false } = requestBody;
+    
+    console.log(`[analyze-knowledge-alignment] 📨 Request received:`);
+    console.log(`  - agentId: ${agentId}`);
+    console.log(`  - forceReanalysis: ${forceReanalysis}`);
+    console.log(`  - freshStart: ${freshStart}`);
+    console.log(`  - Full body:`, JSON.stringify(requestBody, null, 2));
     
     // ✅ OPZIONE A: Fresh Start - Ripristina tutti i chunk prima dell'analisi
     if (freshStart) {
-      console.log('[analyze-knowledge-alignment] 🔄 FRESH START: Ripristino tutti i chunk rimossi...');
+      console.log('[analyze-knowledge-alignment] 🔄 FRESH START REQUESTED: Ripristino tutti i chunk rimossi...');
+      
+      // First, count how many chunks are currently inactive
+      const { count: inactiveCount } = await supabase
+        .from('agent_knowledge')
+        .select('id', { count: 'exact', head: true })
+        .eq('agent_id', agentId)
+        .eq('is_active', false);
+      
+      console.log(`[analyze-knowledge-alignment] Found ${inactiveCount || 0} inactive chunks to restore`);
       
       const { data: restoredChunks, error: restoreError } = await supabase
         .from('agent_knowledge')
@@ -427,10 +442,17 @@ serve(async (req) => {
       
       if (restoreError) {
         console.error('[analyze-knowledge-alignment] ❌ Errore ripristino chunk:', restoreError);
+        throw new Error(`Failed to restore chunks: ${restoreError.message}`);
       } else {
         const restoredCount = restoredChunks?.length || 0;
-        console.log(`[analyze-knowledge-alignment] ✅ ${restoredCount} chunk ripristinati per fresh start`);
+        console.log(`[analyze-knowledge-alignment] ✅ Successfully restored ${restoredCount} chunks for fresh start`);
+        
+        if (restoredCount === 0 && (inactiveCount || 0) > 0) {
+          console.warn('[analyze-knowledge-alignment] ⚠️ WARNING: Expected to restore chunks but none were restored!');
+        }
       }
+    } else {
+      console.log('[analyze-knowledge-alignment] Standard analysis (no fresh start)');
     }
 
     const { data: agent, error: agentError } = await supabase.from('agents').select('id, name, system_prompt').eq('id', agentId).single();
@@ -473,12 +495,24 @@ serve(async (req) => {
       .eq('is_active', true)
       .order('created_at', { ascending: true })  // First criterion
       .order('id', { ascending: true });         // Tiebreaker for stability
-    if (chunksError || !chunks || chunks.length === 0) {
-      await supabase.from('prerequisite_checks').insert({ agent_id: agentId, requirement_id: requirements.id, check_passed: false, missing_critical_sources: { error: 'No active chunks found' } });
+    
+    if (chunksError) {
+      console.error('[analyze-knowledge-alignment] ❌ Error fetching chunks:', chunksError);
+      throw new Error(`Failed to fetch chunks: ${chunksError.message}`);
+    }
+    
+    if (!chunks || chunks.length === 0) {
+      console.error('[analyze-knowledge-alignment] ❌ No active chunks found for agent');
+      await supabase.from('prerequisite_checks').insert({ 
+        agent_id: agentId, 
+        requirement_id: requirements.id, 
+        check_passed: false, 
+        missing_critical_sources: { error: 'No active chunks found' } 
+      });
       throw new Error('No active knowledge chunks found for agent');
     }
 
-    console.log(`[analyze-knowledge-alignment] Found ${chunks.length} active chunks to analyze`);
+    console.log(`[analyze-knowledge-alignment] ✅ Found ${chunks.length} active chunks to analyze`);
 
     // Determine agent type FIRST
     const agentType = detectAgentType(agent.system_prompt);

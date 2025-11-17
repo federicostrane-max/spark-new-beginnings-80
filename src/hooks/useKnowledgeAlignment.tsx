@@ -98,6 +98,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
   const handlePromptChange = async (freshStart = false) => {
     // ✅ RIMOSSO VINCOLO DI COOLDOWN - L'analisi può essere sempre eseguita
+    console.log(`[useKnowledgeAlignment] 🚀 handlePromptChange called with freshStart=${freshStart}`);
     setIsAnalyzing(true);
     
     // Show loading toast with progress
@@ -126,13 +127,25 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
       let isFirstBatch = true;
       
       const processNextBatch = async (): Promise<void> => {
+        const batchParams = { 
+          agentId, 
+          forceReanalysis: isFirstBatch, 
+          freshStart: isFirstBatch ? freshStart : false 
+        };
+        console.log(`[useKnowledgeAlignment] 📤 Calling analyze-knowledge-alignment with params:`, batchParams);
+        
         const { data: analysisData, error: analysisError } = await invokeWithTimeout(
           'analyze-knowledge-alignment',
-          { agentId, forceReanalysis: isFirstBatch, freshStart: isFirstBatch ? freshStart : false }, // Pass freshStart only on first batch
+          batchParams,
           180000 // 3 minutes client-side timeout
         );
 
-        if (analysisError) throw analysisError;
+        if (analysisError) {
+          console.error('[useKnowledgeAlignment] ❌ Analysis error:', analysisError);
+          throw analysisError;
+        }
+
+        console.log(`[useKnowledgeAlignment] 📥 Analysis response:`, analysisData);
 
         // ✅ After first call, subsequent calls will use forceReanalysis: false
         isFirstBatch = false;
