@@ -8,12 +8,16 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, History, Save, Info, AlertTriangle } from 'lucide-react';
 
+type AgentType = 'general' | 'procedural' | 'narrative' | 'technical' | 'research' | 'domain-expert';
+
 interface AlignmentPrompt {
   id: string;
+  agent_type: AgentType;
   version_number: number;
   prompt_content: string;
   alignment_version: string;
@@ -24,6 +28,7 @@ interface AlignmentPrompt {
 }
 
 export const AlignmentPromptEditor = () => {
+  const [selectedAgentType, setSelectedAgentType] = useState<AgentType>('general');
   const [activePrompt, setActivePrompt] = useState<AlignmentPrompt | null>(null);
   const [editedContent, setEditedContent] = useState('');
   const [alignmentVersion, setAlignmentVersion] = useState('');
@@ -38,13 +43,14 @@ export const AlignmentPromptEditor = () => {
   useEffect(() => {
     loadActivePrompt();
     loadHistory();
-  }, []);
+  }, [selectedAgentType]);
 
   const loadActivePrompt = async () => {
     const { data, error } = await supabase
       .from('alignment_agent_prompts')
       .select('*')
       .eq('is_active', true)
+      .eq('agent_type', selectedAgentType)
       .maybeSingle();
 
     if (error) {
@@ -63,6 +69,11 @@ export const AlignmentPromptEditor = () => {
       setEditedContent(data.prompt_content);
       setAlignmentVersion(data.alignment_version || '');
       setLlmModel(data.llm_model || 'google/gemini-2.5-flash');
+    } else {
+      setActivePrompt(null);
+      setEditedContent('');
+      setAlignmentVersion('1.0');
+      setLlmModel('google/gemini-2.5-flash');
     }
     setLoading(false);
   };
@@ -71,6 +82,7 @@ export const AlignmentPromptEditor = () => {
     const { data, error } = await supabase
       .from('alignment_agent_prompts')
       .select('*')
+      .eq('agent_type', selectedAgentType)
       .order('created_at', { ascending: false })
       .limit(20);
 
@@ -181,36 +193,55 @@ export const AlignmentPromptEditor = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-      <div>
-        <h2 className="text-2xl font-bold">Alignment Agent Prompt</h2>
-        <p className="text-sm text-muted-foreground">
-          Prompt utilizzato per analizzare la rilevanza dei chunk rispetto ai requisiti degli agenti
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        {activePrompt && (
-          <>
-            {activePrompt.alignment_version && (
-              <Badge>{activePrompt.alignment_version}</Badge>
-            )}
-            <Badge variant="default" className="bg-green-600">
-              ATTIVO
-            </Badge>
-          </>
-        )}
-      </div>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold mb-2">Alignment Agent Prompt Manager</h2>
+          <p className="text-muted-foreground">
+            Gestisci i prompt di allineamento per tipo di agente
+          </p>
+        </div>
       </div>
 
-      <Alert>
-        <Info className="h-4 w-4" />
-        <AlertDescription className="text-sm">
-          <strong>⚠️ Attenzione:</strong> Le modifiche a questo prompt influenzano{' '}
-          <strong>TUTTE le analisi di allineamento</strong>. 
-          Usa <code className="bg-muted px-1 rounded">${'{requirements.}'}</code> e{' '}
-          <code className="bg-muted px-1 rounded">${'{chunk.}'}</code> per inserire dati dinamici.
-        </AlertDescription>
-      </Alert>
+      <Tabs value={selectedAgentType} onValueChange={(value) => setSelectedAgentType(value as AgentType)}>
+        <TabsList className="grid grid-cols-6 w-full">
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="procedural">Procedural</TabsTrigger>
+          <TabsTrigger value="narrative">Narrative</TabsTrigger>
+          <TabsTrigger value="technical">Technical</TabsTrigger>
+          <TabsTrigger value="research">Research</TabsTrigger>
+          <TabsTrigger value="domain-expert">Domain Expert</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={selectedAgentType} className="space-y-4 mt-4">
+          <div className="flex items-center gap-2">
+            {activePrompt ? (
+              <>
+                <Badge variant="default" className="gap-1">
+                  <Info className="h-3 w-3" />
+                  Prompt Attivo - Tipo: {selectedAgentType.toUpperCase()}
+                </Badge>
+                {activePrompt.alignment_version && (
+                  <Badge variant="outline">{activePrompt.alignment_version}</Badge>
+                )}
+              </>
+            ) : (
+              <Badge variant="secondary">
+                Nessun prompt attivo per {selectedAgentType}
+              </Badge>
+            )}
+          </div>
+
+          <Alert>
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Attenzione:</strong> Modificare questo prompt influenzerà l'analisi
+              di allineamento per tutti gli agenti di tipo <strong>{selectedAgentType}</strong>.
+              <br/>
+              <strong>Placeholder richiesti:</strong> 
+              <code className="ml-2 bg-muted px-1 rounded">{'${requirements.'}</code>, 
+              <code className="ml-2 bg-muted px-1 rounded">{'${chunk.'}</code>
+            </AlertDescription>
+          </Alert>
 
       <Card className="p-4 bg-muted/30">
         <div className="space-y-2">
@@ -458,6 +489,8 @@ export const AlignmentPromptEditor = () => {
           </ScrollArea>
         )}
       </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };
