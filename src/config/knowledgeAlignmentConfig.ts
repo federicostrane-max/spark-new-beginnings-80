@@ -2,7 +2,7 @@ export const KNOWLEDGE_ALIGNMENT_CONFIG = {
   // Auto-removal settings
   auto_removal: {
     enabled: true,
-    threshold: 0.3, // Remove chunks with final_relevance_score < 0.3
+    threshold: 0.5, // Remove chunks with final_relevance_score < 0.5 (50%)
     max_removals_per_run: 50, // Safety: if more than 50, require manual approval
     cooldown_minutes: 60, // Minimum 1 hour between consecutive analyses
   },
