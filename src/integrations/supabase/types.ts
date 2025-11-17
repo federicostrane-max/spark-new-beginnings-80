@@ -575,6 +575,42 @@ export type Database = {
         }
         Relationships: []
       }
+      alignment_agent_prompts: {
+        Row: {
+          alignment_version: string | null
+          created_at: string | null
+          created_by: string | null
+          id: string
+          is_active: boolean | null
+          llm_model: string | null
+          notes: string | null
+          prompt_content: string
+          version_number: number
+        }
+        Insert: {
+          alignment_version?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          llm_model?: string | null
+          notes?: string | null
+          prompt_content: string
+          version_number: number
+        }
+        Update: {
+          alignment_version?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          id?: string
+          is_active?: boolean | null
+          llm_model?: string | null
+          notes?: string | null
+          prompt_content?: string
+          version_number?: number
+        }
+        Relationships: []
+      }
       alignment_analysis_log: {
         Row: {
           agent_id: string | null
@@ -1545,6 +1581,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_alignment_prompt: {
+        Args: { prompt_id: string }
+        Returns: undefined
+      }
       activate_filter_prompt: {
         Args: { prompt_id: string }
         Returns: undefined

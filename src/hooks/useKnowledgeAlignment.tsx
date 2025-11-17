@@ -97,26 +97,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
   }, [agentId, enabled]);
 
   const handlePromptChange = async (forceAnalysis = false) => {
-    // Check cooldown (can bypass if last analysis is incomplete or forced)
-    if (lastAnalysis && !forceAnalysis) {
-      const timeSinceLastAnalysis = Date.now() - lastAnalysis.getTime();
-      const cooldownMs = KNOWLEDGE_ALIGNMENT_CONFIG.triggers.min_time_between_analyses;
-
-      if (timeSinceLastAnalysis < cooldownMs && lastAnalysisStatus === 'completed') {
-        console.log('[useKnowledgeAlignment] Cooldown active, skipping analysis');
-        const minutesRemaining = Math.ceil((cooldownMs - timeSinceLastAnalysis) / 60000);
-        setCooldownActive(true);
-        setCooldownMinutes(minutesRemaining);
-        toast.info(`Analisi in pausa. Prossima disponibile tra ${minutesRemaining} minuti.`);
-        return;
-      }
-      
-      // Allow analysis if last one was incomplete
-      if (lastAnalysisStatus === 'incomplete') {
-        console.log('[useKnowledgeAlignment] Last analysis incomplete, allowing retry');
-      }
-    }
-
+    // ✅ RIMOSSO VINCOLO DI COOLDOWN - L'analisi può essere sempre eseguita
     setIsAnalyzing(true);
     
     // Show loading toast with progress
