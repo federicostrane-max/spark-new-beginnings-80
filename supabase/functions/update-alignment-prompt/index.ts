@@ -13,7 +13,7 @@ serve(async (req) => {
   }
 
   try {
-    const { newPromptContent, alignmentVersion, llmModel, notes, updatedBy } = await req.json();
+    const { newPromptContent, alignmentVersion, llmModel, notes, updatedBy, agentType } = await req.json();
 
     console.log('[update-alignment-prompt] Request:', { 
       updatedBy, 

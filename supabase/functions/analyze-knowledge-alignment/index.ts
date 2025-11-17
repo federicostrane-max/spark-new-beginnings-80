@@ -187,8 +187,9 @@ function normalizeFileName(fileName: string): string {
 async function getActiveAlignmentPrompt(supabase: any): Promise<{ content: string, model: string }> {
   const { data, error } = await supabase
     .from('alignment_agent_prompts')
-    .select('prompt_content, llm_model')
+    .select('prompt_content, llm_model, agent_type')
     .eq('is_active', true)
+    .eq('agent_type', agentType)
     .maybeSingle();
 
   if (error || !data) {

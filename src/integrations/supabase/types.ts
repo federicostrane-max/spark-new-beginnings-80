@@ -577,6 +577,7 @@ export type Database = {
       }
       alignment_agent_prompts: {
         Row: {
+          agent_type: string
           alignment_version: string | null
           created_at: string | null
           created_by: string | null
@@ -588,6 +589,7 @@ export type Database = {
           version_number: number
         }
         Insert: {
+          agent_type?: string
           alignment_version?: string | null
           created_at?: string | null
           created_by?: string | null
@@ -599,6 +601,7 @@ export type Database = {
           version_number: number
         }
         Update: {
+          agent_type?: string
           alignment_version?: string | null
           created_at?: string | null
           created_by?: string | null
