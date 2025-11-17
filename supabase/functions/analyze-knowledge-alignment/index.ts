@@ -403,7 +403,16 @@ serve(async (req) => {
     
     console.log(`[analyze-knowledge-alignment] Using requirement ID: ${requirements.id}, created at: ${requirements.created_at}`);
 
-    const { data: chunks, error: chunksError } = await supabase.from('agent_knowledge').select('id, content, document_name, category, summary, pool_document_id').eq('agent_id', agentId).eq('is_active', true);
+    // ✅ CRITICAL: Add explicit ordering to guarantee stable chunk order across invocations
+    // Without ORDER BY, PostgreSQL may return chunks in different order each time,
+    // causing chunks to be skipped when resuming from a batch
+    const { data: chunks, error: chunksError } = await supabase
+      .from('agent_knowledge')
+      .select('id, content, document_name, category, summary, pool_document_id')
+      .eq('agent_id', agentId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })  // First criterion
+      .order('id', { ascending: true });         // Tiebreaker for stability
     if (chunksError || !chunks || chunks.length === 0) {
       await supabase.from('prerequisite_checks').insert({ agent_id: agentId, requirement_id: requirements.id, check_passed: false, missing_critical_sources: { error: 'No active chunks found' } });
       throw new Error('No active knowledge chunks found for agent');
