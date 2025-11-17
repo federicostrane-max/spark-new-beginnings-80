@@ -137,120 +137,78 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
 
       console.log('[useKnowledgeAlignment] Requirements extracted:', extractData);
 
-      // Step 2: Analyze alignment in batches with retry logic
-      console.log('[useKnowledgeAlignment] Starting batch analysis');
-      let moreBatchesNeeded = true;
-      let totalAnalyzed = 0;
-      let totalChunks = 0;
-      let batchCount = 0;
-      let lastAnalysisData = null;
-      const MAX_RETRIES = 3;
-
-      while (moreBatchesNeeded) {
-        batchCount++;
-        let retries = 0;
-        let batchSuccess = false;
-        
-        console.log(`[useKnowledgeAlignment] Processing batch #${batchCount}`);
-        toast.loading(`Analisi batch #${batchCount}...`, { id: progressToastId, duration: Infinity });
-
-        // Retry loop for individual batches
-        while (!batchSuccess && retries < MAX_RETRIES) {
-          try {
-            const { data: analysisData, error: analysisError } = await invokeWithTimeout(
-              'analyze-knowledge-alignment',
-              { agentId, forceReanalysis: true },
-              180000 // 3 minutes client-side timeout
-            );
-
-            if (analysisError) throw analysisError;
-
-            // Check if analysis was BLOCKED due to missing sources
-            if (analysisData.blocked && analysisData.prerequisite_check_failed) {
-              toast.dismiss(progressToastId);
-              setIsBlocked(true);
-              setMissingCriticalSources(analysisData.missing_critical_sources || []);
-              
-              toast.error(
-                <div>
-                  <p className="font-semibold">🚫 Analisi BLOCCATA</p>
-                  <p className="text-sm mt-1">{analysisData.message}</p>
-                  <ul className="text-xs mt-2 space-y-1">
-                    {analysisData.actions_required?.map((action: string, i: number) => (
-                      <li key={i}>• {action}</li>
-                    ))}
-                  </ul>
-                </div>,
-                { duration: 10000 }
-              );
-              
-              setIsAnalyzing(false);
-              return;
-            }
-
-            totalAnalyzed = analysisData.total_progress;
-            totalChunks = analysisData.total_chunks;
-            moreBatchesNeeded = analysisData.more_batches_needed;
-            lastAnalysisData = analysisData;
-            batchSuccess = true;
-
-            const percentage = totalChunks > 0 ? ((totalAnalyzed / totalChunks) * 100).toFixed(1) : '0';
-            console.log(`[useKnowledgeAlignment] Batch ${batchCount} completed: ${totalAnalyzed}/${totalChunks} chunks (${percentage}%)`);
-            
-            toast.loading(`Analisi in corso: ${totalAnalyzed}/${totalChunks} chunks (${percentage}%)`, { 
-              id: progressToastId, 
-              duration: Infinity 
-            });
-
-          } catch (error: any) {
-            retries++;
-            console.error(`[useKnowledgeAlignment] Batch ${batchCount} failed (attempt ${retries}/${MAX_RETRIES}):`, error);
-            
-            if (retries >= MAX_RETRIES) {
-              throw new Error(`Batch ${batchCount} failed after ${MAX_RETRIES} attempts: ${error.message}`);
-            }
-            
-            // Wait before retrying
-            toast.loading(`Ritentativo ${retries}/${MAX_RETRIES}...`, { id: progressToastId, duration: Infinity });
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        }
-
-        // Brief pause between batches
-        if (moreBatchesNeeded) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-      }
+      // Step 2: Multi-invocation analysis with auto-resume
+      console.log('[useKnowledgeAlignment] Starting multi-invocation analysis');
       
-      // Dismiss loading toast
-      toast.dismiss(progressToastId);
+      const processNextBatch = async (): Promise<void> => {
+        const { data: analysisData, error: analysisError } = await invokeWithTimeout(
+          'analyze-knowledge-alignment',
+          { agentId, forceReanalysis: true },
+          180000 // 3 minutes client-side timeout
+        );
 
-      console.log('[useKnowledgeAlignment] All batches completed!');
-      
-      setLastAnalysis(new Date());
-      setCooldownActive(false);
+        if (analysisError) throw analysisError;
 
-      if (lastAnalysisData) {
-        if (lastAnalysisData.safe_mode_active) {
-          toast.success(
-            `✅ Analisi completata! ${totalAnalyzed} chunk analizzati. ${lastAnalysisData.chunks_flagged_for_removal} chunk saranno rimossi automaticamente tra ${KNOWLEDGE_ALIGNMENT_CONFIG.safe_mode.duration_days} giorni.`,
-            { duration: 6000 }
+        // Check if blocked
+        if (analysisData.blocked) {
+          toast.dismiss(progressToastId);
+          setIsBlocked(true);
+          setMissingCriticalSources(analysisData.missing_critical_sources || []);
+          
+          toast.error(
+            <div>
+              <p className="font-semibold">🚫 Analisi BLOCCATA</p>
+              <p className="text-sm mt-1">{analysisData.message}</p>
+            </div>,
+            { duration: 10000 }
           );
-        } else if (lastAnalysisData.chunks_auto_removed > 0) {
-          toast.success(
-            `✅ Analisi completata! ${totalAnalyzed} chunk analizzati, ${lastAnalysisData.chunks_auto_removed} rimossi automaticamente.`,
-            { duration: 6000 }
-          );
-        } else {
-          toast.success(`✅ Analisi completata! ${totalAnalyzed} chunk analizzati. Knowledge base ottimizzata.`, { duration: 5000 });
+          
+          setIsAnalyzing(false);
+          return;
         }
-      }
+
+        const { status, batchCompleted, totalBatches, chunksProcessed, totalChunks, progressPercentage } = analysisData;
+
+        // Update progress toast
+        toast.loading(
+          `Analisi in corso: Batch ${batchCompleted}/${totalBatches} (${progressPercentage}%)`,
+          { id: progressToastId, duration: Infinity }
+        );
+
+        console.log(`[useKnowledgeAlignment] Batch ${batchCompleted}/${totalBatches} completed - ${chunksProcessed}/${totalChunks} chunks (${progressPercentage}%)`);
+
+        // If not complete, continue after delay
+        if (status === 'in_progress') {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2s delay
+          await processNextBatch(); // Recursive call
+        } else if (status === 'completed') {
+          // Analysis complete
+          toast.dismiss(progressToastId);
+          toast.success(
+            <div>
+              <p className="font-semibold">✅ Analisi completata</p>
+              <p className="text-sm">{chunksProcessed} chunk analizzati</p>
+            </div>,
+            { duration: 5000 }
+          );
+
+          setLastAnalysis(new Date());
+          setLastAnalysisStatus('completed');
+          setIsAnalyzing(false);
+          setIsBlocked(false);
+          setMissingCriticalSources([]);
+        }
+      };
+
+      // Start the recursive batch processing
+      await processNextBatch();
 
     } catch (error: any) {
-      console.error('[useKnowledgeAlignment] Error:', error);
-      toast.error('Errore durante l\'aggiornamento della knowledge base');
-    } finally {
+      console.error('[useKnowledgeAlignment] Analysis failed:', error);
+      toast.dismiss(progressToastId);
+      toast.error(`Errore durante l'analisi: ${error.message}`, { duration: 5000 });
       setIsAnalyzing(false);
+      setLastAnalysisStatus('incomplete');
     }
   };
 
