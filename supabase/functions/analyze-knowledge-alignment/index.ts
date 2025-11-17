@@ -339,23 +339,35 @@ async function analyzeChunk(
   
   const scores = extractJSON(content);
 
+  // ✅ FIX: LLM già ritorna valori 0-1, non dividere per 100!
+  // Normalizza comunque nel caso l'LLM ritorni 0-100
+  const normalize = (score: number) => score > 1 ? score / 100 : score;
+  
+  const normalizedScores = {
+    semantic_relevance: normalize(scores.semantic_relevance),
+    concept_coverage: normalize(scores.concept_coverage),
+    procedural_match: normalize(scores.procedural_match),
+    vocabulary_alignment: normalize(scores.vocabulary_alignment),
+    bibliographic_match: normalize(scores.bibliographic_match)
+  };
+
   const finalScore = (
-    (scores.semantic_relevance / 100) * weights.semantic_relevance +
-    (scores.concept_coverage / 100) * weights.concept_coverage +
-    (scores.procedural_match / 100) * weights.procedural_match +
-    (scores.vocabulary_alignment / 100) * weights.vocabulary_alignment +
-    (scores.bibliographic_match / 100) * weights.bibliographic_match
+    normalizedScores.semantic_relevance * weights.semantic_relevance +
+    normalizedScores.concept_coverage * weights.concept_coverage +
+    normalizedScores.procedural_match * weights.procedural_match +
+    normalizedScores.vocabulary_alignment * weights.vocabulary_alignment +
+    normalizedScores.bibliographic_match * weights.bibliographic_match
   );
 
   return {
     chunk_id: chunk.id,
     agent_id: requirements.agent_id,
     requirement_id: requirements.id,
-    semantic_relevance: scores.semantic_relevance / 100,
-    concept_coverage: scores.concept_coverage / 100,
-    procedural_match: scores.procedural_match / 100,
-    vocabulary_alignment: scores.vocabulary_alignment / 100,
-    bibliographic_match: scores.bibliographic_match / 100,
+    semantic_relevance: normalizedScores.semantic_relevance,
+    concept_coverage: normalizedScores.concept_coverage,
+    procedural_match: normalizedScores.procedural_match,
+    vocabulary_alignment: normalizedScores.vocabulary_alignment,
+    bibliographic_match: normalizedScores.bibliographic_match,
     final_relevance_score: finalScore,
     analysis_model: llmModel,
     analysis_reasoning: scores.reasoning,
