@@ -123,6 +123,28 @@ function detectAgentType(systemPrompt: string): string {
   return 'general';
 }
 
+/**
+ * Extract JSON from LLM response, removing markdown code blocks if present
+ */
+function extractJSON(content: string): any {
+  let cleaned = content.trim();
+  
+  // Remove markdown code blocks if present
+  if (cleaned.startsWith('```')) {
+    // Remove first line (```json or just ```)
+    const lines = cleaned.split('\n');
+    cleaned = lines.slice(1).join('\n');
+  }
+  
+  if (cleaned.endsWith('```')) {
+    // Remove last line (```)
+    const lines = cleaned.split('\n');
+    cleaned = lines.slice(0, -1).join('\n');
+  }
+  
+  return JSON.parse(cleaned.trim());
+}
+
 function detectDomainCriticality(requirements: AgentRequirements): 'high' | 'medium' | 'low' {
   const hasStrictRules = requirements.explicit_rules && requirements.explicit_rules.length > 5;
   const hasCriticalVocabulary = requirements.domain_vocabulary && requirements.domain_vocabulary.length > 20;
@@ -315,7 +337,7 @@ async function analyzeChunk(
     ? data.content[0].text
     : data.choices[0].message.content;
   
-  const scores = JSON.parse(content);
+  const scores = extractJSON(content);
 
   const finalScore = (
     (scores.semantic_relevance / 100) * weights.semantic_relevance +
