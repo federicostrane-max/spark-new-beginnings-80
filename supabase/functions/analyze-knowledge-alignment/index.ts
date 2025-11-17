@@ -158,11 +158,24 @@ function validateWeights(weights: ScoringWeights): boolean {
 }
 
 function getRemovalConfig(domainCriticality: string): RemovalConfig {
+  // Use base threshold from knowledgeAlignmentConfig.ts
+  const baseThreshold = 0.5;
+  
   const configs: Record<string, RemovalConfig> = {
-    high: { auto_remove_threshold: 0.20, flag_for_review_threshold: 0.35 },
-    medium: { auto_remove_threshold: 0.25, flag_for_review_threshold: 0.40 },
-    low: { auto_remove_threshold: 0.30, flag_for_review_threshold: 0.45 }
+    high: { 
+      auto_remove_threshold: baseThreshold - 0.10, // 0.40 for high criticality
+      flag_for_review_threshold: baseThreshold + 0.05 
+    },
+    medium: { 
+      auto_remove_threshold: baseThreshold - 0.05, // 0.45 for medium
+      flag_for_review_threshold: baseThreshold + 0.10 
+    },
+    low: { 
+      auto_remove_threshold: baseThreshold, // 0.50 for low (narrative agents like Che Guevara)
+      flag_for_review_threshold: baseThreshold + 0.15 
+    }
   };
+  
   return configs[domainCriticality] || configs.medium;
 }
 
