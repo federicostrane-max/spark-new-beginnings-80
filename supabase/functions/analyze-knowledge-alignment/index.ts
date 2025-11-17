@@ -192,16 +192,22 @@ serve(async (req) => {
       .eq('agent_id', agentId)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
     
-    if (reqError || !requirements) {
-      console.error(`[analyze-knowledge-alignment] Requirements error:`, reqError);
+    // ✅ FIX 3: Correggi logica prerequisite check - solo se NON ci sono requirements
+    if (!requirements) {
+      console.error(`[analyze-knowledge-alignment] No requirements found for agent ${agentId}`);
       await supabase.from('prerequisite_checks').insert({ 
         agent_id: agentId, 
         check_passed: false, 
-        missing_critical_sources: { error: 'Requirements not extracted' } 
+        missing_critical_sources: { error: 'Requirements not extracted. Run extract-task-requirements first.' } 
       });
       throw new Error('Requirements not found. Run extract-task-requirements first.');
+    }
+    
+    if (reqError) {
+      console.error(`[analyze-knowledge-alignment] Database error fetching requirements:`, reqError);
+      throw new Error(`Database error: ${reqError.message}`);
     }
     
     console.log(`[analyze-knowledge-alignment] Using requirement ID: ${requirements.id}, created at: ${requirements.created_at}`);
