@@ -50,8 +50,16 @@ interface KnowledgeChunk {
 
 function detectAgentType(systemPrompt: string): string {
   const prompt = systemPrompt.toLowerCase();
-  if (prompt.includes('research') || prompt.includes('academic') || prompt.includes('paper') || 
-      prompt.includes('biography') || prompt.includes('biographical')) return 'research';
+  
+  // Biographical agents (vita, personaggi storici)
+  if (prompt.includes('biography') || prompt.includes('biographical') || 
+      prompt.includes('vita') || prompt.includes('life of')) {
+    return 'biographical';
+  }
+  
+  // Research agents (accademici, paper)
+  if (prompt.includes('research') || prompt.includes('academic') || 
+      prompt.includes('paper') || prompt.includes('scholar')) return 'research';
   if (prompt.includes('technical') || prompt.includes('engineering') || prompt.includes('code')) return 'technical';
   if (prompt.includes('creative') || prompt.includes('writing') || prompt.includes('story')) return 'creative';
   return 'general';
@@ -69,6 +77,13 @@ function detectDomainCriticality(requirements: AgentRequirements): 'high' | 'med
 
 function getWeightsForAgent(agentType: string, domainCriticality: string): ScoringWeights {
   const baseWeights: Record<string, ScoringWeights> = {
+    biographical: {
+      semantic_relevance: 0.35,     // ↑ Alto! Contesto storico è semanticamente rilevante
+      concept_coverage: 0.15,       // ↓ Basso! Biografie = eventi concreti, non concetti astratti
+      procedural_match: 0.05,       // ↓ Molto basso! Nessuna procedura in biografie
+      vocabulary_alignment: 0.20,   // = OK per terminologia storica
+      bibliographic_match: 0.25     // ↑ Alto! Citazioni autori sono cruciali
+    },
     research: { semantic_relevance: 0.15, concept_coverage: 0.30, procedural_match: 0.10, vocabulary_alignment: 0.20, bibliographic_match: 0.25 },
     technical: { semantic_relevance: 0.20, concept_coverage: 0.25, procedural_match: 0.30, vocabulary_alignment: 0.20, bibliographic_match: 0.05 },
     creative: { semantic_relevance: 0.40, concept_coverage: 0.30, procedural_match: 0.05, vocabulary_alignment: 0.20, bibliographic_match: 0.05 },
