@@ -184,7 +184,7 @@ function normalizeFileName(fileName: string): string {
 }
 
 // Helper to load active alignment prompt from database
-async function getActiveAlignmentPrompt(supabase: any): Promise<{ content: string, model: string }> {
+async function getActiveAlignmentPrompt(supabase: any, agentType: string): Promise<{ content: string, model: string }> {
   const { data, error } = await supabase
     .from('alignment_agent_prompts')
     .select('prompt_content, llm_model, agent_type')
@@ -388,17 +388,19 @@ serve(async (req) => {
 
     console.log(`[analyze-knowledge-alignment] Found ${chunks.length} active chunks to analyze`);
 
-    // Load active alignment prompt and model
-    const { content: promptTemplate, model: llmModel } = await getActiveAlignmentPrompt(supabase);
-    console.log(`[analyze-knowledge-alignment] Using LLM model: ${llmModel}`);
-
-    // Determine agent type and get weights from shared constant
+    // Determine agent type FIRST
     const agentType = detectAgentType(agent.system_prompt);
+    console.log(`[analyze-knowledge-alignment] Detected agent type: ${agentType} for agent ${agentId}`);
+
+    // Load active alignment prompt for this agent type
+    const { content: promptTemplate, model: llmModel } = await getActiveAlignmentPrompt(supabase, agentType);
+    console.log(`[analyze-knowledge-alignment] Using LLM model: ${llmModel} with ${agentType} template`);
+
     const domainCriticality = detectDomainCriticality(requirements);
     const weights = getWeightsForAgent(agentType, domainCriticality);
     const removalConfig = getRemovalConfig(domainCriticality);
 
-    console.log(`[analyze-knowledge-alignment] Agent type: ${agentType}, Criticality: ${domainCriticality}`);
+    console.log(`[analyze-knowledge-alignment] Criticality: ${domainCriticality}`);
     console.log('[analyze-knowledge-alignment] Using weights:', JSON.stringify(weights));
     
     // Validate weights sum to 1.0
