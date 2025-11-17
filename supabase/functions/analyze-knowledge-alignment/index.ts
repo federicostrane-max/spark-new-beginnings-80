@@ -331,20 +331,39 @@ serve(async (req) => {
         console.log(`[analyze-knowledge-alignment] ✅ Successfully saved ${batchScores.length} scores to database`);
       }
 
-      const chunksProcessed = (startBatch + 1) * CHUNKS_PER_BATCH;
-      const isComplete = chunksProcessed >= chunks.length;
+      // ✅ CONTA GLI SCORE EFFETTIVAMENTE SALVATI NEL DATABASE
+      const { count: actualProcessedCount, error: countError } = await supabase
+        .from('knowledge_relevance_scores')
+        .select('*', { count: 'exact', head: true })
+        .eq('requirement_id', requirements.id);
+
+      if (countError) {
+        console.error('[analyze-knowledge-alignment] ❌ Failed to count processed chunks:', countError);
+      }
+
+      const chunksProcessedThisBatch = batchScores.length;
+      const totalProcessed = actualProcessedCount || 0;
+      const isComplete = totalProcessed >= chunks.length;
       const newStatus = timeoutOccurred ? 'timeout' : (isComplete ? 'completed' : 'running');
 
-      console.log(`[analyze-knowledge-alignment] Updating progress: ${chunksProcessed}/${chunks.length} chunks, status: ${newStatus}`);
+      console.log(`[analyze-knowledge-alignment] Batch ${startBatch + 1} results:`);
+      console.log(`  - Chunks processed in this batch: ${chunksProcessedThisBatch}`);
+      console.log(`  - Total chunks processed so far: ${totalProcessed}/${chunks.length}`);
+      console.log(`  - Status: ${newStatus}`);
 
-      const { error: updateError } = await supabase.from('alignment_analysis_progress').update({
-        chunks_processed: Math.min(chunksProcessed, chunks.length),
-        current_batch: startBatch + 1,
-        status: newStatus,
-        updated_at: new Date().toISOString()
-      }).eq('id', progressId);
+      const { error: updateError } = await supabase
+        .from('alignment_analysis_progress')
+        .update({
+          chunks_processed: totalProcessed,
+          current_batch: startBatch + 1,
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', progressId);
 
-      if (updateError) console.error(`[analyze-knowledge-alignment] ❌ Failed to update progress:`, updateError);
+      if (updateError) {
+        console.error(`[analyze-knowledge-alignment] ❌ Failed to update progress:`, updateError);
+      }
 
       if (!isComplete) {
         console.log(`[analyze-knowledge-alignment] 🔄 Scheduling next batch...`);
@@ -369,14 +388,22 @@ serve(async (req) => {
       }
     }
 
+    // Ricalcola il totale processato per la risposta (usa il valore aggiornato dal DB)
+    const { count: finalProcessedCount } = await supabase
+      .from('knowledge_relevance_scores')
+      .select('*', { count: 'exact', head: true })
+      .eq('requirement_id', requirements.id);
+
+    const actualProcessed = finalProcessedCount || 0;
+
     return new Response(JSON.stringify({
       success: true,
       agentId,
       batch: startBatch + 1,
       totalBatches,
-      chunksProcessed: Math.min((startBatch + 1) * CHUNKS_PER_BATCH, chunks.length),
+      chunksProcessed: actualProcessed,
       totalChunks: chunks.length,
-      complete: (startBatch + 1) * CHUNKS_PER_BATCH >= chunks.length
+      complete: actualProcessed >= chunks.length
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
