@@ -1,5 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.78.0";
+import { 
+  AGENT_TYPE_WEIGHTS,
+  type ScoringWeights 
+} from '../_shared/agentWeights.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,14 +18,6 @@ const CHUNKS_PER_BATCH = 10;
 const BATCH_TIMEOUT_MS = 50000;
 const MAX_AUTO_RESUME_RETRIES = 3;
 const AUTO_RESUME_DELAY_MS = 2000;
-
-interface ScoringWeights {
-  semantic_relevance: number;
-  concept_coverage: number;
-  procedural_match: number;
-  vocabulary_alignment: number;
-  bibliographic_match: number;
-}
 
 interface RemovalConfig {
   auto_remove_threshold: number;
@@ -48,20 +44,82 @@ interface KnowledgeChunk {
   pool_document_id: string | null;
 }
 
+/**
+ * Detects agent type from system prompt using keyword analysis.
+ * Uses the universal categorization from agentWeights.ts
+ */
 function detectAgentType(systemPrompt: string): string {
-  const prompt = systemPrompt.toLowerCase();
+  const promptLower = systemPrompt.toLowerCase();
   
-  // Biographical agents (vita, personaggi storici)
-  if (prompt.includes('biography') || prompt.includes('biographical') || 
-      prompt.includes('vita') || prompt.includes('life of')) {
-    return 'biographical';
+  // NARRATIVE - Biographies, stories, historical accounts (check FIRST - very specific)
+  if (
+    promptLower.includes('biography') || 
+    promptLower.includes('biographical') || 
+    promptLower.includes('vita') || 
+    promptLower.includes('life of') ||
+    promptLower.includes('story') ||
+    promptLower.includes('narrative') ||
+    promptLower.includes('creative writing')
+  ) {
+    return 'narrative';
   }
   
-  // Research agents (accademici, paper)
-  if (prompt.includes('research') || prompt.includes('academic') || 
-      prompt.includes('paper') || prompt.includes('scholar')) return 'research';
-  if (prompt.includes('technical') || prompt.includes('engineering') || prompt.includes('code')) return 'technical';
-  if (prompt.includes('creative') || prompt.includes('writing') || prompt.includes('story')) return 'creative';
+  // DOMAIN-EXPERT - Medical, Legal, Compliance
+  if (
+    promptLower.includes('diagnose') || 
+    promptLower.includes('medical') || 
+    promptLower.includes('health') || 
+    promptLower.includes('patient') ||
+    promptLower.includes('clinical') ||
+    promptLower.includes('treatment') ||
+    promptLower.includes('legal') || 
+    promptLower.includes('contract') || 
+    promptLower.includes('compliance') || 
+    promptLower.includes('law') ||
+    promptLower.includes('regulation')
+  ) {
+    return 'domain-expert';
+  }
+  
+  // RESEARCH - Academic, scientific, analysis
+  if (
+    promptLower.includes('research') || 
+    promptLower.includes('academic') || 
+    promptLower.includes('paper') || 
+    promptLower.includes('scholar') ||
+    promptLower.includes('scientific') ||
+    promptLower.includes('analysis')
+  ) {
+    return 'research';
+  }
+  
+  // TECHNICAL - Engineering, development, IT
+  if (
+    promptLower.includes('code') || 
+    promptLower.includes('technical') || 
+    promptLower.includes('engineer') || 
+    promptLower.includes('develop') ||
+    promptLower.includes('programming') ||
+    promptLower.includes('software')
+  ) {
+    return 'technical';
+  }
+  
+  // PROCEDURAL - Support, operations, workflows
+  if (
+    promptLower.includes('support') || 
+    promptLower.includes('help') || 
+    promptLower.includes('guide') || 
+    promptLower.includes('assist') ||
+    promptLower.includes('workflow') ||
+    promptLower.includes('procedure') ||
+    promptLower.includes('how-to') ||
+    promptLower.includes('operations')
+  ) {
+    return 'procedural';
+  }
+  
+  // DEFAULT - General purpose agents
   return 'general';
 }
 
@@ -75,30 +133,28 @@ function detectDomainCriticality(requirements: AgentRequirements): 'high' | 'med
   return 'low';
 }
 
+/**
+ * Gets weights from shared constant (AGENT_TYPE_WEIGHTS) and adjusts for domain criticality
+ */
 function getWeightsForAgent(agentType: string, domainCriticality: string): ScoringWeights {
-  const baseWeights: Record<string, ScoringWeights> = {
-    biographical: {
-      semantic_relevance: 0.35,     // ↑ Alto! Contesto storico è semanticamente rilevante
-      concept_coverage: 0.15,       // ↓ Basso! Biografie = eventi concreti, non concetti astratti
-      procedural_match: 0.05,       // ↓ Molto basso! Nessuna procedura in biografie
-      vocabulary_alignment: 0.20,   // = OK per terminologia storica
-      bibliographic_match: 0.25     // ↑ Alto! Citazioni autori sono cruciali
-    },
-    research: { semantic_relevance: 0.15, concept_coverage: 0.30, procedural_match: 0.10, vocabulary_alignment: 0.20, bibliographic_match: 0.25 },
-    technical: { semantic_relevance: 0.20, concept_coverage: 0.25, procedural_match: 0.30, vocabulary_alignment: 0.20, bibliographic_match: 0.05 },
-    creative: { semantic_relevance: 0.40, concept_coverage: 0.30, procedural_match: 0.05, vocabulary_alignment: 0.20, bibliographic_match: 0.05 },
-    general: { semantic_relevance: 0.25, concept_coverage: 0.25, procedural_match: 0.20, vocabulary_alignment: 0.20, bibliographic_match: 0.10 }
-  };
-
-  let weights = baseWeights[agentType] || baseWeights.general;
+  // Get base weights from shared constant (imported from _shared/agentWeights.ts)
+  const weights = AGENT_TYPE_WEIGHTS[agentType] || AGENT_TYPE_WEIGHTS.general;
+  
+  // Adjust for high-criticality domains
   if (domainCriticality === 'high') {
-    weights = {
+    return {
       ...weights,
       vocabulary_alignment: Math.min(weights.vocabulary_alignment * 1.3, 0.4),
-      procedural_match: Math.min(weights.procedural_match * 1.2, 0.4)
+      procedural_match: Math.min(weights.procedural_match * 1.2, 0.35),
     };
   }
+  
   return weights;
+}
+
+function validateWeights(weights: ScoringWeights): boolean {
+  const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  return Math.abs(total - 1.0) < 0.001;
 }
 
 function getRemovalConfig(domainCriticality: string): RemovalConfig {
@@ -235,12 +291,19 @@ serve(async (req) => {
 
     console.log(`[analyze-knowledge-alignment] Found ${chunks.length} active chunks to analyze`);
 
+    // Determine agent type and get weights from shared constant
     const agentType = detectAgentType(agent.system_prompt);
     const domainCriticality = detectDomainCriticality(requirements);
     const weights = getWeightsForAgent(agentType, domainCriticality);
     const removalConfig = getRemovalConfig(domainCriticality);
 
     console.log(`[analyze-knowledge-alignment] Agent type: ${agentType}, Criticality: ${domainCriticality}`);
+    console.log('[analyze-knowledge-alignment] Using weights:', JSON.stringify(weights));
+    
+    // Validate weights sum to 1.0
+    if (!validateWeights(weights)) {
+      throw new Error(`Invalid weights for agent type ${agentType}: weights must sum to 1.0`);
+    }
 
     // ✅ FIX: Recupera progress record e aggiornalo se necessario (usa 'running' come status valido)
     const { data: existingProgress } = await supabase
