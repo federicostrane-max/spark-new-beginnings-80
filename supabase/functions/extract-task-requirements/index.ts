@@ -82,6 +82,40 @@ serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    // ✅ OPZIONE B: Smart Re-evaluation - Prompt cambiato, ripristina chunk rimossi
+    // Check if there's a previous requirement with different hash
+    const { data: previousRequirement } = await supabase
+      .from('agent_task_requirements')
+      .select('system_prompt_hash')
+      .eq('agent_id', agentId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (previousRequirement && previousRequirement.system_prompt_hash !== promptHash) {
+      console.log('[extract-task-requirements] 🔄 PROMPT CHANGED: Auto-ripristino chunk rimossi...');
+      console.log(`Old hash: ${previousRequirement.system_prompt_hash.substring(0, 8)}...`);
+      console.log(`New hash: ${promptHash.substring(0, 8)}...`);
+      
+      const { data: restoredChunks, error: restoreError } = await supabase
+        .from('agent_knowledge')
+        .update({
+          is_active: true,
+          removed_at: null,
+          removal_reason: null
+        })
+        .eq('agent_id', agentId)
+        .eq('is_active', false)
+        .select('id');
+      
+      if (restoreError) {
+        console.error('[extract-task-requirements] ❌ Errore auto-ripristino:', restoreError);
+      } else {
+        const restoredCount = restoredChunks?.length || 0;
+        console.log(`[extract-task-requirements] ✅ ${restoredCount} chunk ripristinati per cambio prompt`);
+      }
+    }
 
     console.log('[extract-task-requirements] Cache lookup:', {
       agent_id: agentId,

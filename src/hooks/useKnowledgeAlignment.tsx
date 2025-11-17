@@ -96,13 +96,14 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     };
   }, [agentId, enabled]);
 
-  const handlePromptChange = async (forceAnalysis = false) => {
+  const handlePromptChange = async (freshStart = false) => {
     // ✅ RIMOSSO VINCOLO DI COOLDOWN - L'analisi può essere sempre eseguita
     setIsAnalyzing(true);
     
     // Show loading toast with progress
     const progressToastId = 'analysis-progress';
-    toast.loading('Inizializzazione analisi...', { id: progressToastId, duration: Infinity });
+    const initMessage = freshStart ? '🔄 Ripristino tutti i chunk...' : 'Inizializzazione analisi...';
+    toast.loading(initMessage, { id: progressToastId, duration: Infinity });
 
     try {
       // Step 1: Extract new requirements
@@ -127,7 +128,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
       const processNextBatch = async (): Promise<void> => {
         const { data: analysisData, error: analysisError } = await invokeWithTimeout(
           'analyze-knowledge-alignment',
-          { agentId, forceReanalysis: isFirstBatch }, // ✅ true only for first invocation
+          { agentId, forceReanalysis: isFirstBatch, freshStart: isFirstBatch ? freshStart : false }, // Pass freshStart only on first batch
           180000 // 3 minutes client-side timeout
         );
 
@@ -237,7 +238,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
     cooldownMinutes,
     canAnalyze: !cooldownActive || lastAnalysisStatus === 'incomplete',
     triggerManualAnalysis: () => handlePromptChange(false),
-    forceAnalysis: () => handlePromptChange(true),
+    forceAnalysis: (freshStart = false) => handlePromptChange(freshStart),
     isBlocked,
     missingCriticalSources,
   };

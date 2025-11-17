@@ -407,8 +407,31 @@ serve(async (req) => {
   const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
 
   try {
-    const { agentId, forceReanalysis = false } = await req.json();
-    console.log(`[analyze-knowledge-alignment] Starting for agent: ${agentId}, force: ${forceReanalysis}`);
+    const { agentId, forceReanalysis = false, freshStart = false } = await req.json();
+    console.log(`[analyze-knowledge-alignment] Starting for agent: ${agentId}, force: ${forceReanalysis}, freshStart: ${freshStart}`);
+    
+    // ✅ OPZIONE A: Fresh Start - Ripristina tutti i chunk prima dell'analisi
+    if (freshStart) {
+      console.log('[analyze-knowledge-alignment] 🔄 FRESH START: Ripristino tutti i chunk rimossi...');
+      
+      const { data: restoredChunks, error: restoreError } = await supabase
+        .from('agent_knowledge')
+        .update({
+          is_active: true,
+          removed_at: null,
+          removal_reason: null
+        })
+        .eq('agent_id', agentId)
+        .eq('is_active', false)
+        .select('id');
+      
+      if (restoreError) {
+        console.error('[analyze-knowledge-alignment] ❌ Errore ripristino chunk:', restoreError);
+      } else {
+        const restoredCount = restoredChunks?.length || 0;
+        console.log(`[analyze-knowledge-alignment] ✅ ${restoredCount} chunk ripristinati per fresh start`);
+      }
+    }
 
     const { data: agent, error: agentError } = await supabase.from('agents').select('id, name, system_prompt').eq('id', agentId).single();
     if (agentError || !agent) throw new Error(`Agent not found: ${agentId}`);

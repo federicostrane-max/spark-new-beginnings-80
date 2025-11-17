@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw, Target } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw, Target, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
@@ -99,10 +99,18 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     canAnalyze,
     triggerManualAnalysis,
     forceAnalysis,
+    isBlocked,
+    missingCriticalSources,
   } = useKnowledgeAlignment({
     agentId,
     enabled: true,
   });
+
+  const handleFreshStartAnalysis = () => {
+    if (window.confirm('⚠️ Questo ripristinerà TUTTI i chunk rimossi e riavvierà l\'analisi da zero. Continuare?')) {
+      forceAnalysis(true);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -445,7 +453,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                   Ricarica Stato
                 </Button>
                 <Button 
-                  onClick={forceAnalysis}
+                  onClick={() => forceAnalysis(false)}
                   size="sm"
                   variant="destructive"
                 >
@@ -583,6 +591,23 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                       <p>Prossima analisi disponibile tra {cooldownMinutes} minuti</p>
                     </TooltipContent>
                   )}
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleFreshStartAnalysis}
+                      disabled={isAnalyzing}
+                      size="sm"
+                      variant="outline"
+                      className="border-primary/50 hover:bg-primary/10"
+                    >
+                      <Undo2 className="mr-2 h-4 w-4" />
+                      Analisi da Zero
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Ripristina tutti i chunk rimossi e riesegui l'analisi</p>
+                  </TooltipContent>
                 </Tooltip>
               </div>
             </div>
