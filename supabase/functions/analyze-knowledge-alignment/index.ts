@@ -372,40 +372,46 @@ serve(async (req) => {
     }
 
     const totalBatches = Math.ceil(chunks.length / CHUNKS_PER_BATCH);
-    const startBatch = startFromBatch;
+    
+    console.log(`[analyze-knowledge-alignment] 🚀 Starting batch processing: ${totalBatches} total batches for ${chunks.length} chunks`);
 
-    console.log(`[analyze-knowledge-alignment] Processing batch ${startBatch + 1}/${totalBatches}`);
+    // ✅ CRITICAL FIX: Loop attraverso TUTTI i batch, non solo uno
+    for (let batchNum = startFromBatch; batchNum < totalBatches; batchNum++) {
+      console.log(`[analyze-knowledge-alignment] 📦 Processing batch ${batchNum + 1}/${totalBatches} (chunks ${batchNum * CHUNKS_PER_BATCH + 1}-${Math.min((batchNum + 1) * CHUNKS_PER_BATCH, chunks.length)})`);
 
-    const batchChunks = chunks.slice(startBatch * CHUNKS_PER_BATCH, Math.min((startBatch + 1) * CHUNKS_PER_BATCH, chunks.length));
-    const batchScores: any[] = [];
-    let timeoutOccurred = false;
+      const batchChunks = chunks.slice(batchNum * CHUNKS_PER_BATCH, Math.min((batchNum + 1) * CHUNKS_PER_BATCH, chunks.length));
+      const batchScores: any[] = [];
+      let timeoutOccurred = false;
 
-    try {
-      const processingPromise = (async () => {
-        for (let i = 0; i < batchChunks.length; i++) {
-          const chunk = batchChunks[i];
-          console.log(`[analyze-knowledge-alignment] Analyzing chunk ${startBatch * CHUNKS_PER_BATCH + i + 1}/${chunks.length}: ${chunk.document_name}`);
-          try {
-            const score = await analyzeChunk(chunk, requirements, weights);
-            batchScores.push(score);
-            console.log(`[analyze-knowledge-alignment] ✓ Chunk analyzed, final score: ${score.final_relevance_score.toFixed(3)}`);
-          } catch (error) {
-            console.error(`[analyze-knowledge-alignment] ✗ Failed to analyze chunk ${chunk.id}:`, error);
+      try {
+        const processingPromise = (async () => {
+          for (let i = 0; i < batchChunks.length; i++) {
+            const chunk = batchChunks[i];
+            const chunkIndex = batchNum * CHUNKS_PER_BATCH + i + 1;
+            console.log(`[analyze-knowledge-alignment] Analyzing chunk ${chunkIndex}/${chunks.length}: ${chunk.document_name}`);
+            try {
+              const score = await analyzeChunk(chunk, requirements, weights);
+              batchScores.push(score);
+              console.log(`[analyze-knowledge-alignment] ✓ Chunk analyzed, final score: ${score.final_relevance_score.toFixed(3)}`);
+            } catch (error) {
+              console.error(`[analyze-knowledge-alignment] ✗ Failed to analyze chunk ${chunk.id}:`, error);
+            }
           }
-        }
-      })();
+        })();
 
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Batch timeout')), BATCH_TIMEOUT_MS));
-      await Promise.race([processingPromise, timeoutPromise]);
-      console.log(`[analyze-knowledge-alignment] Batch completed successfully`);
-    } catch (error: any) {
-      if (error?.message === 'Batch timeout') {
-        console.warn(`[analyze-knowledge-alignment] ⚠️ Batch timeout after ${BATCH_TIMEOUT_MS}ms, saving progress...`);
-        timeoutOccurred = true;
-      } else {
-        throw error;
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Batch timeout')), BATCH_TIMEOUT_MS));
+        await Promise.race([processingPromise, timeoutPromise]);
+        console.log(`[analyze-knowledge-alignment] ✅ Batch ${batchNum + 1} completed successfully`);
+      } catch (error: any) {
+        if (error?.message === 'Batch timeout') {
+          console.warn(`[analyze-knowledge-alignment] ⚠️ Batch timeout after ${BATCH_TIMEOUT_MS}ms, saving progress...`);
+          timeoutOccurred = true;
+        } else {
+          throw error;
+        }
       }
-    } finally {
+
+      // Save batch scores
       if (batchScores.length > 0) {
         console.log(`[analyze-knowledge-alignment] 💾 Saving ${batchScores.length} scores to knowledge_relevance_scores...`);
         const { error: upsertError } = await supabase.from('knowledge_relevance_scores').upsert(batchScores, { onConflict: 'chunk_id,requirement_id' });
@@ -416,7 +422,7 @@ serve(async (req) => {
         console.log(`[analyze-knowledge-alignment] ✅ Successfully saved ${batchScores.length} scores to database`);
       }
 
-      // ✅ CONTA GLI SCORE EFFETTIVAMENTE SALVATI NEL DATABASE
+      // Update progress
       const { count: actualProcessedCount, error: countError } = await supabase
         .from('knowledge_relevance_scores')
         .select('*', { count: 'exact', head: true })
@@ -426,21 +432,21 @@ serve(async (req) => {
         console.error('[analyze-knowledge-alignment] ❌ Failed to count processed chunks:', countError);
       }
 
-      const chunksProcessedThisBatch = batchScores.length;
       const totalProcessed = actualProcessedCount || 0;
       const isComplete = totalProcessed >= chunks.length;
       const newStatus = timeoutOccurred ? 'timeout' : (isComplete ? 'completed' : 'running');
 
-      console.log(`[analyze-knowledge-alignment] Batch ${startBatch + 1} results:`);
-      console.log(`  - Chunks processed in this batch: ${chunksProcessedThisBatch}`);
+      console.log(`[analyze-knowledge-alignment] 📊 Batch ${batchNum + 1} results:`);
+      console.log(`  - Chunks processed in this batch: ${batchScores.length}`);
       console.log(`  - Total chunks processed so far: ${totalProcessed}/${chunks.length}`);
+      console.log(`  - Progress: ${((totalProcessed / chunks.length) * 100).toFixed(1)}%`);
       console.log(`  - Status: ${newStatus}`);
 
       const { error: updateError } = await supabase
         .from('alignment_analysis_progress')
         .update({
           chunks_processed: totalProcessed,
-          current_batch: startBatch + 1,
+          current_batch: batchNum + 1,
           status: newStatus,
           updated_at: new Date().toISOString()
         })
@@ -450,41 +456,35 @@ serve(async (req) => {
         console.error(`[analyze-knowledge-alignment] ❌ Failed to update progress:`, updateError);
       }
 
+      // Check if we should continue to next batch or finalize
+      if (timeoutOccurred) {
+        console.log(`[analyze-knowledge-alignment] ⏸️ Batch timeout, stopping processing. Resume required.`);
+        break; // Exit the for loop
+      }
+
       if (!isComplete) {
-        console.log(`[analyze-knowledge-alignment] 🔄 Scheduling next batch...`);
-        for (let attempt = 1; attempt <= MAX_AUTO_RESUME_RETRIES; attempt++) {
-          try {
-            await new Promise(resolve => setTimeout(resolve, AUTO_RESUME_DELAY_MS));
-            const { error: resumeError } = await supabase.functions.invoke('analyze-knowledge-alignment', { body: { agentId, forceReanalysis: false } });
-            if (resumeError) {
-              console.error(`[analyze-knowledge-alignment] ❌ Auto-resume attempt ${attempt} failed:`, resumeError);
-              if (attempt === MAX_AUTO_RESUME_RETRIES) throw resumeError;
-            } else {
-              console.log(`[analyze-knowledge-alignment] ✅ Next batch scheduled successfully`);
-              break;
-            }
-          } catch (error: any) {
-            console.error(`[analyze-knowledge-alignment] ❌ Auto-resume attempt ${attempt} error:`, error);
-          }
-        }
+        console.log(`[analyze-knowledge-alignment] 🔄 Continuing to next batch...`);
+        // Continue to next iteration of the for loop
       } else {
-        console.log(`[analyze-knowledge-alignment] 🎉 Analysis complete! Finalizing...`);
+        console.log(`[analyze-knowledge-alignment] 🎉 All batches complete! Finalizing...`);
         await finalizeAnalysis(supabase, agentId, requirements.id, chunks.length, removalConfig);
+        break; // Exit the for loop
       }
     }
 
-    // Ricalcola il totale processato per la risposta (usa il valore aggiornato dal DB)
+    // Calculate final processed count for response
     const { count: finalProcessedCount } = await supabase
       .from('knowledge_relevance_scores')
       .select('*', { count: 'exact', head: true })
       .eq('requirement_id', requirements.id);
 
     const actualProcessed = finalProcessedCount || 0;
+    const lastBatch = Math.min(startFromBatch + 1, totalBatches);
 
     return new Response(JSON.stringify({
       success: true,
       agentId,
-      batch: startBatch + 1,
+      batch: lastBatch,
       totalBatches,
       chunksProcessed: actualProcessed,
       totalChunks: chunks.length,
