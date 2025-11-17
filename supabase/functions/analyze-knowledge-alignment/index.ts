@@ -337,19 +337,41 @@ async function analyzeChunk(
     ? data.content[0].text
     : data.choices[0].message.content;
   
+  // 🔍 DEBUG: Log raw LLM response
+  console.log(`[DEBUG] Raw LLM response (first 500 chars):`, content.substring(0, 500));
+  
   const scores = extractJSON(content);
+  
+  // 🔍 DEBUG: Log extracted scores
+  console.log(`[DEBUG] Extracted scores from LLM:`, JSON.stringify(scores));
 
-  // ✅ FIX: LLM già ritorna valori 0-1, non dividere per 100!
-  // Normalizza comunque nel caso l'LLM ritorni 0-100
-  const normalize = (score: number) => score > 1 ? score / 100 : score;
+  // ✅ FIX: Normalize function with edge case handling
+  const normalize = (score: number, fieldName: string) => {
+    // Se score è tra 0 e 0.01 (es. 0.009), probabilmente l'LLM ha interpretato male
+    // e ha ritornato 0.9% invece di 90%, quindi moltiplica per 100
+    if (score > 0 && score < 0.01) {
+      console.warn(`[DEBUG] Score ${fieldName} suspiciously low (${score}), multiplying by 100 → ${score * 100}`);
+      return score * 100;
+    }
+    // Se > 1, è in scala 0-100, dividi per 100
+    if (score > 1) {
+      console.log(`[DEBUG] Score ${fieldName} in 0-100 scale (${score}), dividing by 100 → ${score / 100}`);
+      return score / 100;
+    }
+    // Altrimenti già normalizzato 0-1
+    return score;
+  };
   
   const normalizedScores = {
-    semantic_relevance: normalize(scores.semantic_relevance),
-    concept_coverage: normalize(scores.concept_coverage),
-    procedural_match: normalize(scores.procedural_match),
-    vocabulary_alignment: normalize(scores.vocabulary_alignment),
-    bibliographic_match: normalize(scores.bibliographic_match)
+    semantic_relevance: normalize(scores.semantic_relevance, 'semantic_relevance'),
+    concept_coverage: normalize(scores.concept_coverage, 'concept_coverage'),
+    procedural_match: normalize(scores.procedural_match, 'procedural_match'),
+    vocabulary_alignment: normalize(scores.vocabulary_alignment, 'vocabulary_alignment'),
+    bibliographic_match: normalize(scores.bibliographic_match, 'bibliographic_match')
   };
+  
+  // 🔍 DEBUG: Log normalized scores
+  console.log(`[DEBUG] Normalized scores:`, JSON.stringify(normalizedScores));
 
   const finalScore = (
     normalizedScores.semantic_relevance * weights.semantic_relevance +
@@ -358,6 +380,9 @@ async function analyzeChunk(
     normalizedScores.vocabulary_alignment * weights.vocabulary_alignment +
     normalizedScores.bibliographic_match * weights.bibliographic_match
   );
+  
+  // 🔍 DEBUG: Log final score calculation
+  console.log(`[DEBUG] Final score: ${finalScore.toFixed(4)} | Weights used:`, JSON.stringify(weights));
 
   return {
     chunk_id: chunk.id,
