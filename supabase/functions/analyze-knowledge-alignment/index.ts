@@ -477,6 +477,22 @@ serve(async (req) => {
 
     const totalBatches = Math.ceil(chunks.length / CHUNKS_PER_BATCH);
     
+    // 🗑️ DELETE old scores to force recalculation with new prompts
+    if (startFromBatch === 0 || forceReanalysis) {
+      console.log('[analyze-knowledge-alignment] 🗑️ Deleting old scores to force fresh analysis with new prompts...');
+      const { error: deleteError } = await supabase
+        .from('knowledge_relevance_scores')
+        .delete()
+        .eq('agent_id', agentId)
+        .eq('requirement_id', requirements.id);
+      
+      if (deleteError) {
+        console.error('[analyze-knowledge-alignment] Failed to delete old scores:', deleteError);
+      } else {
+        console.log('[analyze-knowledge-alignment] ✅ Old scores deleted, will recalculate with current prompts');
+      }
+    }
+    
     console.log(`[analyze-knowledge-alignment] 🚀 Processing batch ${startFromBatch + 1}/${totalBatches}`);
 
     // ✅ MULTI-INVOCATION: Processa SOLO 1 batch per invocazione
