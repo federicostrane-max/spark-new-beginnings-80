@@ -173,9 +173,14 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         if (log?.completed_at && progressChunks !== log.total_chunks_analyzed) {
           toast.success(`Analisi completata! ${log.total_chunks_analyzed} chunks analizzati.`);
           setProgressChunks(log.total_chunks_analyzed || 0);
+          
+          // ✅ FIX: Force refresh degli stats quando l'analisi si completa
+          console.log('🔄 [Dashboard] Analysis completed, forcing data refresh...');
+          fetchData();
         }
       }
 
+      // Refresh data periodically even during analysis
       fetchData();
     }, 3000); // Poll every 3 seconds
 
@@ -248,9 +253,9 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       if (logs.length > 0) {
         const latest = logs[0];
         
-        // ✅ Se c'è un'analisi in corso, NON usare il vecchio log
-        // Usiamo il log solo se è completato (completed_at non null) o se non c'è analisi attiva
-        if (!isAnalyzing || latest.completed_at) {
+        // ✅ FIX: Aggiorna SEMPRE gli stats se c'è un log completato
+        // Questo risolve il race condition dove isAnalyzing rimane true
+        if (latest.completed_at) {
           // Use overall_alignment_percentage from the log with type safety
           const dimensionBreakdown = latest.dimension_breakdown as any;
           const realCoverage = dimensionBreakdown?.concept_coverage 
@@ -264,6 +269,14 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             removedChunks: latest.chunks_auto_removed,
             conceptCoverage: realCoverage,
           }));
+          
+          // 🔍 DEBUG: Log stats update
+          console.log('📊 [Dashboard] Stats updated from completed log:', {
+            removedChunks: latest.chunks_auto_removed,
+            conceptCoverage: realCoverage,
+            totalChunksAnalyzed: latest.total_chunks_analyzed,
+            isAnalyzing,
+          });
         }
       }
     }
@@ -291,6 +304,9 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       setStats(prev => ({ ...prev, totalChunks: count }));
       // Settiamo anche totalChunksInAnalysis per il calcolo del progresso durante l'analisi
       setTotalChunksInAnalysis(count);
+      
+      // 🔍 DEBUG: Log active chunks count
+      console.log(`📊 [Dashboard] Active chunks count: ${count}, removed: ${stats.removedChunks}`);
     }
   };
 
