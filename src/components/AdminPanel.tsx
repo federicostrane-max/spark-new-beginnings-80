@@ -11,6 +11,7 @@ import { MaintenanceMonitor } from "./MaintenanceMonitor";
 import { OperationsDashboard } from "./OperationsDashboard";
 import { FilterPromptEditor } from "./FilterPromptEditor";
 import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
+import AlignmentMetricsMonitor from "./AlignmentMetricsMonitor";
 
 interface ProcessingResult {
   id: string;
@@ -108,8 +109,9 @@ export const AdminPanel = () => {
   };
 
   return (
-    <Tabs defaultValue="tools" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-6">
+    <Tabs defaultValue="metrics" className="w-full max-w-4xl mx-auto mt-8">
+      <TabsList className="grid w-full grid-cols-7">
+        <TabsTrigger value="metrics">Metriche</TabsTrigger>
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
         <TabsTrigger value="logs">Log Processing</TabsTrigger>
         <TabsTrigger value="maintenance">Manutenzione Auto</TabsTrigger>
@@ -117,6 +119,10 @@ export const AdminPanel = () => {
         <TabsTrigger value="filter-prompt">Filter Prompt</TabsTrigger>
         <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
       </TabsList>
+
+      <TabsContent value="metrics">
+        <AlignmentMetricsMonitor />
+      </TabsContent>
 
       <TabsContent value="tools">
         <Card>
