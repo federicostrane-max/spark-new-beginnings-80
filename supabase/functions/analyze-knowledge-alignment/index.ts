@@ -763,11 +763,25 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
     }
   }
 
+  // ✅ FIX: Recupera il started_at reale dal progress per evitare timestamp anomali
+  const { data: progress } = await supabase
+    .from('alignment_analysis_progress')
+    .select('started_at')
+    .eq('agent_id', agentId)
+    .maybeSingle();
+  
+  const startedAt = progress?.started_at || new Date().toISOString();
+  const completedAt = new Date().toISOString();
+  const duration = Date.now() - new Date(startedAt).getTime();
+  
+  console.log(`[analyze-knowledge-alignment] ⏱️ Analysis duration: ${duration}ms (${(duration / 1000).toFixed(1)}s)`);
+
   await supabase.from('alignment_analysis_log').insert({
     agent_id: agentId,
     requirement_id: requirementId,
-    started_at: new Date().toISOString(),
-    completed_at: new Date().toISOString(),
+    started_at: startedAt,
+    completed_at: completedAt,
+    duration_ms: duration,
     total_chunks_analyzed: totalChunks,
     chunks_flagged_for_removal: belowFlagThreshold.length,
     chunks_auto_removed: actuallyRemoved,
