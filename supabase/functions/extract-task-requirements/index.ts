@@ -92,13 +92,56 @@ serve(async (req) => {
       found_cache: false
     });
 
-    // 5. Prepare AI prompt
+    // 5. Fetch document metadata for enriching the prompt
+    const { data: knowledgeChunks } = await supabase
+      .from('agent_knowledge')
+      .select('document_name, pool_document_id, source_type')
+      .eq('agent_id', agentId)
+      .eq('is_active', true);
+
+    const docMetadata = new Map();
+    if (knowledgeChunks && knowledgeChunks.length > 0) {
+      const poolDocIds = knowledgeChunks
+        .map(c => c.pool_document_id)
+        .filter(Boolean);
+      
+      if (poolDocIds.length > 0) {
+        const { data: poolDocs } = await supabase
+          .from('knowledge_documents')
+          .select('id, file_name, extracted_authors, extracted_title')
+          .in('id', poolDocIds);
+        
+        if (poolDocs) {
+          poolDocs.forEach(doc => {
+            const sourceType = knowledgeChunks.find(c => c.pool_document_id === doc.id)?.source_type || 'unknown';
+            docMetadata.set(doc.file_name, {
+              authors: doc.extracted_authors || ['Unknown'],
+              title: doc.extracted_title || doc.file_name,
+              type: sourceType
+            });
+          });
+        }
+      }
+    }
+
+    console.log('[extract-task-requirements] Found documents:', docMetadata.size);
+
+    // 6. Prepare enriched AI prompt
     const aiPrompt = `${filterPrompt.prompt_content}
 
 AGENT SYSTEM PROMPT TO ANALYZE:
-${agent.system_prompt}`;
+${agent.system_prompt}
 
-    // 6. Call AI with filter prompt
+${docMetadata.size > 0 ? `
+AVAILABLE KNOWLEDGE BASE DOCUMENTS:
+${Array.from(docMetadata.entries()).map(([fileName, meta]) => 
+  `- "${fileName}" by ${meta.authors.join(', ')} (${meta.type})`
+).join('\n')}
+` : ''}
+
+IMPORTANT: When extracting bibliographic references, use the actual authors from available documents when possible.`;
+
+    // 7. Call AI with enriched filter prompt
     console.log('[extract-task-requirements] Calling AI for extraction...');
     
     let response;
