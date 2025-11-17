@@ -59,3 +59,27 @@ export async function forceAlignmentAnalysis(agentId: string) {
     }
   });
 }
+
+// Helper to force re-extraction with cache invalidation
+export async function forceReExtraction(agentId: string) {
+  // Step 1: Invalidate cache
+  await supabase.from('agent_task_requirements')
+    .update({ 
+      extracted_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      system_prompt_hash: 'force-reextract'
+    })
+    .eq('agent_id', agentId);
+  
+  // Step 2: Re-extract requirements
+  await supabase.functions.invoke('extract-task-requirements', {
+    body: { agentId }
+  });
+  
+  // Step 3: Re-analyze alignment
+  return supabase.functions.invoke('analyze-knowledge-alignment', {
+    body: { 
+      agentId,
+      forceReanalysis: true
+    }
+  });
+}
