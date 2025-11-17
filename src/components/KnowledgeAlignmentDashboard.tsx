@@ -111,8 +111,16 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   // Reset progress when analysis starts
   useEffect(() => {
     if (isAnalyzing) {
-      console.log('[KnowledgeAlignmentDashboard] Analisi iniziata, reset progress');
+      console.log('[KnowledgeAlignmentDashboard] 🔄 Analisi iniziata, reset completo');
       setProgressChunks(0);
+      setTotalChunksInAnalysis(0);
+      setAnalysisProgress(null);
+      // ✅ Reset anche removedChunks e conceptCoverage
+      setStats(prev => ({
+        ...prev,
+        removedChunks: 0,
+        conceptCoverage: 0,
+      }));
     }
   }, [isAnalyzing]);
 
@@ -240,19 +248,23 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       if (logs.length > 0) {
         const latest = logs[0];
         
-        // Use overall_alignment_percentage from the log with type safety
-        const dimensionBreakdown = latest.dimension_breakdown as any;
-        const realCoverage = dimensionBreakdown?.concept_coverage 
-          ? dimensionBreakdown.concept_coverage * 100
-          : latest.overall_alignment_percentage || 0;
+        // ✅ Se c'è un'analisi in corso, NON usare il vecchio log
+        // Usiamo il log solo se è completato (completed_at non null) o se non c'è analisi attiva
+        if (!isAnalyzing || latest.completed_at) {
+          // Use overall_alignment_percentage from the log with type safety
+          const dimensionBreakdown = latest.dimension_breakdown as any;
+          const realCoverage = dimensionBreakdown?.concept_coverage 
+            ? dimensionBreakdown.concept_coverage * 100
+            : latest.overall_alignment_percentage || 0;
 
-        // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
-        // rappresenta il batch size (1000), non il totale reale dei chunk
-        setStats(prev => ({
-          ...prev,
-          removedChunks: latest.chunks_auto_removed,
-          conceptCoverage: realCoverage,
-        }));
+          // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
+          // rappresenta il batch size (1000), non il totale reale dei chunk
+          setStats(prev => ({
+            ...prev,
+            removedChunks: latest.chunks_auto_removed,
+            conceptCoverage: realCoverage,
+          }));
+        }
       }
     }
 
