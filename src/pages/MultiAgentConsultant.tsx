@@ -661,6 +661,32 @@ export default function MultiAgentConsultant() {
     }
   };
 
+  /**
+   * 🔍 Verifica se un messaggio esiste già nel database
+   * Usato per distinguere tra failure reale e interruzione SSE
+   */
+  const checkMessageExists = async (messageId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from("agent_messages")
+        .select("id, content")
+        .eq("id", messageId)
+        .single();
+      
+      if (error) {
+        console.error("❌ Error checking message:", error);
+        return false;
+      }
+      
+      const exists = !!data?.content && data.content.length > 0;
+      console.log(`🔍 Message ${messageId} exists in DB:`, exists, `(${data?.content?.length || 0} chars)`);
+      return exists;
+    } catch (e) {
+      console.error("❌ Exception checking message:", e);
+      return false;
+    }
+  };
+
   const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forceConversationId?: string, forceAgent?: Agent) => {
     if (!session?.access_token) return;
     
@@ -738,7 +764,7 @@ export default function MultiAgentConsultant() {
         throw new Error(errorData.error || "Failed to get response");
       }
 
-      console.log("🚀 Starting SSE stream for message:", assistantId.slice(0, 8));
+      console.log("🌊 SSE stream started for assistant message:", assistantId);
       
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -885,6 +911,11 @@ export default function MultiAgentConsultant() {
               chunkCount++; // 🔍 Incrementa contatore chunk
               lastChunkTime = Date.now(); // 🔍 Aggiorna timestamp ultimo chunk
               
+              // ✅ Log first delta received
+              if (chunkCount === 1) {
+                console.log("✅ First delta received, stream is working");
+              }
+              
               // 🔍 Log più frequente per diagnosi (ogni 500 caratteri)
               if (accumulatedText.length % 500 === 0) {
                 console.log(`📊 [${new Date().toISOString()}] Accumulated ${accumulatedText.length} chars (chunk #${chunkCount})`);
@@ -926,7 +957,7 @@ export default function MultiAgentConsultant() {
               break;
               
             } else if (parsed.type === "complete") {
-              console.log("✅ Streaming complete");
+              console.log("✅ SSE stream completed successfully");
               clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
               
               // ✅ FLUSH FINALE: Cancella timeout pendente e forza update con testo completo
@@ -987,25 +1018,47 @@ export default function MultiAgentConsultant() {
         }
       }
     } catch (error: any) {
-      console.error("Error sending message:", error);
-      if (stallDetectionInterval) {
-        clearInterval(stallDetectionInterval); // 🔍 Cleanup in caso di errore
-      }
-      
-      // ❌ IMPORTANTE: Non rimuovere MAI il messaggio user (è già nel database)
-      // Rimuovi solo il placeholder assistant
-      setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-      
-      // 🔄 Ricarica la conversazione dal database per avere i dati corretti
-      if (conversationId) {
-        setTimeout(() => {
-          loadConversation(conversationId);
-        }, 500);
-      }
-      
-      toast.error("Errore durante l'invio del messaggio", {
-        description: error.message || "Riprova tra qualche secondo"
+      console.error("❌ SSE stream interrupted:", {
+        error: error.message,
+        assistantId,
+        conversationId
       });
+      
+      if (stallDetectionInterval) {
+        clearInterval(stallDetectionInterval);
+      }
+      
+      // 🔍 Verifica se il messaggio esiste già nel database
+      console.log("🔍 Checking if assistant message was saved despite streaming error...");
+      const messageExists = await checkMessageExists(assistantId);
+      
+      if (messageExists) {
+        // ✅ SILENT RECOVERY: Il messaggio esiste, recuperalo dal DB
+        console.log("✅ Message found in DB, performing silent recovery");
+        
+        toast.info("Recupero risposta in corso...", {
+          description: "La risposta è stata generata correttamente"
+        });
+        
+        if (conversationId) {
+          await loadConversation(conversationId);
+        }
+      } else {
+        // ❌ ERRORE REALE: Il messaggio NON esiste
+        console.error("❌ Message NOT found in DB, real error occurred");
+        
+        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+        
+        toast.error("Errore durante l'invio del messaggio", {
+          description: error.message || "Riprova tra qualche secondo"
+        });
+        
+        if (conversationId) {
+          setTimeout(() => {
+            loadConversation(conversationId);
+          }, 500);
+        }
+      }
     } finally {
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval); // 🔍 Cleanup garantito
