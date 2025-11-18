@@ -183,49 +183,37 @@ export const AlignmentPromptEditor = () => {
 
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const { data: currentPrompt } = await supabase
-        .from('alignment_agent_prompts')
-        .select('prompt_content, alignment_version')
-        .eq('is_active', true)
-        .eq('agent_type', 'general')
-        .maybeSingle();
-
-      if (!currentPrompt?.prompt_content) {
-        toast({
-          title: 'Errore',
-          description: 'Nessun prompt attivo trovato',
-          variant: 'destructive',
-        });
-        return;
-      }
       
-      // Save to ALL agent types (no agentType specified)
+      // Modalità "solo LLM": aggiorna SOLO il campo llm_model per tutti i tipi
+      // preservando il prompt_content unico di ciascun tipo
       const { data, error } = await supabase.functions.invoke('update-alignment-prompt', {
         body: {
-          newPromptContent: currentPrompt.prompt_content,
-          alignmentVersion: currentPrompt.alignment_version,
           llmModel: llmModel,
-          notes: `Aggiornamento globale LLM a ${llmModel}`,
           updatedBy: userData.user?.id,
-          // NO agentType → updates all 6 types
+          globalLlmUpdate: true, // Flag per modalità "solo LLM"
         },
       });
 
       if (error) throw error;
 
-      const typesUpdated = data.types_updated || 0;
+      const typesUpdated = data?.types_updated || 0;
+      
+      // Validazione critica: TUTTI e 6 i tipi devono essere aggiornati
+      if (typesUpdated !== 6) {
+        throw new Error(`Solo ${typesUpdated}/6 tipi aggiornati. Operazione incompleta.`);
+      }
       
       toast({
-        title: 'Successo ✅',
-        description: `Modello LLM aggiornato per tutti i ${typesUpdated} tipi di agente`,
+        title: '✅ LLM Globale Aggiornato',
+        description: `Modello ${llmModel} applicato a tutti e 6 i tipi di agente`,
       });
 
+      // Ricarica il prompt corrente per vedere il nuovo LLM
       await loadActivePrompt();
-      await loadHistory();
     } catch (error: any) {
       console.error('Global LLM save failed:', error);
       toast({
-        title: 'Errore',
+        title: '❌ Errore Sincronizzazione',
         description: error.message || 'Impossibile aggiornare il modello LLM',
         variant: 'destructive',
       });

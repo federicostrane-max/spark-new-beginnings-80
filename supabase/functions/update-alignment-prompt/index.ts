@@ -13,17 +13,61 @@ serve(async (req) => {
   }
 
   try {
-    const { newPromptContent, alignmentVersion, llmModel, notes, updatedBy, agentType } = await req.json();
+    const { newPromptContent, alignmentVersion, llmModel, notes, updatedBy, agentType, globalLlmUpdate } = await req.json();
 
     console.log('[update-alignment-prompt] Request:', { 
       updatedBy, 
       alignmentVersion,
       llmModel,
       promptLength: newPromptContent?.length,
-      agentType: agentType || 'ALL TYPES'
+      agentType: agentType || 'ALL TYPES',
+      globalLlmUpdate: globalLlmUpdate || false
     });
 
-    // Validate inputs
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // SPECIAL CASE: Global LLM Update Only
+    // When globalLlmUpdate=true, we ONLY update the llm_model field for all types
+    // This preserves each type's unique prompt_content
+    if (globalLlmUpdate && llmModel) {
+      const allAgentTypes = ['general', 'procedural', 'narrative', 'technical', 'research', 'domain-expert'];
+      
+      console.log('[update-alignment-prompt] Global LLM update mode - updating all types to:', llmModel);
+      
+      const updateResults = [];
+      for (const type of allAgentTypes) {
+        const { error: updateError } = await supabase
+          .from('alignment_agent_prompts')
+          .update({ llm_model: llmModel })
+          .eq('agent_type', type)
+          .eq('is_active', true);
+        
+        if (updateError) {
+          console.error(`[update-alignment-prompt] Failed to update ${type}:`, updateError);
+          throw new Error(`Failed to update ${type}: ${updateError.message}`);
+        }
+        
+        updateResults.push(type);
+        console.log(`[update-alignment-prompt] Updated ${type} to ${llmModel}`);
+      }
+      
+      return new Response(
+        JSON.stringify({
+          success: true,
+          types_updated: updateResults.length,
+          model: llmModel,
+          message: `Successfully updated LLM model to ${llmModel} for all ${updateResults.length} agent types`
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200
+        }
+      );
+    }
+
+    // NORMAL CASE: Validate prompt content for new version creation
     if (!newPromptContent) {
       throw new Error('Missing required field: newPromptContent');
     }
@@ -35,10 +79,6 @@ serve(async (req) => {
     if (missing.length > 0) {
       throw new Error(`Alignment prompt must contain placeholders: ${missing.join(', ')}`);
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Determine which agent types to update
     const agentTypes = agentType 
