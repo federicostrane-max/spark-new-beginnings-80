@@ -188,11 +188,13 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         console.log(`✅ Progress updated: ${chunksProcessed}/${totalChunks} (${((chunksProcessed / totalChunks) * 100).toFixed(1)}%)`);
         
         // ✅ NEW: Fetch scores già salvati per calcolare concept coverage in real-time
-        if (chunksProcessed > 0) {
+        if (chunksProcessed > 0 && analysisStartTime) {
           const { data: scores } = await supabase
             .from('knowledge_relevance_scores')
             .select('concept_coverage')
-            .eq('agent_id', agentId);
+            .eq('agent_id', agentId)
+            .gte('analyzed_at', analysisStartTime)
+            .not('concept_coverage', 'is', null);
           
           if (scores && scores.length > 0) {
             const avgConceptCoverage = scores.reduce((sum, s) => sum + (s.concept_coverage || 0), 0) / scores.length;
@@ -203,7 +205,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
               conceptCoverage: conceptCoveragePercent
             }));
             
-            console.log(`📊 Real-time concept coverage: ${conceptCoveragePercent}% (from ${scores.length} scores)`);
+            console.log(`📊 Real-time concept coverage: ${conceptCoveragePercent}% (from ${scores.length} scores) - current analysis only`);
           }
         }
       } else if (!hasSeenProgress) {
