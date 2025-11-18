@@ -849,7 +849,14 @@ async function finalizeAnalysis(
   const belowAutoRemove = allScores.filter((s: any) => s.final_relevance_score < removalConfig.auto_remove_threshold);
   const belowFlagThreshold = allScores.filter((s: any) => s.final_relevance_score >= removalConfig.auto_remove_threshold && s.final_relevance_score < removalConfig.flag_for_review_threshold);
 
-  console.log(`[analyze-knowledge-alignment] Statistics: avg=${avgScore.toFixed(3)}, auto_remove=${belowAutoRemove.length}, flagged=${belowFlagThreshold.length}`);
+  await logInfo(`📊 Statistics: avg=${avgScore.toFixed(3)}, threshold=${removalConfig.auto_remove_threshold}`, {
+    avgScore,
+    threshold: removalConfig.auto_remove_threshold,
+    belowThreshold: belowAutoRemove.length,
+    flaggedForReview: belowFlagThreshold.length,
+    totalScored: allScores.length
+  });
+  console.log(`[analyze-knowledge-alignment] 📊 Statistics: avg=${avgScore.toFixed(3)}, auto_remove=${belowAutoRemove.length} (threshold: ${removalConfig.auto_remove_threshold}), flagged=${belowFlagThreshold.length}`);
 
   // ✅ AUTO-REMOVAL LOGIC: Remove low-quality chunks
   let actuallyRemoved = 0;
