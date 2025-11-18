@@ -46,8 +46,15 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
       if (data) {
         setLastAnalysis(new Date(data.started_at));
         
-        // Consider completed if completed_at is set, regardless of chunk counts
-        setLastAnalysisStatus(data.completed_at ? 'completed' : 'incomplete');
+        // ✅ CRITICAL: Also check if there's a 'running' progress for this analysis
+        // If completed_at is set, force isAnalyzing to false even if progress says 'running'
+        const isActuallyCompleted = !!data.completed_at;
+        setLastAnalysisStatus(isActuallyCompleted ? 'completed' : 'incomplete');
+        
+        // ✅ NEW: If analysis is completed, set isAnalyzing to false
+        if (isActuallyCompleted) {
+          setIsAnalyzing(false);
+        }
         
         // Check cooldown
         const timeSinceLastAnalysis = Date.now() - new Date(data.started_at).getTime();
