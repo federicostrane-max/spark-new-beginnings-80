@@ -222,9 +222,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             .maybeSingle();
           
           if (completedLog?.completed_at) {
-            console.log('✅ Analysis is completed but progress status is still running. Forcing UI refresh.');
-            // Trigger a full data refresh to update all stats
-            await fetchData();
+            console.log('✅ Analysis completed detected. Data will refresh on next polling cycle.');
+            // Don't call fetchData() here - let periodic polling handle it to avoid infinite loop
           }
         }
       } else if (!hasSeenProgress) {
@@ -250,10 +249,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         if (log?.completed_at && progressChunks !== log.total_chunks_analyzed) {
           toast.success(`Analisi completata! ${log.total_chunks_analyzed} chunks analizzati.`);
           setProgressChunks(log.total_chunks_analyzed || 0);
-          
-          // ✅ FIX: Force refresh degli stats quando l'analisi si completa
-          console.log('🔄 [Dashboard] Analysis completed, forcing data refresh...');
-          fetchData();
+          console.log('✅ [Dashboard] Analysis completed, data will refresh on next polling cycle.');
+          // Don't call fetchData() here - periodic polling at line 261 will handle it
         }
       }
 
