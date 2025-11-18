@@ -188,7 +188,7 @@ export const AlignmentPromptEditor = () => {
       // preservando il prompt_content unico di ciascun tipo
       const { data, error } = await supabase.functions.invoke('update-alignment-prompt', {
         body: {
-          newLlmModel: llmModel, // ✅ Nome parametro corretto per edge function
+          llmModel: llmModel, // ✅ Parametro corretto per edge function (NON newLlmModel)
           updatedBy: userData.user?.id,
           globalLlmUpdate: true, // Flag per modalità "solo LLM"
         },
