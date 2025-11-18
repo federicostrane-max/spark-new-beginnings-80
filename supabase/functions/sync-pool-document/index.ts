@@ -54,8 +54,13 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  let documentId: string | undefined;
+  let agentId: string | undefined;
+
   try {
-    const { documentId, agentId }: SyncRequest = await req.json();
+    const body: SyncRequest = await req.json();
+    documentId = body.documentId;
+    agentId = body.agentId;
 
     console.log(`[sync-pool-document] Starting sync for document ${documentId} to agent ${agentId}`);
 
@@ -193,24 +198,42 @@ serve(async (req) => {
     if (sampleChunks && sampleChunks.length > 0) {
       console.log('[sync-pool-document] Document has chunks, fetching ALL for copy (including shared pool)...');
       
-      // Fetch ALL chunks for this document (from shared pool or any agent)
-      // This includes chunks with agent_id = NULL (shared pool) and chunks from other agents
-      const { data: allChunks, error: allChunksError } = await supabase
-        .from('agent_knowledge')
-        .select('document_name, content, category, summary, embedding')
-        .eq('pool_document_id', documentId)
-        .or('agent_id.is.null,agent_id.not.is.null') // Explicitly include all chunks
-        .limit(10000); // Safety limit
+      // Fetch ALL chunks for this document in batches to avoid timeout
+      const FETCH_BATCH_SIZE = 100;
+      let allChunks = [];
+      let offset = 0;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data: chunkBatch, error: batchError } = await supabase
+          .from('agent_knowledge')
+          .select('document_name, content, category, summary, embedding')
+          .eq('pool_document_id', documentId)
+          .or('agent_id.is.null,agent_id.not.is.null')
+          .range(offset, offset + FETCH_BATCH_SIZE - 1);
 
-      if (allChunksError) {
-        console.error('[sync-pool-document] Error fetching all chunks:', allChunksError);
-        throw allChunksError;
+        if (batchError) {
+          console.error('[sync-pool-document] Error fetching chunk batch:', batchError);
+          throw batchError;
+        }
+
+        if (!chunkBatch || chunkBatch.length === 0) {
+          hasMore = false;
+        } else {
+          allChunks.push(...chunkBatch);
+          offset += FETCH_BATCH_SIZE;
+          console.log(`[sync-pool-document] Fetched ${allChunks.length} chunks so far...`);
+          
+          if (chunkBatch.length < FETCH_BATCH_SIZE) {
+            hasMore = false;
+          }
+        }
       }
 
-      console.log(`[sync-pool-document] Found ${allChunks?.length || 0} total chunks to copy`);
+      console.log(`[sync-pool-document] Found ${allChunks.length} total chunks to copy`);
 
       // Copy ALL chunks and assign to agent
-      const chunksToInsert = (allChunks || []).map(chunk => ({
+      const chunksToInsert = allChunks.map(chunk => ({
         agent_id: agentId,
         document_name: chunk.document_name,
         content: chunk.content,
@@ -419,12 +442,9 @@ serve(async (req) => {
   } catch (error) {
     console.error('[sync-pool-document] Error:', error);
     
-    // Mark sync as failed (try to extract documentId and agentId from request)
-    try {
-      const requestClone = req.clone();
-      const { documentId, agentId } = await requestClone.json();
-      
-      if (documentId && agentId) {
+    // Mark sync as failed if we have the IDs
+    if (documentId && agentId) {
+      try {
         const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
         const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
         const supabase = createClient(supabaseUrl, supabaseKey);
@@ -437,9 +457,9 @@ serve(async (req) => {
           })
           .eq('agent_id', agentId)
           .eq('document_id', documentId);
+      } catch (updateError) {
+        console.error('[sync-pool-document] Failed to update sync_status to failed:', updateError);
       }
-    } catch (updateError) {
-      console.error('[sync-pool-document] Failed to update sync_status to failed:', updateError);
     }
     
     return new Response(JSON.stringify({ 
