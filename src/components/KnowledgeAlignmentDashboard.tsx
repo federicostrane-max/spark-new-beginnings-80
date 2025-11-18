@@ -886,13 +886,13 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
                     Analisi in corso: {analysisProgress.chunks_processed}/{analysisProgress.total_chunks} chunks
                   </span>
                   <span className="text-blue-600 dark:text-blue-400 font-bold">
-                    {analysisProgress.percentage}%
+                    {analysisProgress.percentage.toFixed(1)}%
                   </span>
                 </div>
                 <div className="w-full bg-blue-900/20 rounded-full h-2.5">
                   <div 
                     className="bg-blue-500 h-2.5 rounded-full transition-all duration-300"
-                    style={{ width: `${analysisProgress.percentage}%` }}
+                    style={{ width: `${analysisProgress.percentage.toFixed(1)}%` }}
                   />
                 </div>
               </div>
