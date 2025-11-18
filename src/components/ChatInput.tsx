@@ -60,18 +60,22 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     fetchAgents();
   }, []);
 
-  // Detect @agent mentions in input
+  // Detect @agent mentions in input (validate against active agents)
   useEffect(() => {
     const agentMentionRegex = /@([a-zA-Z0-9\-_]+)/g;
-    const matches = [];
+    const potentialSlugs: string[] = [];
     let match;
     
     while ((match = agentMentionRegex.exec(input)) !== null) {
-      matches.push(match[1]);
+      potentialSlugs.push(match[1]);
     }
     
-    setMentionedAgents(matches);
-  }, [input]);
+    // Filter ONLY slugs that match active agents (whitelist validation)
+    const validSlugs = new Set(availableAgents.map(a => a.slug));
+    const validMentions = potentialSlugs.filter(slug => validSlugs.has(slug));
+    
+    setMentionedAgents(validMentions);
+  }, [input, availableAgents]);
 
   // Detect @ trigger and show suggestions
   useEffect(() => {
