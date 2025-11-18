@@ -130,7 +130,7 @@ export const useKnowledgeAlignment = ({ agentId, enabled = true }: UseKnowledgeA
         const batchParams = { 
           agentId, 
           forceReanalysis: isFirstBatch, 
-          freshStart: isFirstBatch ? freshStart : false 
+          freshStart 
         };
         console.log(`[useKnowledgeAlignment] 📤 Calling analyze-knowledge-alignment with params:`, batchParams);
         
