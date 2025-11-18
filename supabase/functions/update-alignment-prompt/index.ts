@@ -56,13 +56,21 @@ serve(async (req) => {
     const nextVersionNumber = currentPrompt ? currentPrompt.version_number + 1 : 1;
     const nextAlignmentVersion = alignmentVersion || (currentPrompt?.alignment_version || 'v1');
 
-    console.log('[update-alignment-prompt] Creating version', nextVersionNumber);
+    console.log('[update-alignment-prompt] Creating version', nextVersionNumber, 'for agent type:', targetAgentType);
 
-    // Deactivate all prompts for this agent type
-    await supabase
+    // Deactivate all prompts for this agent type first
+    const { error: deactivateError } = await supabase
       .from('alignment_agent_prompts')
       .update({ is_active: false })
-      .eq('agent_type', targetAgentType);
+      .eq('agent_type', targetAgentType)
+      .eq('is_active', true);
+
+    if (deactivateError) {
+      console.error('[update-alignment-prompt] Deactivate error:', deactivateError);
+      throw new Error(`Failed to deactivate existing prompts: ${deactivateError.message}`);
+    }
+
+    console.log('[update-alignment-prompt] Deactivated existing prompts for', targetAgentType);
 
     // Insert new prompt version and activate it
     const { data: newPrompt, error: insertError } = await supabase
