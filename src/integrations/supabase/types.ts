@@ -220,6 +220,7 @@ export type Database = {
         Row: {
           agent_id: string | null
           category: string
+          chunking_metadata: Json | null
           content: string
           created_at: string | null
           document_name: string
@@ -235,6 +236,7 @@ export type Database = {
         Insert: {
           agent_id?: string | null
           category: string
+          chunking_metadata?: Json | null
           content: string
           created_at?: string | null
           document_name: string
@@ -250,6 +252,7 @@ export type Database = {
         Update: {
           agent_id?: string | null
           category?: string
+          chunking_metadata?: Json | null
           content?: string
           created_at?: string | null
           document_name?: string
@@ -1017,6 +1020,7 @@ export type Database = {
       knowledge_documents: {
         Row: {
           ai_summary: string | null
+          chunking_strategy: string | null
           complexity_level: string | null
           created_at: string | null
           extracted_authors: string[] | null
@@ -1045,6 +1049,7 @@ export type Database = {
         }
         Insert: {
           ai_summary?: string | null
+          chunking_strategy?: string | null
           complexity_level?: string | null
           created_at?: string | null
           extracted_authors?: string[] | null
@@ -1073,6 +1078,7 @@ export type Database = {
         }
         Update: {
           ai_summary?: string | null
+          chunking_strategy?: string | null
           complexity_level?: string | null
           created_at?: string | null
           extracted_authors?: string[] | null
