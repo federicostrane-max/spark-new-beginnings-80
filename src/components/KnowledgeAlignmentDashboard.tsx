@@ -263,25 +263,19 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
         const latest = logs[0];
         
         // ✅ FIX: Aggiorna SEMPRE gli stats se c'è un log completato
-        // Questo risolve il race condition dove isAnalyzing rimane true
         if (latest.completed_at) {
-          // Use overall_alignment_percentage from the log with type safety
+          // Use overall_alignment_percentage from the log
           const dimensionBreakdown = latest.dimension_breakdown as any;
           const realCoverage = dimensionBreakdown?.concept_coverage 
             ? dimensionBreakdown.concept_coverage * 100
             : latest.overall_alignment_percentage || 0;
 
-          // Non sovrascriviamo totalChunks perché latest.total_chunks_analyzed
-          // rappresenta il batch size (1000), non il totale reale dei chunk
           setStats(prev => ({
             ...prev,
-            removedChunks: latest.chunks_auto_removed,
             conceptCoverage: realCoverage,
           }));
           
-          // 🔍 DEBUG: Log stats update
           console.log('📊 [Dashboard] Stats updated from completed log:', {
-            removedChunks: latest.chunks_auto_removed,
             conceptCoverage: realCoverage,
             totalChunksAnalyzed: latest.total_chunks_analyzed,
             isAnalyzing,
@@ -290,7 +284,14 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       }
     }
 
-    // Fetch removed chunks
+    // ✅ FIX: Count REAL removed chunks from database (is_active = false)
+    const { count: removedCount } = await supabase
+      .from('agent_knowledge')
+      .select('id', { count: 'exact', head: true })
+      .eq('agent_id', agentId)
+      .eq('is_active', false);
+
+    // Fetch removed chunks details for UI
     const { data: removed } = await supabase
       .from('knowledge_removal_history')
       .select('*')
@@ -302,20 +303,22 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       setRemovedChunks(removed);
     }
 
-    // Fetch active chunks count
-    const { count } = await supabase
+    // ✅ FIX: Count REAL active chunks from database
+    const { count: activeCount } = await supabase
       .from('agent_knowledge')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('agent_id', agentId)
       .eq('is_active', true);
 
-    if (count !== null) {
-      setStats(prev => ({ ...prev, totalChunks: count }));
-      // Settiamo anche totalChunksInAnalysis per il calcolo del progresso durante l'analisi
-      setTotalChunksInAnalysis(count);
+    if (activeCount !== null) {
+      setStats(prev => ({
+        ...prev,
+        totalChunks: activeCount,
+        removedChunks: removedCount || 0,
+      }));
+      setTotalChunksInAnalysis(activeCount);
       
-      // 🔍 DEBUG: Log active chunks count
-      console.log(`📊 [Dashboard] Active chunks count: ${count}, removed: ${stats.removedChunks}`);
+      console.log(`📊 [Dashboard] Database counts - Active: ${activeCount}, Removed: ${removedCount}`);
     }
   };
 
