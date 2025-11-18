@@ -363,12 +363,15 @@ async function analyzeChunk(
     return score;
   };
   
+  // ✅ FIX: Handle typo in Claude's response (vocabular_alignment vs vocabulary_alignment)
+  const vocabularyScore = scores.vocabulary_alignment ?? scores.vocabular_alignment ?? 0;
+  
   const normalizedScores = {
-    semantic_relevance: normalize(scores.semantic_relevance, 'semantic_relevance'),
-    concept_coverage: normalize(scores.concept_coverage, 'concept_coverage'),
-    procedural_match: normalize(scores.procedural_match, 'procedural_match'),
-    vocabulary_alignment: normalize(scores.vocabulary_alignment, 'vocabulary_alignment'),
-    bibliographic_match: normalize(scores.bibliographic_match, 'bibliographic_match')
+    semantic_relevance: normalize(scores.semantic_relevance ?? 0, 'semantic_relevance'),
+    concept_coverage: normalize(scores.concept_coverage ?? 0, 'concept_coverage'),
+    procedural_match: normalize(scores.procedural_match ?? 0, 'procedural_match'),
+    vocabulary_alignment: normalize(vocabularyScore, 'vocabulary_alignment'),
+    bibliographic_match: normalize(scores.bibliographic_match ?? 0, 'bibliographic_match')
   };
   
   // 🔍 DEBUG: Log normalized scores
