@@ -3501,8 +3501,9 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             // Route to appropriate LLM provider
             if (llmProvider === 'deepseek') {
               // DeepSeek with direct streaming
+              const deepseekModel = agent.ai_model || 'deepseek-chat';
               console.log('🚀 ROUTING TO DEEPSEEK');
-              console.log(`   Model: deepseek-chat`);
+              console.log(`   Model: ${deepseekModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
               if (!DEEPSEEK_API_KEY) {
@@ -3521,7 +3522,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                  model: 'deepseek-chat',
+                  model: deepseekModel,
                   messages: deepseekMessages,
                   temperature: 0.7,
                   max_tokens: 4000,
