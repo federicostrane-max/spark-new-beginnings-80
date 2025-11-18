@@ -681,32 +681,40 @@ serve(async (req) => {
       console.log(`[analyze-knowledge-alignment] ✅ Successfully saved ${batchScores.length} scores to database`);
     }
 
-    // Update progress
+    // ✅ VALIDATION: Count real scores saved in database
     const { count: actualProcessedCount, error: countError } = await supabase
       .from('knowledge_relevance_scores')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
+      .eq('agent_id', agentId)
       .eq('requirement_id', requirements.id);
 
     if (countError) {
-      console.error('[analyze-knowledge-alignment] ❌ Failed to count processed chunks:', countError);
+      console.error(`[analyze-knowledge-alignment] Error counting scores:`, countError);
+      throw new Error(`Failed to count scores: ${countError.message}`);
     }
 
-    const totalProcessed = actualProcessedCount || 0;
-    const isComplete = totalProcessed >= chunks.length;
-    const newStatus = timeoutOccurred ? 'timeout' : (isComplete ? 'completed' : 'running');
+    const actualChunksProcessed = actualProcessedCount || 0;
+    
+    // ✅ DETAILED LOGGING for batch progress
+    await logger.info(`Batch ${batchNum + 1}/${totalBatches} completed`, {
+      batchScoresSaved: batchScores.length,
+      totalScoresInDB: actualChunksProcessed,
+      totalChunksToAnalyze: chunks.length,
+      progressPercentage: ((actualChunksProcessed / chunks.length) * 100).toFixed(1)
+    });
 
     console.log(`[analyze-knowledge-alignment] 📊 Batch ${batchNum + 1} results:`);
+    console.log(`  - Status: running`);
     console.log(`  - Chunks processed in this batch: ${batchScores.length}`);
-    console.log(`  - Total chunks processed so far: ${totalProcessed}/${chunks.length}`);
-    console.log(`  - Progress: ${((totalProcessed / chunks.length) * 100).toFixed(1)}%`);
-    console.log(`  - Status: ${newStatus}`);
+    console.log(`  - Total chunks processed so far: ${actualChunksProcessed}/${chunks.length}`);
+    console.log(`  - Progress: ${((actualChunksProcessed / chunks.length) * 100).toFixed(1)}%`);
 
     const { error: updateError } = await supabase
       .from('alignment_analysis_progress')
       .update({
-        chunks_processed: totalProcessed,
+        chunks_processed: actualChunksProcessed,
         current_batch: batchNum + 1,
-        status: newStatus,
+        status: 'running',
         updated_at: new Date().toISOString()
       })
       .eq('id', progressId);
@@ -715,19 +723,32 @@ serve(async (req) => {
       console.error(`[analyze-knowledge-alignment] ❌ Failed to update progress:`, updateError);
     }
 
-    // Finalize if complete
-    if (isComplete) {
-      console.log(`[analyze-knowledge-alignment] 🎉 All batches complete! Finalizing...`);
+    // ✅ PRE-FINALIZATION VALIDATION: Check if ALL chunks have been analyzed
+    const isLastBatch = (batchNum + 1) >= totalBatches;
+    if (isLastBatch) {
+      // ✅ CRITICAL: Verify integrity before finalizing
+      if (actualChunksProcessed !== chunks.length) {
+        await logger.error('Integrity check FAILED before finalization', {
+          actualScoresInDB: actualChunksProcessed,
+          expectedChunks: chunks.length,
+          missing: chunks.length - actualChunksProcessed
+        });
+        throw new Error(`Integrity check failed: ${actualChunksProcessed} scores vs ${chunks.length} chunks`);
+      }
+      
+      await logger.info('✅ Integrity check PASSED - All chunks analyzed, calling finalize');
+      console.log('[analyze-knowledge-alignment] 🏁 All batches completed, calling finalize...');
       await finalizeAnalysis(supabase, agentId, requirements.id, chunks.length, removalConfig, logger!);
     }
 
     // Calculate final processed count for response
     const { count: finalProcessedCount } = await supabase
       .from('knowledge_relevance_scores')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact', head: true })
       .eq('requirement_id', requirements.id);
 
     const actualProcessed = finalProcessedCount || 0;
+    const isComplete = actualProcessed >= chunks.length;
 
     return new Response(JSON.stringify({
       success: true,
@@ -863,6 +884,25 @@ async function finalizeAnalysis(
       }
       
       console.log(`[analyze-knowledge-alignment] 🎉 Successfully removed ${actuallyRemoved}/${belowAutoRemove.length} chunks`);
+      
+      // ✅ POST-REMOVAL INTEGRITY TEST
+      const { count: activeCount } = await supabase
+        .from('agent_knowledge')
+        .select('id', { count: 'exact', head: true })
+        .eq('agent_id', agentId)
+        .eq('is_active', true);
+
+      const { count: inactiveCount } = await supabase
+        .from('agent_knowledge')
+        .select('id', { count: 'exact', head: true })
+        .eq('agent_id', agentId)
+        .eq('is_active', false);
+
+      await logInfo(`Post-removal integrity check`, {
+        activeChunks: activeCount,
+        inactiveChunks: inactiveCount,
+        removedThisRun: actuallyRemoved
+      });
     }
   }
 
