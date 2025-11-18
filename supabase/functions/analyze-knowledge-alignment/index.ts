@@ -408,7 +408,11 @@ async function analyzeChunk(
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-  const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '', 
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { auth: { persistSession: false } }
+  );
   
   let logger: EdgeFunctionLogger | null = null;
 
@@ -887,7 +891,7 @@ async function finalizeAnalysis(
           const removalReason = `Auto-removed: relevance score ${(score.final_relevance_score * 100).toFixed(1)}% < ${(removalConfig.auto_remove_threshold * 100)}% threshold`;
           
           // 2. Archive to removal history
-          await supabase
+          const { error: historyError } = await supabase
             .from('knowledge_removal_history')
             .insert({
               chunk_id: score.chunk_id,
@@ -905,20 +909,39 @@ async function finalizeAnalysis(
               removed_at: new Date().toISOString()
             });
           
+          if (historyError) {
+            console.error(`[analyze-knowledge-alignment] ❌ Failed to archive chunk ${score.chunk_id} to history:`, historyError);
+            throw historyError;
+          }
+          
           // 3. Mark chunk as inactive in agent_knowledge
-          await supabase
+          const { error: updateError, count } = await supabase
             .from('agent_knowledge')
             .update({
               is_active: false,
               removed_at: new Date().toISOString(),
               removal_reason: removalReason
             })
-            .eq('id', score.chunk_id);
+            .eq('id', score.chunk_id)
+            .select('id', { count: 'exact', head: true });
           
+          if (updateError) {
+            console.error(`[analyze-knowledge-alignment] ❌ Failed to update chunk ${score.chunk_id}:`, updateError);
+            throw updateError;
+          }
+          
+          // Verify the update actually modified a record
+          if (count === 0) {
+            console.error(`[analyze-knowledge-alignment] ⚠️ UPDATE returned success but modified 0 rows for chunk ${score.chunk_id}`);
+            throw new Error(`No rows updated for chunk ${score.chunk_id}`);
+          }
+          
+          // Only increment counter after successful removal
           actuallyRemoved++;
           console.log(`[analyze-knowledge-alignment] ✅ Removed chunk ${score.chunk_id} (score: ${(score.final_relevance_score * 100).toFixed(1)}%)`);
         } catch (error) {
           console.error(`[analyze-knowledge-alignment] ❌ Error removing chunk ${score.chunk_id}:`, error);
+          // Continue with next chunk instead of breaking the entire process
         }
       }
       
