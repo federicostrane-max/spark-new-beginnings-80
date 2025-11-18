@@ -2106,16 +2106,36 @@ Deno.serve(async (req) => {
     // ============================================
     // DETERMINISTIC @TAG DETECTION SYSTEM
     // ============================================
+    
+    // Load all valid agent slugs for whitelist validation
+    const { data: activeAgents } = await supabase
+      .from('agents')
+      .select('slug')
+      .eq('active', true);
+    
+    const validAgentSlugs = new Set(activeAgents?.map(a => a.slug) || []);
+    console.log(`📋 [REQ-${requestId}] Loaded ${validAgentSlugs.size} valid agent slugs for @mention validation`);
+    
     const agentTagRegex = /@([a-zA-Z0-9\-_]+)/g;
-    const mentionedAgentSlugs: string[] = [];
+    const potentialSlugs: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = agentTagRegex.exec(message)) !== null) {
       if (match[1]) {
-        mentionedAgentSlugs.push(match[1]);
+        potentialSlugs.push(match[1]);
       }
     }
     
-    console.log(`🏷️ [REQ-${requestId}] Detected @tags:`, mentionedAgentSlugs);
+    // Filter ONLY slugs that correspond to active agents (whitelist)
+    const mentionedAgentSlugs = potentialSlugs.filter(slug => validAgentSlugs.has(slug));
+    
+    // Log ignored invalid mentions
+    const invalidSlugs = potentialSlugs.filter(slug => !validAgentSlugs.has(slug));
+    if (invalidSlugs.length > 0) {
+      console.log(`⚠️ [REQ-${requestId}] Ignored invalid @mentions: ${invalidSlugs.join(', ')}`);
+    }
+    if (mentionedAgentSlugs.length > 0) {
+      console.log(`🏷️ [REQ-${requestId}] Valid @mentions found: ${mentionedAgentSlugs.join(', ')}`);
+    }
     
     // Remove @tags from the message for processing
     const messageWithoutTags = message.replace(agentTagRegex, '').trim();
@@ -2179,17 +2199,9 @@ Deno.serve(async (req) => {
             .eq('active', true)
             .single();
           
+          // Safety check: slug passed whitelist validation, must exist
           if (targetAgentError || !targetAgent) {
-            console.error(`❌ [REQ-${requestId}] Agent @${targetSlug} not found`);
-            
-            // Insert system error message
-            await supabase
-              .from('agent_messages')
-              .insert({
-                conversation_id: conversation.id,
-                role: 'system',
-                content: `❌ Agente @${targetSlug} non trovato o non attivo.`
-              });
+            console.error(`🚨 [REQ-${requestId}] INTEGRITY ERROR: Agent @${targetSlug} passed whitelist but not found in DB`);
             continue;
           }
           
