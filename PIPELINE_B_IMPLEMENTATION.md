@@ -5,30 +5,36 @@
 
 ## 📊 Status Dashboard
 
-**Current Phase**: 🚧 Not Started
-**Progress**: 0/36 tasks completed (0%)
+**Current Phase**: 🚧 Milestone 1 - Infrastructure Setup
+**Progress**: 1/36 tasks completed (2.8%)
 **Estimated Total**: ~28-35 hours
-**Started**: [DATE]
-**Expected Completion**: [DATE + 10 days]
+**Started**: 2025-01-18
+**Expected Completion**: 2025-01-28
 
-**Active Milestone**: None
-**Last Updated**: [TIMESTAMP]
-**Last Context**: Initial setup
+**Active Milestone**: Milestone 1: Database + Nexla
+**Last Updated**: 2025-01-18 19:30:00
+**Last Context**: Completed Task 1.1 - Database Migration with auto-save system
 
 ---
 
 ## 🎯 Quick Resume Context
 
 **What I was doing**:
-- [Update this section before switching to Pipeline A work]
+- ✅ Completed Task 1.1: Database Migration (added chunking_strategy to knowledge_documents, chunking_metadata to agent_knowledge)
+- ✅ Implemented auto-save system in src/lib/pipelineBLogger.ts
+- Migration deployed successfully with new columns and index
 
 **Next Steps**:
-- [ ] Start with Milestone 1: Database + Nexla setup
+- [ ] Task 1.2: Nexla Microservice - Code Setup (FastAPI app with ai-chunking library)
+- [ ] Task 1.3: Deploy microservice to Railway
+- [ ] Task 1.4: Integrate Nexla endpoint into Supabase edge functions
 
 **Blockers**:
 - None currently
 
 **Recent Decisions**:
+- [2025-01-18 19:30] Using localStorage for Pipeline B state persistence (frontend)
+- [2025-01-18 19:30] Auto-save functions: pausePipelineB(), resumePipelineB(), completeTask()
 - Using dual-pipeline approach (A: existing, B: Landing AI + Nexla)
 - Implementing in feature branch `feature/pipeline-b`
 - Shadow mode testing before production rollout
@@ -44,23 +50,34 @@
 **Deployable**: ✅ Yes (independent of Pipeline A)
 
 #### Task 1.1: Database Migration
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: None
+**Time**: 1.5 hours | **Status**: ✅ Completed | **Depends on**: None | **Completed**: 2025-01-18 19:30
 
-- [ ] Create migration file `20250118000000_add_pipeline_b_support.sql`
-- [ ] Add `chunking_strategy` column to `knowledge_documents`
+- [x] Create migration file `20250118000000_add_pipeline_b_support.sql`
+- [x] Add `chunking_strategy` column to `knowledge_documents`
   ```sql
   ALTER TABLE knowledge_documents 
   ADD COLUMN chunking_strategy TEXT DEFAULT 'sliding_window' 
   CHECK (chunking_strategy IN ('sliding_window', 'landing_ai_nexla'));
   ```
-- [ ] Add `chunking_metadata` JSONB column to `agent_knowledge`
+- [x] Add `chunking_metadata` JSONB column to `agent_knowledge`
   ```sql
   ALTER TABLE agent_knowledge
-  ADD COLUMN chunking_metadata JSONB;
+  ADD COLUMN chunking_metadata JSONB DEFAULT '{}'::jsonb;
   ```
-- [ ] Create index `idx_knowledge_documents_chunking_strategy`
-- [ ] Test migration on staging (verify no breaking changes)
-- [ ] Deploy migration to production
+- [x] Create index `idx_knowledge_documents_chunking_strategy`
+- [x] Test migration on staging (verify no breaking changes)
+- [x] Deploy migration to production
+
+**Implementation Notes**:
+- Migration deployed successfully via supabase--migration tool
+- Added documentation comments to both columns
+- Index created for efficient filtering by chunking_strategy
+- Default value '{}' set for chunking_metadata JSONB column
+- Created auto-save system in `src/lib/pipelineBLogger.ts` with functions:
+  - `pausePipelineB()` - Save state when interrupting
+  - `resumePipelineB()` - Load state when continuing
+  - `completeTask()` - Mark tasks as done
+  - `addBlocker()`, `logDecision()` - Track issues and decisions
 
 **Verification**:
 ```sql
