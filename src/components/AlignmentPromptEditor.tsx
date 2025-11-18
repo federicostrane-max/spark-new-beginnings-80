@@ -40,10 +40,28 @@ export const AlignmentPromptEditor = () => {
   const [showHistory, setShowHistory] = useState(false);
   const { toast } = useToast();
 
+  // Load global LLM model only once on mount
+  useEffect(() => {
+    loadGlobalLlmModel();
+  }, []);
+
   useEffect(() => {
     loadActivePrompt();
     loadHistory();
   }, [selectedAgentType]);
+
+  const loadGlobalLlmModel = async () => {
+    const { data } = await supabase
+      .from('alignment_agent_prompts')
+      .select('llm_model')
+      .eq('is_active', true)
+      .eq('agent_type', 'general')
+      .maybeSingle();
+    
+    if (data?.llm_model) {
+      setLlmModel(data.llm_model);
+    }
+  };
 
   const loadActivePrompt = async () => {
     const { data, error } = await supabase
@@ -68,12 +86,12 @@ export const AlignmentPromptEditor = () => {
       setActivePrompt(data as AlignmentPrompt);
       setEditedContent(data.prompt_content);
       setAlignmentVersion(data.alignment_version || '');
-      setLlmModel(data.llm_model || 'google/gemini-2.5-flash');
+      // DO NOT update llmModel here - it's shared globally
     } else {
       setActivePrompt(null);
       setEditedContent('');
       setAlignmentVersion('1.0');
-      setLlmModel('google/gemini-2.5-flash');
+      // DO NOT reset llmModel here - it's shared globally
     }
     setLoading(false);
   };
@@ -201,6 +219,69 @@ export const AlignmentPromptEditor = () => {
           </p>
         </div>
       </div>
+
+      {/* Global LLM Model Selector */}
+      <Card className="p-4 bg-primary/5 border-primary/20">
+        <div className="flex items-start gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Label htmlFor="globalLlmModel" className="text-base font-semibold">
+                Modello LLM Globale
+              </Label>
+              <Badge variant="outline" className="gap-1">
+                <Info className="h-3 w-3" />
+                Condiviso tra tutti i tipi
+              </Badge>
+            </div>
+            <Select value={llmModel} onValueChange={setLlmModel}>
+              <SelectTrigger id="globalLlmModel" className="bg-background">
+                <SelectValue placeholder="Seleziona modello LLM" />
+              </SelectTrigger>
+              <SelectContent className="bg-background z-50">
+                <SelectItem value="google/gemini-2.5-flash">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Google Gemini 2.5 Flash</span>
+                    <span className="text-xs text-muted-foreground">Veloce ed economico • Bilanciato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-2.5-pro">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Google Gemini 2.5 Pro</span>
+                    <span className="text-xs text-muted-foreground">Massima qualità • Ragionamento avanzato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-2.5-flash-lite">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Google Gemini 2.5 Flash Lite</span>
+                    <span className="text-xs text-muted-foreground">Ultra veloce • Costi minimi</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5">
+                  <div className="flex flex-col">
+                    <span className="font-medium">OpenAI GPT-5</span>
+                    <span className="text-xs text-muted-foreground">Eccellenza • Multimodale</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5-mini">
+                  <div className="flex flex-col">
+                    <span className="font-medium">OpenAI GPT-5 Mini</span>
+                    <span className="text-xs text-muted-foreground">Ottimo rapporto qualità/prezzo</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="openai/gpt-5-nano">
+                  <div className="flex flex-col">
+                    <span className="font-medium">OpenAI GPT-5 Nano</span>
+                    <span className="text-xs text-muted-foreground">Velocità massima • Alto volume</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-2">
+              ℹ️ Questo modello verrà utilizzato per l'analisi di allineamento di tutti i 6 tipi di agente
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <Tabs value={selectedAgentType} onValueChange={(value) => setSelectedAgentType(value as AgentType)}>
         <TabsList className="grid grid-cols-6 w-full">
