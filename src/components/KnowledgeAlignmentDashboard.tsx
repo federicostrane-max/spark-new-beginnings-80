@@ -262,8 +262,8 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
       if (logs.length > 0) {
         const latest = logs[0];
         
-        // ✅ FIX: Aggiorna SEMPRE gli stats se c'è un log completato
-        if (latest.completed_at) {
+        // ✅ FIX: Aggiorna stats SOLO se l'analisi è completata E non c'è analisi in corso
+        if (latest.completed_at && !isAnalyzing) {
           // Use overall_alignment_percentage from the log
           const dimensionBreakdown = latest.dimension_breakdown as any;
           const realCoverage = dimensionBreakdown?.concept_coverage 
