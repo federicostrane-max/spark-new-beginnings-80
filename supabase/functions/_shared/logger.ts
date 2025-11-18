@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.78.0';
+import { createClient, SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
