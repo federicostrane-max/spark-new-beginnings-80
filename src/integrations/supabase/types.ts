@@ -616,15 +616,21 @@ export type Database = {
       }
       alignment_analysis_log: {
         Row: {
+          actual_chunks_scored: number | null
           agent_id: string | null
           analysis_config: Json | null
           chunks_auto_removed: number
           chunks_flagged_for_removal: number
+          chunks_kept: number | null
+          chunks_removed: number | null
           completed_at: string | null
           created_at: string | null
           dimension_breakdown: Json | null
           duration_ms: number | null
+          execution_id: string | null
           id: string
+          integrity_message: string | null
+          integrity_valid: boolean | null
           missing_critical_sources: Json | null
           overall_alignment_percentage: number | null
           prerequisite_check_passed: boolean
@@ -633,15 +639,21 @@ export type Database = {
           total_chunks_analyzed: number
         }
         Insert: {
+          actual_chunks_scored?: number | null
           agent_id?: string | null
           analysis_config?: Json | null
           chunks_auto_removed?: number
           chunks_flagged_for_removal?: number
+          chunks_kept?: number | null
+          chunks_removed?: number | null
           completed_at?: string | null
           created_at?: string | null
           dimension_breakdown?: Json | null
           duration_ms?: number | null
+          execution_id?: string | null
           id?: string
+          integrity_message?: string | null
+          integrity_valid?: boolean | null
           missing_critical_sources?: Json | null
           overall_alignment_percentage?: number | null
           prerequisite_check_passed: boolean
@@ -650,15 +662,21 @@ export type Database = {
           total_chunks_analyzed?: number
         }
         Update: {
+          actual_chunks_scored?: number | null
           agent_id?: string | null
           analysis_config?: Json | null
           chunks_auto_removed?: number
           chunks_flagged_for_removal?: number
+          chunks_kept?: number | null
+          chunks_removed?: number | null
           completed_at?: string | null
           created_at?: string | null
           dimension_breakdown?: Json | null
           duration_ms?: number | null
+          execution_id?: string | null
           id?: string
+          integrity_message?: string | null
+          integrity_valid?: boolean | null
           missing_critical_sources?: Json | null
           overall_alignment_percentage?: number | null
           prerequisite_check_passed?: boolean
@@ -789,6 +807,47 @@ export type Database = {
             columns: ["document_id"]
             isOneToOne: false
             referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      edge_function_execution_logs: {
+        Row: {
+          agent_id: string | null
+          created_at: string
+          execution_id: string
+          function_name: string
+          id: string
+          log_level: string
+          message: string
+          metadata: Json | null
+        }
+        Insert: {
+          agent_id?: string | null
+          created_at?: string
+          execution_id: string
+          function_name: string
+          id?: string
+          log_level: string
+          message: string
+          metadata?: Json | null
+        }
+        Update: {
+          agent_id?: string | null
+          created_at?: string
+          execution_id?: string
+          function_name?: string
+          id?: string
+          log_level?: string
+          message?: string
+          metadata?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "edge_function_execution_logs_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
         ]

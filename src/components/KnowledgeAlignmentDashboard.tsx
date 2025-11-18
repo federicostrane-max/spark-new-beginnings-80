@@ -8,11 +8,12 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw, Target, Undo2 } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, RotateCcw, Play, Shield, Loader2, AlertTriangle, Info, TrendingUp, TrendingDown, Clock, RefreshCw, Target, Undo2, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useKnowledgeAlignment } from '@/hooks/useKnowledgeAlignment';
 import { KNOWLEDGE_ALIGNMENT_CONFIG } from '@/config/knowledgeAlignmentConfig';
 import GapAnalysisView from './GapAnalysisView';
+import { EdgeFunctionLogsViewer } from './EdgeFunctionLogsViewer';
 
 interface KnowledgeAlignmentDashboardProps {
   agentId: string;
@@ -839,13 +840,17 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
 
       {/* Tabs */}
       <Tabs defaultValue="gaps" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="gaps">
             <Target className="mr-2 h-4 w-4" />
             Gap Mancanti
           </TabsTrigger>
           <TabsTrigger value="removed">Chunk Rimossi ({removedChunks.length})</TabsTrigger>
           <TabsTrigger value="history">Storico Analisi ({analysisLogs.length})</TabsTrigger>
+          <TabsTrigger value="logs">
+            <FileText className="mr-2 h-4 w-4" />
+            Execution Logs
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="gaps" className="space-y-4">
@@ -1070,6 +1075,16 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
               </Table>
             </Card>
           )}
+        </TabsContent>
+
+        {/* New Tab: Execution Logs */}
+        <TabsContent value="logs" className="space-y-4">
+          <EdgeFunctionLogsViewer 
+            agentId={agentId}
+            functionName="analyze-knowledge-alignment"
+            limit={150}
+            enableRealtime={true}
+          />
         </TabsContent>
       </Tabs>
     </div>
