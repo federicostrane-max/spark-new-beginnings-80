@@ -90,6 +90,11 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     removedChunks: 0,
     conceptCoverage: 0,
   });
+  
+  // ✅ NEW: Track if we've seen at least one valid progress record for current analysis
+  const [hasSeenProgress, setHasSeenProgress] = useState(false);
+  // ✅ NEW: Store timestamp when analysis starts to filter out old records
+  const [analysisStartTime, setAnalysisStartTime] = useState<string | null>(null);
 
   const { 
     isAnalyzing, 
@@ -120,7 +125,13 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   // Reset progress when analysis starts
   useEffect(() => {
     if (isAnalyzing) {
-      console.log('[KnowledgeAlignmentDashboard] 🔄 Analisi iniziata, reset completo');
+      const now = new Date().toISOString();
+      console.log('[KnowledgeAlignmentDashboard] 🔄 Analisi iniziata, reset completo', { startTime: now });
+      
+      // ✅ Set timestamp and reset tracking flags
+      setAnalysisStartTime(now);
+      setHasSeenProgress(false);
+      
       setProgressChunks(0);
       setTotalChunksInAnalysis(0);
       setAnalysisProgress(null);
@@ -136,22 +147,31 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
   // Poll for updates when analyzing - fetch progress from DB
   // Continue polling for 5 minutes after completion to catch final status
   useEffect(() => {
-    if (!isAnalyzing) return;
+    if (!isAnalyzing || !analysisStartTime) return;
 
     const interval = setInterval(async () => {
-      // ✅ First check for running progress
+      // ✅ CRITICAL: Only fetch progress records that started AFTER this analysis began
       const { data: progress, error: progressError } = await supabase
         .from('alignment_analysis_progress' as any)
-        .select('chunks_processed, total_chunks, status, updated_at')
+        .select('chunks_processed, total_chunks, status, updated_at, started_at')
         .eq('agent_id', agentId)
         .eq('status', 'running')
+        .gte('started_at', analysisStartTime)
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      console.log('📊 Progress polling:', progress);
+      console.log('📊 Progress polling:', { 
+        progress, 
+        hasSeenProgress, 
+        analysisStartTime,
+        recordStartedAt: (progress as any)?.started_at 
+      });
 
       if (progress && !progressError) {
+        // ✅ Mark that we've seen at least one valid progress record
+        setHasSeenProgress(true);
+        
         // Analysis is running - update progress
         const chunksProcessed = (progress as any).chunks_processed || 0;
         const totalChunks = (progress as any).total_chunks || 0;
@@ -166,14 +186,21 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             : 0
         });
         console.log(`✅ Progress updated: ${chunksProcessed}/${totalChunks} (${((chunksProcessed / totalChunks) * 100).toFixed(1)}%)`);
+      } else if (!hasSeenProgress) {
+        // ✅ CRITICAL FIX: If we haven't seen any progress yet, DO NOT fallback to old logs
+        // Show explicit 0 instead of old data
+        console.log('⏳ Waiting for first progress record from new analysis...');
+        setProgressChunks(0);
+        setTotalChunksInAnalysis(totalChunksInAnalysis || 0);
       } else {
-        // No running progress - check if completed
+        // ✅ Only check completed logs if we've already seen progress for this analysis
         const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         
         const { data: log } = await supabase
           .from('alignment_analysis_log')
-          .select('total_chunks_analyzed, completed_at')
+          .select('total_chunks_analyzed, completed_at, started_at')
           .eq('agent_id', agentId)
+          .gte('started_at', analysisStartTime)
           .or(`completed_at.is.null,completed_at.gte.${fiveMinutesAgo}`)
           .order('started_at', { ascending: false })
           .limit(1)
@@ -194,7 +221,7 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [isAnalyzing, agentId, progressChunks]);
+  }, [isAnalyzing, agentId, progressChunks, analysisStartTime, hasSeenProgress, totalChunksInAnalysis]);
 
   const [prerequisiteCheckPassed, setPrerequisiteCheckPassed] = useState(true);
 
