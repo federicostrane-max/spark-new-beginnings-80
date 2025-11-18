@@ -633,6 +633,39 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </p>
           </div>
 
+          {/* DeepSeek Model Selection */}
+          {llmProvider === 'deepseek' && (
+            <div>
+              <Label htmlFor="aiModel">DeepSeek Model *</Label>
+              <Select 
+                value={aiModel || 'deepseek-reasoner'} 
+                onValueChange={setAiModel}
+                disabled={loading}
+              >
+                <SelectTrigger id="aiModel">
+                  <SelectValue placeholder="Select DeepSeek model" />
+                </SelectTrigger>
+                <SelectContent className="bg-background z-50">
+                  <SelectItem value="deepseek-reasoner">
+                    <div className="flex flex-col">
+                      <span className="font-medium">DeepSeek Reasoner</span>
+                      <span className="text-xs text-muted-foreground">Reasoning profondo con Chain-of-Thought esplicito • Migliore per analisi complesse</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="deepseek-chat">
+                    <div className="flex flex-col">
+                      <span className="font-medium">DeepSeek Chat</span>
+                      <span className="text-xs text-muted-foreground">Conversazione veloce • Economico</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                Reasoner include &lt;think&gt; tags per mostrare il ragionamento step-by-step
+              </p>
+            </div>
+          )}
+
           {/* OpenRouter Model Selection */}
           {llmProvider === 'openrouter' && (
             <div>
