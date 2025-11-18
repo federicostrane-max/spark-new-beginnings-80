@@ -4,6 +4,7 @@ import {
   AGENT_TYPE_WEIGHTS,
   type ScoringWeights 
 } from '../_shared/agentWeights.ts';
+import { createLogger, type EdgeFunctionLogger } from '../_shared/logger.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -405,29 +406,35 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   const supabase = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
+  
+  let logger: EdgeFunctionLogger | null = null;
 
   try {
     const requestBody = await req.json();
     const { agentId, forceReanalysis = false, freshStart = false } = requestBody;
     
-    console.log(`[analyze-knowledge-alignment] 📨 Request received:`);
-    console.log(`  - agentId: ${agentId}`);
-    console.log(`  - forceReanalysis: ${forceReanalysis}`);
-    console.log(`  - freshStart: ${freshStart}`);
-    console.log(`  - Full body:`, JSON.stringify(requestBody, null, 2));
+    // Create persistent logger
+    logger = createLogger('analyze-knowledge-alignment', agentId);
     
-    // ✅ OPZIONE A: Fresh Start - Ripristina tutti i chunk prima dell'analisi
+    await logger.info('Request received', {
+      agentId,
+      forceReanalysis,
+      freshStart,
+      requestBody
+    });
+    
+    // ✅ FRESH START: Restore all removed chunks before analysis
     if (freshStart) {
-      console.log('[analyze-knowledge-alignment] 🔄 FRESH START REQUESTED: Ripristino tutti i chunk rimossi...');
+      await logger!.info('Fresh Start requested - restoring all removed chunks');
       
-      // First, count how many chunks are currently inactive
+      // Count inactive chunks before restoration
       const { count: inactiveCount } = await supabase
         .from('agent_knowledge')
         .select('id', { count: 'exact', head: true })
         .eq('agent_id', agentId)
         .eq('is_active', false);
       
-      console.log(`[analyze-knowledge-alignment] Found ${inactiveCount || 0} inactive chunks to restore`);
+      await logger!.info(`Found ${inactiveCount || 0} inactive chunks to restore`);
       
       const { data: restoredChunks, error: restoreError } = await supabase
         .from('agent_knowledge')
@@ -441,18 +448,21 @@ serve(async (req) => {
         .select('id');
       
       if (restoreError) {
-        console.error('[analyze-knowledge-alignment] ❌ Errore ripristino chunk:', restoreError);
+        await logger!.error('Failed to restore chunks', { error: restoreError });
         throw new Error(`Failed to restore chunks: ${restoreError.message}`);
-      } else {
-        const restoredCount = restoredChunks?.length || 0;
-        console.log(`[analyze-knowledge-alignment] ✅ Successfully restored ${restoredCount} chunks for fresh start`);
-        
-        if (restoredCount === 0 && (inactiveCount || 0) > 0) {
-          console.warn('[analyze-knowledge-alignment] ⚠️ WARNING: Expected to restore chunks but none were restored!');
-        }
+      }
+      
+      const restoredCount = restoredChunks?.length || 0;
+      await logger!.info(`Successfully restored ${restoredCount} chunks for fresh start`);
+      
+      if (restoredCount === 0 && (inactiveCount || 0) > 0) {
+        await logger!.warn('Expected to restore chunks but none were restored', {
+          inactiveCount,
+          restoredCount
+        });
       }
     } else {
-      console.log('[analyze-knowledge-alignment] Standard analysis (no fresh start)');
+      await logger!.info('Standard analysis (no fresh start)');
     }
 
     const { data: agent, error: agentError } = await supabase.from('agents').select('id, name, system_prompt').eq('id', agentId).single();
@@ -708,7 +718,7 @@ serve(async (req) => {
     // Finalize if complete
     if (isComplete) {
       console.log(`[analyze-knowledge-alignment] 🎉 All batches complete! Finalizing...`);
-      await finalizeAnalysis(supabase, agentId, requirements.id, chunks.length, removalConfig);
+      await finalizeAnalysis(supabase, agentId, requirements.id, chunks.length, removalConfig, logger!);
     }
 
     // Calculate final processed count for response
@@ -736,13 +746,49 @@ serve(async (req) => {
   }
 });
 
-async function finalizeAnalysis(supabase: any, agentId: string, requirementId: string, totalChunks: number, removalConfig: RemovalConfig) {
-  console.log('[analyze-knowledge-alignment] Finalizing analysis...');
+async function finalizeAnalysis(
+  supabase: any, 
+  agentId: string, 
+  requirementId: string, 
+  totalChunks: number, 
+  removalConfig: RemovalConfig,
+  logger?: EdgeFunctionLogger
+) {
+  const logInfo = logger ? logger.info.bind(logger) : async (msg: string, meta?: any) => console.log(msg, meta);
+  const logWarn = logger ? logger.warn.bind(logger) : async (msg: string, meta?: any) => console.warn(msg, meta);
+  const logError = logger ? logger.error.bind(logger) : async (msg: string, meta?: any) => console.error(msg, meta);
 
-  const { data: allScores } = await supabase.from('knowledge_relevance_scores').select('*').eq('agent_id', agentId).eq('requirement_id', requirementId);
+  await logInfo('Starting finalization');
+
+  const { data: allScores } = await supabase
+    .from('knowledge_relevance_scores')
+    .select('*')
+    .eq('agent_id', agentId)
+    .eq('requirement_id', requirementId);
+  
   if (!allScores || allScores.length === 0) {
-    console.error('[analyze-knowledge-alignment] ❌ No scores found for finalization');
+    await logError('No scores found for finalization');
     return;
+  }
+
+  // ✅ VALIDATION: Check integrity
+  const actualScored = allScores.length;
+  const discrepancy = Math.abs(totalChunks - actualScored);
+  const integrityValid = discrepancy <= 5; // Allow 5 chunks margin
+  
+  await logInfo(`Integrity check: ${actualScored}/${totalChunks} chunks scored`, {
+    actualScored,
+    totalChunks,
+    discrepancy,
+    integrityValid
+  });
+
+  if (!integrityValid) {
+    await logWarn(`Integrity issue detected: ${discrepancy} chunks missing`, {
+      expected: totalChunks,
+      actual: actualScored,
+      missing: totalChunks - actualScored
+    });
   }
 
   const scores = allScores.map((s: any) => s.final_relevance_score);
@@ -820,7 +866,7 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
     }
   }
 
-  // ✅ FIX: Recupera il started_at reale dal progress per evitare timestamp anomali
+  // Get start time from progress for accurate duration
   const { data: progress } = await supabase
     .from('alignment_analysis_progress')
     .select('started_at')
@@ -831,8 +877,9 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
   const completedAt = new Date().toISOString();
   const duration = Date.now() - new Date(startedAt).getTime();
   
-  console.log(`[analyze-knowledge-alignment] ⏱️ Analysis duration: ${duration}ms (${(duration / 1000).toFixed(1)}s)`);
+  await logInfo(`Analysis duration: ${duration}ms (${(duration / 1000).toFixed(1)}s)`);
 
+  // Save analysis log with integrity data
   await supabase.from('alignment_analysis_log').insert({
     agent_id: agentId,
     requirement_id: requirementId,
@@ -840,11 +887,24 @@ async function finalizeAnalysis(supabase: any, agentId: string, requirementId: s
     completed_at: completedAt,
     duration_ms: duration,
     total_chunks_analyzed: totalChunks,
+    actual_chunks_scored: actualScored,
     chunks_flagged_for_removal: belowFlagThreshold.length,
     chunks_auto_removed: actuallyRemoved,
+    chunks_removed: actuallyRemoved,
+    chunks_kept: actualScored - actuallyRemoved,
     overall_alignment_percentage: avgScore * 100,
-    prerequisite_check_passed: true
+    prerequisite_check_passed: true,
+    integrity_valid: integrityValid,
+    integrity_message: integrityValid 
+      ? null 
+      : `Missing ${discrepancy} chunks: expected ${totalChunks}, scored ${actualScored}`,
+    execution_id: logger?.executionId || null
   });
 
-  console.log('[analyze-knowledge-alignment] ✅ Analysis finalized');
+  await logInfo('Analysis finalized successfully', {
+    totalChunks,
+    actualScored,
+    removed: actuallyRemoved,
+    integrityValid
+  });
 }
