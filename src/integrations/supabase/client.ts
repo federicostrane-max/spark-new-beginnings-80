@@ -62,7 +62,17 @@ export async function forceAlignmentAnalysis(agentId: string) {
 
 // Helper to force re-extraction with cache invalidation
 export async function forceReExtraction(agentId: string) {
-  // Step 1: Invalidate cache
+  // Step 1: Restore all removed chunks FIRST (fresh start)
+  await supabase.from('agent_knowledge')
+    .update({ 
+      is_active: true,
+      removal_reason: null,
+      removed_at: null
+    })
+    .eq('agent_id', agentId)
+    .eq('is_active', false);
+  
+  // Step 2: Invalidate cache
   await supabase.from('agent_task_requirements')
     .update({ 
       extracted_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
@@ -70,12 +80,12 @@ export async function forceReExtraction(agentId: string) {
     })
     .eq('agent_id', agentId);
   
-  // Step 2: Re-extract requirements
+  // Step 3: Re-extract requirements
   await supabase.functions.invoke('extract-task-requirements', {
     body: { agentId }
   });
   
-  // Step 3: Re-analyze alignment
+  // Step 4: Re-analyze alignment with forceReanalysis flag
   return supabase.functions.invoke('analyze-knowledge-alignment', {
     body: { 
       agentId,
