@@ -19,7 +19,8 @@ serve(async (req) => {
       updatedBy, 
       alignmentVersion,
       llmModel,
-      promptLength: newPromptContent?.length 
+      promptLength: newPromptContent?.length,
+      agentType: agentType || 'ALL TYPES'
     });
 
     // Validate inputs
@@ -39,69 +40,87 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get current active prompt for this specific agent type
-    const targetAgentType = agentType || 'general';
-    const { data: currentPrompt, error: currentError } = await supabase
-      .from('alignment_agent_prompts')
-      .select('*')
-      .eq('is_active', true)
-      .eq('agent_type', targetAgentType)
-      .maybeSingle();
+    // Determine which agent types to update
+    const agentTypes = agentType 
+      ? [agentType] 
+      : ['general', 'procedural', 'narrative', 'technical', 'research', 'domain-expert'];
 
-    if (currentError && currentError.code !== 'PGRST116') {
-      console.error('[update-alignment-prompt] Error fetching current prompt:', currentError);
-      throw new Error(`Failed to fetch current prompt: ${currentError.message}`);
-    }
+    console.log('[update-alignment-prompt] Updating agent types:', agentTypes);
 
-    const nextVersionNumber = currentPrompt ? currentPrompt.version_number + 1 : 1;
-    const nextAlignmentVersion = alignmentVersion || (currentPrompt?.alignment_version || 'v1');
+    const results = [];
 
-    console.log('[update-alignment-prompt] Creating version', nextVersionNumber, 'for agent type:', targetAgentType);
+    // Update each agent type
+    for (const type of agentTypes) {
+      console.log(`[update-alignment-prompt] Processing type: ${type}`);
 
-    // Deactivate all prompts for this agent type first
-    const { error: deactivateError } = await supabase
-      .from('alignment_agent_prompts')
-      .update({ is_active: false })
-      .eq('agent_type', targetAgentType)
-      .eq('is_active', true);
+      // Get current active prompt for this type
+      const { data: currentPrompt, error: currentError } = await supabase
+        .from('alignment_agent_prompts')
+        .select('*')
+        .eq('is_active', true)
+        .eq('agent_type', type)
+        .maybeSingle();
 
-    if (deactivateError) {
-      console.error('[update-alignment-prompt] Deactivate error:', deactivateError);
-      throw new Error(`Failed to deactivate existing prompts: ${deactivateError.message}`);
-    }
+      if (currentError && currentError.code !== 'PGRST116') {
+        console.error(`[update-alignment-prompt] Error fetching prompt for ${type}:`, currentError);
+        throw new Error(`Failed to fetch current prompt for ${type}: ${currentError.message}`);
+      }
 
-    console.log('[update-alignment-prompt] Deactivated existing prompts for', targetAgentType);
+      const nextVersionNumber = currentPrompt ? currentPrompt.version_number + 1 : 1;
+      const nextAlignmentVersion = alignmentVersion || (currentPrompt?.alignment_version || 'v1');
 
-    // Insert new prompt version and activate it
-    const { data: newPrompt, error: insertError } = await supabase
-      .from('alignment_agent_prompts')
-      .insert({
-        agent_type: targetAgentType,
+      // Deactivate all prompts for this agent type
+      const { error: deactivateError } = await supabase
+        .from('alignment_agent_prompts')
+        .update({ is_active: false })
+        .eq('agent_type', type)
+        .eq('is_active', true);
+
+      if (deactivateError) {
+        console.error(`[update-alignment-prompt] Deactivate error for ${type}:`, deactivateError);
+        throw new Error(`Failed to deactivate prompts for ${type}: ${deactivateError.message}`);
+      }
+
+      console.log(`[update-alignment-prompt] Deactivated existing prompts for ${type}`);
+
+      // Insert new prompt version
+      const { data: newPrompt, error: insertError } = await supabase
+        .from('alignment_agent_prompts')
+        .insert({
+          agent_type: type,
+          version_number: nextVersionNumber,
+          prompt_content: newPromptContent,
+          is_active: true,
+          alignment_version: nextAlignmentVersion,
+          llm_model: llmModel || 'google/gemini-2.5-flash',
+          notes: notes || null,
+          created_by: updatedBy || null,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error(`[update-alignment-prompt] Insert error for ${type}:`, insertError);
+        throw new Error(`Failed to save prompt for ${type}: ${insertError.message}`);
+      }
+
+      console.log(`[update-alignment-prompt] Successfully created version ${nextVersionNumber} for ${type}`);
+      
+      results.push({
+        agent_type: type,
         version_number: nextVersionNumber,
-        prompt_content: newPromptContent,
-        is_active: true,
-        alignment_version: nextAlignmentVersion,
-        llm_model: llmModel || 'google/gemini-2.5-flash',
-        notes: notes || null,
-        created_by: updatedBy || null,
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('[update-alignment-prompt] Insert error:', insertError);
-      throw new Error(`Failed to save new prompt: ${insertError.message}`);
+        prompt_id: newPrompt.id
+      });
     }
-
-    console.log('[update-alignment-prompt] Successfully created version', nextVersionNumber);
 
     return new Response(
       JSON.stringify({
         success: true,
-        prompt_id: newPrompt.id,
-        version_number: nextVersionNumber,
-        alignment_version: nextAlignmentVersion,
-        message: `Successfully created alignment prompt version ${nextVersionNumber}`
+        results,
+        types_updated: agentTypes.length,
+        message: agentTypes.length === 1 
+          ? `Successfully created alignment prompt version for ${agentTypes[0]}`
+          : `Successfully updated alignment prompts for all ${agentTypes.length} agent types`
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

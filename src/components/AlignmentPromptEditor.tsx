@@ -140,6 +140,7 @@ export const AlignmentPromptEditor = () => {
     try {
       const { data: userData } = await supabase.auth.getUser();
       
+      // Save for current tab only (agentType specified)
       const { data, error } = await supabase.functions.invoke('update-alignment-prompt', {
         body: {
           newPromptContent: editedContent,
@@ -147,14 +148,19 @@ export const AlignmentPromptEditor = () => {
           llmModel: llmModel,
           notes: notes || undefined,
           updatedBy: userData.user?.id,
+          agentType: selectedAgentType, // Only update current tab
         },
       });
 
       if (error) throw error;
 
+      const typesUpdated = data.types_updated || 1;
+      
       toast({
         title: 'Successo',
-        description: `Nuova versione ${data.version_number} creata e attivata`,
+        description: typesUpdated === 1 
+          ? `Nuova versione creata per ${selectedAgentType}`
+          : `Aggiornati ${typesUpdated} tipi di agente`,
       });
 
       await loadActivePrompt();
@@ -165,6 +171,62 @@ export const AlignmentPromptEditor = () => {
       toast({
         title: 'Errore',
         description: error.message || 'Impossibile salvare il prompt',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveGlobalLlm = async () => {
+    setSaving(true);
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const { data: currentPrompt } = await supabase
+        .from('alignment_agent_prompts')
+        .select('prompt_content, alignment_version')
+        .eq('is_active', true)
+        .eq('agent_type', 'general')
+        .maybeSingle();
+
+      if (!currentPrompt?.prompt_content) {
+        toast({
+          title: 'Errore',
+          description: 'Nessun prompt attivo trovato',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      // Save to ALL agent types (no agentType specified)
+      const { data, error } = await supabase.functions.invoke('update-alignment-prompt', {
+        body: {
+          newPromptContent: currentPrompt.prompt_content,
+          alignmentVersion: currentPrompt.alignment_version,
+          llmModel: llmModel,
+          notes: `Aggiornamento globale LLM a ${llmModel}`,
+          updatedBy: userData.user?.id,
+          // NO agentType → updates all 6 types
+        },
+      });
+
+      if (error) throw error;
+
+      const typesUpdated = data.types_updated || 0;
+      
+      toast({
+        title: 'Successo ✅',
+        description: `Modello LLM aggiornato per tutti i ${typesUpdated} tipi di agente`,
+      });
+
+      await loadActivePrompt();
+      await loadHistory();
+    } catch (error: any) {
+      console.error('Global LLM save failed:', error);
+      toast({
+        title: 'Errore',
+        description: error.message || 'Impossibile aggiornare il modello LLM',
         variant: 'destructive',
       });
     } finally {
@@ -274,12 +336,36 @@ export const AlignmentPromptEditor = () => {
                     <span className="text-xs text-muted-foreground">Velocità massima • Alto volume</span>
                   </div>
                 </SelectItem>
+                <SelectItem value="claude-sonnet-4-5">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Claude Sonnet 4.5</span>
+                    <span className="text-xs text-muted-foreground">Massima intelligenza • Ragionamento superiore</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground mt-2">
               ℹ️ Questo modello verrà utilizzato per l'analisi di allineamento di tutti i 6 tipi di agente
             </p>
           </div>
+          <Button 
+            onClick={handleSaveGlobalLlm} 
+            disabled={saving}
+            variant="default"
+            className="shrink-0"
+          >
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Sincronizzando...
+              </>
+            ) : (
+              <>
+                <Save className="mr-2 h-4 w-4" />
+                Applica a Tutti
+              </>
+            )}
+          </Button>
         </div>
       </Card>
 
