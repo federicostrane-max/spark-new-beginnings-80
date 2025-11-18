@@ -6,13 +6,14 @@
 ## 📊 Status Dashboard
 
 **Current Phase**: 🚧 Milestone 1 - Infrastructure Setup
-**Progress**: 1/36 tasks completed (2.8%)
-**Estimated Total**: ~28-35 hours
+**Progress**: 1/38 tasks completed (2.6%)
+**Estimated Total**: ~32-40 hours
 **Started**: 2025-01-18
-**Expected Completion**: 2025-01-28
+**Expected Completion**: 2025-01-30
+⚠️ **Critical requirement added**: Validated dataset integration for ML-driven pipeline selection
 
 **Active Milestone**: Milestone 1: Database + Nexla
-**Last Updated**: 2025-01-18 19:30:00
+**Last Updated**: 2025-01-18 19:45:00
 **Last Context**: Completed Task 1.1 - Database Migration with auto-save system
 
 ---
@@ -33,11 +34,98 @@
 - None currently
 
 **Recent Decisions**:
+- [2025-01-18 19:45] **CRITICAL**: Sistema di testing automatizzato con dataset validato richiesto per decision-making data-driven Pipeline A vs B
 - [2025-01-18 19:30] Using localStorage for Pipeline B state persistence (frontend)
 - [2025-01-18 19:30] Auto-save functions: pausePipelineB(), resumePipelineB(), completeTask()
 - Using dual-pipeline approach (A: existing, B: Landing AI + Nexla)
 - Implementing in feature branch `feature/pipeline-b`
 - Shadow mode testing before production rollout
+
+---
+
+## ⚠️ REQUISITO CRITICO: Sistema di Testing Automatizzato
+
+### Obiettivo
+Creare un sistema di testing automatizzato basato su un **dataset già validato e accessibile via API**, progettato per:
+1. **Valutare oggettivamente** le prestazioni di parsing e chunking delle Pipeline A e B
+2. **Addestrare automaticamente** il sistema a riconoscere i tipi di documenti in ingresso
+3. **Decidere automaticamente** quando usare Pipeline A (economica) vs Pipeline B (sofisticata)
+
+### Dataset di Test
+Il dataset deve essere:
+- **Accessibile via API** (endpoint dedicato per il testing)
+- **Validato da esperti** (ground truth verificata)
+- **Strutturato per categoria**:
+  - 📜 Documenti storici (testo denso, riferimenti bibliografici)
+  - 🔧 Documenti tecnici (procedure, istruzioni operative)
+  - 📊 Documenti con tabelle complesse
+  - 📈 Documenti con grafici e immagini
+- **Completo di**:
+  - Domande di verifica (Q&A pairs)
+  - Risposte corrette attese
+  - Metadata di classificazione (complessità, tipo layout, presenza tabelle)
+  - Output ideali (chunk boundaries, extracted entities)
+
+### Metriche di Valutazione
+Per ogni documento testato:
+- **Qualità del chunking**: Boundaries semantici preservati? Score 0-100
+- **Preservazione semantica**: Le risposte alle domande sono corrette? Accuracy %
+- **Precisione estrazione**: Tabelle, citazioni, entità estratte correttamente? Precision/Recall
+- **Performance**: Tempo di processing, costo per documento
+
+### Sistema di Addestramento
+Il sistema deve apprendere a classificare i documenti in ingresso per scegliere la pipeline ottimale:
+
+**Input Features** (caratteristiche del documento):
+- Presenza di tabelle (booleano + count)
+- Complessità layout (simple/complex, score 0-100)
+- Lunghezza documento (page count, text length)
+- Presenza di immagini/grafici
+- Densità di riferimenti bibliografici
+
+**Output** (raccomandazione):
+- `use_pipeline_a`: Documento semplice, priorità costo/velocità
+- `use_pipeline_b`: Documento complesso, priorità accuratezza
+- Confidence score della raccomandazione
+
+**Decision Factors**:
+```
+IF has_tables > 3 OR layout_complexity > 70:
+  → Raccomanda Pipeline B
+ELSE IF page_count < 10 AND layout_complexity < 40:
+  → Raccomanda Pipeline A
+ELSE:
+  → Valuta cost/benefit based on historical accuracy data
+```
+
+### Fasi di Implementazione
+
+#### Fase 1: Dataset Integration + Automated Testing (Milestone 4)
+- [ ] Integrare API endpoint del dataset di test
+- [ ] Implementare framework di valutazione Q&A
+- [ ] Creare test suites per categoria (storico, tecnico, tabelle, grafici)
+- [ ] Generare report di performance per tipo documento
+- [ ] Baseline metrics per Pipeline A
+- [ ] Comparative metrics Pipeline A vs B
+
+#### Fase 2: Classification Model Training (Milestone 5)
+- [ ] Raccogliere features da documenti processati
+- [ ] Etichettare documenti con pipeline ottimale (based on test results)
+- [ ] Addestrare modello di classificazione (decision tree o logistic regression)
+- [ ] Validare accuratezza predizioni su test set
+- [ ] Deploy modello come edge function `classify-document`
+
+#### Fase 3: Auto-Routing (Post-MVP)
+- [ ] Integrare `classify-document` in upload flow
+- [ ] Override manuale disponibile in UI
+- [ ] Monitoring delle scelte automatiche vs manuali
+- [ ] Retraining periodico basato su feedback
+
+### Benefici Attesi
+- ✅ **Decision-making oggettivo**: Non più "gut feeling", ma dati verificati
+- ✅ **Ottimizzazione costi**: Pipeline A per documenti semplici (90% dei casi?)
+- ✅ **Massima accuratezza**: Pipeline B solo dove serve davvero
+- ✅ **Continuous improvement**: Il sistema impara dai documenti processati
 
 ---
 
@@ -453,21 +541,48 @@ function determineWinner(metricsA, metricsB): 'pipeline_a' | 'pipeline_b' | 'tie
 
 ---
 
-#### Task 4.4: Automated Testing Script
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 4.2
+#### Task 4.4: Automated Testing with Validated Dataset
+**Time**: 3.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 4.2
 
-- [ ] Create `scripts/run-ab-tests.ts`
-- [ ] Select 20 representative documents from production
-- [ ] Call `compare-chunking-strategies` for each
-- [ ] Generate summary report
-- [ ] Email results to admin
-- [ ] Schedule daily run (if desired)
+**Subtask 4.4.1: Dataset API Integration**
+- [ ] Create edge function `get-test-dataset` to fetch validated documents
+- [ ] Implement caching for test documents (avoid repeated API calls)
+- [ ] Parse dataset structure (categories, documents, Q&A pairs, metadata)
+- [ ] Validate dataset completeness (all required fields present)
 
-**Test Suite**:
-- [ ] 5 simple text-only PDFs (< 10 pages)
-- [ ] 5 complex multi-column PDFs (10-30 pages)
-- [ ] 5 table-heavy PDFs (> 3 tables)
-- [ ] 5 image-heavy PDFs (> 10 images)
+**Subtask 4.4.2: Q&A Evaluation Framework**
+- [ ] Create `evaluateChunkingQuality(chunks, qaData)` function
+- [ ] Implement semantic search over chunks to answer test questions
+- [ ] Calculate accuracy: correct_answers / total_questions
+- [ ] Compare answers vs ground truth (fuzzy matching + semantic similarity)
+- [ ] Generate per-question performance report
+
+**Subtask 4.4.3: Category-Specific Test Suites**
+- [ ] Historical documents test suite (📜 5-7 documents)
+- [ ] Technical documents test suite (🔧 5-7 documents)
+- [ ] Table-heavy documents test suite (📊 5-7 documents)
+- [ ] Graph/image documents test suite (📈 5-7 documents)
+- [ ] Run `compare-chunking-strategies` on each document
+- [ ] Store results in `pipeline_comparison_metrics` with category tag
+
+**Subtask 4.4.4: Performance Report Generation**
+- [ ] Aggregate results by category
+- [ ] Calculate metrics per category:
+  - Chunking quality score (0-100)
+  - Q&A accuracy (%)
+  - Extraction precision/recall (tables, entities)
+  - Processing time (avg, median, p95)
+  - Cost per document (avg)
+- [ ] Generate comparison report (Pipeline A vs B per category)
+- [ ] Identify winning pipeline per document type
+- [ ] Export report as JSON + CSV
+- [ ] Email summary to admin
+
+**Success Criteria**:
+- ✅ All 20-28 test documents processed successfully
+- ✅ Q&A accuracy measured for both pipelines
+- ✅ Clear winner identified per category
+- ✅ Cost/benefit analysis complete
 
 ---
 
@@ -521,8 +636,74 @@ function determineWinner(metricsA, metricsB): 'pipeline_a' | 'pipeline_b' | 'tie
 
 ---
 
-#### Task 5.3: Rollout Decision Matrix
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: Milestone 4
+#### Task 5.3: Pipeline Selection ML Training
+**Time**: 2-3 hours | **Status**: ⬜ Not Started | **Depends on**: Milestone 4 completed
+
+**Goal**: Addestrare un modello di classificazione per decidere automaticamente quale pipeline usare in base alle caratteristiche del documento.
+
+**Subtask 5.3.1: Feature Extraction**
+- [ ] Analizzare risultati di Milestone 4 per identificare pattern
+- [ ] Estrarre features da ogni documento testato:
+  - `has_tables` (boolean)
+  - `table_count` (int)
+  - `layout_complexity` (0-100, from Landing AI metadata)
+  - `page_count` (int)
+  - `has_images` (boolean)
+  - `image_count` (int)
+  - `text_density` (chars/page)
+  - `bibliography_references` (count)
+- [ ] Label each document with optimal pipeline (based on accuracy + cost)
+
+**Subtask 5.3.2: Model Training**
+- [ ] Prepare training dataset (80% test docs) and validation set (20%)
+- [ ] Train classification model:
+  - Option 1: Decision Tree (interpretable, fast)
+  - Option 2: Logistic Regression (probability scores)
+  - Option 3: Simple rule-based heuristic (if dataset too small)
+- [ ] Evaluate model accuracy on validation set (target: >85%)
+- [ ] Generate decision rules (human-readable)
+
+**Subtask 5.3.3: Deploy Classification Edge Function**
+- [ ] Create `supabase/functions/classify-document/index.ts`
+- [ ] Input: document metadata (pre-extracted features)
+- [ ] Output: `{ pipeline: 'A' | 'B', confidence: 0-1, reasoning: string }`
+- [ ] Implement model inference (use trained weights/rules)
+- [ ] Add logging for monitoring prediction accuracy
+- [ ] Test on holdout set from Milestone 4
+
+**Decision Logic Example**:
+```typescript
+function classifyDocument(features: DocumentFeatures): PipelineRecommendation {
+  // Rule-based heuristic (can be replaced with trained model)
+  if (features.table_count >= 3 || features.layout_complexity > 70) {
+    return { pipeline: 'B', confidence: 0.9, reasoning: 'Complex layout or multiple tables detected' };
+  }
+  
+  if (features.page_count < 10 && features.layout_complexity < 40) {
+    return { pipeline: 'A', confidence: 0.85, reasoning: 'Simple document, cost optimization' };
+  }
+  
+  // Borderline case - use cost/benefit
+  const costDiff = PIPELINE_B_COST - PIPELINE_A_COST;
+  const expectedAccuracyGain = estimateAccuracyGain(features); // from historical data
+  
+  if (expectedAccuracyGain * VALUE_PER_ACCURACY_POINT > costDiff) {
+    return { pipeline: 'B', confidence: 0.6, reasoning: 'Expected accuracy gain justifies cost' };
+  }
+  
+  return { pipeline: 'A', confidence: 0.7, reasoning: 'Default to cost-efficient pipeline' };
+}
+```
+
+**Success Criteria**:
+- ✅ Classification model achieves >85% accuracy on validation set
+- ✅ Edge function deployed and tested
+- ✅ Prediction reasoning is clear and interpretable
+
+---
+
+#### Task 5.4: Rollout Decision Matrix
+**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: Milestone 4, Task 5.3
 
 - [ ] Analyze A/B testing results from Milestone 4
 - [ ] Calculate ROI:
@@ -543,8 +724,8 @@ function determineWinner(metricsA, metricsB): 'pipeline_a' | 'pipeline_b' | 'tie
 
 ---
 
-#### Task 5.4: Pipeline A Refactoring (if Pipeline B wins)
-**Time**: 3-4 hours | **Status**: ⬜ Not Started | **Depends on**: Task 5.3 decision
+#### Task 5.5: Pipeline A Refactoring (if Pipeline B wins)
+**Time**: 3-4 hours | **Status**: ⬜ Not Started | **Depends on**: Task 5.4 decision
 
 **If Pipeline B becomes default:**
 - [ ] Update all existing upload functions to use Pipeline B
@@ -560,7 +741,7 @@ function determineWinner(metricsA, metricsB): 'pipeline_a' | 'pipeline_b' | 'tie
 
 ---
 
-#### Task 5.5: Documentation & Knowledge Transfer
+#### Task 5.6: Documentation & Knowledge Transfer
 **Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: All milestones
 
 - [ ] Update project README with Pipeline B explanation
