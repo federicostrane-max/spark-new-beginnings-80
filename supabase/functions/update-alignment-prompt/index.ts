@@ -39,11 +39,13 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get current active prompt
+    // Get current active prompt for this specific agent type
+    const targetAgentType = agentType || 'general';
     const { data: currentPrompt, error: currentError } = await supabase
       .from('alignment_agent_prompts')
       .select('*')
       .eq('is_active', true)
+      .eq('agent_type', targetAgentType)
       .maybeSingle();
 
     if (currentError && currentError.code !== 'PGRST116') {
@@ -56,18 +58,17 @@ serve(async (req) => {
 
     console.log('[update-alignment-prompt] Creating version', nextVersionNumber);
 
-    // Deactivate old prompt first
-    if (currentPrompt) {
-      await supabase
-        .from('alignment_agent_prompts')
-        .update({ is_active: false })
-        .eq('id', currentPrompt.id);
-    }
+    // Deactivate all prompts for this agent type
+    await supabase
+      .from('alignment_agent_prompts')
+      .update({ is_active: false })
+      .eq('agent_type', targetAgentType);
 
     // Insert new prompt version and activate it
     const { data: newPrompt, error: insertError } = await supabase
       .from('alignment_agent_prompts')
       .insert({
+        agent_type: targetAgentType,
         version_number: nextVersionNumber,
         prompt_content: newPromptContent,
         is_active: true,
