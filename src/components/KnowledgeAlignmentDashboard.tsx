@@ -208,6 +208,25 @@ export const KnowledgeAlignmentDashboard = ({ agentId }: KnowledgeAlignmentDashb
             console.log(`📊 Real-time concept coverage: ${conceptCoveragePercent}% (from ${scores.length} scores) - current analysis only`);
           }
         }
+
+        // ✅ SAFETY NET: Detect "de facto" completion even if status is still 'running'
+        if (chunksProcessed > 0 && chunksProcessed >= totalChunks) {
+          console.log('🔍 All chunks processed, checking if analysis is actually completed...');
+          
+          const { data: completedLog } = await supabase
+            .from('alignment_analysis_log')
+            .select('completed_at')
+            .eq('agent_id', agentId)
+            .gte('started_at', analysisStartTime)
+            .not('completed_at', 'is', null)
+            .maybeSingle();
+          
+          if (completedLog?.completed_at) {
+            console.log('✅ Analysis is completed but progress status is still running. Forcing UI refresh.');
+            // Trigger a full data refresh to update all stats
+            await fetchData();
+          }
+        }
       } else if (!hasSeenProgress) {
         // ✅ CRITICAL FIX: If we haven't seen any progress yet, DO NOT fallback to old logs
         // Show explicit 0 instead of old data

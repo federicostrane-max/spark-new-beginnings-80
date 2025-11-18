@@ -973,6 +973,22 @@ async function finalizeAnalysis(
     execution_id: logger?.executionId || null
   });
 
+  // ✅ CRITICAL FIX: Update progress status to 'completed'
+  const { error: progressUpdateError } = await supabase
+    .from('alignment_analysis_progress')
+    .update({ 
+      status: 'completed',
+      chunks_processed: totalChunks,
+      updated_at: completedAt
+    })
+    .eq('agent_id', agentId);
+  
+  if (progressUpdateError) {
+    console.error('[analyze-knowledge-alignment] ❌ Failed to update progress to completed:', progressUpdateError);
+  } else {
+    console.log('[analyze-knowledge-alignment] ✅ Progress status updated to completed');
+  }
+
   await logInfo('Analysis finalized successfully', {
     totalChunks,
     actualScored,
