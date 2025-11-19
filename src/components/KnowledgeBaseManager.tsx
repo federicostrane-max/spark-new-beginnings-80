@@ -72,7 +72,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    alert('🔵 COMPONENT MOUNTED - Agent: ' + agentId);
     console.log('🔵 KnowledgeBaseManager mounted, agentId:', agentId);
     loadDocuments();
   }, [agentId]);
@@ -737,11 +736,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           
           <Button 
             onClick={() => {
-              alert('🟢 TEST CLICKED - Docs: ' + documents.length);
               console.log('🟢 TEST BUTTON CLICKED');
               console.log('🟢 Documents:', documents.length);
               console.log('🟢 Agent ID:', agentId);
-              toast.success('Test button works!');
+              toast.success('Test button works! Docs: ' + documents.length);
             }}
             size="sm"
             variant="secondary"

@@ -801,19 +801,15 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
           )}
 
           {/* Knowledge Base Manager - Durante l'editing */}
-          {editingAgent && (() => {
-            alert('🔵 RENDERING KB MANAGER - Agent: ' + editingAgent.name);
-            console.log('🔵 About to render KnowledgeBaseManager for agent:', editingAgent.id);
-            return (
-              <div className="border rounded-lg p-4">
-                <KnowledgeBaseManager 
-                  agentId={editingAgent.id}
-                  agentName={editingAgent.name}
-                  onDocsUpdated={onDocsUpdated}
-                />
-              </div>
-            );
-          })()}
+          {editingAgent && (
+            <div className="border rounded-lg p-4">
+              <KnowledgeBaseManager 
+                agentId={editingAgent.id}
+                agentName={editingAgent.name}
+                onDocsUpdated={onDocsUpdated}
+              />
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-2 justify-between items-center">
