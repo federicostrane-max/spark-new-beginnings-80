@@ -761,6 +761,51 @@ export type Database = {
           },
         ]
       }
+      document_assignment_backups: {
+        Row: {
+          assignments: Json
+          assignments_count: number
+          backup_description: string | null
+          backup_name: string
+          created_at: string | null
+          created_by: string | null
+          documents_count: number
+          files_found: number
+          files_missing: number
+          id: string
+          restored_at: string | null
+          restored_by: string | null
+        }
+        Insert: {
+          assignments: Json
+          assignments_count: number
+          backup_description?: string | null
+          backup_name: string
+          created_at?: string | null
+          created_by?: string | null
+          documents_count: number
+          files_found?: number
+          files_missing?: number
+          id?: string
+          restored_at?: string | null
+          restored_by?: string | null
+        }
+        Update: {
+          assignments?: Json
+          assignments_count?: number
+          backup_description?: string | null
+          backup_name?: string
+          created_at?: string | null
+          created_by?: string | null
+          documents_count?: number
+          files_found?: number
+          files_missing?: number
+          id?: string
+          restored_at?: string | null
+          restored_by?: string | null
+        }
+        Relationships: []
+      }
       document_processing_cache: {
         Row: {
           created_at: string | null
