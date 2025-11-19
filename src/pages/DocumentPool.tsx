@@ -47,6 +47,9 @@ export default function DocumentPool() {
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [showReprocessDialog, setShowReprocessDialog] = useState(false);
   const [documentsWithoutChunks, setDocumentsWithoutChunks] = useState(0);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [showRecoverDialog, setShowRecoverDialog] = useState(false);
+  const [documentsWithoutFulltext, setDocumentsWithoutFulltext] = useState(0);
   
   // Backup & restore states
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
@@ -68,6 +71,7 @@ export default function DocumentPool() {
     checkMigrationStatus();
     loadHealthMetrics();
     checkDocumentsWithoutChunks();
+    checkDocumentsWithoutFulltext();
     loadBackups();
   }, []);
 
@@ -92,6 +96,21 @@ export default function DocumentPool() {
       console.error('[Migration Check Error]', error);
     } finally {
       setCheckingMigration(false);
+    }
+  };
+
+  const checkDocumentsWithoutFulltext = async () => {
+    try {
+      const { count } = await supabase
+        .from('knowledge_documents')
+        .select('id', { count: 'exact', head: true })
+        .is('full_text', null)
+        .eq('processing_status', 'ready_for_assignment')
+        .eq('validation_status', 'validated');
+      
+      setDocumentsWithoutFulltext(count || 0);
+    } catch (error) {
+      console.error('[Check Fulltext] Error:', error);
     }
   };
 
@@ -167,6 +186,7 @@ export default function DocumentPool() {
     checkMigrationStatus();
     loadHealthMetrics();
     checkDocumentsWithoutChunks();
+    checkDocumentsWithoutFulltext();
     loadBackups();
   };
 
@@ -359,6 +379,7 @@ export default function DocumentPool() {
       setTimeout(() => {
         loadHealthMetrics();
         checkDocumentsWithoutChunks();
+        checkDocumentsWithoutFulltext();
         setTableKey(prev => prev + 1);
       }, 2000);
       
@@ -367,6 +388,85 @@ export default function DocumentPool() {
       toast.error(`Errore durante il riprocessamento: ${error.message}`, { id: 'reprocess' });
     } finally {
       setIsReprocessing(false);
+    }
+  };
+
+  const handleRecoverMissingFulltext = async () => {
+    setIsRecovering(true);
+    setShowRecoverDialog(false);
+    
+    try {
+      let totalProcessed = 0;
+      let totalSuccess = 0;
+      let totalFileMissing = 0;
+      let totalOcrFailed = 0;
+      let totalChunks = 0;
+      let hasMore = true;
+      let batchNumber = 1;
+
+      toast.loading('Recupero batch 1 in corso...', { id: 'recover' });
+      
+      while (hasMore) {
+        const { data, error } = await supabase.functions.invoke('recover-missing-fulltext', {
+          body: { batchSize: 10 }
+        });
+        
+        if (error) {
+          console.error(`[Batch ${batchNumber}] Error:`, error);
+          break;
+        }
+        
+        const { summary, results } = data;
+        totalProcessed += summary.total;
+        totalSuccess += summary.success;
+        totalFileMissing += summary.fileMissing;
+        totalOcrFailed += summary.ocrFailed;
+        
+        // Count total chunks created
+        const batchChunks = results
+          .filter((r: any) => r.status === 'success')
+          .reduce((sum: number, r: any) => sum + (r.chunksCreated || 0), 0);
+        totalChunks += batchChunks;
+        
+        console.log(`[Batch ${batchNumber}] Total: ${summary.total}, Success: ${summary.success}, File Missing: ${summary.fileMissing}, OCR Failed: ${summary.ocrFailed}, Chunks: ${batchChunks}`);
+        
+        // Se non ci sono più documenti da processare, esci
+        if (summary.total === 0) {
+          hasMore = false;
+        } else {
+          batchNumber++;
+          toast.loading(
+            `Recupero batch ${batchNumber}... (✅ ${totalSuccess} recuperati, 📁 ${totalFileMissing} file mancanti, ⚠️ ${totalOcrFailed} OCR falliti, 📦 ${totalChunks} chunk)`,
+            { id: 'recover' }
+          );
+          // Pausa di 2 secondi tra un batch e l'altro
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+      
+      // Build detailed message
+      let message = `✅ Recupero completato! ${totalSuccess} documenti recuperati, ${totalChunks} chunk creati.`;
+      if (totalFileMissing > 0) {
+        message += `\n📁 ${totalFileMissing} file non trovati nello storage (marcati come validation_failed).`;
+      }
+      if (totalOcrFailed > 0) {
+        message += `\n⚠️ ${totalOcrFailed} documenti falliti per errore OCR.`;
+      }
+      
+      toast.success(message, { id: 'recover', duration: 15000 });
+      
+      setTimeout(() => {
+        loadHealthMetrics();
+        checkDocumentsWithoutChunks();
+        checkDocumentsWithoutFulltext();
+        setTableKey(prev => prev + 1);
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error('[Recover Error]', error);
+      toast.error(`Errore durante il recupero: ${error.message}`, { id: 'recover' });
+    } finally {
+      setIsRecovering(false);
     }
   };
 
@@ -647,6 +747,28 @@ export default function DocumentPool() {
               </DropdownMenuItem>
             </TooltipProvider>
 
+            {/* Recupera PDF Senza Full Text */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={() => setShowRecoverDialog(true)}
+                disabled={isRecovering || documentsWithoutFulltext === 0}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Recupera PDF Senza Full Text ({documentsWithoutFulltext})</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Recupera documenti validati senza full_text. Verifica storage, estrae testo, 
+                      crea chunk. File mancanti → validation_failed. Processo in batch da 10.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
             {/* Test Aggressive Extraction (nascosto in prod) */}
             {import.meta.env.DEV && (
               <>
@@ -868,6 +990,43 @@ export default function DocumentPool() {
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={handleReprocessDocuments}>
               Avvia Riprocessamento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Recover Missing Fulltext Dialog */}
+      <AlertDialog open={showRecoverDialog} onOpenChange={setShowRecoverDialog}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Recupera PDF Senza Full Text
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm space-y-2">
+              Questa operazione <strong>avanzata</strong> tenterà di recuperare i documenti validati che non hanno il campo full_text popolato.
+              <br /><br />
+              <strong>Processo di recupero:</strong>
+              <br />
+              1. <strong>Verifica Storage:</strong> Controlla se il PDF esiste effettivamente nei bucket
+              <br />
+              2. <strong>Se File Trovato:</strong> Estrae testo, salva full_text, crea chunk con embeddings
+              <br />
+              3. <strong>Se File Mancante:</strong> Marca il documento come "validation_failed" con motivo specifico
+              <br />
+              4. <strong>Se OCR Fallisce:</strong> Lascia il documento in stato attuale per debug manuale
+              <br /><br />
+              <strong>Feedback dettagliato:</strong> Distingue tra successi, file mancanti e errori OCR.
+              <br /><br />
+              <strong>Batch size:</strong> 10 documenti alla volta.
+              <br /><br />
+              Attualmente ci sono <strong>{documentsWithoutFulltext} documenti</strong> da recuperare. Vuoi procedere?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRecoverMissingFulltext}>
+              Avvia Recupero
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
