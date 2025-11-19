@@ -5,6 +5,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Voice mapping: common names to ElevenLabs voice IDs
+const VOICE_MAP: Record<string, string> = {
+  'alloy': '9BWtsMINqrJLrRacOk9x', // Aria
+  'echo': 'TX3LPaxmHKxFdv7VOQHJ', // Liam
+  'fable': 'XB0fDUnXU5powFXDhCwa', // Charlotte
+  'onyx': 'bIHbv24MWmeRgasZH58o', // Will
+  'nova': 'EXAVITQu4vr4xnSDxMaL', // Sarah
+  'shimmer': 'pFZP5JQG7iQjIQuC4Bku', // Lily
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -17,8 +27,8 @@ serve(async (req) => {
       throw new Error('No text provided');
     }
 
-    // OpenAI TTS has a 4096 character limit
-    const MAX_TTS_LENGTH = 4000; // Leave some buffer
+    // ElevenLabs has a 5000 character limit for free tier
+    const MAX_TTS_LENGTH = 4500;
     let processedText = text;
     
     if (text.length > MAX_TTS_LENGTH) {
@@ -26,35 +36,37 @@ serve(async (req) => {
       processedText = text.substring(0, MAX_TTS_LENGTH) + '...';
     }
 
-    const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
-    if (!openAIApiKey) {
-      throw new Error('OPENAI_API_KEY not configured');
+    const elevenLabsApiKey = Deno.env.get('ELEVEN_LABS_API_KEY');
+    if (!elevenLabsApiKey) {
+      throw new Error('ELEVEN_LABS_API_KEY not configured');
     }
 
-    // OpenAI TTS voices: alloy, echo, fable, onyx, nova, shimmer
-    // Default to 'alloy' if not specified
-    const voiceName = voice || 'alloy';
+    // Map voice name to ElevenLabs voice ID
+    const voiceId = VOICE_MAP[voice] || VOICE_MAP['alloy'];
     
-    console.log('Generating speech with OpenAI voice:', voiceName, `(${processedText.length} chars)`);
+    console.log('Generating speech with ElevenLabs voice:', voice, `-> ${voiceId} (${processedText.length} chars)`);
 
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
+        'Accept': 'audio/mpeg',
         'Content-Type': 'application/json',
+        'xi-api-key': elevenLabsApiKey,
       },
       body: JSON.stringify({
-        model: 'tts-1',
-        input: processedText,
-        voice: voiceName,
-        response_format: 'mp3',
+        text: processedText,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        }
       }),
     });
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('OpenAI TTS error:', error);
-      throw new Error(`OpenAI TTS error: ${error}`);
+      console.error('ElevenLabs TTS error:', error);
+      throw new Error(`ElevenLabs TTS error: ${error}`);
     }
 
     console.log('Speech generated successfully, streaming response');
