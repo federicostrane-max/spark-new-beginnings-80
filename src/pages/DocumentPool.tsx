@@ -132,7 +132,7 @@ export default function DocumentPool() {
     setShowCleanupDialog(false);
     
     try {
-      toast.loading('Pulizia chunks duplicati in corso...', { id: 'cleanup' });
+      toast.loading('Pulizia chunks duplicati in corso (batch processing)...', { id: 'cleanup' });
       
       const { data, error } = await supabase.functions.invoke('cleanup-duplicate-chunks');
       
@@ -140,8 +140,8 @@ export default function DocumentPool() {
       
       const results = data.results;
       toast.success(
-        `Cleanup completato! Processati ${results.documentsProcessed} documenti, rimossi ${results.duplicatesRemoved} chunks duplicati.`,
-        { id: 'cleanup', duration: 5000 }
+        `Cleanup completato! Processati ${results.documentsProcessed} documenti in batch, rimossi ${results.duplicatesRemoved} chunks duplicati (${results.chunksBefore} → ${results.chunksAfter}).`,
+        { id: 'cleanup', duration: 6000 }
       );
       
       setTimeout(() => {

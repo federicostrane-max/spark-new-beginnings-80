@@ -36,33 +36,57 @@ Deno.serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    console.log('Executing consolidate_pool_chunks...');
+    const BATCH_SIZE = 10;
+    let allResults: any[] = [];
+    let hasMore = true;
+    let totalProcessed = 0;
 
-    // Execute the consolidation function
-    const { data, error } = await supabaseClient.rpc('consolidate_pool_chunks');
+    console.log('Starting batch consolidation...');
 
-    if (error) {
-      console.error('Error executing consolidate_pool_chunks:', error);
-      throw error;
+    // Process in batches until no more documents to process
+    while (hasMore) {
+      console.log(`Processing batch starting at document ${totalProcessed}...`);
+      
+      const { data, error } = await supabaseClient.rpc('consolidate_pool_chunks_batch', {
+        batch_limit: BATCH_SIZE
+      });
+
+      if (error) {
+        console.error('Error executing consolidate_pool_chunks_batch:', error);
+        throw error;
+      }
+
+      if (!data || data.length === 0) {
+        hasMore = false;
+        console.log('No more documents to process');
+      } else {
+        allResults = [...allResults, ...data];
+        totalProcessed += data.length;
+        console.log(`Batch completed: ${data.length} documents processed. Total: ${totalProcessed}`);
+        
+        // If we got fewer results than the batch size, we're done
+        if (data.length < BATCH_SIZE) {
+          hasMore = false;
+        }
+      }
     }
 
-    console.log('Consolidation completed:', data);
+    console.log('Consolidation completed. Total documents:', totalProcessed);
 
     // Calculate totals
-    const totalDocuments = data?.length || 0;
-    const totalDuplicatesRemoved = data?.reduce((sum: number, doc: any) => sum + (doc.duplicates_removed || 0), 0) || 0;
-    const totalChunksBefore = data?.reduce((sum: number, doc: any) => sum + (doc.chunks_before || 0), 0) || 0;
-    const totalChunksAfter = data?.reduce((sum: number, doc: any) => sum + (doc.chunks_after || 0), 0) || 0;
+    const totalDuplicatesRemoved = allResults.reduce((sum: number, doc: any) => sum + (doc.duplicates_removed || 0), 0);
+    const totalChunksBefore = allResults.reduce((sum: number, doc: any) => sum + (doc.chunks_before || 0), 0);
+    const totalChunksAfter = allResults.reduce((sum: number, doc: any) => sum + (doc.chunks_after || 0), 0);
 
     return new Response(
       JSON.stringify({
         success: true,
         results: {
-          documentsProcessed: totalDocuments,
+          documentsProcessed: totalProcessed,
           duplicatesRemoved: totalDuplicatesRemoved,
           chunksBefore: totalChunksBefore,
           chunksAfter: totalChunksAfter,
-          details: data
+          details: allResults
         }
       }),
       {
