@@ -116,6 +116,19 @@ serve(async (req) => {
 
     console.log(`[check-and-sync-all] Found ${assignedDocIds.size} assigned documents`);
 
+    // Check if there are too many documents (limit to prevent timeout)
+    if (assignedDocIds.size > 100) {
+      console.log(`[check-and-sync-all] Too many documents (${assignedDocIds.size}), recommending direct query`);
+      return new Response(JSON.stringify({ 
+        success: false,
+        tooManyDocuments: true,
+        count: assignedDocIds.size,
+        message: 'Too many documents, please use direct query method'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // ========================================
     // STEP 2: Get chunk counts for THIS agent only (OPTIMIZED)
     // ========================================
