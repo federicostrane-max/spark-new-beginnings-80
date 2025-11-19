@@ -123,8 +123,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       // Check sync status for each document
       if (transformedData.length > 0) {
         // Small delay to ensure database writes have propagated
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        checkSyncStatuses(transformedData);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        logger.info('document-sync', `Calling checkSyncStatuses for ${transformedData.length} documents`, undefined, { agentId });
+        // Use await to ensure sync status is loaded before UI becomes interactive
+        await checkSyncStatuses(transformedData);
       }
     } catch (error: any) {
       logger.error('knowledge-base', 'Error loading assigned documents', error, { agentId });
@@ -139,6 +141,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       logger.info('document-sync', `Direct DB query for ${docs.length} documents`, undefined, { agentId });
       
       const docIds = docs.map(d => d.id);
+      logger.info('document-sync', `Looking for chunks with document IDs: ${docIds.slice(0, 3).join(', ')}...`, undefined, { agentId });
       
       // Query chunk counts directly from agent_knowledge
       const { data: chunkCounts, error } = await supabase
@@ -148,7 +151,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         .eq('is_active', true)
         .in('pool_document_id', docIds);
 
-      if (error) throw error;
+      if (error) {
+        logger.error('document-sync', 'Error querying agent_knowledge', error, { agentId });
+        throw error;
+      }
+
+      logger.info('document-sync', `Found ${chunkCounts?.length || 0} total chunks in database`, undefined, { agentId });
 
       // Count chunks per document
       const chunkCountMap = new Map<string, number>();
@@ -159,18 +167,30 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         }
       });
 
-      // Update documents with correct chunk counts
-      const updatedDocs = docs.map(doc => ({
-        ...doc,
-        syncStatus: ((chunkCountMap.get(doc.id) || 0) > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
-        chunkCount: chunkCountMap.get(doc.id) || 0,
-        expectedChunks: chunkCountMap.get(doc.id) || 0,
-      }));
+      logger.info('document-sync', `Chunk count map has ${chunkCountMap.size} documents with chunks`, undefined, { agentId });
 
+      // Update documents with correct chunk counts
+      const updatedDocs = docs.map(doc => {
+        const chunkCount = chunkCountMap.get(doc.id) || 0;
+        const syncStatus = chunkCount > 0 ? 'synced' : 'missing';
+        
+        logger.info('document-sync', `Document ${doc.file_name}: ${chunkCount} chunks, status: ${syncStatus}`, 
+          undefined, { agentId, documentId: doc.id });
+        
+        return {
+          ...doc,
+          syncStatus: syncStatus as 'synced' | 'missing',
+          chunkCount: chunkCount,
+          expectedChunks: chunkCount,
+        };
+      });
+
+      logger.info('document-sync', `Setting ${updatedDocs.length} documents to state`, undefined, { agentId });
       setDocuments(updatedDocs);
       
       const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
-      logger.info('document-sync', `Direct query complete: ${docs.length - missingCount} synced, ${missingCount} missing`, 
+      const syncedCount = updatedDocs.filter(d => d.syncStatus === 'synced').length;
+      logger.info('document-sync', `Direct query complete: ${syncedCount} synced, ${missingCount} missing`, 
         undefined, { agentId });
       
       // Reset quick sync flag only if all documents are synced
@@ -299,12 +319,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
 
   const handleSyncAllMissing = async (forceRedownload = false) => {
-    const missingDocs = documents.filter(doc => doc.syncStatus === 'missing');
+    // Include both 'missing' and 'checking' documents (checking means status wasn't loaded correctly)
+    const missingDocs = documents.filter(doc => 
+      doc.syncStatus === 'missing' || doc.syncStatus === 'checking' || (doc.chunkCount || 0) === 0
+    );
     
     if (missingDocs.length === 0) {
       toast.info('Nessun documento da sincronizzare');
       return;
     }
+    
+    logger.info('document-sync', `Starting sync for ${missingDocs.length} documents`, undefined, { agentId });
 
     let successCount = 0;
     let failedDocs: Array<{doc: typeof missingDocs[0], error: string}> = [];
