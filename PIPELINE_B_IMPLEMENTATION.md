@@ -43,6 +43,319 @@
 
 ---
 
+## 🤖 Architettura Multi-Agente: Orchestratore Intelligente
+
+### Introduzione al Concetto
+
+Invece di decidere staticamente quale pipeline utilizzare (A o B), implementiamo un **orchestratore multi-agente** che analizza il documento in arrivo e sceglie dinamicamente la strategia di processing ottimale.
+
+**Obiettivo**: Routing intelligente e data-driven basato su analisi documentale automatica, minimizzando i costi mantenendo la qualità.
+
+---
+
+### Pattern Architetturali (da Ricerca Accademica)
+
+#### 1️⃣ Decomposizione Gerarchica (TLTKPDF Pattern)
+
+Il task complesso "processa questo documento" viene scomposto in sotto-task specializzati:
+
+```
+Task Complesso: "Processa documento X"
+  ↓
+Sub-Task 1: "Analizza struttura del documento" (header, footer, sezioni, tabelle)
+  ↓
+Sub-Task 2: "Identifica elementi complessi" (grafici, formule, multi-colonne)
+  ↓
+Sub-Task 3: "Classifica complessità" (semplice/media/alta)
+  ↓
+Sub-Task 4: "Decidi pipeline" (A economica vs B sofisticata)
+  ↓
+Sub-Task 5: "Esegui parsing" (con pipeline scelta)
+  ↓
+Sub-Task 6: "Ricombina risultati" (unifica chunk in knowledge base)
+```
+
+#### 2️⃣ Common Ground & Argumentation (TLTKPDF Pattern)
+
+Gli agenti condividono un **database comune** (`document_analysis_state`) dove registrano:
+- Evidenze strutturali rilevate
+- Score di complessità calcolati
+- Decisioni intermedie
+- Argomentazioni pro/contro per ogni scelta
+
+**Tabella Proposta**: `document_analysis_state`
+```sql
+CREATE TABLE document_analysis_state (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID REFERENCES knowledge_documents(id),
+  agent_id VARCHAR(50), -- 'structural_analyzer', 'complexity_classifier', 'router'
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  analysis_type VARCHAR(50), -- 'structure', 'complexity', 'decision'
+  findings JSONB, -- Evidenze strutturali, score, reasoning
+  recommendation VARCHAR(20), -- 'pipeline_a', 'pipeline_b', null
+  confidence_score DECIMAL(3,2) -- 0.00 - 1.00
+);
+```
+
+**Esempio di "Discussione" tra Agenti**:
+```json
+// Agente 1 (Structural Analyzer) scrive:
+{
+  "agent_id": "structural_analyzer",
+  "findings": {
+    "has_tables": true,
+    "table_count": 8,
+    "has_multi_column": true,
+    "has_images": false
+  },
+  "recommendation": null // Non ancora deciso
+}
+
+// Agente 2 (Complexity Classifier) legge e aggiunge:
+{
+  "agent_id": "complexity_classifier",
+  "findings": {
+    "layout_complexity_score": 78,
+    "reasoning": "8 tabelle + layout multi-colonna → alta complessità"
+  },
+  "recommendation": "pipeline_b",
+  "confidence_score": 0.85
+}
+
+// Agente 3 (Router) legge entrambi e decide:
+{
+  "agent_id": "router",
+  "findings": {
+    "final_decision": "pipeline_b",
+    "cost_estimate": "$0.15",
+    "reasoning": "Complessità 78/100 supera soglia 70 → necessaria Pipeline B"
+  }
+}
+```
+
+#### 3️⃣ Agenti Specializzati (ai-agents-in-action Pattern)
+
+Ogni agente ha un **ruolo specifico** e **expertise limitata**:
+
+| Agente | Responsabilità | Input | Output |
+|--------|---------------|-------|--------|
+| **Structural Analyzer** | Analizza layout PDF | Documento grezzo | Mappa strutturale (tabelle, colonne, header) |
+| **Complexity Classifier** | Calcola score complessità | Mappa strutturale | Score 0-100, categoria (simple/complex) |
+| **Router Decisionale** | Sceglie pipeline | Score + evidenze | Decisione: A o B + confidence |
+| **Parser Semplice (A)** | Parsing leggero | Documento semplice | Chunk testuali basic |
+| **Parser Complesso (B)** | Parsing avanzato | Documento complesso | Chunk semantici + entities |
+
+---
+
+### Flusso di Orchestrazione
+
+```
+📄 Documento PDF in arrivo
+   ↓
+🔍 [Agente 1] Analisi Strutturale
+   ├─ Conta tabelle
+   ├─ Rileva layout multi-colonna
+   ├─ Identifica header/footer
+   └─ Scrive evidenze nel Common Ground DB
+   ↓
+📊 [Agente 2] Classificazione Complessità
+   ├─ Legge evidenze strutturali dal DB
+   ├─ Calcola layout_complexity_score
+   ├─ Assegna categoria (simple/medium/complex)
+   └─ Scrive raccomandazione preliminare nel DB
+   ↓
+💬 Argumentation Phase
+   ├─ Agente 2 propone: "Raccomando Pipeline B (confidence 0.85)"
+   ├─ Agente 1 supporta: "8 tabelle rilevate, concorde"
+   └─ Decisione registrata nel Common Ground
+   ↓
+🎯 [Agente 3] Router Decisionale
+   ├─ Legge tutte le evidenze dal DB
+   ├─ Applica regole business (soglie, policy costo)
+   ├─ Decide: Pipeline A (economica) vs B (complessa)
+   └─ Scrive decisione finale nel DB
+   ↓
+⚙️ Esecuzione
+   ├─ Se Pipeline A → [Agente 4] Parser Semplice
+   │  └─ Text extraction + chunking basic
+   ├─ Se Pipeline B → [Agente 5] Parser Complesso
+   │  └─ Landing AI + Nexla agentic chunking
+   ↓
+🔄 Ricombinazione Risultati
+   ├─ Merge dei chunk processati
+   ├─ Inserimento in agent_knowledge
+   └─ Aggiornamento document_analysis_state con outcome
+```
+
+---
+
+### Vantaggi Architetturali
+
+✅ **Testabilità**
+- Ogni agente è un'unità isolata testabile indipendentemente
+- Mock del Common Ground DB per testing senza side effects
+
+✅ **Osservabilità**
+- Ogni decisione tracciata in `document_analysis_state`
+- Audit trail completo: perché Pipeline B è stata scelta?
+- Debug facilitato: quale agente ha fallito?
+
+✅ **Evolutività**
+- Aggiungi nuovi agenti (es. "OCR Specialist") senza modificare gli esistenti
+- Sostituisci agenti sottoperformanti mantenendo l'interfaccia
+- Migliora regole di routing senza toccare parser
+
+✅ **Data-Driven Decisions**
+- Niente euristica fissa hardcoded
+- Decisioni basate su evidenze concrete nel DB
+- ML-ready: features dal DB → training set per classificatore automatico
+
+✅ **Cost-Effectiveness**
+- Usa Pipeline A (economica) quando la qualità è sufficiente
+- Riservato Pipeline B (costosa) solo a documenti che lo richiedono
+- ROI misurabile: risparmio costi vs. accuratezza
+
+---
+
+### Opzioni di Integrazione
+
+#### Opzione A: Nuovo Edge Function Dedicato
+**File**: `supabase/functions/orchestrate-document-processing/index.ts`
+
+```typescript
+export async function orchestrateProcessing(documentId: string) {
+  // 1. Chiama Structural Analyzer (altro edge function)
+  const structure = await analyzeStructure(documentId);
+  
+  // 2. Chiama Complexity Classifier
+  const complexity = await classifyComplexity(structure);
+  
+  // 3. Chiama Router Decisionale
+  const decision = await routeDocument(complexity);
+  
+  // 4. Esegui pipeline scelta
+  if (decision.pipeline === 'A') {
+    return await executePipelineA(documentId);
+  } else {
+    return await executePipelineB(documentId);
+  }
+}
+```
+
+**Pro**: Separazione netta, facile testare orchestratore in isolamento  
+**Contro**: Più edge functions = più latenza chiamate inter-function
+
+#### Opzione B: Estensione Multi-Agent Orchestrator Esistente
+**File**: `src/pages/MultiAgentConsultant.tsx` + nuovi agenti specializzati
+
+- Aggiunge "Document Processing Agent" con tool `analyze_document`
+- Tool interna chiama i 3 agenti specializzati in sequenza
+- Sfrutta orchestratore conversazionale già presente
+
+**Pro**: Riutilizza infrastruttura multi-agente esistente  
+**Contro**: Accoppiamento con logica conversazionale (non ideale per batch processing)
+
+**Raccomandazione**: **Opzione A** (edge function dedicato) per separazione concerns e scalabilità.
+
+---
+
+### Roadmap di Sviluppo
+
+#### Phase 1: Validazione Standalone Pipeline A e B (2-3 settimane)
+Prima di costruire l'orchestratore, validare che le due pipeline funzionino correttamente in isolamento:
+
+**Task**:
+- [ ] 1.1 Completare Pipeline B (Landing AI + Nexla) secondo Milestone 2
+- [ ] 1.2 Benchmark Pipeline A su dataset semplice (10 documenti)
+- [ ] 1.3 Benchmark Pipeline B su dataset complesso (10 documenti)
+- [ ] 1.4 Misurare: costo/doc, tempo/doc, qualità chunks, recall domande Q&A
+
+**Output**: Tabella comparativa con metriche quantitative
+```
+| Metrica              | Pipeline A | Pipeline B |
+|----------------------|------------|------------|
+| Costo medio/doc      | $0.02      | $0.15      |
+| Tempo medio (sec)    | 8          | 35         |
+| Qualità chunking (%) | 72         | 94         |
+| Recall Q&A (%)       | 68         | 89         |
+```
+
+**Decisione chiave**: Verificare che esista una **non-sovrapposizione** nei casi d'uso ottimali (altrimenti orchestratore inutile).
+
+#### Phase 2: Costruzione Orchestratore (1-2 settimane)
+
+**Task**:
+- [ ] 2.1 Design schema `document_analysis_state` + migration
+- [ ] 2.2 Implementare Agente 1: Structural Analyzer
+  - Input: PDF path
+  - Output: { has_tables, table_count, has_multi_column, has_images }
+  - Edge function: `analyze-document-structure`
+- [ ] 2.3 Implementare Agente 2: Complexity Classifier
+  - Input: Structural findings
+  - Output: { complexity_score, category, recommendation }
+  - Edge function: `classify-document-complexity`
+- [ ] 2.4 Implementare Agente 3: Router Decisionale
+  - Input: Complexity + business rules
+  - Output: { pipeline_choice, confidence, reasoning }
+  - Edge function: `route-document-pipeline`
+- [ ] 2.5 Orchestrator Main Logic
+  - Edge function: `orchestrate-document-processing`
+  - Chiama sequenzialmente Agente 1 → 2 → 3 → esecuzione pipeline
+- [ ] 2.6 Integrazione in sistema multi-agente esistente (se opzione B scelta)
+
+**Output**: Sistema orchestratore funzionante end-to-end
+
+#### Phase 3: Testing Orchestratore (1 settimana)
+
+**Task**:
+- [ ] 3.1 Test su dataset misto (20 doc: 10 semplici, 10 complessi)
+- [ ] 3.2 Validare decisioni orchestratore vs. ground truth
+  - Accuracy: decisioni corrette / totale
+  - Precision: documenti complessi correttamente assegnati a B
+  - Recall: documenti semplici correttamente assegnati ad A
+- [ ] 3.3 Misurare risparmio economico
+  - Costo attuale (100% Pipeline B): $15/100 doc
+  - Costo orchestrato (mix A/B): $X/100 doc
+  - Saving: $(15 - X) / $15 * 100%
+- [ ] 3.4 A/B test qualità output
+  - Pipeline B pura vs. Orchestratore
+  - Delta qualità accettabile? (<5% degradazione)
+
+**Output**: Report decisione GO/NO-GO per produzione
+
+---
+
+### Domande Architetturali Aperte
+
+❓ **Granularità del Routing**
+- Routing per-documento (un intero PDF → una pipeline)?
+- Routing per-sezione (Capitolo 1 → A, Capitolo 2 con tabelle → B)?
+- **Decisione iniziale**: Per-documento (più semplice), evolvere a per-sezione se necessario
+
+❓ **Strategia di Fallback**
+- Se Pipeline A fallisce → retry con B?
+- Se Pipeline B fallisce → fallback ad A?
+- Timeout logic?
+- **Decisione iniziale**: Pipeline B come fallback per errori critici di A
+
+❓ **Caching delle Analisi**
+- Documenti simili (stesso hash strutturale) → riutilizzare decisione?
+- Cache `document_analysis_state` per pattern ricorrenti?
+- **Decisione iniziale**: No caching in MVP, aggiungere in Milestone 5 se necessario
+
+❓ **Human-in-the-Loop**
+- Permettere override manuale per casi dubbi?
+- UI per visualizzare reasoning orchestratore?
+- Confidence threshold sotto cui richiedere conferma umana?
+- **Decisione iniziale**: Fully automated in MVP, HITL come feature avanzata
+
+❓ **Integrazione con ML Classifier Future**
+- `document_analysis_state` come training set per modello di classificazione?
+- Sostituire regole euristiche con modello ML quando dataset > 1000 doc?
+- **Decisione iniziale**: Preparare schema DB per essere ML-ready, implementare ML in Milestone 5
+
+---
+
 ## ⚠️ REQUISITO CRITICO: Sistema di Testing Automatizzato
 
 ### Obiettivo
