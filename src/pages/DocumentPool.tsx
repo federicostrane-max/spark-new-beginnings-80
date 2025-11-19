@@ -30,6 +30,9 @@ export default function DocumentPool() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [isCleaningChunks, setIsCleaningChunks] = useState(false);
   const [showCleanupDialog, setShowCleanupDialog] = useState(false);
+  const [isReprocessing, setIsReprocessing] = useState(false);
+  const [showReprocessDialog, setShowReprocessDialog] = useState(false);
+  const [documentsWithoutChunks, setDocumentsWithoutChunks] = useState(0);
   
   // Health metrics
   const [healthMetrics, setHealthMetrics] = useState({
@@ -42,6 +45,7 @@ export default function DocumentPool() {
   useEffect(() => {
     checkMigrationStatus();
     loadHealthMetrics();
+    checkDocumentsWithoutChunks();
   }, []);
 
   const checkMigrationStatus = async () => {
@@ -65,6 +69,32 @@ export default function DocumentPool() {
       console.error('[Migration Check Error]', error);
     } finally {
       setCheckingMigration(false);
+    }
+  };
+
+  const checkDocumentsWithoutChunks = async () => {
+    try {
+      // Get all ready documents
+      const { data: docs } = await supabase
+        .from('knowledge_documents')
+        .select('id')
+        .eq('processing_status', 'ready_for_assignment');
+
+      if (!docs) return;
+
+      let countWithoutChunks = 0;
+      for (const doc of docs) {
+        const { count } = await supabase
+          .from('agent_knowledge')
+          .select('id', { count: 'exact', head: true })
+          .eq('pool_document_id', doc.id);
+
+        if (count === 0) countWithoutChunks++;
+      }
+
+      setDocumentsWithoutChunks(countWithoutChunks);
+    } catch (error) {
+      console.error('[Check Docs Without Chunks] Error:', error);
     }
   };
 
@@ -99,6 +129,7 @@ export default function DocumentPool() {
     setTableKey(prev => prev + 1);
     checkMigrationStatus();
     loadHealthMetrics();
+    checkDocumentsWithoutChunks();
   };
 
   const handleRetryBlocked = async () => {
@@ -146,6 +177,7 @@ export default function DocumentPool() {
       
       setTimeout(() => {
         loadHealthMetrics();
+        checkDocumentsWithoutChunks();
         setTableKey(prev => prev + 1);
       }, 2000);
       
@@ -154,6 +186,39 @@ export default function DocumentPool() {
       toast.error(`Errore durante cleanup: ${error.message}`, { id: 'cleanup' });
     } finally {
       setIsCleaningChunks(false);
+    }
+  };
+
+  const handleReprocessDocuments = async () => {
+    setIsReprocessing(true);
+    setShowReprocessDialog(false);
+    
+    try {
+      toast.loading('Riprocessamento documenti in corso...', { id: 'reprocess' });
+      
+      const { data, error } = await supabase.functions.invoke('reprocess-documents-without-chunks', {
+        body: { batchSize: 5 }
+      });
+      
+      if (error) throw error;
+      
+      const { summary } = data;
+      toast.success(
+        `✅ Riprocessamento completato! ${summary.successful} documenti processati con successo, ${summary.totalChunks} chunk creati. ${summary.failed > 0 ? `${summary.failed} documenti falliti.` : ''}`,
+        { id: 'reprocess', duration: 8000 }
+      );
+      
+      setTimeout(() => {
+        loadHealthMetrics();
+        checkDocumentsWithoutChunks();
+        setTableKey(prev => prev + 1);
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error('[Reprocess Error]', error);
+      toast.error(`Errore durante il riprocessamento: ${error.message}`, { id: 'reprocess' });
+    } finally {
+      setIsReprocessing(false);
     }
   };
 
@@ -363,6 +428,26 @@ export default function DocumentPool() {
                 </>
               )}
             </Button>
+            
+            <Button
+              onClick={() => setShowReprocessDialog(true)}
+              disabled={isReprocessing || documentsWithoutChunks === 0}
+              variant="outline"
+              size="lg"
+              className="border-purple-500/50 bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-400"
+            >
+              {isReprocessing ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Riprocessamento...
+                </>
+              ) : (
+                <>
+                  <FileX className="mr-2 h-5 w-5" />
+                  Riprocessa Documenti Senza Chunk ({documentsWithoutChunks})
+                </>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -463,6 +548,38 @@ export default function DocumentPool() {
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={handleCleanupChunks}>
               Avvia Pulizia
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reprocess Documents Confirmation Dialog */}
+      <AlertDialog open={showReprocessDialog} onOpenChange={setShowReprocessDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conferma Riprocessamento Documenti</AlertDialogTitle>
+            <AlertDialogDescription>
+              Questa operazione riprocesserà <strong>{documentsWithoutChunks}</strong> documento/i che non hanno chunk nel pool condiviso.
+              <br /><br />
+              Per ogni documento:
+              <ul className="list-disc list-inside mt-2 space-y-1">
+                <li>Estrarrà il testo dal PDF</li>
+                <li>Creerà chunk di testo con overlap</li>
+                <li>Genererà embeddings usando OpenAI</li>
+                <li>Salverà i chunk nel pool condiviso</li>
+              </ul>
+              <br />
+              I documenti che non possono essere processati (file corrotto, testo non estraibile) verranno marcati come <strong>"validation_failed"</strong>.
+              <br /><br />
+              <strong>Batch size:</strong> 5 documenti alla volta per evitare timeout.
+              <br /><br />
+              Vuoi procedere?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleReprocessDocuments}>
+              Avvia Riprocessamento
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
