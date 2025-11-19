@@ -606,6 +606,22 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleBulkDocumentSelect = (docIds: string[], shouldSelect: boolean) => {
+    setSelectedDocIds((prevSelected) => {
+      const newSelected = new Set(prevSelected);
+      
+      if (shouldSelect) {
+        // Aggiungi tutti i documenti
+        docIds.forEach(id => newSelected.add(id));
+      } else {
+        // Rimuovi tutti i documenti
+        docIds.forEach(id => newSelected.delete(id));
+      }
+      
+      return newSelected;
+    });
+  };
+
   const getFolderInfo = () => {
     const folderCounts = new Map<string, number>();
     documents.forEach(doc => {
@@ -961,6 +977,7 @@ export const DocumentPoolTable = () => {
                 }
                 setSelectedDocIds(newSelected);
               }}
+              onBulkDocumentSelect={handleBulkDocumentSelect}
               selectedDocuments={selectedDocIds}
               onDocumentClick={(doc) => {
                 // Find full document data

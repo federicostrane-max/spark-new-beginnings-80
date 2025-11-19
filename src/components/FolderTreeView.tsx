@@ -41,6 +41,7 @@ interface FolderTreeViewProps {
   onDocumentClick: (doc: KnowledgeDocument) => void;
   onFolderAssign?: (folderDocs: KnowledgeDocument[]) => void;
   onFolderDelete?: (folderId: string, folderName: string) => void;
+  onBulkDocumentSelect?: (docIds: string[], shouldSelect: boolean) => void;
 }
 
 export function FolderTreeView({ 
@@ -49,24 +50,29 @@ export function FolderTreeView({
   selectedDocuments,
   onDocumentClick,
   onFolderAssign,
-  onFolderDelete
+  onFolderDelete,
+  onBulkDocumentSelect
 }: FolderTreeViewProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
   const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], selectedCount: number) => {
-    // Se tutti sono selezionati, deseleziona tutti
-    // Altrimenti (nessuno o alcuni selezionati), seleziona tutti
     const shouldSelectAll = selectedCount < folderDocs.length;
+    const docIds = folderDocs.map(doc => doc.id);
     
-    folderDocs.forEach(doc => {
-      const isSelected = selectedDocuments.has(doc.id);
-      // Solo toggle se lo stato corrente è diverso da quello desiderato
-      if (shouldSelectAll && !isSelected) {
-        onDocumentSelect(doc.id); // Seleziona
-      } else if (!shouldSelectAll && isSelected) {
-        onDocumentSelect(doc.id); // Deseleziona
-      }
-    });
+    // Se esiste la funzione bulk, usala (molto più efficiente)
+    if (onBulkDocumentSelect) {
+      onBulkDocumentSelect(docIds, shouldSelectAll);
+    } else {
+      // Fallback al metodo uno-per-uno (più lento)
+      folderDocs.forEach(doc => {
+        const isSelected = selectedDocuments.has(doc.id);
+        if (shouldSelectAll && !isSelected) {
+          onDocumentSelect(doc.id);
+        } else if (!shouldSelectAll && isSelected) {
+          onDocumentSelect(doc.id);
+        }
+      });
+    }
   };
 
   const toggleFolder = (folderId: string) => {
