@@ -1693,6 +1693,16 @@ export type Database = {
         Args: { prompt_id: string }
         Returns: undefined
       }
+      consolidate_pool_chunks: {
+        Args: never
+        Returns: {
+          chunks_after: number
+          chunks_before: number
+          document_id: string
+          document_name: string
+          duplicates_removed: number
+        }[]
+      }
       count_processing_documents: { Args: never; Returns: number }
       find_orphaned_chunks: {
         Args: never
