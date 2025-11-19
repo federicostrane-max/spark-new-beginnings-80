@@ -130,6 +130,9 @@ serve(async (req) => {
       .not('pool_document_id', 'is', null)
       .eq('is_active', true);
 
+    // 🔍 LOGGING DETTAGLIATO PER DEBUG - Timestamp: ${new Date().toISOString()}
+    console.log(`[check-and-sync-all] 🚀 VERSIONE FIXATA - Query returned ${allChunks?.length || 0} total chunks`);
+
     if (chunksError) {
       console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
       throw chunksError;
@@ -143,7 +146,7 @@ serve(async (req) => {
       }
     });
 
-    console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents`);
+    console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents (${allChunks?.length || 0} total chunks)`);
 
     // ========================================
     // STEP 3: Find discrepancies (considering sync_status)
