@@ -119,14 +119,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       logger.success('knowledge-base', `Loaded ${transformedData.length} assigned documents`, undefined, { agentId });
       setDocuments(transformedData);
+      console.log('✅ After setDocuments, transformedData count:', transformedData.length);
 
       // Check sync status for each document
       if (transformedData.length > 0) {
         // Small delay to ensure database writes have propagated
         await new Promise(resolve => setTimeout(resolve, 500));
         logger.info('document-sync', `Calling checkSyncStatuses for ${transformedData.length} documents`, undefined, { agentId });
+        console.log('🔄 About to call checkSyncStatuses...');
         // Use await to ensure sync status is loaded before UI becomes interactive
         await checkSyncStatuses(transformedData);
+        console.log('✅ checkSyncStatuses completed');
       }
     } catch (error: any) {
       logger.error('knowledge-base', 'Error loading assigned documents', error, { agentId });
@@ -137,11 +140,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
   // Direct database query fallback for sync status
   const checkSyncStatusesDirect = async (docs: KnowledgeDocument[]) => {
+    console.log('🔍 [checkSyncStatusesDirect] START - docs count:', docs.length);
+    
     try {
-      logger.info('document-sync', `Direct DB query for ${docs.length} documents`, undefined, { agentId });
-      
       const docIds = docs.map(d => d.id);
-      logger.info('document-sync', `Looking for chunks with document IDs: ${docIds.slice(0, 3).join(', ')}...`, undefined, { agentId });
+      console.log('🔍 Looking for chunks with IDs:', docIds.slice(0, 3));
       
       // Query chunk counts directly from agent_knowledge
       const { data: chunkCounts, error } = await supabase
@@ -152,53 +155,50 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         .in('pool_document_id', docIds);
 
       if (error) {
-        logger.error('document-sync', 'Error querying agent_knowledge', error, { agentId });
+        console.error('❌ Error querying agent_knowledge:', error);
         throw error;
       }
 
-      logger.info('document-sync', `Found ${chunkCounts?.length || 0} total chunks in database`, undefined, { agentId });
+      console.log('✅ Found chunks:', chunkCounts?.length);
 
       // Count chunks per document
       const chunkCountMap = new Map<string, number>();
       chunkCounts?.forEach(chunk => {
         if (chunk.pool_document_id) {
-          const count = chunkCountMap.get(chunk.pool_document_id) || 0;
-          chunkCountMap.set(chunk.pool_document_id, count + 1);
+          chunkCountMap.set(
+            chunk.pool_document_id,
+            (chunkCountMap.get(chunk.pool_document_id) || 0) + 1
+          );
         }
       });
 
-      logger.info('document-sync', `Chunk count map has ${chunkCountMap.size} documents with chunks`, undefined, { agentId });
+      console.log('📊 Chunk count map size:', chunkCountMap.size);
 
       // Update documents with correct chunk counts
       const updatedDocs = docs.map(doc => {
         const chunkCount = chunkCountMap.get(doc.id) || 0;
-        const syncStatus = chunkCount > 0 ? 'synced' : 'missing';
-        
-        logger.info('document-sync', `Document ${doc.file_name}: ${chunkCount} chunks, status: ${syncStatus}`, 
-          undefined, { agentId, documentId: doc.id });
-        
+        console.log(`  - ${doc.file_name}: ${chunkCount} chunks`);
         return {
           ...doc,
-          syncStatus: syncStatus as 'synced' | 'missing',
-          chunkCount: chunkCount,
+          syncStatus: (chunkCount > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
+          chunkCount,
           expectedChunks: chunkCount,
         };
       });
 
-      logger.info('document-sync', `Setting ${updatedDocs.length} documents to state`, undefined, { agentId });
-      setDocuments(updatedDocs);
-      
+      console.log('🔄 Calling setDocuments with', updatedDocs.length, 'docs');
+      setDocuments([...updatedDocs]); // Force new array reference
+      console.log('✅ setDocuments called');
+
       const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
-      const syncedCount = updatedDocs.filter(d => d.syncStatus === 'synced').length;
-      logger.info('document-sync', `Direct query complete: ${syncedCount} synced, ${missingCount} missing`, 
-        undefined, { agentId });
-      
+      console.log(`✅ Final: ${updatedDocs.length - missingCount} synced, ${missingCount} missing`);
+
       // Reset quick sync flag only if all documents are synced
       const allSynced = updatedDocs.every(doc => doc.syncStatus === 'synced');
       if (allSynced) {
         setHasTriedQuickSync(false);
       }
-      
+
       // Notify parent component about doc updates
       if (onDocsUpdated) {
         onDocsUpdated();
@@ -717,18 +717,75 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           </Button>
           
           <Button 
-            onClick={() => {
-              setDocuments(prev => prev.map(d => ({ ...d, syncStatus: 'checking' as const, chunkCount: 0 })));
-              checkSyncStatuses(documents);
+            onClick={async () => {
+              console.log('🔄 Aggiorna Stato clicked');
+              toast.info('Aggiornamento stato in corso...', { duration: 1000 });
+              await loadDocuments();
+            }}
+            size="sm"
+            variant="outline"
+            type="button"
+            disabled={documents.length === 0 || loading}
+            title="Aggiorna lo stato di sincronizzazione dei documenti"
+          >
+            <RefreshCw className={loading ? "h-4 w-4 mr-2 animate-spin" : "h-4 w-4 mr-2"} />
+            Aggiorna Stato
+          </Button>
+          
+          <Button 
+            onClick={async () => {
+              console.log('🔄 Force Refresh clicked');
+              const toastId = toast.loading('Lettura diretta dal database...');
+              
+              try {
+                const docIds = documents.map(d => d.id);
+                const { data, error } = await supabase
+                  .from('agent_knowledge')
+                  .select('pool_document_id')
+                  .eq('agent_id', agentId)
+                  .eq('is_active', true)
+                  .in('pool_document_id', docIds);
+
+                if (error) throw error;
+
+                const chunkCountMap = new Map<string, number>();
+                data?.forEach(chunk => {
+                  if (chunk.pool_document_id) {
+                    chunkCountMap.set(
+                      chunk.pool_document_id,
+                      (chunkCountMap.get(chunk.pool_document_id) || 0) + 1
+                    );
+                  }
+                });
+
+                const updatedDocs = documents.map(doc => ({
+                  ...doc,
+                  syncStatus: ((chunkCountMap.get(doc.id) || 0) > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
+                  chunkCount: chunkCountMap.get(doc.id) || 0,
+                  expectedChunks: chunkCountMap.get(doc.id) || 0,
+                }));
+
+                setDocuments([...updatedDocs]);
+                
+                const synced = updatedDocs.filter(d => d.syncStatus === 'synced').length;
+                const missing = updatedDocs.filter(d => d.syncStatus === 'missing').length;
+                
+                toast.success(`Aggiornato: ${synced} sincronizzati, ${missing} mancanti`, { id: toastId });
+                
+                if (onDocsUpdated) onDocsUpdated();
+              } catch (error) {
+                console.error('Force refresh error:', error);
+                toast.error('Errore nel force refresh', { id: toastId });
+              }
             }}
             size="sm"
             variant="outline"
             type="button"
             disabled={documents.length === 0}
-            title="Aggiorna lo stato di sincronizzazione dei documenti"
+            title="Forza aggiornamento diretto dal database"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Aggiorna Stato
+            Force Refresh
           </Button>
           
           {totalIssues > 0 && (
@@ -750,10 +807,20 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
               <DropdownMenuContent align="end">
                 {missingCount > 0 && (
                   <DropdownMenuItem
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      handleSyncAllMissing(hasTriedQuickSync);
+                      console.log('🔄 Ricarica Tutti clicked');
+                      toast.info('Aggiornamento stato prima della sincronizzazione...', { duration: 1500 });
+                      
+                      // FIRST: Refresh status from database
+                      await checkSyncStatusesDirect(documents);
+                      
+                      // Wait a bit for state to update
+                      await new Promise(resolve => setTimeout(resolve, 500));
+                      
+                      // THEN: Sync missing documents
+                      await handleSyncAllMissing(hasTriedQuickSync);
                     }}
                   >
                     {hasTriedQuickSync ? (
