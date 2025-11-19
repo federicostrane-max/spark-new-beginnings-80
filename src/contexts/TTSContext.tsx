@@ -71,6 +71,10 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
 
   // Pre-generate audio in background (cache only, no playback)
   const preGenerateAudio = useCallback(async (messageId: string, text: string) => {
+    // DISABLED: TTS quota exceeded on both OpenAI and ElevenLabs
+    // Users can still manually click play button if they have credits
+    return;
+    
     // Don't pre-generate if already cached or empty
     if (audioCache[messageId] || !text.trim()) return;
 
@@ -118,8 +122,18 @@ export const TTSProvider = ({ children }: { children: ReactNode }) => {
       // If not cached, fetch it now
       if (!blobUrl) {
         console.log('Audio not cached, fetching...');
-        blobUrl = await fetchAudioBlob(text);
-        setAudioCache(prev => ({ ...prev, [messageId]: blobUrl }));
+        try {
+          blobUrl = await fetchAudioBlob(text);
+          setAudioCache(prev => ({ ...prev, [messageId]: blobUrl }));
+        } catch (error: any) {
+          // Show user-friendly error if quota exceeded
+          if (error.message?.includes('quota_exceeded') || error.message?.includes('quota')) {
+            toast.error('TTS quota exceeded - service temporarily unavailable');
+          } else {
+            toast.error('Failed to generate audio');
+          }
+          throw error;
+        }
       } else {
         console.log('Playing cached audio');
       }
