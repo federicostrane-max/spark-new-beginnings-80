@@ -69,12 +69,34 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const [searching, setSearching] = useState(false);
   const [displayedDocuments, setDisplayedDocuments] = useState<PoolDocument[]>([]);
   const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
+  const [autoSyncTriggered, setAutoSyncTriggered] = useState(false);
   const isMobile = useIsMobile();
 
   useEffect(() => {
     console.log('🔵 KnowledgeBaseManager mounted, agentId:', agentId);
     loadDocuments();
   }, [agentId]);
+
+  // Auto-sync missing documents after initial load
+  useEffect(() => {
+    if (autoSyncTriggered || loading || documents.length === 0) {
+      return;
+    }
+
+    const missingDocs = documents.filter(doc => 
+      doc.syncStatus === 'missing' || (doc.chunkCount || 0) === 0
+    );
+    
+    if (missingDocs.length > 0 && !hasTriedQuickSync) {
+      console.log('🔄 Auto-syncing', missingDocs.length, 'missing documents');
+      setAutoSyncTriggered(true);
+      
+      setTimeout(async () => {
+        toast.info(`Sincronizzazione automatica di ${missingDocs.length} documenti...`);
+        await handleSyncAllMissing(false);
+      }, 1500);
+    }
+  }, [documents, loading, autoSyncTriggered, hasTriedQuickSync]);
 
   const loadDocuments = async () => {
     console.log('🔵 loadDocuments called for agent:', agentId);
@@ -716,120 +738,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           >
             <Plus className="h-4 w-4 mr-2" />
             Assegna Documento
-          </Button>
-          
-          <Button 
-            onClick={async () => {
-              console.log('🔄 Aggiorna Stato clicked');
-              toast.info('Aggiornamento stato in corso...', { duration: 1000 });
-              await loadDocuments();
-            }}
-            size="sm"
-            variant="outline"
-            type="button"
-            disabled={documents.length === 0 || loading}
-            title="Aggiorna lo stato di sincronizzazione dei documenti"
-          >
-            <RefreshCw className={loading ? "h-4 w-4 mr-2 animate-spin" : "h-4 w-4 mr-2"} />
-            Aggiorna Stato
-          </Button>
-          
-          <Button 
-            onClick={() => {
-              console.log('🟢 TEST BUTTON CLICKED');
-              console.log('🟢 Documents:', documents.length);
-              console.log('🟢 Agent ID:', agentId);
-              toast.success('Test button works! Docs: ' + documents.length);
-            }}
-            size="sm"
-            variant="secondary"
-            type="button"
-          >
-            Test
-          </Button>
-
-          <Button 
-            onClick={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              
-              try {
-                console.log('🔵 FORCE REFRESH CLICKED - START');
-                const toastId = toast.loading('Lettura database...');
-                
-                console.log('🔵 Agent ID:', agentId);
-                console.log('🔵 Documents count:', documents.length);
-                console.log('🔵 First 3 doc IDs:', documents.slice(0, 3).map(d => d.id));
-                
-                const docIds = documents.map(d => d.id);
-                
-                console.log('🔵 Querying supabase...');
-                const { data, error } = await supabase
-                  .from('agent_knowledge')
-                  .select('pool_document_id')
-                  .eq('agent_id', agentId)
-                  .eq('is_active', true)
-                  .in('pool_document_id', docIds);
-
-                console.log('🔵 Query result:', { dataLength: data?.length, error });
-                
-                if (error) {
-                  console.error('🔴 Supabase error:', error);
-                  toast.error(`Errore: ${error.message}`, { id: toastId });
-                  return;
-                }
-
-                const chunkCountMap = new Map<string, number>();
-                data?.forEach(chunk => {
-                  if (chunk.pool_document_id) {
-                    const current = chunkCountMap.get(chunk.pool_document_id) || 0;
-                    chunkCountMap.set(chunk.pool_document_id, current + 1);
-                  }
-                });
-
-                console.log('🔵 Chunk count map:', Object.fromEntries(chunkCountMap));
-
-                const updatedDocs = documents.map(doc => {
-                  const count = chunkCountMap.get(doc.id) || 0;
-                  return {
-                    ...doc,
-                    syncStatus: (count > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
-                    chunkCount: count,
-                    expectedChunks: count,
-                  };
-                });
-
-                console.log('🔵 Updated docs:', updatedDocs.map(d => ({ name: d.file_name, count: d.chunkCount })));
-                console.log('🔵 Calling setDocuments...');
-                
-                setDocuments([...updatedDocs]);
-                
-                console.log('🔵 setDocuments called successfully');
-                
-                const synced = updatedDocs.filter(d => d.syncStatus === 'synced').length;
-                const missing = updatedDocs.filter(d => d.syncStatus === 'missing').length;
-                
-                toast.success(`✅ ${synced} sincronizzati, ${missing} mancanti`, { id: toastId });
-                
-                if (onDocsUpdated) {
-                  console.log('🔵 Calling onDocsUpdated...');
-                  onDocsUpdated();
-                }
-                
-                console.log('🔵 FORCE REFRESH CLICKED - END');
-              } catch (error: any) {
-                console.error('🔴 Force refresh error:', error);
-                console.error('🔴 Error stack:', error?.stack);
-                toast.error(`Errore: ${error?.message || 'Unknown error'}`);
-              }
-            }}
-            size="sm"
-            variant="outline"
-            type="button"
-            disabled={documents.length === 0}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Force Refresh {documents.length > 0 && `(${documents.length})`}
           </Button>
           
           {totalIssues > 0 && (
