@@ -511,6 +511,22 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               console.error('❌ [CLONE] Error cloning pool knowledge:', insertPoolKnowledgeError);
             } else {
               console.log('✅ [CLONE] Pool knowledge cloned successfully');
+              
+              // Update sync_status to 'completed' for cloned document links
+              const { error: updateStatusError } = await supabase
+                .from("agent_document_links")
+                .update({ 
+                  sync_status: 'completed',
+                  sync_completed_at: new Date().toISOString()
+                })
+                .eq('agent_id', clonedAgent.id)
+                .in('document_id', poolDocIds);
+                
+              if (updateStatusError) {
+                console.error('⚠️ [CLONE] Error updating sync status:', updateStatusError);
+              } else {
+                console.log('✅ [CLONE] Sync status updated to completed for all pool documents');
+              }
             }
           } else {
             console.log('ℹ️ [CLONE] No pool knowledge to clone');
