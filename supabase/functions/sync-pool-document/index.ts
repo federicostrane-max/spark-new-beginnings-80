@@ -386,7 +386,7 @@ serve(async (req) => {
           const embedding = embeddingData.data[0].embedding;
 
           chunksToInsert.push({
-            agent_id: agentId,
+          agent_id: null, // ✅ SHARED POOL
             document_name: poolDoc.file_name,
             content: chunk,
             category: 'General',
