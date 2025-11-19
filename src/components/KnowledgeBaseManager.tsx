@@ -72,10 +72,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const isMobile = useIsMobile();
 
   useEffect(() => {
+    console.log('🔵 KnowledgeBaseManager mounted, agentId:', agentId);
     loadDocuments();
   }, [agentId]);
 
   const loadDocuments = async () => {
+    console.log('🔵 loadDocuments called for agent:', agentId);
     logger.info('knowledge-base', 'Loading assigned documents', { agentId }, { agentId });
     try {
       setLoading(true);
@@ -733,12 +735,35 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           </Button>
           
           <Button 
-            onClick={async () => {
-              console.log('🔄 Force Refresh clicked');
-              const toastId = toast.loading('Lettura diretta dal database...');
+            onClick={() => {
+              console.log('🟢 TEST BUTTON CLICKED');
+              console.log('🟢 Documents:', documents.length);
+              console.log('🟢 Agent ID:', agentId);
+              toast.success('Test button works!');
+            }}
+            size="sm"
+            variant="secondary"
+            type="button"
+          >
+            Test
+          </Button>
+
+          <Button 
+            onClick={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
               
               try {
+                console.log('🔵 FORCE REFRESH CLICKED - START');
+                const toastId = toast.loading('Lettura database...');
+                
+                console.log('🔵 Agent ID:', agentId);
+                console.log('🔵 Documents count:', documents.length);
+                console.log('🔵 First 3 doc IDs:', documents.slice(0, 3).map(d => d.id));
+                
                 const docIds = documents.map(d => d.id);
+                
+                console.log('🔵 Querying supabase...');
                 const { data, error } = await supabase
                   .from('agent_knowledge')
                   .select('pool_document_id')
@@ -746,46 +771,65 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                   .eq('is_active', true)
                   .in('pool_document_id', docIds);
 
-                if (error) throw error;
+                console.log('🔵 Query result:', { dataLength: data?.length, error });
+                
+                if (error) {
+                  console.error('🔴 Supabase error:', error);
+                  toast.error(`Errore: ${error.message}`, { id: toastId });
+                  return;
+                }
 
                 const chunkCountMap = new Map<string, number>();
                 data?.forEach(chunk => {
                   if (chunk.pool_document_id) {
-                    chunkCountMap.set(
-                      chunk.pool_document_id,
-                      (chunkCountMap.get(chunk.pool_document_id) || 0) + 1
-                    );
+                    const current = chunkCountMap.get(chunk.pool_document_id) || 0;
+                    chunkCountMap.set(chunk.pool_document_id, current + 1);
                   }
                 });
 
-                const updatedDocs = documents.map(doc => ({
-                  ...doc,
-                  syncStatus: ((chunkCountMap.get(doc.id) || 0) > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
-                  chunkCount: chunkCountMap.get(doc.id) || 0,
-                  expectedChunks: chunkCountMap.get(doc.id) || 0,
-                }));
+                console.log('🔵 Chunk count map:', Object.fromEntries(chunkCountMap));
 
+                const updatedDocs = documents.map(doc => {
+                  const count = chunkCountMap.get(doc.id) || 0;
+                  return {
+                    ...doc,
+                    syncStatus: (count > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
+                    chunkCount: count,
+                    expectedChunks: count,
+                  };
+                });
+
+                console.log('🔵 Updated docs:', updatedDocs.map(d => ({ name: d.file_name, count: d.chunkCount })));
+                console.log('🔵 Calling setDocuments...');
+                
                 setDocuments([...updatedDocs]);
+                
+                console.log('🔵 setDocuments called successfully');
                 
                 const synced = updatedDocs.filter(d => d.syncStatus === 'synced').length;
                 const missing = updatedDocs.filter(d => d.syncStatus === 'missing').length;
                 
-                toast.success(`Aggiornato: ${synced} sincronizzati, ${missing} mancanti`, { id: toastId });
+                toast.success(`✅ ${synced} sincronizzati, ${missing} mancanti`, { id: toastId });
                 
-                if (onDocsUpdated) onDocsUpdated();
-              } catch (error) {
-                console.error('Force refresh error:', error);
-                toast.error('Errore nel force refresh', { id: toastId });
+                if (onDocsUpdated) {
+                  console.log('🔵 Calling onDocsUpdated...');
+                  onDocsUpdated();
+                }
+                
+                console.log('🔵 FORCE REFRESH CLICKED - END');
+              } catch (error: any) {
+                console.error('🔴 Force refresh error:', error);
+                console.error('🔴 Error stack:', error?.stack);
+                toast.error(`Errore: ${error?.message || 'Unknown error'}`);
               }
             }}
             size="sm"
             variant="outline"
             type="button"
             disabled={documents.length === 0}
-            title="Forza aggiornamento diretto dal database"
           >
             <RefreshCw className="h-4 w-4 mr-2" />
-            Force Refresh
+            Force Refresh {documents.length > 0 && `(${documents.length})`}
           </Button>
           
           {totalIssues > 0 && (
