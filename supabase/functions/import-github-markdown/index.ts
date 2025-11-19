@@ -137,14 +137,15 @@ serve(async (req) => {
             file_path: rawUrl,
             extracted_title: title,
             ai_summary: description,
-            full_text: content, // ✅ SAVE DIRECTLY TO full_text
+            full_text: content,
             text_length: content.length,
             processing_status: 'pending_processing',
             validation_status: 'pending',
             source_url: rawUrl,
             search_query: `GitHub: ${repo}`,
-            metadata_extraction_method: 'vision', // ✅ Correct valid value
-            metadata_confidence: 'high'
+            metadata_extraction_method: 'vision',
+            metadata_confidence: 'high',
+            folder: 'Huggingface_GitHub'
           })
           .select()
           .single();

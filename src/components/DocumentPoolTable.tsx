@@ -78,6 +78,7 @@ interface KnowledgeDocument {
   metadata_verified_online?: boolean;
   metadata_verified_source?: string;
   metadata_confidence?: string;
+  folder?: string;
 }
 
 export const DocumentPoolTable = () => {
@@ -87,7 +88,9 @@ export const DocumentPoolTable = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [folderFilter, setFolderFilter] = useState<string>("all");
   const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [availableFolders, setAvailableFolders] = useState<string[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -107,6 +110,7 @@ export const DocumentPoolTable = () => {
   useEffect(() => {
     loadDocuments();
     loadAvailableAgents();
+    loadAvailableFolders();
 
     // Setup realtime subscription for knowledge_documents
     const channel = supabase
@@ -181,6 +185,7 @@ export const DocumentPoolTable = () => {
           topics: doc.topics || [],
           complexity_level: doc.complexity_level || "",
           agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+          folder: doc.folder,
         };
       });
 
@@ -222,15 +227,36 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const loadAvailableFolders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("knowledge_documents")
+        .select("folder")
+        .not("folder", "is", null);
+
+      if (error) throw error;
+
+      const uniqueFolders = [...new Set(data.map(d => d.folder).filter(Boolean))];
+      setAvailableFolders(uniqueFolders);
+    } catch (error: any) {
+      console.error('[DocumentPoolTable] Error loading folders:', error);
+    }
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "validated":
+      case "ready_for_assignment":
         return <CheckCircle2 className="h-4 w-4 text-green-500" />;
       case "validation_failed":
         return <XCircle className="h-4 w-4 text-red-500" />;
       case "validating":
       case "processing":
+      case "pending_processing":
         return <Clock className="h-4 w-4 text-yellow-500" />;
+      case "pending":
+      case "downloaded":
+        return <Clock className="h-4 w-4 text-muted-foreground" />;
       default:
         return <Clock className="h-4 w-4 text-muted-foreground" />;
     }
@@ -244,6 +270,8 @@ export const DocumentPoolTable = () => {
       processing: "In Elaborazione",
       ready_for_assignment: "Pronto",
       downloaded: "Scaricato",
+      pending: "In Attesa",
+      pending_processing: "In Coda",
     };
     return labels[status] || status;
   };
@@ -468,7 +496,10 @@ export const DocumentPoolTable = () => {
       (agentFilter === "none" && doc.agents_count === 0) ||
       ((doc as any).agent_ids?.includes(agentFilter));
 
-    return matchesSearch && matchesStatus && matchesAgent;
+    const matchesFolder =
+      folderFilter === "all" || doc.folder === folderFilter;
+
+    return matchesSearch && matchesStatus && matchesAgent && matchesFolder;
   });
 
   return (
@@ -482,7 +513,7 @@ export const DocumentPoolTable = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Cerca</label>
               <div className="relative">
@@ -525,6 +556,23 @@ export const DocumentPoolTable = () => {
                   {availableAgents.map((agent) => (
                     <SelectItem key={agent.id} value={agent.id}>
                       {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Cartella</label>
+              <Select value={folderFilter} onValueChange={setFolderFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Tutte le cartelle" />
+                </SelectTrigger>
+                <SelectContent className="bg-background">
+                  <SelectItem value="all">Tutte le cartelle</SelectItem>
+                  {availableFolders.map((folder) => (
+                    <SelectItem key={folder} value={folder}>
+                      {folder}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -615,12 +663,13 @@ export const DocumentPoolTable = () => {
                       aria-label="Seleziona tutti"
                     />
                   </TableHead>
-                  <TableHead className="w-[25%]">File</TableHead>
-                  <TableHead className="w-[12%]">Status</TableHead>
-                  <TableHead className="w-[10%]">Pagine</TableHead>
-                  <TableHead className="w-[18%]">Agenti Assegnati</TableHead>
-                  <TableHead className="w-[12%]">Creato</TableHead>
-                  <TableHead className="w-[15%] text-right">Azioni</TableHead>
+                  <TableHead className="w-[22%]">File</TableHead>
+                  <TableHead className="w-[10%]">Status</TableHead>
+                  <TableHead className="w-[10%]">Cartella</TableHead>
+                  <TableHead className="w-[8%]">Pagine</TableHead>
+                  <TableHead className="w-[16%]">Agenti Assegnati</TableHead>
+                  <TableHead className="w-[10%]">Creato</TableHead>
+                  <TableHead className="w-[12%] text-right">Azioni</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -712,13 +761,22 @@ export const DocumentPoolTable = () => {
                           </>
                         ) : (
                           <>
-                            {getStatusIcon(doc.validation_status)}
+                            {getStatusIcon(doc.processing_status)}
                             <span className="text-sm">
-                              {getStatusLabel(doc.validation_status)}
+                              {getStatusLabel(doc.processing_status)}
                             </span>
                           </>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {doc.folder ? (
+                        <Badge variant="outline" className="text-xs">
+                          {doc.folder}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm">
                       {doc.page_count ? (
