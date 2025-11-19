@@ -1028,6 +1028,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes: number | null
+          full_text: string | null
           id: string
           keywords: string[] | null
           metadata_confidence: string | null
@@ -1057,6 +1058,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes?: number | null
+          full_text?: string | null
           id?: string
           keywords?: string[] | null
           metadata_confidence?: string | null
@@ -1086,6 +1088,7 @@ export type Database = {
           file_name?: string
           file_path?: string
           file_size_bytes?: number | null
+          full_text?: string | null
           id?: string
           keywords?: string[] | null
           metadata_confidence?: string | null

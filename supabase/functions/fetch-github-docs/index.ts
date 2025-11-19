@@ -156,7 +156,7 @@ serve(async (req) => {
           .from('shared-pool-uploads')
           .getPublicUrl(`github/${fileName}`);
 
-        // Save to knowledge_documents
+        // Save to knowledge_documents with full_text for Markdown
         const { data: docData, error: insertError } = await supabase
           .from('knowledge_documents')
           .insert({
@@ -166,6 +166,7 @@ serve(async (req) => {
             search_query: `GitHub: ${repo}`,
             file_size_bytes: blob.size,
             text_length: content.length,
+            full_text: content, // Store Markdown content directly
             processing_status: 'downloaded',
             validation_status: 'pending',
             extracted_title: title,
@@ -182,11 +183,10 @@ serve(async (req) => {
 
         console.log(`✅ Saved: ${file.path} (ID: ${docData.id})`);
         
-        // Trigger processing via edge function - pass Markdown content directly
+        // Trigger processing - content is now in database full_text field
         const { error: processError } = await supabase.functions.invoke('process-document', {
           body: { 
-            documentId: docData.id,
-            fullText: content
+            documentId: docData.id
           }
         });
 

@@ -84,42 +84,57 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // If fullText is not provided, try to get it from chunks or extract from PDF
+    // Get full text: check document.full_text first (for Markdown), then chunks, then extract PDF
     let fullText = providedFullText;
     if (!fullText) {
-      console.log('[process-document] Full text not provided, checking for chunks...');
+      console.log('[process-document] Full text not provided, checking document.full_text field...');
       
-      const { data: chunks, error: chunksError } = await supabase
-        .from('agent_knowledge')
-        .select('content')
-        .eq('pool_document_id', documentId)
-        .order('created_at', { ascending: true });
+      // Check if document has pre-stored full_text (e.g., Markdown from GitHub)
+      const { data: doc, error: docError } = await supabase
+        .from('knowledge_documents')
+        .select('full_text')
+        .eq('id', documentId)
+        .single();
 
-      if (!chunksError && chunks && chunks.length > 0) {
-        // Reconstruct full text from chunks (remove potential duplicates from overlap)
-        fullText = chunks.map(c => c.content).join(' ');
-        console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
+      if (!docError && doc?.full_text && doc.full_text.trim() !== '') {
+        console.log(`[process-document] Using pre-stored full_text (${doc.full_text.length} chars)`);
+        fullText = doc.full_text;
       } else {
-        // No chunks found, extract text from PDF
-        console.log('[process-document] No chunks found, extracting text from PDF...');
+        // No full_text in document, try to reconstruct from chunks
+        console.log('[process-document] No full_text found, checking for chunks...');
         
-        const { data: extractResult, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
-          body: { documentId }
-        });
+        const { data: chunks, error: chunksError } = await supabase
+          .from('agent_knowledge')
+          .select('content')
+          .eq('pool_document_id', documentId)
+          .order('created_at', { ascending: true });
 
-        if (extractError || !extractResult?.text) {
-          throw new Error(`Cannot extract text from PDF for document ${documentId}: ${extractError?.message || 'No text extracted'}`);
+        if (!chunksError && chunks && chunks.length > 0) {
+          // Reconstruct full text from chunks
+          fullText = chunks.map(c => c.content).join(' ');
+          console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
+        } else {
+          // No chunks found, extract text from PDF
+          console.log('[process-document] No chunks found, extracting text from PDF...');
+          
+          const { data: extractResult, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+            body: { documentId }
+          });
+
+          if (extractError || !extractResult?.text) {
+            throw new Error(`Cannot extract text from PDF for document ${documentId}: ${extractError?.message || 'No text extracted'}`);
+          }
+
+          const extractedText = extractResult.text;
+          fullText = extractedText;
+          console.log(`[process-document] Extracted ${extractedText.length} characters from PDF`);
+          
+          // Update the document with the extracted text length
+          await supabase
+            .from('knowledge_documents')
+            .update({ text_length: extractedText.length })
+            .eq('id', documentId);
         }
-
-        const extractedText = extractResult.text;
-        fullText = extractedText;
-        console.log(`[process-document] Extracted ${extractedText.length} characters from PDF`);
-        
-        // Update the document with the extracted text length
-        await supabase
-          .from('knowledge_documents')
-          .update({ text_length: extractedText.length })
-          .eq('id', documentId);
       }
     }
 
