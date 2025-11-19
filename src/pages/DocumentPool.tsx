@@ -34,6 +34,13 @@ export default function DocumentPool() {
   const [showReprocessDialog, setShowReprocessDialog] = useState(false);
   const [documentsWithoutChunks, setDocumentsWithoutChunks] = useState(0);
   
+  // Backup & restore states
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [backups, setBackups] = useState<any[]>([]);
+  const [selectedBackup, setSelectedBackup] = useState<any>(null);
+  const [showBackupDialog, setShowBackupDialog] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  
   // Health metrics
   const [healthMetrics, setHealthMetrics] = useState({
     ready: 0,
@@ -46,6 +53,7 @@ export default function DocumentPool() {
     checkMigrationStatus();
     loadHealthMetrics();
     checkDocumentsWithoutChunks();
+    loadBackups();
   }, []);
 
   const checkMigrationStatus = async () => {
@@ -98,6 +106,20 @@ export default function DocumentPool() {
     }
   };
 
+  const loadBackups = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('document_assignment_backups')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setBackups(data || []);
+    } catch (error) {
+      console.error('[Load Backups] Error:', error);
+    }
+  };
+
   const loadHealthMetrics = async () => {
     try {
       const { count: readyCount } = await supabase
@@ -130,6 +152,62 @@ export default function DocumentPool() {
     checkMigrationStatus();
     loadHealthMetrics();
     checkDocumentsWithoutChunks();
+    loadBackups();
+  };
+
+  const handleCreateBackup = async () => {
+    setIsCreatingBackup(true);
+    try {
+      toast.loading('Creazione backup in corso...', { id: 'backup' });
+      
+      const { data, error } = await supabase.functions.invoke('verify-and-backup-assignments', {
+        body: {
+          backupName: `Backup ${new Date().toLocaleString('it-IT')}`,
+          backupDescription: 'Backup automatico delle assegnazioni documenti problematici'
+        }
+      });
+
+      if (error) throw error;
+
+      toast.success(
+        `✅ Backup creato! ${data.summary.totalDocuments} documenti, ${data.summary.totalAssignments} assegnazioni.\n📁 File trovati: ${data.summary.filesFound}\n❌ File mancanti: ${data.summary.filesMissing}`,
+        { id: 'backup', duration: 8000 }
+      );
+
+      await loadBackups();
+    } catch (error: any) {
+      console.error('[Create Backup Error]', error);
+      toast.error(`Errore durante la creazione del backup: ${error.message}`, { id: 'backup' });
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async (backupId: string) => {
+    setIsRestoring(true);
+    try {
+      toast.loading('Ripristino assegnazioni in corso...', { id: 'restore' });
+      
+      const { data, error } = await supabase.functions.invoke('restore-assignments-from-backup', {
+        body: { backupId }
+      });
+
+      if (error) throw error;
+
+      toast.success(
+        `✅ Ripristino completato! ${data.summary.assignmentsRestored} assegnazioni ripristinate, ${data.summary.syncSuccesses} sincronizzazioni riuscite.`,
+        { id: 'restore', duration: 8000 }
+      );
+
+      await loadBackups();
+      setShowBackupDialog(false);
+      setTableKey(prev => prev + 1);
+    } catch (error: any) {
+      console.error('[Restore Backup Error]', error);
+      toast.error(`Errore durante il ripristino: ${error.message}`, { id: 'restore' });
+    } finally {
+      setIsRestoring(false);
+    }
   };
 
   const handleRetryBlocked = async () => {
@@ -480,6 +558,25 @@ export default function DocumentPool() {
                 </>
               )}
             </Button>
+
+            <Button
+              onClick={handleCreateBackup}
+              disabled={isCreatingBackup}
+              variant="outline"
+              size="lg"
+              className="border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400"
+            >
+              {isCreatingBackup ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Backup...
+                </>
+              ) : (
+                <>
+                  💾 Backup Assegnazioni
+                </>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -530,6 +627,67 @@ export default function DocumentPool() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Backups Section */}
+        {backups.length > 0 && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                💾 Backups Assegnazioni Disponibili
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {backups.slice(0, 5).map((backup) => (
+                  <div
+                    key={backup.id}
+                    className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium">{backup.backup_name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {new Date(backup.created_at).toLocaleString('it-IT')} • {backup.documents_count} documenti • {backup.assignments_count} assegnazioni
+                        {backup.files_missing > 0 && ` • ⚠️ ${backup.files_missing} file mancanti`}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedBackup(backup);
+                          setShowBackupDialog(true);
+                        }}
+                      >
+                        👁️ Dettagli
+                      </Button>
+                      {!backup.restored_at && (
+                        <Button
+                          size="sm"
+                          variant="default"
+                          onClick={() => handleRestoreBackup(backup.id)}
+                          disabled={isRestoring}
+                        >
+                          {isRestoring ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            '🔄 Ripristina'
+                          )}
+                        </Button>
+                      )}
+                      {backup.restored_at && (
+                        <div className="text-sm text-green-500 flex items-center gap-1">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Ripristinato
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="mb-6 flex flex-col gap-4">
           <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
@@ -613,6 +771,76 @@ export default function DocumentPool() {
             <AlertDialogAction onClick={handleReprocessDocuments}>
               Avvia Riprocessamento
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Backup Details Dialog */}
+      <AlertDialog open={showBackupDialog} onOpenChange={setShowBackupDialog}>
+        <AlertDialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Dettagli Backup</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedBackup && (
+                <div className="space-y-4 mt-4">
+                  <div>
+                    <strong>Nome:</strong> {selectedBackup.backup_name}
+                  </div>
+                  <div>
+                    <strong>Data:</strong> {new Date(selectedBackup.created_at).toLocaleString('it-IT')}
+                  </div>
+                  <div>
+                    <strong>Documenti:</strong> {selectedBackup.documents_count}
+                  </div>
+                  <div>
+                    <strong>Assegnazioni:</strong> {selectedBackup.assignments_count}
+                  </div>
+                  <div>
+                    <strong>File trovati:</strong> <span className="text-green-500">{selectedBackup.files_found}</span>
+                  </div>
+                  <div>
+                    <strong>File mancanti:</strong> <span className="text-red-500">{selectedBackup.files_missing}</span>
+                  </div>
+                  
+                  {selectedBackup.restored_at && (
+                    <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <div className="flex items-center gap-2 text-green-500">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <strong>Ripristinato il:</strong> {new Date(selectedBackup.restored_at).toLocaleString('it-IT')}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                    <div className="text-sm text-muted-foreground mb-2">
+                      Documenti nel backup:
+                    </div>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {selectedBackup.assignments?.documents?.map((doc: any) => (
+                        <div
+                          key={doc.document_id}
+                          className={`p-2 rounded border text-sm ${
+                            doc.file_exists 
+                              ? 'bg-green-500/10 border-green-500/20' 
+                              : 'bg-red-500/10 border-red-500/20'
+                          }`}
+                        >
+                          <div className="font-medium flex items-center gap-2">
+                            {doc.file_exists ? '✅' : '❌'} {doc.file_name}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Agenti: {doc.assignments?.map((a: any) => a.agent_name).join(', ')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Chiudi</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
