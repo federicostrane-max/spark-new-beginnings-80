@@ -553,7 +553,11 @@ export default function MultiAgentConsultant() {
   }, [session?.user?.id]);
 
   const handleAgentCreated = useCallback((newAgent: Agent) => {
-    console.log('[MultiAgentConsultant] handleAgentCreated called:', newAgent.name, newAgent.id);
+    console.log('[MultiAgentConsultant] handleAgentCreated called:', {
+      name: newAgent.name,
+      id: newAgent.id,
+      timestamp: new Date().toISOString()
+    });
     
     // First trigger sidebar refresh
     setAgentUpdateTrigger(prev => {
@@ -563,6 +567,7 @@ export default function MultiAgentConsultant() {
     });
     
     // Then auto-select the newly created agent
+    console.log('[MultiAgentConsultant] Setting currentAgent to:', newAgent.name);
     handleSelectAgent(newAgent);
     console.log(`[MultiAgentConsultant] ${newAgent.name} created/updated successfully`);
     setEditingAgent(null);

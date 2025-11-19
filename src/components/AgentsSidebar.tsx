@@ -58,6 +58,7 @@ export const AgentsSidebar = ({
   const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [syncingAgents, setSyncingAgents] = useState<Set<string>>(new Set());
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   
   // Health monitoring
   const agentIds = agents.map(a => a.id);
@@ -102,17 +103,30 @@ export const AgentsSidebar = ({
           // NO FILTER - we need to capture DELETE events too
         },
         (payload) => {
-          console.log('📡 [AgentsSidebar] Realtime event received:', payload.eventType);
+          console.log('📡 [AgentsSidebar] Realtime event received:', {
+            eventType: payload.eventType,
+            timestamp: new Date().toISOString(),
+            newData: payload.new,
+            oldData: payload.old
+          });
           
-          if (payload.eventType === 'DELETE') {
+          if (payload.eventType === 'INSERT') {
+            console.log('✨ [AgentsSidebar] New agent inserted:', payload.new);
+            // Reload immediato per nuovi agenti
+            loadAgents();
+          } else if (payload.eventType === 'DELETE') {
+            console.log('🗑️ [AgentsSidebar] Agent deleted:', payload.old);
             // Rimuovi immediatamente l'agente dallo stato locale
             setAgents(prev => prev.filter(a => a.id !== payload.old.id));
-          } else if (payload.eventType === 'UPDATE' && payload.new.active === false) {
-            // Rimuovi agenti soft-deleted
-            setAgents(prev => prev.filter(a => a.id !== payload.new.id));
-          } else {
-            // Per INSERT e UPDATE, reload tutto
-            loadAgents();
+          } else if (payload.eventType === 'UPDATE') {
+            console.log('✏️ [AgentsSidebar] Agent updated:', payload.new);
+            if (payload.new.active === false) {
+              // Se l'agente è stato disattivato, rimuovilo
+              setAgents(prev => prev.filter(a => a.id !== payload.new.id));
+            } else {
+              // Altrimenti reload per aggiornare i dati
+              loadAgents();
+            }
           }
         }
       )
@@ -141,6 +155,7 @@ export const AgentsSidebar = ({
       if (error) throw error;
       console.log('[AgentsSidebar] Loaded', data?.length || 0, 'agents');
       setAgents(data || []);
+      setLastRefresh(new Date()); // Track last refresh
     } catch (error: any) {
       console.error("[AgentsSidebar] Error loading agents:", error);
     } finally {
@@ -289,8 +304,8 @@ export const AgentsSidebar = ({
       </div>
 
       {/* Search Box */}
-      <div className="px-3 pb-2">
-        <div className="relative">
+      <div className="px-3 pb-2 flex items-center gap-2">
+        <div className="relative flex-1">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-sidebar-foreground/50" />
           <Input
             placeholder="Cerca agente..."
@@ -299,6 +314,21 @@ export const AgentsSidebar = ({
             className="pl-8 bg-sidebar-accent/50 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/50"
           />
         </div>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={loadAgents}
+                className="shrink-0"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Aggiorna lista agenti</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       {/* Agents List */}
