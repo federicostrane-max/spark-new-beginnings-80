@@ -122,6 +122,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       // Check sync status for each document
       if (transformedData.length > 0) {
+        // Small delay to ensure database writes have propagated
+        await new Promise(resolve => setTimeout(resolve, 1000));
         checkSyncStatuses(transformedData);
       }
     } catch (error: any) {
@@ -572,19 +574,21 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         toast.error('Errore nella sincronizzazione dei documenti');
       }
 
-      loadDocuments();
+      // Wait for sync to complete and reload
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await loadDocuments();
       
       // Notify parent to update badge
       if (onDocsUpdated) {
         onDocsUpdated();
       }
 
-      // Close dialog after 2 seconds to let user see results
+      // Close dialog after showing results
       setTimeout(() => {
         setShowAssignDialog(false);
         setSyncProgress(null);
         setSyncStatuses(new Map());
-      }, 2000);
+      }, 1000);
       
     } catch (error: any) {
       console.error('❌ Error assigning documents:', error);
@@ -683,6 +687,21 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           >
             <Plus className="h-4 w-4 mr-2" />
             Assegna Documento
+          </Button>
+          
+          <Button 
+            onClick={() => {
+              setDocuments(prev => prev.map(d => ({ ...d, syncStatus: 'checking' as const, chunkCount: 0 })));
+              checkSyncStatuses(documents);
+            }}
+            size="sm"
+            variant="outline"
+            type="button"
+            disabled={documents.length === 0}
+            title="Aggiorna lo stato di sincronizzazione dei documenti"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Aggiorna Stato
           </Button>
           
           {totalIssues > 0 && (
