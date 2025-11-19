@@ -194,18 +194,50 @@ export default function DocumentPool() {
     setShowReprocessDialog(false);
     
     try {
-      toast.loading('Riprocessamento documenti in corso...', { id: 'reprocess' });
+      let totalProcessed = 0;
+      let totalSuccessful = 0;
+      let totalFailed = 0;
+      let totalChunks = 0;
+      let hasMore = true;
+      let batchNumber = 1;
+
+      toast.loading('Riprocessamento batch 1 in corso...', { id: 'reprocess' });
       
-      const { data, error } = await supabase.functions.invoke('reprocess-documents-without-chunks', {
-        body: { batchSize: 5 }
-      });
+      while (hasMore) {
+        const { data, error } = await supabase.functions.invoke('reprocess-documents-without-chunks', {
+          body: { batchSize: 5 }
+        });
+        
+        if (error) {
+          console.error(`[Batch ${batchNumber}] Error:`, error);
+          break;
+        }
+        
+        const { summary } = data;
+        totalProcessed += summary.processed;
+        totalSuccessful += summary.successful;
+        totalFailed += summary.failed;
+        totalChunks += summary.totalChunks;
+        
+        console.log(`[Batch ${batchNumber}] Processed: ${summary.processed}, Successful: ${summary.successful}, Failed: ${summary.failed}, Chunks: ${summary.totalChunks}`);
+        
+        // Se non ci sono più documenti da processare, esci
+        if (summary.processed === 0) {
+          hasMore = false;
+        } else {
+          batchNumber++;
+          toast.loading(
+            `Riprocessamento batch ${batchNumber} in corso... (${totalSuccessful} successi, ${totalFailed} falliti, ${totalChunks} chunk)`,
+            { id: 'reprocess' }
+          );
+          // Pausa di 2 secondi tra un batch e l'altro
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
       
-      if (error) throw error;
-      
-      const { summary } = data;
       toast.success(
-        `✅ Riprocessamento completato! ${summary.successful} documenti processati con successo, ${summary.totalChunks} chunk creati. ${summary.failed > 0 ? `${summary.failed} documenti falliti.` : ''}`,
-        { id: 'reprocess', duration: 8000 }
+        `✅ Riprocessamento completato! ${totalSuccessful} documenti processati, ${totalChunks} chunk creati.${totalFailed > 0 ? ` ${totalFailed} documenti falliti.` : ''}`,
+        { id: 'reprocess', duration: 10000 }
       );
       
       setTimeout(() => {
