@@ -165,6 +165,7 @@ serve(async (req) => {
             source_url: `https://github.com/${repo}/blob/main/${file.path}`,
             search_query: `GitHub: ${repo}`,
             file_size_bytes: blob.size,
+            text_length: content.length,
             processing_status: 'downloaded',
             validation_status: 'pending',
             extracted_title: title,
@@ -181,9 +182,12 @@ serve(async (req) => {
 
         console.log(`✅ Saved: ${file.path} (ID: ${docData.id})`);
         
-        // Trigger processing via edge function
+        // Trigger processing via edge function - pass Markdown content directly
         const { error: processError } = await supabase.functions.invoke('process-document', {
-          body: { documentId: docData.id }
+          body: { 
+            documentId: docData.id,
+            fullText: content
+          }
         });
 
         if (processError) {
