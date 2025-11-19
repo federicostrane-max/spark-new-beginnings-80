@@ -65,7 +65,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       
       toast.loading(`Importazione da ${selectedRepo}...`, { id: 'github-import' });
 
-      const { data, error } = await supabase.functions.invoke('fetch-github-docs', {
+      const { data, error } = await supabase.functions.invoke('import-github-markdown', {
         body: {
           repo: selectedRepo,
           path: pathFilter,
@@ -127,7 +127,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       for (const repo of HUGGINGFACE_REPOS) {
         console.log(`📥 Importing ${repo.label}...`);
         
-        const { data, error } = await supabase.functions.invoke('fetch-github-docs', {
+        const { data, error } = await supabase.functions.invoke('import-github-markdown', {
           body: {
             repo: repo.value,
             path: repo.path,
