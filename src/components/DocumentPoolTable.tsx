@@ -42,6 +42,7 @@ import { BulkAssignDocumentDialog } from "./BulkAssignDocumentDialog";
 import { CreateFolderDialog } from "./CreateFolderDialog";
 import { AssignToFolderDialog } from "./AssignToFolderDialog";
 import { ManageFoldersDialog } from "./ManageFoldersDialog";
+import { FolderTreeView } from "./FolderTreeView";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
@@ -116,11 +117,21 @@ export const DocumentPoolTable = () => {
   const [assignToFolderDialogOpen, setAssignToFolderDialogOpen] = useState(false);
   const [manageFoldersDialogOpen, setManageFoldersDialogOpen] = useState(false);
   const [docsToAssignToFolder, setDocsToAssignToFolder] = useState<{ ids: string[]; names: string[] }>({ ids: [], names: [] });
+  
+  // View mode state
+  const [viewMode, setViewMode] = useState<'table' | 'folders'>('folders');
+  const [foldersData, setFoldersData] = useState<Array<{
+    id: string;
+    name: string;
+    documentCount: number;
+    documents: KnowledgeDocument[];
+  }>>([]);
 
   useEffect(() => {
     loadDocuments();
     loadAvailableAgents();
     loadAvailableFolders();
+    loadFolders();
 
     // Setup realtime subscription for knowledge_documents
     const channel = supabase
@@ -136,6 +147,20 @@ export const DocumentPoolTable = () => {
           console.log('[DocumentPoolTable] Realtime update:', payload);
           // Reload documents on any change
           loadDocuments();
+          loadFolders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'folders'
+        },
+        (payload) => {
+          console.log('[DocumentPoolTable] Folders update:', payload);
+          loadFolders();
+          loadAvailableFolders();
         }
       )
       .subscribe();
@@ -240,16 +265,135 @@ export const DocumentPoolTable = () => {
   const loadAvailableFolders = async () => {
     try {
       const { data, error } = await supabase
-        .from("knowledge_documents")
-        .select("folder")
-        .not("folder", "is", null);
+        .from("folders")
+        .select("name")
+        .order("name");
 
       if (error) throw error;
 
-      const uniqueFolders = [...new Set(data.map(d => d.folder).filter(Boolean))];
-      setAvailableFolders(uniqueFolders);
+      const folders = (data || []).map((f: any) => f.name);
+      setAvailableFolders(folders);
     } catch (error: any) {
       console.error('[DocumentPoolTable] Error loading folders:', error);
+    }
+  };
+
+  const loadFolders = async () => {
+    try {
+      // Load folders from database
+      const { data: foldersDbData, error: foldersError } = await supabase
+        .from('folders')
+        .select('*')
+        .order('name');
+
+      if (foldersError) throw foldersError;
+
+      // Load documents for each folder
+      const foldersWithDocs = await Promise.all(
+        (foldersDbData || []).map(async (folder) => {
+          const { data: docs, error: docsError } = await supabase
+            .from('knowledge_documents')
+            .select(`
+              *,
+              agent_document_links(
+                agent_id,
+                agents(id, name)
+              )
+            `)
+            .eq('folder', folder.name)
+            .order('created_at', { ascending: false });
+
+          if (docsError) throw docsError;
+
+          // Transform documents
+          const transformedDocs = (docs || []).map((doc: any) => {
+            const links = doc.agent_document_links || [];
+            const agentNames = links
+              .map((link: any) => link.agents?.name)
+              .filter(Boolean);
+
+            return {
+              id: doc.id,
+              file_name: doc.file_name,
+              validation_status: doc.validation_status,
+              validation_reason: doc.validation_reason || "",
+              processing_status: doc.processing_status,
+              ai_summary: doc.ai_summary,
+              text_length: doc.text_length,
+              page_count: doc.page_count,
+              created_at: doc.created_at,
+              agent_names: agentNames,
+              agents_count: agentNames.length,
+              folder: doc.folder,
+              keywords: doc.keywords || [],
+              topics: doc.topics || [],
+              complexity_level: doc.complexity_level || "",
+              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+            };
+          });
+
+          return {
+            id: folder.id,
+            name: folder.name,
+            documentCount: transformedDocs.length,
+            documents: transformedDocs,
+          };
+        })
+      );
+
+      // Add "Senza Cartella" folder for documents without a folder
+      const { data: noFolderDocs, error: noFolderError } = await supabase
+        .from('knowledge_documents')
+        .select(`
+          *,
+          agent_document_links(
+            agent_id,
+            agents(id, name)
+          )
+        `)
+        .is('folder', null)
+        .order('created_at', { ascending: false });
+
+      if (noFolderError) throw noFolderError;
+
+      if (noFolderDocs && noFolderDocs.length > 0) {
+        const transformedNoFolderDocs = noFolderDocs.map((doc: any) => {
+          const links = doc.agent_document_links || [];
+          const agentNames = links
+            .map((link: any) => link.agents?.name)
+            .filter(Boolean);
+
+          return {
+            id: doc.id,
+            file_name: doc.file_name,
+            validation_status: doc.validation_status,
+            validation_reason: doc.validation_reason || "",
+            processing_status: doc.processing_status,
+            ai_summary: doc.ai_summary,
+            text_length: doc.text_length,
+            page_count: doc.page_count,
+            created_at: doc.created_at,
+            agent_names: agentNames,
+            agents_count: agentNames.length,
+            folder: doc.folder,
+            keywords: doc.keywords || [],
+            topics: doc.topics || [],
+            complexity_level: doc.complexity_level || "",
+            agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+          };
+        });
+
+        foldersWithDocs.push({
+          id: 'no-folder',
+          name: 'Senza Cartella',
+          documentCount: transformedNoFolderDocs.length,
+          documents: transformedNoFolderDocs,
+        });
+      }
+
+      setFoldersData(foldersWithDocs);
+    } catch (error: any) {
+      console.error('[DocumentPoolTable] Error loading folders data:', error);
     }
   };
 
@@ -636,6 +780,23 @@ export const DocumentPoolTable = () => {
             </span>
             <div className="flex flex-wrap gap-2">
               <Button
+                variant={viewMode === 'folders' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setViewMode('folders')}
+              >
+                <Folder className="mr-2 h-4 w-4" />
+                Vista Cartelle
+              </Button>
+              <Button
+                variant={viewMode === 'table' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setViewMode('table')}
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Vista Tabella
+              </Button>
+              <div className="h-6 w-px bg-border mx-1" />
+              <Button
                 onClick={() => setCreateFolderDialogOpen(true)}
                 variant="outline"
                 size="sm"
@@ -704,6 +865,28 @@ export const DocumentPoolTable = () => {
                 Riprova
               </Button>
             </div>
+          ) : viewMode === 'folders' ? (
+            <FolderTreeView
+              folders={foldersData}
+              onDocumentSelect={(docId) => {
+                const newSelected = new Set(selectedDocIds);
+                if (newSelected.has(docId)) {
+                  newSelected.delete(docId);
+                } else {
+                  newSelected.add(docId);
+                }
+                setSelectedDocIds(newSelected);
+              }}
+              selectedDocuments={selectedDocIds}
+              onDocumentClick={(doc) => {
+                // Find full document data
+                const fullDoc = documents.find(d => d.id === doc.id);
+                if (fullDoc) {
+                  setDocToView(fullDoc);
+                  setDetailsDialogOpen(true);
+                }
+              }}
+            />
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />

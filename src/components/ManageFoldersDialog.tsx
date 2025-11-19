@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ interface ManageFoldersDialogProps {
 export function ManageFoldersDialog({
   open,
   onOpenChange,
-  folders,
+  folders: propFolders,
   onFoldersChanged,
 }: ManageFoldersDialogProps) {
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
@@ -33,7 +33,52 @@ export function ManageFoldersDialog({
   const [deleteAction, setDeleteAction] = useState<"unassign" | "move">("unassign");
   const [moveToFolder, setMoveToFolder] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
   const { toast } = useToast();
+
+  // Load folders from database when dialog opens
+  React.useEffect(() => {
+    if (open) {
+      loadFolders();
+    }
+  }, [open]);
+
+  const loadFolders = async () => {
+    try {
+      const { data: foldersData, error } = await supabase
+        .from('folders')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+
+      // Get document count for each folder
+      const foldersWithCounts = await Promise.all(
+        (foldersData || []).map(async (folder) => {
+          const { count, error: countError } = await supabase
+            .from('knowledge_documents')
+            .select('*', { count: 'exact', head: true })
+            .eq('folder', folder.name);
+
+          if (countError) throw countError;
+
+          return {
+            name: folder.name,
+            count: count || 0,
+          };
+        })
+      );
+
+      setFolders(foldersWithCounts);
+    } catch (error) {
+      console.error("Error loading folders:", error);
+      toast({
+        title: "Errore",
+        description: "Impossibile caricare le cartelle",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleRename = async (oldName: string) => {
     const trimmedName = newName.trim();
@@ -68,12 +113,21 @@ export function ManageFoldersDialog({
     setIsLoading(true);
 
     try {
-      const { error } = await supabase
+      // Update folder name in folders table
+      const { error: folderError } = await supabase
+        .from('folders')
+        .update({ name: trimmedName })
+        .eq('name', oldName);
+
+      if (folderError) throw folderError;
+
+      // Update folder name in documents
+      const { error: docsError } = await supabase
         .from('knowledge_documents')
         .update({ folder: trimmedName })
         .eq('folder', oldName);
 
-      if (error) throw error;
+      if (docsError) throw docsError;
 
       toast({
         title: "Cartella rinominata",
@@ -82,6 +136,7 @@ export function ManageFoldersDialog({
 
       setRenamingFolder(null);
       setNewName("");
+      loadFolders();
       onFoldersChanged();
     } catch (error) {
       console.error("Errore nella rinomina:", error);
@@ -116,12 +171,21 @@ export function ManageFoldersDialog({
         updateValue = moveToFolder;
       }
 
-      const { error } = await supabase
+      // Update documents first
+      const { error: docsError } = await supabase
         .from('knowledge_documents')
         .update({ folder: updateValue })
         .eq('folder', deletingFolder.name);
 
-      if (error) throw error;
+      if (docsError) throw docsError;
+
+      // Delete folder from folders table
+      const { error: folderError } = await supabase
+        .from('folders')
+        .delete()
+        .eq('name', deletingFolder.name);
+
+      if (folderError) throw folderError;
 
       toast({
         title: "Cartella eliminata",
@@ -133,6 +197,7 @@ export function ManageFoldersDialog({
       setDeletingFolder(null);
       setDeleteAction("unassign");
       setMoveToFolder("");
+      loadFolders();
       onFoldersChanged();
     } catch (error) {
       console.error("Errore nell'eliminazione:", error);

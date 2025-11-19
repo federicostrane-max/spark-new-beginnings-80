@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import { Folder } from "lucide-react";
 
 interface CreateFolderDialogProps {
@@ -57,16 +58,32 @@ export function CreateFolderDialog({
 
     setIsLoading(true);
     
-    // La cartella verrà creata "virtualmente" - esisterà quando ci assegneremo documenti
-    toast({
-      title: "Cartella creata",
-      description: `Cartella "${trimmedName}" pronta per l'uso`,
-    });
-    
-    setFolderName("");
-    onFolderCreated();
-    onOpenChange(false);
-    setIsLoading(false);
+    try {
+      // INSERIRE NEL DATABASE
+      const { error } = await supabase
+        .from('folders')
+        .insert({ name: trimmedName });
+
+      if (error) throw error;
+
+      toast({
+        title: "Cartella creata",
+        description: `Cartella "${trimmedName}" creata con successo`,
+      });
+      
+      setFolderName("");
+      onFolderCreated();
+      onOpenChange(false);
+    } catch (error) {
+      console.error("Errore nella creazione:", error);
+      toast({
+        title: "Errore",
+        description: "Impossibile creare la cartella",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
