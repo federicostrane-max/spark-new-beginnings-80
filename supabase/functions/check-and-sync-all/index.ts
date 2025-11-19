@@ -122,21 +122,21 @@ serve(async (req) => {
     // Use RPC to count chunks grouped by document efficiently
     const agentChunkMap = new Map<string, number>();
     
-    // Get unique pool_document_ids first (much faster)
-    const { data: uniqueDocs, error: uniqueDocsError } = await supabase
+    // Get all chunks with both id and pool_document_id to count correctly
+    const { data: allChunks, error: chunksError } = await supabase
       .from('agent_knowledge')
-      .select('pool_document_id')
+      .select('id, pool_document_id')
       .eq('agent_id', agentId)
       .not('pool_document_id', 'is', null)
       .eq('is_active', true);
 
-    if (uniqueDocsError) {
-      console.error('[check-and-sync-all] Error fetching unique docs:', uniqueDocsError);
-      throw uniqueDocsError;
+    if (chunksError) {
+      console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
+      throw chunksError;
     }
 
     // Group by pool_document_id client-side
-    uniqueDocs?.forEach(chunk => {
+    allChunks?.forEach(chunk => {
       if (chunk.pool_document_id) {
         const count = agentChunkMap.get(chunk.pool_document_id) || 0;
         agentChunkMap.set(chunk.pool_document_id, count + 1);
