@@ -31,6 +31,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [progress, setProgress] = useState(0);
   const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
+  const [newFilesList, setNewFilesList] = useState<File[]>([]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -55,13 +56,17 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-  const removeDuplicatesAndContinue = () => {
-    const existingNames = new Set(duplicatesList.map(f => f.name));
-    const filteredFiles = selectedFiles.filter(f => !existingNames.has(f.name));
-    setSelectedFiles(filteredFiles);
+  const proceedWithNewFiles = async () => {
     setDuplicatesDialogOpen(false);
+    toast.info(`${duplicatesList.length} file duplicato/i ignorato/i, caricamento di ${newFilesList.length} file nuovi...`);
+    
+    // Proceed with upload of new files only
+    await performUpload(newFilesList);
+    
+    // Reset states
+    setSelectedFiles([]);
     setDuplicatesList([]);
-    toast.success(`${duplicatesList.length} file duplicato/i rimosso/i dalla selezione`);
+    setNewFilesList([]);
   };
 
   const handleUpload = async () => {
@@ -90,10 +95,13 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
 
       const existingFileNames = new Set(existingDocs?.map(d => d.file_name) || []);
       const duplicates = selectedFiles.filter(f => existingFileNames.has(f.name));
+      const newFiles = selectedFiles.filter(f => !existingFileNames.has(f.name));
 
       if (duplicates.length > 0) {
         console.log('⚠️ DUPLICATES FOUND:', duplicates.map(f => f.name));
+        console.log('✓ NEW FILES TO UPLOAD:', newFiles.map(f => f.name));
         setDuplicatesList(duplicates);
+        setNewFilesList(newFiles);
         setDuplicatesDialogOpen(true);
         return;
       }
@@ -107,15 +115,21 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       setCheckingDuplicates(false);
     }
 
+    // No duplicates, proceed with upload
+    await performUpload(selectedFiles);
+    setSelectedFiles([]);
+  };
+
+  const performUpload = async (filesToUpload: File[]) => {
     setUploading(true);
     setProgress(0);
     let successCount = 0;
     let errorCount = 0;
-    const totalFiles = selectedFiles.length;
+    const totalFiles = filesToUpload.length;
     
     try {
-      for (let fileIndex = 0; fileIndex < selectedFiles.length; fileIndex++) {
-        const file = selectedFiles[fileIndex];
+      for (let fileIndex = 0; fileIndex < filesToUpload.length; fileIndex++) {
+        const file = filesToUpload[fileIndex];
         setCurrentFile(file.name);
         
         try {
@@ -294,34 +308,70 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       </CardContent>
 
       <AlertDialog open={duplicatesDialogOpen} onOpenChange={setDuplicatesDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-600" />
-              File Duplicati Trovati
+              Riepilogo Upload
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {duplicatesList.length === 1 
-                ? 'Il seguente file esiste già nel database:'
-                : `I seguenti ${duplicatesList.length} file esistono già nel database:`}
+              Alcuni file sono già presenti nel pool e verranno ignorati. Vuoi procedere con il caricamento dei file nuovi?
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="max-h-60 overflow-y-auto bg-muted rounded-lg p-3">
-            <ul className="space-y-2">
-              {duplicatesList.map((file, idx) => (
-                <li key={idx} className="text-sm font-medium flex items-start gap-2">
-                  <span className="text-yellow-600">•</span>
-                  <span className="flex-1">{file.name}</span>
-                </li>
-              ))}
-            </ul>
+          
+          <div className="flex-1 overflow-y-auto space-y-4 my-4">
+            {newFilesList.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-green-600 mb-2 flex items-center gap-2">
+                  <Upload className="h-4 w-4" />
+                  File nuovi da caricare ({newFilesList.length})
+                </h4>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {newFilesList.map((file, index) => (
+                    <div key={index} className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950/20 rounded text-sm">
+                      <span className="truncate flex-1">{file.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {(file.size / 1024 / 1024).toFixed(2)}MB
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {duplicatesList.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-yellow-600 mb-2 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  File duplicati (verranno ignorati) ({duplicatesList.length})
+                </h4>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {duplicatesList.map((file, index) => (
+                    <div key={index} className="flex items-center gap-2 p-2 bg-yellow-50 dark:bg-yellow-950/20 rounded text-sm">
+                      <span className="truncate flex-1">{file.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {(file.size / 1024 / 1024).toFixed(2)}MB
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDuplicatesList([])}>
+            <AlertDialogCancel onClick={() => {
+              setDuplicatesDialogOpen(false);
+              setDuplicatesList([]);
+              setNewFilesList([]);
+            }}>
               Annulla
             </AlertDialogCancel>
-            <AlertDialogAction onClick={removeDuplicatesAndContinue}>
-              Rimuovi duplicati e continua
+            <AlertDialogAction 
+              onClick={proceedWithNewFiles}
+              disabled={newFilesList.length === 0}
+            >
+              Continua con {newFilesList.length} file nuov{newFilesList.length === 1 ? 'o' : 'i'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
