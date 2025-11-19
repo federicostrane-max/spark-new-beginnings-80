@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 3;
     let allResults: any[] = [];
     let hasMore = true;
     let totalProcessed = 0;
