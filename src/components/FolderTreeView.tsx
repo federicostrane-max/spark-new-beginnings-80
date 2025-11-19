@@ -53,12 +53,18 @@ export function FolderTreeView({
 }: FolderTreeViewProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
-  const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], checked: boolean) => {
+  const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], selectedCount: number) => {
+    // Se tutti sono selezionati, deseleziona tutti
+    // Altrimenti (nessuno o alcuni selezionati), seleziona tutti
+    const shouldSelectAll = selectedCount < folderDocs.length;
+    
     folderDocs.forEach(doc => {
-      if (checked && !selectedDocuments.has(doc.id)) {
-        onDocumentSelect(doc.id);
-      } else if (!checked && selectedDocuments.has(doc.id)) {
-        onDocumentSelect(doc.id);
+      const isSelected = selectedDocuments.has(doc.id);
+      // Solo toggle se lo stato corrente è diverso da quello desiderato
+      if (shouldSelectAll && !isSelected) {
+        onDocumentSelect(doc.id); // Seleziona
+      } else if (!shouldSelectAll && isSelected) {
+        onDocumentSelect(doc.id); // Deseleziona
       }
     });
   };
@@ -120,7 +126,12 @@ export function FolderTreeView({
                 <div className="flex items-center gap-2 flex-1">
                   <Checkbox
                     checked={selectedInFolder === folderDocs.length && folderDocs.length > 0}
-                    onCheckedChange={(checked) => handleFolderCheckboxChange(folderDocs, checked as boolean)}
+                    ref={(el: any) => {
+                      if (el && selectedInFolder > 0 && selectedInFolder < folderDocs.length) {
+                        el.indeterminate = true;
+                      }
+                    }}
+                    onCheckedChange={() => handleFolderCheckboxChange(folderDocs, selectedInFolder)}
                     onClick={(e) => e.stopPropagation()}
                     className="mr-1"
                   />
@@ -154,7 +165,7 @@ export function FolderTreeView({
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleFolderCheckboxChange(folderDocs, true);
+                        handleFolderCheckboxChange(folderDocs, 0);
                       }}
                     >
                       <FolderCheck className="mr-2 h-4 w-4" />
