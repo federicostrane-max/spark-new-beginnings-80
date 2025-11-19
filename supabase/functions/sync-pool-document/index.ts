@@ -73,7 +73,7 @@ serve(async (req) => {
     // ========================================
     const { data: poolDoc, error: docError } = await supabase
       .from('knowledge_documents')
-      .select('*')
+      .select('id, file_name, file_path, processing_status, validation_status, full_text')
       .eq('id', documentId)
       .eq('processing_status', 'ready_for_assignment')
       .maybeSingle();
