@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle, FileX } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle, FileX, MoreVertical, Info } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { GitHubDocsImport } from "@/components/GitHubDocsImport";
@@ -19,6 +19,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export default function DocumentPool() {
   const navigate = useNavigate();
@@ -40,6 +54,7 @@ export default function DocumentPool() {
   const [selectedBackup, setSelectedBackup] = useState<any>(null);
   const [showBackupDialog, setShowBackupDialog] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isRecategorizing, setIsRecategorizing] = useState(false);
   
   // Health metrics
   const [healthMetrics, setHealthMetrics] = useState({
@@ -207,6 +222,29 @@ export default function DocumentPool() {
       toast.error(`Errore durante il ripristino: ${error.message}`, { id: 'restore' });
     } finally {
       setIsRestoring(false);
+    }
+  };
+
+  const handleRecategorizeGitHub = async () => {
+    setIsRecategorizing(true);
+    try {
+      toast.loading('Ricategorizzazione documenti GitHub in corso...', { id: 'recat' });
+      
+      const { data, error } = await supabase.functions.invoke('recategorize-github-docs');
+      
+      if (error) throw error;
+      
+      toast.success(
+        `✅ Ricategorizzazione completata! ${data.updatedCount} documenti aggiornati.`,
+        { id: 'recat', duration: 5000 }
+      );
+      
+      setTableKey(prev => prev + 1);
+    } catch (error: any) {
+      console.error('[Recategorize Error]', error);
+      toast.error(`Errore: ${error.message}`, { id: 'recat' });
+    } finally {
+      setIsRecategorizing(false);
     }
   };
 
@@ -477,108 +515,168 @@ export default function DocumentPool() {
                     <RefreshCw className="mr-2 h-5 w-5" />
                     Migra PDF degli Agenti al Pool
                   </>
-                )}
-              </Button>
             )}
-            
-            <Button
-              onClick={handleRetryBlocked}
-              disabled={isRetrying}
-              variant="secondary"
-              size="lg"
-            >
-              {isRetrying ? (
-                <>
-                  <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
-                  Validazione...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="mr-2 h-5 w-5" />
-                  Riprova PDF Bloccati
-                </>
-              )}
+          </Button>
+        )}
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="lg">
+              <MoreVertical className="h-5 w-5 mr-2" />
+              Manutenzione
             </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <DropdownMenuLabel>Operazioni di Manutenzione</DropdownMenuLabel>
+            <DropdownMenuSeparator />
             
-            <Button
-              onClick={handleTestAggressiveExtraction}
-              disabled={testingExtraction}
-              variant="outline"
-              size="lg"
-            >
-              {testingExtraction ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Testing...
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="mr-2 h-5 w-5" />
-                  Test Aggressive Extraction
-                </>
-              )}
-            </Button>
-            
-            <Button
-              onClick={() => setShowCleanupDialog(true)}
-              disabled={isCleaningChunks}
-              variant="outline"
-              size="lg"
-              className="border-orange-500/50 bg-orange-500/10 hover:bg-orange-500/20 text-orange-700 dark:text-orange-400"
-            >
-              {isCleaningChunks ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Pulizia...
-                </>
-              ) : (
-                <>
-                  <FileX className="mr-2 h-5 w-5" />
-                  Pulisci Chunks Duplicati
-                </>
-              )}
-            </Button>
-            
-            <Button
-              onClick={() => setShowReprocessDialog(true)}
-              disabled={isReprocessing || documentsWithoutChunks === 0}
-              variant="outline"
-              size="lg"
-              className="border-purple-500/50 bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-400"
-            >
-              {isReprocessing ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Riprocessamento...
-                </>
-              ) : (
-                <>
-                  <FileX className="mr-2 h-5 w-5" />
-                  Riprocessa Documenti Senza Chunk ({documentsWithoutChunks})
-                </>
-              )}
-            </Button>
+            {/* Ricategorizza Documenti GitHub */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={handleRecategorizeGitHub}
+                disabled={isRecategorizing}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Ricategorizza Documenti GitHub</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Organizza i file Markdown importati da GitHub nelle cartelle corrette 
+                      (Transformers, Diffusers, Datasets, PEFT, Hub) in base al repository di origine.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
 
-            <Button
-              onClick={handleCreateBackup}
-              disabled={isCreatingBackup}
-              variant="outline"
-              size="lg"
-              className="border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-400"
-            >
-              {isCreatingBackup ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Backup...
-                </>
-              ) : (
-                <>
-                  💾 Backup Assegnazioni
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
+            <DropdownMenuSeparator />
+
+            {/* Riprova PDF Bloccati */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={handleRetryBlocked}
+                disabled={isRetrying}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Riprova PDF Bloccati</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Tenta di riprocessare i PDF che sono falliti durante l'elaborazione 
+                      (status: validation_failed, processing_failed). Utile per errori temporanei.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            {/* Backup Assegnazioni */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={handleCreateBackup}
+                disabled={isCreatingBackup}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Backup Assegnazioni</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Crea un backup delle assegnazioni documento-agente. Salva quali documenti 
+                      sono assegnati a quali agenti, utile prima di operazioni di manutenzione.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              Debug & Emergenza
+            </DropdownMenuLabel>
+
+            {/* Pulisci Chunks Duplicati */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={() => setShowCleanupDialog(true)}
+                disabled={isCleaningChunks}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Pulisci Chunks Duplicati</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Rimuove chunk duplicati nel database. Processo in batch che consolida 
+                      i chunk identici. Usare solo se si notano duplicati anomali.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            {/* Riprocessa Documenti Senza Chunk */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={() => setShowReprocessDialog(true)}
+                disabled={isReprocessing || documentsWithoutChunks === 0}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Riprocessa Documenti Senza Chunk ({documentsWithoutChunks})</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Riprocessa documenti che sono in stato "ready" ma non hanno chunk associati. 
+                      Processo in batch. Disabilitato se non ci sono documenti da riprocessare.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            {/* Test Aggressive Extraction (nascosto in prod) */}
+            {import.meta.env.DEV && (
+              <>
+                <DropdownMenuSeparator />
+                <TooltipProvider>
+                  <DropdownMenuItem
+                    onClick={handleTestAggressiveExtraction}
+                    disabled={testingExtraction}
+                    className="flex items-center justify-between cursor-pointer"
+                  >
+                    <span className="text-xs text-muted-foreground">Test Extraction</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="left" className="max-w-xs">
+                        <p className="text-xs">
+                          [DEBUG] Testa strategie di estrazione metadati aggressive. 
+                          Solo per sviluppo/debugging.
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </DropdownMenuItem>
+                </TooltipProvider>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
 
         {!checkingMigration && needsMigration && (
           <Alert className="bg-blue-500/10 border-blue-500 mb-6">

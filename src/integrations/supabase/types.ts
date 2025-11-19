@@ -1831,6 +1831,7 @@ export type Database = {
           summary: string
         }[]
       }
+      recategorize_github_documents: { Args: never; Returns: number }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
