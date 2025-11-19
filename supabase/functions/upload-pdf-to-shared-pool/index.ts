@@ -116,6 +116,7 @@ serve(async (req) => {
         processing_status: 'processing',
         text_length: text.length,
         file_size_bytes: fileSize || null,
+        full_text: text, // ✅ Salva full_text durante l'inserimento
       })
       .select('id')
       .single();

@@ -114,26 +114,62 @@ serve(async (req) => {
           fullText = chunks.map(c => c.content).join(' ');
           console.log(`[process-document] Reconstructed text from ${chunks.length} chunks (${fullText.length} chars)`);
         } else {
-          // No chunks found, extract text from PDF
-          console.log('[process-document] No chunks found, extracting text from PDF...');
+          // No chunks found, try to extract text from PDF
+          console.log('[process-document] No chunks found, attempting PDF extraction...');
           
-          const { data: extractResult, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
-            body: { documentId }
-          });
+          try {
+            const { data: extractResult, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+              body: { documentId }
+            });
 
-          if (extractError || !extractResult?.text) {
-            throw new Error(`Cannot extract text from PDF for document ${documentId}: ${extractError?.message || 'No text extracted'}`);
+            if (extractError || !extractResult?.text) {
+              console.warn(`[process-document] ⚠️ PDF extraction failed: ${extractError?.message || 'No text extracted'}`);
+              
+              // FALLBACK: Try one more time to get chunks (potrebbe essere stato creato nel frattempo)
+              console.log('[process-document] FALLBACK: Attempting to reconstruct from chunks as last resort...');
+              const { data: fallbackChunks } = await supabase
+                .from('agent_knowledge')
+                .select('content')
+                .eq('pool_document_id', documentId)
+                .is('agent_id', null)
+                .order('created_at', { ascending: true });
+              
+              if (fallbackChunks && fallbackChunks.length > 0) {
+                fullText = fallbackChunks.map(c => c.content).join(' ');
+                console.log(`[process-document] ✓ FALLBACK SUCCESS: Reconstructed ${fullText.length} chars from ${fallbackChunks.length} chunks`);
+              } else {
+                throw new Error(`Cannot extract text from PDF and no chunks available for document ${documentId}`);
+              }
+            } else {
+              const extractedText = extractResult.text;
+              fullText = extractedText;
+              console.log(`[process-document] ✓ Extracted ${extractedText.length} characters from PDF`);
+              
+              // Update the document with the extracted text length
+              await supabase
+                .from('knowledge_documents')
+                .update({ text_length: extractedText.length })
+                .eq('id', documentId);
+            }
+          } catch (pdfError: any) {
+            console.error(`[process-document] PDF extraction error:`, pdfError);
+            
+            // FALLBACK: Last attempt to get chunks
+            console.log('[process-document] FALLBACK: PDF extraction threw error, trying chunks...');
+            const { data: errorFallbackChunks } = await supabase
+              .from('agent_knowledge')
+              .select('content')
+              .eq('pool_document_id', documentId)
+              .is('agent_id', null)
+              .order('created_at', { ascending: true });
+            
+            if (errorFallbackChunks && errorFallbackChunks.length > 0) {
+              fullText = errorFallbackChunks.map(c => c.content).join(' ');
+              console.log(`[process-document] ✓ FALLBACK SUCCESS: Reconstructed ${fullText.length} chars from ${errorFallbackChunks.length} chunks after error`);
+            } else {
+              throw new Error(`PDF extraction failed and no chunks available: ${pdfError.message}`);
+            }
           }
-
-          const extractedText = extractResult.text;
-          fullText = extractedText;
-          console.log(`[process-document] Extracted ${extractedText.length} characters from PDF`);
-          
-          // Update the document with the extracted text length
-          await supabase
-            .from('knowledge_documents')
-            .update({ text_length: extractedText.length })
-            .eq('id', documentId);
         }
       }
     }
