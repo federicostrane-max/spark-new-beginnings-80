@@ -33,11 +33,15 @@ import {
   Info,
   RefreshCw,
   X,
+  Folder,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
 import { DocumentDetailsDialog } from "./DocumentDetailsDialog";
 import { BulkAssignDocumentDialog } from "./BulkAssignDocumentDialog";
+import { CreateFolderDialog } from "./CreateFolderDialog";
+import { AssignToFolderDialog } from "./AssignToFolderDialog";
+import { ManageFoldersDialog } from "./ManageFoldersDialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
@@ -106,6 +110,12 @@ export const DocumentPoolTable = () => {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  
+  // Folder management state
+  const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
+  const [assignToFolderDialogOpen, setAssignToFolderDialogOpen] = useState(false);
+  const [manageFoldersDialogOpen, setManageFoldersDialogOpen] = useState(false);
+  const [docsToAssignToFolder, setDocsToAssignToFolder] = useState<{ ids: string[]; names: string[] }>({ ids: [], names: [] });
 
   useEffect(() => {
     loadDocuments();
@@ -433,6 +443,35 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleRemoveFromFolder = async (documentIds: string[]) => {
+    try {
+      const { error } = await supabase
+        .from('knowledge_documents')
+        .update({ folder: null })
+        .in('id', documentIds);
+
+      if (error) throw error;
+
+      toast.success(`${documentIds.length} documento/i rimosso/i dalla cartella`);
+      loadDocuments();
+      loadAvailableFolders();
+      setSelectedDocIds(new Set());
+    } catch (error) {
+      console.error("Errore rimozione cartella:", error);
+      toast.error("Impossibile rimuovere documenti dalla cartella");
+    }
+  };
+
+  const getFolderInfo = () => {
+    const folderCounts = new Map<string, number>();
+    documents.forEach(doc => {
+      if (doc.folder) {
+        folderCounts.set(doc.folder, (folderCounts.get(doc.folder) || 0) + 1);
+      }
+    });
+    return Array.from(folderCounts.entries()).map(([name, count]) => ({ name, count }));
+  };
+
   const handleRepairDocuments = async () => {
     try {
       setRepairing(true);
@@ -589,8 +628,29 @@ export const DocumentPoolTable = () => {
             <span className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
               Documenti ({filteredDocuments.length})
+              {availableFolders.length > 0 && (
+                <Badge variant="secondary" className="text-xs">
+                  {availableFolders.length} cartelle
+                </Badge>
+              )}
             </span>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() => setCreateFolderDialogOpen(true)}
+                variant="outline"
+                size="sm"
+              >
+                <Folder className="mr-2 h-4 w-4" />
+                Crea Cartella
+              </Button>
+              <Button
+                onClick={() => setManageFoldersDialogOpen(true)}
+                variant="outline"
+                size="sm"
+                disabled={availableFolders.length === 0}
+              >
+                Gestisci Cartelle
+              </Button>
               <Button
                 onClick={handleRepairDocuments}
                 disabled={repairing}
@@ -604,7 +664,7 @@ export const DocumentPoolTable = () => {
                   </>
                 ) : (
                   <>
-                    🔧 Ripara tutti i documenti
+                    🔧 Ripara
                   </>
                 )}
               </Button>
@@ -622,7 +682,7 @@ export const DocumentPoolTable = () => {
                 ) : (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4" />
-                    Elabora documenti mancanti
+                    Elabora
                   </>
                 )}
               </Button>
@@ -1007,7 +1067,29 @@ export const DocumentPoolTable = () => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => {
+                    const selectedDocs = documents.filter(d => selectedDocIds.has(d.id));
+                    setDocsToAssignToFolder({
+                      ids: Array.from(selectedDocIds),
+                      names: selectedDocs.map(d => d.file_name)
+                    });
+                    setAssignToFolderDialogOpen(true);
+                  }}
+                >
+                  <Folder className="h-4 w-4 mr-2" />
+                  Cartella
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleRemoveFromFolder(Array.from(selectedDocIds))}
+                >
+                  Rimuovi Cartella
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1015,7 +1097,7 @@ export const DocumentPoolTable = () => {
                   disabled={validatedSelectedDocs.length === 0}
                 >
                   <LinkIcon className="h-4 w-4 mr-2" />
-                  Assegna
+                  Assegna Agenti
                 </Button>
                 <Button
                   variant="destructive"
@@ -1064,6 +1146,40 @@ export const DocumentPoolTable = () => {
         onAssigned={() => {
           setSelectedDocIds(new Set());
           loadDocuments();
+        }}
+      />
+
+      {/* Folder Management Dialogs */}
+      <CreateFolderDialog
+        open={createFolderDialogOpen}
+        onOpenChange={setCreateFolderDialogOpen}
+        existingFolders={availableFolders}
+        onFolderCreated={() => {
+          loadAvailableFolders();
+        }}
+      />
+
+      <AssignToFolderDialog
+        open={assignToFolderDialogOpen}
+        onOpenChange={setAssignToFolderDialogOpen}
+        documentIds={docsToAssignToFolder.ids}
+        documentNames={docsToAssignToFolder.names}
+        availableFolders={availableFolders}
+        onAssigned={() => {
+          loadDocuments();
+          loadAvailableFolders();
+          setSelectedDocIds(new Set());
+          setDocsToAssignToFolder({ ids: [], names: [] });
+        }}
+      />
+
+      <ManageFoldersDialog
+        open={manageFoldersDialogOpen}
+        onOpenChange={setManageFoldersDialogOpen}
+        folders={getFolderInfo()}
+        onFoldersChanged={() => {
+          loadDocuments();
+          loadAvailableFolders();
         }}
       />
 
