@@ -102,15 +102,18 @@ export const AgentsSidebar = ({
           // NO FILTER - we need to capture DELETE events too
         },
         (payload) => {
-          console.log('📡 [AgentsSidebar] Realtime event received:');
-          console.log('  - Event type:', payload.eventType);
-          console.log('  - Table:', payload.table);
-          console.log('  - New data:', payload.new);
-          console.log('  - Old data:', payload.old);
-          console.log('  - Timestamp:', new Date().toISOString());
+          console.log('📡 [AgentsSidebar] Realtime event received:', payload.eventType);
           
-          // Reload agents on any change (INSERT, UPDATE, DELETE)
-          loadAgents();
+          if (payload.eventType === 'DELETE') {
+            // Rimuovi immediatamente l'agente dallo stato locale
+            setAgents(prev => prev.filter(a => a.id !== payload.old.id));
+          } else if (payload.eventType === 'UPDATE' && payload.new.active === false) {
+            // Rimuovi agenti soft-deleted
+            setAgents(prev => prev.filter(a => a.id !== payload.new.id));
+          } else {
+            // Per INSERT e UPDATE, reload tutto
+            loadAgents();
+          }
         }
       )
       .subscribe((status) => {
@@ -175,17 +178,36 @@ export const AgentsSidebar = ({
     if (!agentToDelete) return;
     
     try {
-      const { error } = await supabase
+      // Soft delete: marca l'agente come inactive
+      const { data, error } = await supabase
         .from("agents")
-        .delete()
-        .eq("id", agentToDelete.id);
+        .update({ active: false })
+        .eq("id", agentToDelete.id)
+        .select();
 
       if (error) throw error;
 
+      // Verifica se qualcosa è stato effettivamente eliminato
+      if (!data || data.length === 0) {
+        toast.error("Non hai i permessi per eliminare questo agente");
+        setAgentToDelete(null);
+        return;
+      }
+
+      toast.success("Agente eliminato con successo");
       setAgentToDelete(null);
-      loadAgents();
+      
+      // Rimuovi immediatamente dallo stato locale
+      setAgents(prev => prev.filter(a => a.id !== agentToDelete.id));
+      
+      // Se l'agente eliminato era quello selezionato, deseleziona
+      if (currentAgentId === agentToDelete.id) {
+        onSelectAgent(agents.find(a => a.id !== agentToDelete.id) || agents[0]);
+      }
     } catch (error: any) {
       console.error("Error deleting agent:", error);
+      toast.error(`Errore durante l'eliminazione: ${error.message}`);
+      setAgentToDelete(null);
     }
   };
 
