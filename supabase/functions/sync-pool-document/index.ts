@@ -293,48 +293,55 @@ serve(async (req) => {
     console.log('[sync-pool-document] ❌ No existing chunks found for this document!');
     console.log(`[sync-pool-document] Document ID: ${documentId}`);
     console.log(`[sync-pool-document] File path in DB: ${poolDoc.file_path}`);
-    console.log('[sync-pool-document] Attempting to process document from storage...');
     
-    // Try to extract text from the PDF
+    // 🆕 CHECK IF DOCUMENT ALREADY HAS FULL_TEXT (e.g. GitHub Markdown imports)
     let fullText: string;
     
-    try {
-      const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
-        body: { filePath: poolDoc.file_path }
-      });
+    if (poolDoc.full_text && poolDoc.full_text.trim().length > 0) {
+      console.log(`[sync-pool-document] ✅ Using existing full_text from database (${poolDoc.full_text.length} characters)`);
+      fullText = poolDoc.full_text;
+    } else {
+      // Try to extract text from the PDF
+      console.log('[sync-pool-document] Attempting to extract text from storage...');
+      
+      try {
+        const { data: extractData, error: extractError } = await supabase.functions.invoke('extract-pdf-text', {
+          body: { filePath: poolDoc.file_path }
+        });
 
-      if (extractError || !extractData?.text) {
-        console.error('[sync-pool-document] Failed to extract text:', extractError);
-        throw new Error('Could not extract text from PDF');
+        if (extractError || !extractData?.text) {
+          console.error('[sync-pool-document] Failed to extract text:', extractError);
+          throw new Error('Could not extract text from PDF');
+        }
+
+        fullText = extractData.text;
+        console.log(`[sync-pool-document] Extracted ${fullText.length} characters from PDF`);
+      } catch (extractError) {
+        console.error('[sync-pool-document] PDF extraction failed:', extractError);
+      
+        // Mark sync as failed
+        await supabase
+          .from('agent_document_links')
+          .update({ 
+            sync_status: 'failed',
+            sync_completed_at: new Date().toISOString(),
+            sync_error: 'Document has no chunks and could not be extracted. Needs re-upload.'
+          })
+          .eq('document_id', documentId)
+          .eq('agent_id', agentId);
+      
+        return new Response(
+          JSON.stringify({ 
+            error: 'Document not processable',
+            message: `The document "${poolDoc.file_name}" has no text chunks in the database and could not be extracted.\n\nSolution: Delete this document from the pool and re-upload it.`,
+            documentId,
+            agentId,
+            fileName: poolDoc.file_name,
+            suggestion: 'Delete and re-upload the document'
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
-
-      fullText = extractData.text;
-      console.log(`[sync-pool-document] Extracted ${fullText.length} characters from PDF`);
-    } catch (extractError) {
-      console.error('[sync-pool-document] PDF extraction failed:', extractError);
-      
-      // Mark sync as failed
-      await supabase
-        .from('agent_document_links')
-        .update({ 
-          sync_status: 'failed',
-          sync_completed_at: new Date().toISOString(),
-          sync_error: 'Document has no chunks and could not be extracted. Needs re-upload.'
-        })
-        .eq('document_id', documentId)
-        .eq('agent_id', agentId);
-      
-      return new Response(
-        JSON.stringify({ 
-          error: 'Document not processable',
-          message: `The document "${poolDoc.file_name}" has no text chunks in the database and could not be extracted.\n\nSolution: Delete this document from the pool and re-upload it.`,
-          documentId,
-          agentId,
-          fileName: poolDoc.file_name,
-          suggestion: 'Delete and re-upload the document'
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
     }
 
     // Create chunks from the extracted text
