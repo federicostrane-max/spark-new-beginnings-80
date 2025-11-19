@@ -143,7 +143,7 @@ serve(async (req) => {
             validation_status: 'pending',
             source_url: rawUrl,
             search_query: `GitHub: ${repo}`,
-            metadata_extraction_method: 'vision_api', // ✅ Use valid value
+            metadata_extraction_method: 'vision', // ✅ Correct valid value
             metadata_confidence: 'high'
           })
           .select()
