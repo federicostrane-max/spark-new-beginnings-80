@@ -24,6 +24,7 @@ interface KnowledgeDocument {
   id: string;
   file_name: string;
   validation_status: string;
+  processing_status: string;
 }
 
 interface BulkAssignDocumentDialogProps {
@@ -206,12 +207,12 @@ export const BulkAssignDocumentDialog = ({
     }
   };
 
-  // Only show validated AND ready_for_assignment documents
+  // Only show ready_for_assignment documents
   const validatedDocs = documents.filter(d => 
-    d.validation_status === 'validated'
+    d.processing_status === 'ready_for_assignment'
   );
   const invalidDocs = documents.filter(d => 
-    d.validation_status !== 'validated'
+    d.processing_status !== 'ready_for_assignment'
   );
 
   return (
@@ -226,7 +227,7 @@ export const BulkAssignDocumentDialog = ({
             Assegna {validatedDocs.length} {validatedDocs.length === 1 ? 'documento' : 'documenti'} a uno o più agenti
             {invalidDocs.length > 0 && (
               <span className="block mt-1 text-amber-600">
-                ({invalidDocs.length} {invalidDocs.length === 1 ? 'documento' : 'documenti'} non validato sarà ignorato)
+                ({invalidDocs.length} {invalidDocs.length === 1 ? 'documento' : 'documenti'} non pronto sarà ignorato)
               </span>
             )}
           </DialogDescription>
