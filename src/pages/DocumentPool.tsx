@@ -28,6 +28,8 @@ export default function DocumentPool() {
   const [checkingMigration, setCheckingMigration] = useState(true);
   const [tableKey, setTableKey] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isCleaningChunks, setIsCleaningChunks] = useState(false);
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false);
   
   // Health metrics
   const [healthMetrics, setHealthMetrics] = useState({
@@ -122,6 +124,36 @@ export default function DocumentPool() {
       toast.error(`Errore: ${err.message}`, { id: 'retry' });
     } finally {
       setIsRetrying(false);
+    }
+  };
+
+  const handleCleanupChunks = async () => {
+    setIsCleaningChunks(true);
+    setShowCleanupDialog(false);
+    
+    try {
+      toast.loading('Pulizia chunks duplicati in corso...', { id: 'cleanup' });
+      
+      const { data, error } = await supabase.functions.invoke('cleanup-duplicate-chunks');
+      
+      if (error) throw error;
+      
+      const results = data.results;
+      toast.success(
+        `Cleanup completato! Processati ${results.documentsProcessed} documenti, rimossi ${results.duplicatesRemoved} chunks duplicati.`,
+        { id: 'cleanup', duration: 5000 }
+      );
+      
+      setTimeout(() => {
+        loadHealthMetrics();
+        setTableKey(prev => prev + 1);
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error('[Cleanup Error]', error);
+      toast.error(`Errore durante cleanup: ${error.message}`, { id: 'cleanup' });
+    } finally {
+      setIsCleaningChunks(false);
     }
   };
 
@@ -311,6 +343,26 @@ export default function DocumentPool() {
                 </>
               )}
             </Button>
+            
+            <Button
+              onClick={() => setShowCleanupDialog(true)}
+              disabled={isCleaningChunks}
+              variant="outline"
+              size="lg"
+              className="border-orange-500/50 bg-orange-500/10 hover:bg-orange-500/20 text-orange-700 dark:text-orange-400"
+            >
+              {isCleaningChunks ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Pulizia...
+                </>
+              ) : (
+                <>
+                  <FileX className="mr-2 h-5 w-5" />
+                  Pulisci Chunks Duplicati
+                </>
+              )}
+            </Button>
           </div>
         </div>
 
@@ -388,6 +440,29 @@ export default function DocumentPool() {
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction onClick={handleMigration}>
               Procedi con la Migrazione
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cleanup Chunks Confirmation Dialog */}
+      <AlertDialog open={showCleanupDialog} onOpenChange={setShowCleanupDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Conferma Pulizia Chunks Duplicati</AlertDialogTitle>
+            <AlertDialogDescription>
+              Questa operazione consoliderà tutti i chunks duplicati nel pool condiviso,
+              rimuovendo le copie ridondanti dai singoli agent.
+              <br /><br />
+              L'operazione è sicura e può essere eseguita più volte senza problemi.
+              <br /><br />
+              Vuoi procedere?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCleanupChunks}>
+              Avvia Pulizia
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
