@@ -661,8 +661,92 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleFolderAssign = (folderDocs: KnowledgeDocument[]) => {
+    // Seleziona automaticamente i documenti della cartella pronti per l'assegnazione
+    const readyDocIds = folderDocs
+      .filter(d => d.processing_status === 'ready_for_assignment')
+      .map(d => d.id);
+    
+    if (readyDocIds.length === 0) {
+      toast.error("Nessun documento pronto per l'assegnazione in questa cartella");
+      return;
+    }
+    
+    setSelectedDocIds(new Set(readyDocIds));
+    
+    // Apri il dialogo di assegnazione bulk
+    setBulkAssignDialogOpen(true);
+  };
+
+  const handleFolderDelete = async (folderId: string, folderName: string) => {
+    // Conferma eliminazione
+    const confirmed = confirm(
+      `Sei sicuro di voler eliminare la cartella "${folderName}" con tutti i suoi documenti?\n\n` +
+      `Questa azione è irreversibile.`
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      toast.loading('Eliminazione cartella in corso...', { id: 'folder-delete' });
+      
+      // Trova tutti i documenti nella cartella
+      const folderData = foldersData.find(f => f.id === folderId);
+      if (!folderData) {
+        toast.error('Cartella non trovata', { id: 'folder-delete' });
+        return;
+      }
+      
+      const docIds = folderData.documents.map(d => d.id);
+      
+      // Elimina prima i link agenti-documenti
+      if (docIds.length > 0) {
+        const { error: linksError } = await supabase
+          .from('agent_document_links')
+          .delete()
+          .in('document_id', docIds);
+        
+        if (linksError) throw linksError;
+        
+        // Elimina i chunks
+        const { error: chunksError } = await supabase
+          .from('agent_knowledge')
+          .delete()
+          .in('pool_document_id', docIds);
+        
+        if (chunksError) throw chunksError;
+        
+        // Elimina i documenti
+        const { error: docsError } = await supabase
+          .from('knowledge_documents')
+          .delete()
+          .in('id', docIds);
+        
+        if (docsError) throw docsError;
+      }
+      
+      // Elimina la cartella
+      const { error: folderError } = await supabase
+        .from('folders')
+        .delete()
+        .eq('id', folderId);
+      
+      if (folderError) throw folderError;
+      
+      toast.success(`Cartella "${folderName}" e ${docIds.length} documenti eliminati`, { id: 'folder-delete' });
+      
+      // Reload
+      loadDocuments();
+      loadFolders();
+      loadAvailableFolders();
+    } catch (error: any) {
+      console.error('Error deleting folder:', error);
+      toast.error(`Errore nell'eliminazione: ${error.message}`, { id: 'folder-delete' });
+    }
+  };
+
   const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
-  const validatedSelectedDocs = selectedDocuments.filter((d) => d.validation_status === "validated");
+  const validatedSelectedDocs = selectedDocuments.filter((d) => d.processing_status === "ready_for_assignment");
 
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
@@ -886,6 +970,8 @@ export const DocumentPoolTable = () => {
                   setDetailsDialogOpen(true);
                 }
               }}
+              onFolderAssign={handleFolderAssign}
+              onFolderDelete={handleFolderDelete}
             />
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">

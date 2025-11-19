@@ -3,9 +3,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle, MoreVertical, Users, Trash2, FolderCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface KnowledgeDocument {
   id: string;
@@ -32,15 +39,29 @@ interface FolderTreeViewProps {
   onDocumentSelect: (docId: string) => void;
   selectedDocuments: Set<string>;
   onDocumentClick: (doc: KnowledgeDocument) => void;
+  onFolderAssign?: (folderDocs: KnowledgeDocument[]) => void;
+  onFolderDelete?: (folderId: string, folderName: string) => void;
 }
 
 export function FolderTreeView({ 
   folders, 
   onDocumentSelect, 
   selectedDocuments,
-  onDocumentClick 
+  onDocumentClick,
+  onFolderAssign,
+  onFolderDelete
 }: FolderTreeViewProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], checked: boolean) => {
+    folderDocs.forEach(doc => {
+      if (checked && !selectedDocuments.has(doc.id)) {
+        onDocumentSelect(doc.id);
+      } else if (!checked && selectedDocuments.has(doc.id)) {
+        onDocumentSelect(doc.id);
+      }
+    });
+  };
 
   const toggleFolder = (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
@@ -97,6 +118,12 @@ export function FolderTreeView({
             >
               <div className="flex items-center justify-between p-3 bg-muted/50 hover:bg-muted transition-colors">
                 <div className="flex items-center gap-2 flex-1">
+                  <Checkbox
+                    checked={selectedInFolder === folderDocs.length && folderDocs.length > 0}
+                    onCheckedChange={(checked) => handleFolderCheckboxChange(folderDocs, checked as boolean)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="mr-1"
+                  />
                   <CollapsibleTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                       {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -117,6 +144,53 @@ export function FolderTreeView({
                     </Badge>
                   )}
                 </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFolderCheckboxChange(folderDocs, true);
+                      }}
+                    >
+                      <FolderCheck className="mr-2 h-4 w-4" />
+                      Seleziona tutti ({folder.documentCount})
+                    </DropdownMenuItem>
+                    
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onFolderAssign) {
+                          const readyDocs = folderDocs.filter(d => d.processing_status === 'ready_for_assignment');
+                          onFolderAssign(readyDocs);
+                        }
+                      }}
+                      disabled={folderDocs.filter(d => d.processing_status === 'ready_for_assignment').length === 0}
+                    >
+                      <Users className="mr-2 h-4 w-4" />
+                      Assegna cartella a agente
+                    </DropdownMenuItem>
+                    
+                    <DropdownMenuSeparator />
+                    
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onFolderDelete) {
+                          onFolderDelete(folder.id, folder.name);
+                        }
+                      }}
+                      className="text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Elimina cartella
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
 
               <CollapsibleContent className="border-t">
