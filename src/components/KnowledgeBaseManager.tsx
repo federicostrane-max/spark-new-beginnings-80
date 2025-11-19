@@ -193,9 +193,17 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     try {
       logger.info('document-sync', `Checking sync status for ${docs.length} documents`, undefined, { agentId });
       
-      // Try edge function with 30s timeout
+      // If more than 50 documents, use direct database query (more reliable)
+      if (docs.length > 50) {
+        logger.info('document-sync', 'Many documents detected, using direct database query', undefined, { agentId });
+        toast.info('Caricamento stato documenti...', { duration: 2000 });
+        await checkSyncStatusesDirect(docs);
+        return;
+      }
+      
+      // Try edge function with 10s timeout (reduced for faster fail-over)
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Edge function timeout')), 30000)
+        setTimeout(() => reject(new Error('Edge function timeout')), 10000)
       );
       
       const edgeFunctionPromise = supabase.functions.invoke('check-and-sync-all', {
@@ -210,67 +218,82 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
         const { data, error } = result;
 
-        if (error) throw error;
+        // Check for errors and invalid responses
+        if (error || !data || !data.statuses) {
+          throw new Error(error?.message || 'Empty or invalid response from edge function');
+        }
         
         // Check if edge function returned "too many documents" response
-        if (data?.tooManyDocuments) {
+        if (data.tooManyDocuments) {
           logger.info('document-sync', `Edge function suggests direct query (${data.count} documents)`, undefined, { agentId });
           toast.info('Caricamento diretto dal database...', { duration: 2000 });
           await checkSyncStatusesDirect(docs);
           return;
         }
         
-        if (data?.statuses) {
-          const updatedDocs = docs.map(doc => {
-            const status = data.statuses.find((s: any) => s.documentId === doc.id);
-            if (status) {
-              if (status.status !== 'synced') {
-                logger.warning('document-sync', `Document not synced: ${status.fileName}`, 
-                  { status: status.status, chunkCount: status.chunkCount }, 
-                  { agentId, documentId: doc.id }
-                );
-              }
-              return {
-                ...doc,
-                syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
-                chunkCount: status.chunkCount || 0,
-                expectedChunks: status.expectedChunks || status.chunkCount || 0,
-              };
+        // Verify that we actually got statuses
+        if (data.statuses.length === 0) {
+          throw new Error('No statuses returned by edge function');
+        }
+        
+        const updatedDocs = docs.map(doc => {
+          const status = data.statuses.find((s: any) => s.documentId === doc.id);
+          if (status) {
+            if (status.status !== 'synced') {
+              logger.warning('document-sync', `Document not synced: ${status.fileName}`, 
+                { status: status.status, chunkCount: status.chunkCount }, 
+                { agentId, documentId: doc.id }
+              );
             }
-            return doc;
-          });
-          setDocuments(updatedDocs);
-          
-          const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
-          if (missingCount > 0) {
-            logger.warning('document-sync', `${missingCount} documents not synced`, 
-              { total: docs.length, missing: missingCount }, 
-              { agentId }
-            );
-          } else {
-            logger.success('document-sync', 'All documents synced successfully', undefined, { agentId });
+            return {
+              ...doc,
+              syncStatus: (status.status === 'synced' ? 'synced' : 'missing') as 'synced' | 'missing',
+              chunkCount: status.chunkCount || 0,
+              expectedChunks: status.expectedChunks || status.chunkCount || 0,
+            };
           }
-          
-          // Reset quick sync flag only if all documents are synced
-          const allSynced = updatedDocs.every(doc => doc.syncStatus === 'synced');
-          if (allSynced) {
-            setHasTriedQuickSync(false);
-          }
-          
-          // Notify parent component about doc updates
-          if (onDocsUpdated) {
-            onDocsUpdated();
-          }
+          // If no status found, leave as 'checking'
+          return { ...doc, syncStatus: 'checking' as const };
+        });
+        
+        setDocuments(updatedDocs);
+        
+        // If any documents are still in 'checking' state, use fallback
+        const stillChecking = updatedDocs.filter(d => d.syncStatus === 'checking').length;
+        if (stillChecking > 0) {
+          logger.warning('document-sync', `${stillChecking} documents still in checking state, using fallback`, undefined, { agentId });
+          await checkSyncStatusesDirect(docs);
+          return;
+        }
+        
+        const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
+        logger.info('document-sync', `Sync status check complete: ${docs.length - missingCount} synced, ${missingCount} missing`, 
+          undefined, { agentId });
+        
+        // Reset quick sync flag only if all documents are synced
+        const allSynced = updatedDocs.every(doc => doc.syncStatus === 'synced');
+        if (allSynced) {
+          setHasTriedQuickSync(false);
+        }
+        
+        // Notify parent component about doc updates
+        if (onDocsUpdated) {
+          onDocsUpdated();
         }
       } catch (edgeError: any) {
         // FALLBACK: Use direct database query
         logger.warning('document-sync', 'Edge function failed, using direct database query', edgeError, { agentId });
-        toast.info('Fallback al database diretto...', { duration: 2000 });
+        toast.info('Caricamento dal database...', { duration: 2000 });
         await checkSyncStatusesDirect(docs);
       }
     } catch (error) {
       logger.error('document-sync', 'Error checking sync statuses', error, { agentId });
-      toast.error('Errore nel controllo dello stato dei documenti');
+      // Also try fallback in case of outer error
+      try {
+        await checkSyncStatusesDirect(docs);
+      } catch (fallbackError) {
+        toast.error('Errore nel caricamento dello stato dei documenti');
+      }
     }
   };
 
