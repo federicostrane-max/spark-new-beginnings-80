@@ -68,6 +68,26 @@ serve(async (req) => {
 
         if (processError) throw processError;
 
+        // ✅ NEW: Verify chunks were created for extract operations
+        if (item.processing_type === 'extract') {
+          console.log(`✓ Verifying chunks for ${item.document_id}...`);
+          const { data: chunks, error: checkError } = await supabase
+            .from('agent_knowledge')
+            .select('id')
+            .eq('pool_document_id', item.document_id)
+            .limit(1);
+          
+          if (checkError) {
+            throw new Error(`Chunk verification failed: ${checkError.message}`);
+          }
+          
+          if (!chunks || chunks.length === 0) {
+            throw new Error('Chunk creation failed: no chunks found after processing');
+          }
+          
+          console.log(`✓ Chunks verified for ${item.document_id}`);
+        }
+
         // Marca come completed
         await supabase
           .from('document_processing_queue')
