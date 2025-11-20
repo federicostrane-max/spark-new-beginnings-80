@@ -158,7 +158,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        ...results,
+        results,
         message: 'Documents imported. Auto-processing started via triggers.'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }

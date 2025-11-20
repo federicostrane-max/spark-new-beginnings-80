@@ -108,7 +108,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
 
       console.log('✅ GitHub import result:', data);
 
-      const { results } = data;
+      const results = data.results || data;
       
       if (results.saved > 0) {
         toast.success(
@@ -153,35 +153,49 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       toast.loading('Importazione batch Hugging Face docs...', { id: 'batch-import' });
 
       let totalSaved = 0;
+      let totalSkipped = 0;
       let totalFailed = 0;
 
       for (const repo of HUGGINGFACE_REPOS) {
-        console.log(`📥 Importing ${repo.label}...`);
-        
-        const { data, error } = await supabase.functions.invoke('import-github-markdown', {
-          body: {
-            repo: repo.value,
-            path: repo.path,
-            maxFiles: 999999, // Nessun limite - scarica TUTTO
-            filePattern: "*.md"
-          }
-        });
+        try {
+          console.log(`📥 Importing ${repo.label}...`);
+          
+          toast.loading(`Importazione ${repo.label}...`, { id: `batch-${repo.value}` });
 
-        if (error) {
+          const { data, error } = await supabase.functions.invoke('import-github-markdown', {
+            body: {
+              repo: repo.value,
+              path: repo.path,
+              maxFiles: 999999,
+              filePattern: "*.md"
+            }
+          });
+
+          if (error) throw error;
+
+          const results = data.results || data;
+          totalSaved += results.saved;
+          totalSkipped += results.skipped;
+          totalFailed += results.failed;
+
+          toast.success(
+            `${repo.label}: ${results.saved} importati, ${results.skipped} già presenti`,
+            { id: `batch-${repo.value}` }
+          );
+
+          console.log(`✅ ${repo.label}: ${results.saved} saved, ${results.skipped} skipped`);
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error: any) {
           console.error(`❌ Failed to import ${repo.label}:`, error);
           totalFailed++;
-          continue;
+          toast.error(`Errore ${repo.label}: ${error.message}`, { id: `batch-${repo.value}` });
         }
-
-        totalSaved += data.results.saved;
-        console.log(`✅ ${repo.label}: ${data.results.saved} docs`);
-        
-        // Small delay between repos
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       toast.success(
-        `Batch import completato: ${totalSaved} documenti importati! Elaborazione in corso...`,
+        `Batch completato: ${totalSaved} importati, ${totalSkipped} già presenti, ${totalFailed} errori`,
         { id: 'batch-import', duration: 5000 }
       );
 
