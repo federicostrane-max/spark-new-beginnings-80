@@ -1,15 +1,13 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { AlertCircle, PackageX, Clock, AlertTriangle, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { AlertCircle, PackageX, Clock, AlertTriangle } from "lucide-react";
 
 interface HealthData {
   stuckProcessing: { count: number; files: string[] };
@@ -25,34 +23,9 @@ export const DocumentPoolHealthIndicators = () => {
     noChunks: { count: 0, files: [] },
     stuckQueue: { count: 0, files: [] },
     pendingValidation: { count: 0, files: [] },
-    loading: true,
+    loading: true
   });
-  const [cleaningUp, setCleaningUp] = useState(false);
 
-  const cleanupZombieDocuments = async () => {
-    setCleaningUp(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('cleanup-documents-without-chunks');
-      
-      if (error) throw error;
-      
-      if (data.success) {
-        toast.success(`✅ ${data.deleted} documenti zombie eliminati`, {
-          description: data.documents?.slice(0, 3).join(', ')
-        });
-        loadHealthIndicators(); // Refresh indicators
-      } else {
-        throw new Error(data.error || 'Unknown error');
-      }
-    } catch (error) {
-      console.error('[Cleanup] Error:', error);
-      toast.error('❌ Errore durante la pulizia', {
-        description: error instanceof Error ? error.message : 'Errore sconosciuto'
-      });
-    } finally {
-      setCleaningUp(false);
-    }
-  };
 
   const loadHealthIndicators = async () => {
     try {
@@ -186,20 +159,6 @@ export const DocumentPoolHealthIndicators = () => {
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
-
-      {/* Cleanup button for documents without chunks */}
-      {healthData.noChunks.count > 0 && (
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={cleanupZombieDocuments}
-          disabled={cleaningUp}
-          className="h-6 text-xs"
-        >
-          <Trash2 className="h-3 w-3 mr-1" />
-          {cleaningUp ? 'Eliminazione...' : 'Elimina Zombie'}
-        </Button>
-      )}
 
       {/* Documenti senza chunks - SEMPRE VISIBILE */}
       <TooltipProvider>
