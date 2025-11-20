@@ -34,6 +34,8 @@ import {
   RefreshCw,
   X,
   Folder,
+  Plus,
+  Settings,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
@@ -44,6 +46,7 @@ import { AssignToFolderDialog } from "./AssignToFolderDialog";
 import { ManageFoldersDialog } from "./ManageFoldersDialog";
 import { FolderTreeView } from "./FolderTreeView";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DocumentPoolHealthIndicators } from "./DocumentPoolHealthIndicators";
 import {
   Tooltip,
   TooltipContent,
@@ -109,8 +112,6 @@ export const DocumentPoolTable = () => {
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
   const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [repairing, setRepairing] = useState(false);
   
   // Folder management state
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -543,49 +544,6 @@ export const DocumentPoolTable = () => {
     }
   };
 
-  const handleBulkProcessUnprocessed = async () => {
-    try {
-      setBulkProcessing(true);
-      
-      // Trova documenti senza summary
-      const { data: docsToProcess, error: queryError } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name')
-        .or('ai_summary.is.null,ai_summary.eq.');
-
-      if (queryError) throw queryError;
-
-      if (!docsToProcess || docsToProcess.length === 0) {
-        toast.info('Nessun documento da elaborare');
-        return;
-      }
-
-      toast.loading(`Elaborazione di ${docsToProcess.length} documenti...`, { id: 'bulk-process' });
-
-      // Processa in parallelo con limite
-      const batchSize = 3;
-      for (let i = 0; i < docsToProcess.length; i += batchSize) {
-        const batch = docsToProcess.slice(i, i + batchSize);
-        await Promise.all(
-          batch.map(doc =>
-            supabase.functions.invoke('process-document', {
-              body: { documentId: doc.id }
-            })
-          )
-        );
-      }
-
-      toast.success(`${docsToProcess.length} documenti in elaborazione`, { id: 'bulk-process' });
-      
-      // Reload dopo un po'
-      setTimeout(() => loadDocuments(), 3000);
-    } catch (error: any) {
-      console.error('Error bulk processing:', error);
-      toast.error(`Errore: ${error.message}`, { id: 'bulk-process' });
-    } finally {
-      setBulkProcessing(false);
-    }
-  };
 
   const handleRemoveFromFolder = async (documentIds: string[]) => {
     try {
@@ -632,50 +590,6 @@ export const DocumentPoolTable = () => {
     return Array.from(folderCounts.entries()).map(([name, count]) => ({ name, count }));
   };
 
-  const handleRepairDocuments = async () => {
-    try {
-      setRepairing(true);
-      toast.loading('Riparazione documenti in corso...', { id: 'repair' });
-
-      const { data, error } = await supabase.functions.invoke('repair-documents');
-
-      if (error) throw error;
-
-      const result = data as {
-        chunksCreated: number;
-        revalidated: number;
-        validationTriggered: number;
-        unblocked: number;
-        errors: Array<{ fileName: string; error: string }>;
-      };
-
-      const total = result.chunksCreated + result.revalidated + result.validationTriggered + result.unblocked;
-      
-      if (result.errors.length > 0) {
-        toast.error(
-          `${total} documenti riparati, ${result.errors.length} errori. Controlla i log per dettagli.`,
-          { id: 'repair', duration: 5000 }
-        );
-        console.error('Repair errors:', result.errors);
-      } else {
-        toast.success(
-          `✅ Riparazione completata!\n` +
-          `• ${result.chunksCreated} documenti con chunks creati\n` +
-          `• ${result.revalidated} documenti ri-validati\n` +
-          `• ${result.validationTriggered} validazioni triggerate\n` +
-          `• ${result.unblocked} documenti sbloccati`,
-          { id: 'repair', duration: 7000 }
-        );
-      }
-
-      setTimeout(() => loadDocuments(), 2000);
-    } catch (error: any) {
-      console.error('Repair error:', error);
-      toast.error(`Errore nella riparazione: ${error.message}`, { id: 'repair' });
-    } finally {
-      setRepairing(false);
-    }
-  };
 
   const handleFolderAssign = (folderDocs: KnowledgeDocument[]) => {
     // Seleziona automaticamente i documenti della cartella pronti per l'assegnazione
@@ -868,85 +782,87 @@ export const DocumentPoolTable = () => {
       {/* Documents Table */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span className="flex items-center gap-2">
+          <CardTitle className="flex items-center justify-between flex-wrap gap-3">
+            <span className="flex items-center gap-3">
               <FileText className="h-5 w-5" />
-              Documenti ({filteredDocuments.length})
+              <span className="font-semibold">Documenti ({filteredDocuments.length})</span>
+              <DocumentPoolHealthIndicators />
               {availableFolders.length > 0 && (
                 <Badge variant="secondary" className="text-xs">
                   {availableFolders.length} cartelle
                 </Badge>
               )}
             </span>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={viewMode === 'folders' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('folders')}
-              >
-                <Folder className="mr-2 h-4 w-4" />
-                Vista Cartelle
-              </Button>
-              <Button
-                variant={viewMode === 'table' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('table')}
-              >
-                <FileText className="mr-2 h-4 w-4" />
-                Vista Tabella
-              </Button>
-              <div className="h-6 w-px bg-border mx-1" />
-              <Button
-                onClick={() => setCreateFolderDialogOpen(true)}
-                variant="outline"
-                size="sm"
-              >
-                <Folder className="mr-2 h-4 w-4" />
-                Crea Cartella
-              </Button>
-              <Button
-                onClick={() => setManageFoldersDialogOpen(true)}
-                variant="outline"
-                size="sm"
-                disabled={availableFolders.length === 0}
-              >
-                Gestisci Cartelle
-              </Button>
-              <Button
-                onClick={handleRepairDocuments}
-                disabled={repairing}
-                variant="default"
-                size="sm"
-              >
-                {repairing ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Riparazione...
-                  </>
-                ) : (
-                  <>
-                    🔧 Ripara
-                  </>
-                )}
-              </Button>
-              <Button
-                onClick={handleBulkProcessUnprocessed}
-                disabled={bulkProcessing}
-                variant="outline"
-                size="sm"
-              >
-                {bulkProcessing ? (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Elaborazione...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Elabora
-                  </>
-                )}
-              </Button>
+            <div className="flex items-center gap-2">
+              {/* Toggle Vista: Cartelle/Tabella */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setViewMode(viewMode === 'folders' ? 'table' : 'folders')}
+                      className="h-8 px-3"
+                    >
+                      {viewMode === 'folders' ? (
+                        <>
+                          <Folder className="h-4 w-4 mr-1.5" />
+                          <span className="hidden sm:inline">Cartelle</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-4 w-4 mr-1.5" />
+                          <span className="hidden sm:inline">Tabella</span>
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Cambia visualizzazione: {viewMode === 'folders' ? 'Tabella' : 'Cartelle'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <div className="h-6 w-px bg-border" />
+
+              {/* Crea Cartella - Pulsante + */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => setCreateFolderDialogOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Crea nuova cartella</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              {/* Gestisci Cartelle - Icona Gear */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => setManageFoldersDialogOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      disabled={availableFolders.length === 0}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {availableFolders.length === 0 
+                      ? 'Nessuna cartella da gestire' 
+                      : 'Gestisci cartelle'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </CardTitle>
         </CardHeader>
