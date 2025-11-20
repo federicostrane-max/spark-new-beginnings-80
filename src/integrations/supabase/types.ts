@@ -1805,6 +1805,7 @@ export type Database = {
           duplicates_removed: number
         }[]
       }
+      count_documents_without_chunks: { Args: never; Returns: number }
       count_processing_documents: { Args: never; Returns: number }
       find_orphaned_chunks: {
         Args: never
