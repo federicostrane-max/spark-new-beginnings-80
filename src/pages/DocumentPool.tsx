@@ -5,6 +5,7 @@ import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { GitHubDocsImport } from "@/components/GitHubDocsImport";
+import { RepairDocumentsButton } from "@/components/RepairDocumentsButton";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -974,8 +975,11 @@ export default function DocumentPool() {
         )}
 
         <div className="mb-6 flex flex-col gap-4">
-          <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
-          <GitHubDocsImport onImportComplete={handleUploadComplete} />
+          <div className="flex items-center gap-4">
+            <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
+            <GitHubDocsImport onImportComplete={handleUploadComplete} />
+            <RepairDocumentsButton />
+          </div>
         </div>
 
         <DocumentPoolTable key={tableKey} />
