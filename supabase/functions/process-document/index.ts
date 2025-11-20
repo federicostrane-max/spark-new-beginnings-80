@@ -373,11 +373,12 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     // ========================================
     console.log('[process-document] Creating chunks for shared pool...');
     
-    // Check if chunks already exist for this document
+    // Check if chunks already exist for this document in the SHARED POOL
     const { data: existingChunks, error: checkError } = await supabase
       .from('agent_knowledge')
       .select('id')
       .eq('pool_document_id', documentId)
+      .is('agent_id', null)  // ✅ FIX: Only check shared pool chunks, not agent-assigned ones
       .limit(1);
     
     if (checkError) {
@@ -511,6 +512,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       .from('knowledge_documents')
       .update({ 
         processing_status: 'ready_for_assignment',
+        validation_status: 'validated',  // ✅ FIX: Mark document as validated when ready
         ai_summary: analysis.summary,
         keywords: analysis.keywords,
         topics: analysis.topics,
