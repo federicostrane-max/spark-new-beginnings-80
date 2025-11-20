@@ -41,6 +41,8 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [pathFilter, setPathFilter] = useState("");
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [monitoring, setMonitoring] = useState(false);
+  const [processingStats, setProcessingStats] = useState({ total: 0, ready: 0, processing: 0 });
 
   const handleRepoChange = (value: string) => {
     setSelectedRepo(value);
@@ -48,6 +50,35 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     if (repo) {
       setPathFilter(repo.path);
     }
+  };
+
+  const monitorProcessing = async (searchQuery: string) => {
+    setMonitoring(true);
+    const pollInterval = setInterval(async () => {
+      const { data } = await supabase
+        .from('knowledge_documents')
+        .select('processing_status')
+        .like('search_query', `%${searchQuery}%`);
+
+      if (data) {
+        const total = data.length;
+        const ready = data.filter(d => d.processing_status === 'ready_for_assignment').length;
+        const processing = data.filter(d => d.processing_status === 'pending_processing' || d.processing_status === 'processing').length;
+        
+        setProcessingStats({ total, ready, processing });
+        
+        if (processing === 0 && total > 0) {
+          clearInterval(pollInterval);
+          setMonitoring(false);
+          toast.success(`Elaborazione completata: ${ready} documenti pronti`, { duration: 5000 });
+        }
+      }
+    }, 5000);
+
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      setMonitoring(false);
+    }, 300000);
   };
 
   const handleImport = async () => {
@@ -84,6 +115,8 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
           `${results.saved} documenti importati da GitHub! Elaborazione in corso...`,
           { id: 'github-import', duration: 5000 }
         );
+        
+        monitorProcessing(`GitHub: ${selectedRepo}`);
       } else {
         toast.info(
           'Nessun nuovo documento trovato (potrebbero essere già presenti)',
@@ -99,7 +132,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         );
       }
 
-      // Close dialog and refresh
       setOpen(false);
       onImportComplete();
 
@@ -149,9 +181,13 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       }
 
       toast.success(
-        `Batch import completato! ${totalSaved} documenti importati da ${HUGGINGFACE_REPOS.length} repository`,
-        { id: 'batch-import', duration: 6000 }
+        `Batch import completato: ${totalSaved} documenti importati! Elaborazione in corso...`,
+        { id: 'batch-import', duration: 5000 }
       );
+
+      HUGGINGFACE_REPOS.forEach(repo => {
+        monitorProcessing(`GitHub: ${repo.value}`);
+      });
 
       setOpen(false);
       onImportComplete();
@@ -224,17 +260,35 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
               <strong>Download completo senza limiti:</strong>
             </p>
             <p className="mt-1 ml-6">
-              Verrà scaricata <strong>TUTTA</strong> la documentazione disponibile dal repository selezionato
+              L'import è ottimizzato per scaricare repository complete senza timeout. 
+              I documenti vengono elaborati in background dopo l'import.
             </p>
           </div>
 
           {/* Progress */}
           {importing && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Importazione in corso...</span>
+              <Progress value={33} className="w-full" />
+              <p className="text-sm text-muted-foreground">Import in corso...</p>
+            </div>
+          )}
+
+          {/* Processing Monitor */}
+          {monitoring && processingStats.total > 0 && (
+            <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Elaborazione in corso...</span>
+                <span className="text-sm text-muted-foreground">
+                  {processingStats.ready} / {processingStats.total} pronti
+                </span>
               </div>
-              <Progress value={100} className="animate-pulse" />
+              <Progress 
+                value={(processingStats.ready / processingStats.total) * 100} 
+                className="w-full" 
+              />
+              <p className="text-xs text-muted-foreground">
+                {processingStats.processing} documenti in elaborazione
+              </p>
             </div>
           )}
 
