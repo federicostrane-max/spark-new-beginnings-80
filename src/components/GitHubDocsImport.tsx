@@ -130,7 +130,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
           body: {
             repo: repo.value,
             path: repo.path,
-            maxFiles: 150, // More per repo for batch
+            maxFiles: 999999, // Nessun limite - scarica TUTTO
             filePattern: "*.md"
           }
         });
