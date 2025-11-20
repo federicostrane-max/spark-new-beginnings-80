@@ -107,6 +107,7 @@ serve(async (req) => {
           if (descMatch) description = descMatch[1].trim();
         }
 
+        // Force redeploy 2025-01-25: Fix metadata_extraction_method to use 'text' instead of 'github_frontmatter'
         documentsToInsert.push({
           file_name: file.path,
           file_path: rawUrl,
@@ -120,7 +121,7 @@ serve(async (req) => {
           processing_status: 'pending_processing', // ✅ Trigger auto-processes
           validation_status: 'pending', // ✅ Correct state
           chunking_strategy: 'sliding_window',
-          metadata_extraction_method: 'text',
+          metadata_extraction_method: 'text', // ✅ FIXED: Use 'text' (valid constraint value)
           metadata_confidence: 'high'
         });
 
