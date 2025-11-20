@@ -33,9 +33,9 @@ serve(async (req) => {
     
     const pagesToExtract = maxPages || 1; // Default to 1 page if not specified
 
-    const googleApiKey = Deno.env.get('GOOGLE_AI_STUDIO_API_KEY');
-    if (!googleApiKey) {
-      throw new Error('GOOGLE_AI_STUDIO_API_KEY not configured');
+    const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
+    if (!deepseekApiKey) {
+      throw new Error('DEEPSEEK_API_KEY not configured');
     }
 
     console.log('[ocr-image] Processing file:', fileName || imageUrl);
@@ -66,37 +66,44 @@ serve(async (req) => {
     
     console.log(`[ocr-image] Processing as: ${mimeType} (${pagesToExtract} pages)`);
 
-    // Call Google Gemini API with higher quota model
-    console.log('[ocr-image] Calling Google Gemini 2.0 Flash for OCR...');
+    // Call DeepSeek V3 Vision API
+    console.log('[ocr-image] Calling DeepSeek V3 Vision for OCR...');
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${googleApiKey}`,
+      'https://api.deepseek.com/v1/chat/completions',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${deepseekApiKey}`
+        },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
+          model: 'deepseek-chat',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
               {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64Image
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType};base64,${base64Image}`
                 }
               }
             ]
-          }]
+          }],
+          temperature: 0.1,
+          max_tokens: 4000
         })
       }
     );
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('Google Vision API error:', error);
-      throw new Error(`Google Vision API error: ${error}`);
+      console.error('DeepSeek Vision API error:', error);
+      throw new Error(`DeepSeek Vision API error: ${error}`);
     }
 
     const result = await response.json();
-    const extractedText = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const extractedText = result.choices?.[0]?.message?.content || '';
 
     console.log('OCR completed, extracted:', extractedText.substring(0, 100));
 
