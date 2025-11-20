@@ -66,8 +66,8 @@ serve(async (req) => {
     
     console.log(`[ocr-image] Processing as: ${mimeType} (${pagesToExtract} pages)`);
 
-    // Call Google Vision API
-    console.log('[ocr-image] Calling Google Gemini API for OCR...');
+    // Call Google Gemini API with higher quota model
+    console.log('[ocr-image] Calling Google Gemini 2.0 Flash for OCR...');
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${googleApiKey}`,
       {
