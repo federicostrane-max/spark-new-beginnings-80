@@ -482,6 +482,28 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     }
     
     // ========================================
+    // CRITICAL: Verify Chunks Were Created
+    // ========================================
+    console.log('[process-document] 🔍 Verifying chunk creation...');
+    const { count: finalChunkCount, error: countError } = await supabase
+      .from('agent_knowledge')
+      .select('*', { count: 'exact', head: true })
+      .eq('pool_document_id', documentId)
+      .is('agent_id', null);
+    
+    if (countError) {
+      console.error('[process-document] ❌ Error counting chunks:', countError);
+      throw new Error(`Failed to verify chunk creation: ${countError.message}`);
+    }
+    
+    if (!finalChunkCount || finalChunkCount === 0) {
+      console.error('[process-document] ❌ CRITICAL: No chunks were created for document');
+      throw new Error('Document processing failed: No chunks were successfully created in agent_knowledge table');
+    }
+    
+    console.log(`[process-document] ✅ Verification passed: ${finalChunkCount} chunks confirmed in database`);
+    
+    // ========================================
     // Update Database with Analysis
     // ========================================
     console.log('[process-document] Updating database with analysis...');
