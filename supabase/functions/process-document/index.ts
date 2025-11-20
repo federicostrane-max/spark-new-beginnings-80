@@ -379,6 +379,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       .select('id')
       .eq('pool_document_id', documentId)
       .is('agent_id', null)  // ✅ FIX: Only check shared pool chunks, not agent-assigned ones
+      .eq('is_active', true)  // ✅ FIX: Only check active chunks
       .limit(1);
     
     if (checkError) {
@@ -423,18 +424,24 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         console.log(`[process-document] Processing batch ${batchNumber}/${totalBatches} (${batch.length} chunks)...`);
         
         // Generate embeddings for batch
+        const OPENAI_TIMEOUT_MS = 30000; // 30 secondi
         const embeddingPromises = batch.map(async (chunk) => {
-          const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${openAIApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: 'text-embedding-3-small',
-              input: chunk,
+          const embeddingResponse = await Promise.race([
+            fetch('https://api.openai.com/v1/embeddings', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${openAIApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'text-embedding-3-small',
+                input: chunk,
+              }),
             }),
-          });
+            new Promise<Response>((_, reject) => 
+              setTimeout(() => reject(new Error('OpenAI API timeout after 30s')), OPENAI_TIMEOUT_MS)
+            )
+          ]) as Response;
           
           if (!embeddingResponse.ok) {
             throw new Error(`Failed to generate embedding: ${embeddingResponse.statusText}`);
