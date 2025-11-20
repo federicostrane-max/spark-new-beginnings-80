@@ -52,21 +52,15 @@ serve(async (req) => {
     const fileSizeMB = (imageBuffer.byteLength / (1024 * 1024)).toFixed(2);
     console.log(`[ocr-image] File downloaded: ${fileSizeMB} MB`);
     
-    // Use chunked conversion for large files to avoid stack overflow
-    console.log('[ocr-image] Converting to base64...');
-    const base64Image = arrayBufferToBase64(imageBuffer);
-    console.log('[ocr-image] Conversion complete');
-
     // Determine if it's a PDF or image
     const isPDF = fileName?.toLowerCase().endsWith('.pdf') || false;
-    const mimeType = isPDF ? 'application/pdf' : (imageResponse.headers.get('content-type') || 'image/jpeg');
     const prompt = isPDF 
       ? `Extract ALL visible text from the first ${pagesToExtract} pages of this PDF document. Focus especially on: title, authors, publication info, chapter headings, and any bibliographic metadata. Return the text exactly as it appears, preserving formatting, line breaks, and structure. Do not add commentary.`
       : "Extract all text from this image. Return only the extracted text, nothing else.";
     
-    console.log(`[ocr-image] Processing as: ${mimeType} (${pagesToExtract} pages)`);
+    console.log(`[ocr-image] Processing as: ${isPDF ? 'PDF' : 'Image'} (${pagesToExtract} pages)`);
 
-    // Call Lovable AI Gateway with Gemini 2.5 Flash
+    // Call Lovable AI Gateway with Gemini 2.5 Flash - Using URL instead of base64 for PDFs
     console.log('[ocr-image] Calling Lovable AI (Gemini 2.5 Flash) for OCR...');
     const response = await fetch(
       'https://ai.gateway.lovable.dev/v1/chat/completions',
@@ -85,7 +79,7 @@ serve(async (req) => {
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:${mimeType};base64,${base64Image}`
+                  url: imageUrl  // Use direct URL instead of base64
                 }
               }
             ]
