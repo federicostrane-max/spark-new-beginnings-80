@@ -137,13 +137,14 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           
           // Step 1: Extract text from PDF
           setProgress((fileIndex / totalFiles) * 100 + 10);
-          const text = await extractTextFromPDF(file);
+          let text = await extractTextFromPDF(file);
           console.log(`✓ Extracted ${text.length} characters from ${file.name}`);
           
           // Se l'estrazione nativa fallisce (PDF scannerizzato), 
-          // l'edge function farà OCR automaticamente
+          // inviamo un placeholder e l'edge function farà OCR automaticamente
           if (!text || text.length < 10) {
             console.warn(`⚠️ Estrazione nativa fallita per ${file.name}, verrà usato OCR`);
+            text = '[REQUIRES_OCR]'; // Placeholder per triggare OCR nell'edge function
           }
 
           // Step 1.5: Convert PDF file to base64 for storage (using FileReader to avoid stack overflow)
