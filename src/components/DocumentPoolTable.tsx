@@ -787,41 +787,29 @@ export const DocumentPoolTable = () => {
               <FileText className="h-5 w-5" />
               <span className="font-semibold">Documenti ({filteredDocuments.length})</span>
               <DocumentPoolHealthIndicators />
-              {availableFolders.length > 0 && (
-                <Badge variant="secondary" className="text-xs">
-                  {availableFolders.length} cartelle
-                </Badge>
-              )}
             </span>
             <div className="flex items-center gap-2">
-              {/* Toggle Vista: Cartelle/Tabella */}
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setViewMode(viewMode === 'folders' ? 'table' : 'folders')}
-                      className="h-8 px-3"
-                    >
-                      {viewMode === 'folders' ? (
-                        <>
-                          <Folder className="h-4 w-4 mr-1.5" />
-                          <span className="hidden sm:inline">Cartelle</span>
-                        </>
-                      ) : (
-                        <>
-                          <FileText className="h-4 w-4 mr-1.5" />
-                          <span className="hidden sm:inline">Tabella</span>
-                        </>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Cambia visualizzazione: {viewMode === 'folders' ? 'Tabella' : 'Cartelle'}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              {/* Toggle Vista: Cartelle/Tabella - Sempre Visibile */}
+              <div className="inline-flex border rounded-md overflow-hidden">
+                <Button
+                  variant={viewMode === 'table' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('table')}
+                  className="rounded-none h-8"
+                >
+                  <FileText className="h-4 w-4 mr-1.5" />
+                  Tabella
+                </Button>
+                <Button
+                  variant={viewMode === 'folders' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setViewMode('folders')}
+                  className="rounded-none h-8"
+                >
+                  <Folder className="h-4 w-4 mr-1.5" />
+                  Cartelle
+                </Button>
+              </div>
 
               <div className="h-6 w-px bg-border" />
 
