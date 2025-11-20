@@ -81,6 +81,29 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     }, 300000);
   };
 
+  const handleProcessQueue = async () => {
+    try {
+      toast.loading('Elaborazione coda documenti...', { id: 'process-queue' });
+
+      const { data, error } = await supabase.functions.invoke('process-document-queue', {
+        body: { batchSize: 50 }
+      });
+
+      if (error) throw error;
+
+      toast.success(
+        `Coda elaborata: ${data.processed} processati, ${data.failed} falliti`,
+        { id: 'process-queue', duration: 5000 }
+      );
+
+      onImportComplete();
+
+    } catch (error: any) {
+      console.error('❌ Queue processing error:', error);
+      toast.error(`Errore elaborazione coda: ${error.message}`, { id: 'process-queue' });
+    }
+  };
+
   const handleImport = async () => {
     if (!selectedRepo) {
       toast.error("Seleziona un repository");
@@ -343,6 +366,15 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
                   Importa Tutti i Repo HF (~500 docs)
                 </>
               )}
+            </Button>
+
+            <Button
+              onClick={handleProcessQueue}
+              variant="outline"
+              className="w-full gap-2"
+            >
+              <Loader2 className="h-4 w-4" />
+              Processa Coda Documenti
             </Button>
           </div>
 
