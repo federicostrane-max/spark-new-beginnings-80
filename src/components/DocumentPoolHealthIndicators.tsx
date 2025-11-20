@@ -10,59 +10,99 @@ import {
 import { AlertCircle, PackageX, Clock, AlertTriangle } from "lucide-react";
 
 interface HealthData {
-  stuckProcessing: number;
-  noChunks: number;
-  stuckQueue: number;
-  pendingValidation: number;
+  stuckProcessing: { count: number; files: string[] };
+  noChunks: { count: number; files: string[] };
+  stuckQueue: { count: number; files: string[] };
+  pendingValidation: { count: number; files: string[] };
   loading: boolean;
 }
 
 export const DocumentPoolHealthIndicators = () => {
   const [healthData, setHealthData] = useState<HealthData>({
-    stuckProcessing: 0,
-    noChunks: 0,
-    stuckQueue: 0,
-    pendingValidation: 0,
+    stuckProcessing: { count: 0, files: [] },
+    noChunks: { count: 0, files: [] },
+    stuckQueue: { count: 0, files: [] },
+    pendingValidation: { count: 0, files: [] },
     loading: true,
   });
 
   const loadHealthIndicators = async () => {
     try {
-      // 1. Documenti in processing > 10 min
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       
-      const { count: stuckCount } = await supabase
+      // 1. Documenti in processing > 10 min - con file names
+      const { data: stuckDocs, count: stuckCount } = await supabase
         .from('knowledge_documents')
-        .select('*', { count: 'exact', head: true })
+        .select('file_name', { count: 'exact' })
         .eq('processing_status', 'processing')
-        .lt('created_at', tenMinutesAgo);
+        .lt('created_at', tenMinutesAgo)
+        .order('created_at', { ascending: true })
+        .limit(10);
 
-      // 2. Documenti senza chunks
-      const { data: noChunksData, error: rpcError } = await supabase
+      // 2. Documenti senza chunks - prima il count
+      const { data: noChunksCount, error: rpcError } = await supabase
         .rpc('count_documents_without_chunks');
 
       if (rpcError) {
         console.error('[HealthIndicators] RPC Error:', rpcError);
       }
 
-      // 3. Job queue in processing > 10 min
-      const { count: queueStuckCount } = await supabase
-        .from('document_processing_queue')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'processing')
-        .lt('started_at', tenMinutesAgo);
-
-      // 4. Documenti pending validation
-      const { count: pendingCount } = await supabase
+      // Query separata per ottenere i nomi dei file senza chunks
+      const { data: allDocs } = await supabase
         .from('knowledge_documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('validation_status', 'pending');
+        .select('id, file_name')
+        .eq('processing_status', 'ready_for_assignment')
+        .limit(100);
+
+      // Verifica quali non hanno chunks
+      const docsWithoutChunks: string[] = [];
+      if (allDocs && noChunksCount && noChunksCount > 0) {
+        for (const doc of allDocs.slice(0, 10)) {
+          const { count } = await supabase
+            .from('agent_knowledge')
+            .select('*', { count: 'exact', head: true })
+            .eq('pool_document_id', doc.id);
+          
+          if (!count || count === 0) {
+            docsWithoutChunks.push(doc.file_name);
+            if (docsWithoutChunks.length >= 10) break;
+          }
+        }
+      }
+
+      // 3. Job queue in processing > 10 min - con file names
+      const { data: queueDocs, count: queueStuckCount } = await supabase
+        .from('document_processing_queue')
+        .select('document_id, knowledge_documents!inner(file_name)', { count: 'exact' })
+        .eq('status', 'processing')
+        .lt('started_at', tenMinutesAgo)
+        .limit(10);
+
+      // 4. Documenti pending validation - con file names
+      const { data: pendingDocs, count: pendingCount } = await supabase
+        .from('knowledge_documents')
+        .select('file_name', { count: 'exact' })
+        .eq('validation_status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(10);
 
       setHealthData({
-        stuckProcessing: stuckCount || 0,
-        noChunks: noChunksData || 0,
-        stuckQueue: queueStuckCount || 0,
-        pendingValidation: pendingCount || 0,
+        stuckProcessing: {
+          count: stuckCount || 0,
+          files: stuckDocs?.map(d => d.file_name) || []
+        },
+        noChunks: {
+          count: noChunksCount || 0,
+          files: docsWithoutChunks
+        },
+        stuckQueue: {
+          count: queueStuckCount || 0,
+          files: queueDocs?.map(q => q.knowledge_documents?.file_name).filter(Boolean) || []
+        },
+        pendingValidation: {
+          count: pendingCount || 0,
+          files: pendingDocs?.map(d => d.file_name) || []
+        },
         loading: false,
       });
     } catch (error) {
@@ -81,89 +121,159 @@ export const DocumentPoolHealthIndicators = () => {
     return null;
   }
 
-  const hasIssues = 
-    healthData.stuckProcessing > 0 ||
-    healthData.noChunks > 0 ||
-    healthData.stuckQueue > 0 ||
-    healthData.pendingValidation > 0;
-
-  if (!hasIssues) {
-    return null;
-  }
-
   return (
-    <div className="flex items-center gap-2 ml-2">
-      {/* Documenti bloccati in processing */}
-      {healthData.stuckProcessing > 0 && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <Badge variant="destructive" className="text-xs cursor-help">
-                <AlertCircle className="h-3 w-3 mr-1" />
-                {healthData.stuckProcessing}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="font-semibold">Documenti bloccati in elaborazione</p>
-              <p className="text-xs">{healthData.stuckProcessing} documento/i in processing da più di 10 minuti</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
+    <div className="flex flex-wrap items-center gap-2 ml-2">
+      {/* Documenti bloccati in processing - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.stuckProcessing.count === 0 ? "outline" : "destructive"}
+              className={`text-xs cursor-help ${healthData.stuckProcessing.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
+            >
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Bloccati: {healthData.stuckProcessing.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.stuckProcessing.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento bloccato in processing</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-red-600 dark:text-red-400">
+                  ⚠️ {healthData.stuckProcessing.count} documenti bloccati in processing (&gt;10 min)
+                </p>
+                {healthData.stuckProcessing.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.stuckProcessing.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file}</li>
+                    ))}
+                    {healthData.stuckProcessing.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.stuckProcessing.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
-      {/* Documenti senza chunks */}
-      {healthData.noChunks > 0 && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <Badge className="text-xs cursor-help bg-orange-500 hover:bg-orange-600 text-white">
-                <PackageX className="h-3 w-3 mr-1" />
-                {healthData.noChunks}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="font-semibold">Documenti senza chunks</p>
-              <p className="text-xs">{healthData.noChunks} documento/i pronti ma senza chunks generati</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
+      {/* Documenti senza chunks - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.noChunks.count === 0 ? "outline" : "default"}
+              className={`text-xs cursor-help ${
+                healthData.noChunks.count === 0 
+                  ? "border-green-500 text-green-700 dark:text-green-500" 
+                  : "bg-orange-500 hover:bg-orange-600 text-white"
+              }`}
+            >
+              <PackageX className="h-3 w-3 mr-1" />
+              Senza Chunks: {healthData.noChunks.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.noChunks.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti hanno chunks</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-orange-600 dark:text-orange-400">
+                  ⚠️ {healthData.noChunks.count} documenti senza chunks generati
+                </p>
+                {healthData.noChunks.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.noChunks.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file}</li>
+                    ))}
+                    {healthData.noChunks.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.noChunks.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
-      {/* Job queue bloccati */}
-      {healthData.stuckQueue > 0 && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <Badge variant="destructive" className="text-xs cursor-help">
-                <Clock className="h-3 w-3 mr-1" />
-                {healthData.stuckQueue}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="font-semibold">Job bloccati nella coda</p>
-              <p className="text-xs">{healthData.stuckQueue} job in elaborazione da più di 10 minuti</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
+      {/* Job queue bloccati - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.stuckQueue.count === 0 ? "outline" : "destructive"}
+              className={`text-xs cursor-help ${healthData.stuckQueue.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
+            >
+              <Clock className="h-3 w-3 mr-1" />
+              Queue: {healthData.stuckQueue.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.stuckQueue.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun job bloccato nella coda</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-red-600 dark:text-red-400">
+                  ⚠️ {healthData.stuckQueue.count} job bloccati nella coda (&gt;10 min)
+                </p>
+                {healthData.stuckQueue.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.stuckQueue.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file}</li>
+                    ))}
+                    {healthData.stuckQueue.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.stuckQueue.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
 
-      {/* Documenti pending validation */}
-      {healthData.pendingValidation > 0 && (
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <Badge className="text-xs cursor-help bg-yellow-500 hover:bg-yellow-600 text-white">
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                {healthData.pendingValidation}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p className="font-semibold">Documenti in attesa di validazione</p>
-              <p className="text-xs">{healthData.pendingValidation} documento/i pending validation</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
+      {/* Documenti pending validation - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.pendingValidation.count === 0 ? "outline" : "default"}
+              className={`text-xs cursor-help ${
+                healthData.pendingValidation.count === 0 
+                  ? "border-green-500 text-green-700 dark:text-green-500" 
+                  : "bg-yellow-500 hover:bg-yellow-600 text-white"
+              }`}
+            >
+              <AlertTriangle className="h-3 w-3 mr-1" />
+              Pending: {healthData.pendingValidation.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.pendingValidation.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento in attesa di validazione</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                  ⚠️ {healthData.pendingValidation.count} documenti in attesa di validazione
+                </p>
+                {healthData.pendingValidation.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.pendingValidation.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file}</li>
+                    ))}
+                    {healthData.pendingValidation.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.pendingValidation.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 };
