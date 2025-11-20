@@ -33,9 +33,9 @@ serve(async (req) => {
     
     const pagesToExtract = maxPages || 1; // Default to 1 page if not specified
 
-    const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
-    if (!deepseekApiKey) {
-      throw new Error('DEEPSEEK_API_KEY not configured');
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    if (!lovableApiKey) {
+      throw new Error('LOVABLE_API_KEY not configured');
     }
 
     console.log('[ocr-image] Processing file:', fileName || imageUrl);
@@ -66,18 +66,18 @@ serve(async (req) => {
     
     console.log(`[ocr-image] Processing as: ${mimeType} (${pagesToExtract} pages)`);
 
-    // Call DeepSeek V3 Vision API
-    console.log('[ocr-image] Calling DeepSeek V3 Vision for OCR...');
+    // Call Lovable AI Gateway with Gemini 2.5 Flash
+    console.log('[ocr-image] Calling Lovable AI (Gemini 2.5 Flash) for OCR...');
     const response = await fetch(
-      'https://api.deepseek.com/v1/chat/completions',
+      'https://ai.gateway.lovable.dev/v1/chat/completions',
       {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${deepseekApiKey}`
+          'Authorization': `Bearer ${lovableApiKey}`
         },
         body: JSON.stringify({
-          model: 'deepseek-chat',
+          model: 'google/gemini-2.5-flash',
           messages: [{
             role: 'user',
             content: [
@@ -89,17 +89,15 @@ serve(async (req) => {
                 }
               }
             ]
-          }],
-          temperature: 0.1,
-          max_tokens: 4000
+          }]
         })
       }
     );
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('DeepSeek Vision API error:', error);
-      throw new Error(`DeepSeek Vision API error: ${error}`);
+      console.error('Lovable AI Gateway error:', error);
+      throw new Error(`Lovable AI Gateway error: ${error}`);
     }
 
     const result = await response.json();
