@@ -120,7 +120,7 @@ serve(async (req) => {
           processing_status: 'pending_processing', // ✅ Trigger auto-processes
           validation_status: 'pending', // ✅ Correct state
           chunking_strategy: 'sliding_window',
-          metadata_extraction_method: 'github_frontmatter',
+          metadata_extraction_method: 'text',
           metadata_confidence: 'high'
         });
 
