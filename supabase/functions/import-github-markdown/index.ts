@@ -84,9 +84,31 @@ serve(async (req) => {
       errors: [] as string[]
     };
 
+    // Check existing documents once
+    const existingFileNames = new Set<string>();
+    const { data: existingDocs } = await supabase
+      .from('knowledge_documents')
+      .select('file_name')
+      .in('file_name', markdownFiles.map(f => f.path));
+    
+    if (existingDocs) {
+      existingDocs.forEach(doc => existingFileNames.add(doc.file_name));
+    }
+
+    // Batch processing
+    const BATCH_SIZE = 50;
+    const documentsToInsert = [];
+
     for (const file of markdownFiles) {
       try {
-        console.log(`\n⬇️ Downloading: ${file.path}`);
+        // Skip if already exists
+        if (existingFileNames.has(file.path)) {
+          console.log(`⏭️ Skipping ${file.path} - already exists`);
+          results.skipped++;
+          continue;
+        }
+
+        console.log(`⬇️ Downloading: ${file.path}`);
 
         // Download raw markdown content
         const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/main/${file.path}`;
@@ -118,64 +140,61 @@ serve(async (req) => {
           if (descMatch) description = descMatch[1];
         }
 
-        // Check if already exists
-        const { data: existing } = await supabase
-          .from('knowledge_documents')
-          .select('id')
-          .eq('file_name', file.path)
-          .maybeSingle();
-
-        if (existing) {
-          console.log(`⏭️ Skipping ${file.path} - already exists`);
-          results.skipped++;
-          continue;
-        }
-
-        // Insert document with full_text directly
-        const { data: document, error: insertError } = await supabase
-          .from('knowledge_documents')
-          .insert({
-            file_name: file.path,
-            file_path: rawUrl,
-            extracted_title: title,
-            ai_summary: description,
-            full_text: content,
-            text_length: content.length,
-            processing_status: 'pending_processing',
-            validation_status: 'pending',
-            source_url: rawUrl,
-            search_query: `GitHub: ${repo}`,
-            metadata_extraction_method: 'vision',
-            metadata_confidence: 'high',
-            folder: 'Huggingface_GitHub'
-          })
-          .select()
-          .single();
-
-        if (insertError) {
-          throw insertError;
-        }
-
-        console.log(`💾 Saved to database: ${document.id}`);
-
-        // Trigger processing (will read from full_text)
-        const { error: processError } = await supabase.functions.invoke('process-document', {
-          body: { documentId: document.id }
+        // Add to batch
+        documentsToInsert.push({
+          file_name: file.path,
+          file_path: rawUrl,
+          extracted_title: title,
+          ai_summary: description,
+          full_text: content,
+          text_length: content.length,
+          processing_status: 'pending_processing',
+          validation_status: 'pending',
+          source_url: rawUrl,
+          search_query: `GitHub: ${repo}`,
+          metadata_extraction_method: 'vision',
+          metadata_confidence: 'high',
+          folder: 'Huggingface_GitHub'
         });
 
-        if (processError) {
-          console.error(`⚠️ Processing trigger failed for ${file.path}:`, processError);
-          // Don't fail the import, just log
-        } else {
-          console.log(`🔄 Processing triggered for ${file.path}`);
-        }
+        // Insert batch when full
+        if (documentsToInsert.length >= BATCH_SIZE) {
+          const { error: batchError } = await supabase
+            .from('knowledge_documents')
+            .insert(documentsToInsert);
 
-        results.saved++;
+          if (batchError) {
+            console.error(`❌ Batch insert failed:`, batchError);
+            results.failed += documentsToInsert.length;
+            results.errors.push(`Batch insert error: ${batchError.message}`);
+          } else {
+            console.log(`💾 Saved batch of ${documentsToInsert.length} documents`);
+            results.saved += documentsToInsert.length;
+          }
+          
+          documentsToInsert.length = 0; // Clear batch
+        }
 
       } catch (error: any) {
         console.error(`❌ Error processing ${file.path}:`, error.message);
         results.failed++;
         results.errors.push(`${file.path}: ${error.message}`);
+      }
+    }
+
+    // Insert remaining documents
+    if (documentsToInsert.length > 0) {
+      const { error: batchError } = await supabase
+        .from('knowledge_documents')
+        .insert(documentsToInsert);
+
+      if (batchError) {
+        console.error(`❌ Final batch insert failed:`, batchError);
+        results.failed += documentsToInsert.length;
+        results.errors.push(`Final batch insert error: ${batchError.message}`);
+      } else {
+        console.log(`💾 Saved final batch of ${documentsToInsert.length} documents`);
+        results.saved += documentsToInsert.length;
       }
     }
 
