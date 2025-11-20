@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Github, Loader2, Download } from "lucide-react";
+import { Github, Loader2, Download, FolderGit2, FolderTree } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,8 @@ import {
 
 interface GitHubDocsImportProps {
   onImportComplete: () => void;
+  onRecategorize: () => void;
+  isRecategorizing: boolean;
 }
 
 const HUGGINGFACE_REPOS = [
@@ -35,7 +37,7 @@ const HUGGINGFACE_REPOS = [
   { value: "huggingface/peft", label: "PEFT", path: "docs/source" },
 ];
 
-export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) => {
+export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategorizing }: GitHubDocsImportProps) => {
   const [open, setOpen] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [pathFilter, setPathFilter] = useState("");
@@ -328,20 +330,38 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
             </Button>
 
             <Button
-              variant="secondary"
               onClick={handleBatchImport}
-              disabled={importing}
-              className="w-full"
+              disabled={importing || batchImporting}
+              className="w-full gap-2"
             >
-              {importing ? (
+              {batchImporting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Batch Import...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importazione in corso ({progress.current}/{progress.total})
                 </>
               ) : (
                 <>
-                  <Github className="mr-2 h-4 w-4" />
-                  Importa Tutti i Repo HF (~500 docs)
+                  <FolderGit2 className="h-4 w-4" />
+                  Importa Tutti Repos Huggingface
+                </>
+              )}
+            </Button>
+
+            <Button
+              onClick={onRecategorize}
+              disabled={isRecategorizing}
+              variant="outline"
+              className="w-full gap-2"
+            >
+              {isRecategorizing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Ricategorizzazione...
+                </>
+              ) : (
+                <>
+                  <FolderTree className="h-4 w-4" />
+                  Riorganizza Documenti GitHub
                 </>
               )}
             </Button>
