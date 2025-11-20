@@ -6,6 +6,67 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+/**
+ * Extract text from PDF using simple text extraction
+ * This works for PDFs with embedded text (not scanned images)
+ */
+async function extractTextNatively(pdfBuffer: ArrayBuffer): Promise<string> {
+  try {
+    console.log('[extract-pdf-text] Attempting native text extraction...');
+    
+    // Convert ArrayBuffer to string to look for text content
+    const uint8Array = new Uint8Array(pdfBuffer);
+    const decoder = new TextDecoder('latin1'); // PDFs use latin1 encoding
+    const pdfString = decoder.decode(uint8Array);
+    
+    // Extract text between stream objects (simple PDF text extraction)
+    // This regex finds text content in PDF streams
+    const textMatches = pdfString.match(/\(([^)]+)\)/g) || [];
+    
+    let extractedText = '';
+    for (const match of textMatches) {
+      // Remove parentheses and clean up
+      const text = match.slice(1, -1)
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\\\/g, '\\')
+        .replace(/\\([()])/g, '$1');
+      
+      // Filter out control characters and keep meaningful text
+      if (text.length > 2 && !/^[\x00-\x1F]+$/.test(text)) {
+        extractedText += text + ' ';
+      }
+    }
+    
+    // Also try to extract text from BT/ET blocks (more sophisticated)
+    const btEtPattern = /BT\s*(.*?)\s*ET/gs;
+    const btEtMatches = pdfString.match(btEtPattern) || [];
+    
+    for (const block of btEtMatches) {
+      const tjMatches = block.match(/\[(.*?)\]\s*TJ/g) || [];
+      for (const tj of tjMatches) {
+        const content = tj.match(/\(([^)]+)\)/g) || [];
+        for (const c of content) {
+          const cleaned = c.slice(1, -1);
+          if (cleaned.length > 1) {
+            extractedText += cleaned + ' ';
+          }
+        }
+      }
+    }
+    
+    const finalText = extractedText.trim();
+    const extractedLength = finalText.length;
+    console.log(`[extract-pdf-text] Native extraction complete: ${extractedLength} characters`);
+    
+    return finalText;
+  } catch (error) {
+    console.error('[extract-pdf-text] Native extraction failed:', error);
+    return '';
+  }
+}
+
 interface ExtractionRequest {
   documentId?: string;
   filePath?: string;
@@ -171,46 +232,68 @@ serve(async (req) => {
 
     console.log(`[extract-pdf-text] PDF downloaded from ${successfulBucket.name}, size: ${pdfBlob.size} bytes`);
 
-    // Create a temporary signed URL for the PDF (valid for 5 minutes)
-    console.log(`[extract-pdf-text] Creating signed URL from ${successfulBucket.name}...`);
-    const { data: signedUrlData, error: signedUrlError } = await supabase
-      .storage
-      .from(successfulBucket.name)
-      .createSignedUrl(successfulBucket.path, 300); // 300 seconds = 5 minutes
+    // ========================================
+    // PHASE 1: Try native text extraction first
+    // ========================================
+    console.log('[extract-pdf-text] PHASE 1: Attempting native text extraction...');
+    const pdfBuffer = await pdfBlob.arrayBuffer();
+    const nativeText = await extractTextNatively(pdfBuffer);
+    
+    let extractedText = '';
+    let extractionMethod = 'native';
+    
+    // Check if native extraction was successful (more than 100 characters)
+    if (nativeText.length > 100) {
+      console.log(`[extract-pdf-text] ✅ Native extraction successful: ${nativeText.length} characters`);
+      extractedText = nativeText;
+      extractionMethod = 'native';
+    } else {
+      console.log(`[extract-pdf-text] ⚠️ Native extraction insufficient (${nativeText.length} chars), falling back to OCR...`);
+      
+      // ========================================
+      // PHASE 2: Fallback to OCR if native extraction failed
+      // ========================================
+      console.log('[extract-pdf-text] PHASE 2: Creating signed URL for OCR fallback...');
+      const { data: signedUrlData, error: signedUrlError } = await supabase
+        .storage
+        .from(successfulBucket.name)
+        .createSignedUrl(successfulBucket.path, 300); // 300 seconds = 5 minutes
 
-    if (signedUrlError || !signedUrlData?.signedUrl) {
-      throw new Error(`Failed to create signed URL: ${signedUrlError?.message || 'Unknown error'}`);
-    }
-
-    console.log('[extract-pdf-text] Signed URL created, calling ocr-image...');
-
-    // Call ocr-image function with the signed URL
-    const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr-image', {
-      body: {
-        imageUrl: signedUrlData.signedUrl,
-        fileName: filePath.split('/').pop() || 'document.pdf'
+      if (signedUrlError || !signedUrlData?.signedUrl) {
+        throw new Error(`Failed to create signed URL: ${signedUrlError?.message || 'Unknown error'}`);
       }
-    });
 
-    if (ocrError) {
-      console.error('[extract-pdf-text] OCR failed:', ocrError);
-      throw new Error(`OCR extraction failed: ${ocrError.message}`);
+      console.log('[extract-pdf-text] Calling ocr-image for fallback extraction...');
+      const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr-image', {
+        body: {
+          imageUrl: signedUrlData.signedUrl,
+          fileName: filePath.split('/').pop() || 'document.pdf'
+        }
+      });
+
+      if (ocrError) {
+        console.error('[extract-pdf-text] OCR fallback failed:', ocrError);
+        // If OCR fails, use whatever native extraction got
+        extractedText = nativeText;
+        extractionMethod = 'native-fallback';
+      } else {
+        extractedText = ocrData?.extractedText || nativeText;
+        extractionMethod = 'ocr';
+      }
     }
-
-    const extractedText = ocrData?.extractedText || '';
 
     if (!extractedText || extractedText.trim().length === 0) {
-      console.warn('[extract-pdf-text] ⚠️ Warning: OCR returned empty or very short text');
-      // Don't throw error - return what we have and let process-document handle it
+      console.warn('[extract-pdf-text] ⚠️ Warning: All extraction methods returned empty text');
     }
 
-    console.log(`[extract-pdf-text] ✅ Extraction successful: ${extractedText.length} characters`);
+    console.log(`[extract-pdf-text] ✅ Final extraction successful (${extractionMethod}): ${extractedText.length} characters`);
 
     return new Response(
       JSON.stringify({ 
         success: true,
         text: extractedText,
-        length: extractedText.length
+        length: extractedText.length,
+        method: extractionMethod
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
