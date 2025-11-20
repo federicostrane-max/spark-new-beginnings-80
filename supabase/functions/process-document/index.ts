@@ -510,7 +510,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     // This prevents documents from being stuck in 'processing' if timeout occurs
     // ========================================
     console.log('[process-document] 🎯 CRITICAL: Updating processing status to ready_for_assignment...');
-    await supabase
+    const { error: updateError } = await supabase
       .from('knowledge_documents')
       .update({ 
         processing_status: 'ready_for_assignment',
@@ -524,6 +524,12 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         processed_at: new Date().toISOString()
       })
       .eq('id', documentId);
+    
+    if (updateError) {
+      console.error('[process-document] ❌ CRITICAL: Failed to update document status to ready_for_assignment:', updateError);
+      throw new Error(`Failed to update document status: ${updateError.message}`);
+    }
+    
     console.log('[process-document] ✅ Status updated to ready_for_assignment');
     
     // ========================================
