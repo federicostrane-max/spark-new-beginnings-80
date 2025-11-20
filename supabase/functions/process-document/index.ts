@@ -504,10 +504,10 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     console.log(`[process-document] ✅ Verification passed: ${finalChunkCount} chunks confirmed in database`);
     
     // ========================================
-    // Update Database with Analysis
+    // CRITICAL: Update Status IMMEDIATELY After Verification
+    // This prevents documents from being stuck in 'processing' if timeout occurs
     // ========================================
-    console.log('[process-document] Updating database with analysis...');
-
+    console.log('[process-document] 🎯 CRITICAL: Updating processing status to ready_for_assignment...');
     await supabase
       .from('knowledge_documents')
       .update({ 
@@ -521,7 +521,13 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         processed_at: new Date().toISOString()
       })
       .eq('id', documentId);
-
+    console.log('[process-document] ✅ Status updated to ready_for_assignment');
+    
+    // ========================================
+    // Non-Critical: Update Cache & Notifications
+    // If these fail/timeout, document status is already updated above
+    // ========================================
+    console.log('[process-document] 📝 Updating processing cache...');
     await supabase
       .from('document_processing_cache')
       .update({ 
