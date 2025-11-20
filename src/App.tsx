@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { TTSProvider } from "@/contexts/TTSContext";
 import { useAuth } from "@/hooks/useAuth";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { Toaster } from "@/components/ui/sonner";
 
 // Lazy load all page components
 const MultiAgentConsultant = lazy(() => import("./pages/MultiAgentConsultant"));
@@ -106,6 +107,7 @@ const App = () => {
           </TooltipProvider>
         </TTSProvider>
       </AuthProvider>
+      <Toaster />
     </BrowserRouter>
   </QueryClientProvider>
   );
