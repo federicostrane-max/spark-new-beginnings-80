@@ -488,8 +488,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     const { count: finalChunkCount, error: countError } = await supabase
       .from('agent_knowledge')
       .select('*', { count: 'exact', head: true })
-      .eq('pool_document_id', documentId)
-      .is('agent_id', null);
+      .eq('pool_document_id', documentId);
     
     if (countError) {
       console.error('[process-document] ❌ Error counting chunks:', countError);

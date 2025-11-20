@@ -165,11 +165,11 @@ export const DocumentPoolHealthIndicators = () => {
         <Tooltip>
           <TooltipTrigger>
             <Badge 
-              variant={healthData.noChunks.count === 0 ? "outline" : "default"}
+              variant={healthData.noChunks.count === 0 ? "outline" : "destructive"}
               className={`text-xs cursor-help ${
                 healthData.noChunks.count === 0 
                   ? "border-green-500 text-green-700 dark:text-green-500" 
-                  : "bg-orange-500 hover:bg-orange-600 text-white"
+                  : ""
               }`}
             >
               <PackageX className="h-3 w-3 mr-1" />
@@ -241,11 +241,11 @@ export const DocumentPoolHealthIndicators = () => {
         <Tooltip>
           <TooltipTrigger>
             <Badge 
-              variant={healthData.pendingValidation.count === 0 ? "outline" : "default"}
+              variant={healthData.pendingValidation.count === 0 ? "outline" : "destructive"}
               className={`text-xs cursor-help ${
                 healthData.pendingValidation.count === 0 
                   ? "border-green-500 text-green-700 dark:text-green-500" 
-                  : "bg-yellow-500 hover:bg-yellow-600 text-white"
+                  : ""
               }`}
             >
               <AlertTriangle className="h-3 w-3 mr-1" />
