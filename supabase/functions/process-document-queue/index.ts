@@ -68,13 +68,15 @@ serve(async (req) => {
 
         if (processError) throw processError;
 
-        // ✅ NEW: Verify chunks were created for extract operations
+        // ✅ NEW: Verify chunks were created for extract operations (SHARED POOL + ACTIVE)
         if (item.processing_type === 'extract') {
-          console.log(`✓ Verifying chunks for ${item.document_id}...`);
+          console.log(`✓ Verifying SHARED POOL chunks for ${item.document_id}...`);
           const { data: chunks, error: checkError } = await supabase
             .from('agent_knowledge')
             .select('id')
             .eq('pool_document_id', item.document_id)
+            .is('agent_id', null)       // ✅ FIX: Only shared pool chunks
+            .eq('is_active', true)       // ✅ FIX: Only active chunks
             .limit(1);
           
           if (checkError) {
@@ -82,10 +84,10 @@ serve(async (req) => {
           }
           
           if (!chunks || chunks.length === 0) {
-            throw new Error('Chunk creation failed: no chunks found after processing');
+            throw new Error('Chunk creation failed: no SHARED POOL chunks found after processing');
           }
           
-          console.log(`✓ Chunks verified for ${item.document_id}`);
+          console.log(`✓ Shared pool chunks verified for ${item.document_id}`);
         }
 
         // Marca come completed
