@@ -7,7 +7,6 @@ import { Loader2, RefreshCw, Database, CheckCircle, XCircle } from "lucide-react
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProcessingLogs } from "./ProcessingLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MaintenanceMonitor } from "./MaintenanceMonitor";
 import { OperationsDashboard } from "./OperationsDashboard";
 import { FilterPromptEditor } from "./FilterPromptEditor";
 import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
@@ -114,7 +113,6 @@ export const AdminPanel = () => {
         <TabsTrigger value="metrics">Metriche</TabsTrigger>
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
         <TabsTrigger value="logs">Log Processing</TabsTrigger>
-        <TabsTrigger value="maintenance">Manutenzione Auto</TabsTrigger>
         <TabsTrigger value="operations">Operazioni</TabsTrigger>
         <TabsTrigger value="filter-prompt">Filter Prompt</TabsTrigger>
         <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
@@ -295,10 +293,6 @@ export const AdminPanel = () => {
 
       <TabsContent value="logs">
         <ProcessingLogs />
-      </TabsContent>
-
-      <TabsContent value="maintenance">
-        <MaintenanceMonitor />
       </TabsContent>
 
       <TabsContent value="operations">
