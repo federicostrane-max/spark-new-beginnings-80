@@ -5,7 +5,7 @@ import { ArrowLeft, RefreshCw, AlertCircle, CheckCircle2, Loader2, AlertTriangle
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { GitHubDocsImport } from "@/components/GitHubDocsImport";
-import { RepairDocumentsButton } from "@/components/RepairDocumentsButton";
+
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -52,6 +52,9 @@ export default function DocumentPool() {
   const [showRecoverDialog, setShowRecoverDialog] = useState(false);
   const [documentsWithoutFulltext, setDocumentsWithoutFulltext] = useState(0);
   const [isCleaningBroken, setIsCleaningBroken] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
+  const [repairReport, setRepairReport] = useState<any>(null);
+  const [showRepairReport, setShowRepairReport] = useState(false);
 
   // Backup & restore states
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
@@ -617,6 +620,32 @@ export default function DocumentPool() {
     }
   };
 
+  const handleRepairAndAssign = async () => {
+    try {
+      setIsRepairing(true);
+      toast.loading('Riparazione e assegnazione in corso...', { id: 'repair' });
+      
+      const { data, error } = await supabase.functions.invoke('repair-and-assign-documents');
+      
+      if (error) throw error;
+      
+      setRepairReport(data);
+      setShowRepairReport(true);
+      toast.success("Riparazione e assegnazione completate!", { id: 'repair' });
+      
+      // Refresh metrics
+      await loadHealthMetrics();
+      await checkDocumentsWithoutChunks();
+      await checkDocumentsWithoutFulltext();
+      setTableKey(prev => prev + 1);
+    } catch (error: any) {
+      console.error('Error repairing documents:', error);
+      toast.error(`Errore durante la riparazione: ${error.message}`, { id: 'repair' });
+    } finally {
+      setIsRepairing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto py-8 px-4">
@@ -712,6 +741,31 @@ export default function DocumentPool() {
                     <p className="text-xs">
                       Tenta di riprocessare i PDF che sono falliti durante l'elaborazione 
                       (status: validation_failed, processing_failed). Utile per errori temporanei.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            <DropdownMenuSeparator />
+
+            {/* Ripara e Assegna Documenti */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={handleRepairAndAssign}
+                disabled={isRepairing}
+                className="flex items-center justify-between cursor-pointer"
+              >
+                <span>Ripara e Assegna Documenti</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Trova documenti con full_text ma senza chunks, li processa per creare i chunks,
+                      e ripristina automaticamente le assegnazioni dal backup più recente.
+                      Operazione completa e automatica con report dettagliato.
                     </p>
                   </TooltipContent>
                 </Tooltip>
@@ -978,7 +1032,6 @@ export default function DocumentPool() {
           <div className="flex items-center gap-4">
             <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
             <GitHubDocsImport onImportComplete={handleUploadComplete} />
-            <RepairDocumentsButton />
           </div>
         </div>
 
@@ -1160,6 +1213,138 @@ export default function DocumentPool() {
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Chiudi</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Repair Report Dialog */}
+      <AlertDialog open={showRepairReport} onOpenChange={setShowRepairReport}>
+        <AlertDialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Report Riparazione e Assegnazione</AlertDialogTitle>
+            <AlertDialogDescription>
+              {repairReport && (
+                <div className="space-y-6 mt-4 text-left">
+                  {/* Summary */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                      <div className="text-sm text-muted-foreground">Documenti Processati</div>
+                      <div className="text-2xl font-bold text-blue-500">
+                        {repairReport.summary?.documentsProcessed || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/20">
+                      <div className="text-sm text-muted-foreground">Chunks Creati</div>
+                      <div className="text-2xl font-bold text-green-500">
+                        {repairReport.summary?.totalChunksCreated || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                      <div className="text-sm text-muted-foreground">Assegnazioni Ripristinate</div>
+                      <div className="text-2xl font-bold text-purple-500">
+                        {repairReport.summary?.assignmentsRestored || 0}
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                      <div className="text-sm text-muted-foreground">Sincronizzazioni</div>
+                      <div className="text-2xl font-bold text-yellow-500">
+                        {repairReport.summary?.syncSuccesses || 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Processing Details */}
+                  {repairReport.processing?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-2">📄 Documenti Processati</h3>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {repairReport.processing.map((doc: any, idx: number) => (
+                          <div 
+                            key={idx}
+                            className={`p-3 rounded border text-sm ${
+                              doc.success 
+                                ? 'bg-green-500/10 border-green-500/20' 
+                                : 'bg-red-500/10 border-red-500/20'
+                            }`}
+                          >
+                            <div className="font-medium flex items-center gap-2">
+                              {doc.success ? '✅' : '❌'} {doc.fileName}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {doc.success 
+                                ? `${doc.chunksCreated} chunks creati` 
+                                : `Errore: ${doc.error}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assignment Details */}
+                  {repairReport.assignments && (
+                    <div>
+                      <h3 className="font-semibold mb-2">🔗 Assegnazioni</h3>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="p-2 rounded bg-muted">
+                          <strong>Backup usato:</strong> {repairReport.assignments.backupUsed}
+                        </div>
+                        <div className="p-2 rounded bg-muted">
+                          <strong>Assegnazioni totali:</strong> {repairReport.assignments.totalAssignments}
+                        </div>
+                        <div className="p-2 rounded bg-muted">
+                          <strong>Ripristinate:</strong> {repairReport.assignments.restored}
+                        </div>
+                        <div className="p-2 rounded bg-muted">
+                          <strong>Saltate:</strong> {repairReport.assignments.skipped}
+                        </div>
+                      </div>
+
+                      {repairReport.assignments.details?.length > 0 && (
+                        <div className="mt-3 space-y-2 max-h-40 overflow-y-auto">
+                          {repairReport.assignments.details.map((detail: any, idx: number) => (
+                            <div 
+                              key={idx}
+                              className={`p-2 rounded border text-xs ${
+                                detail.success 
+                                  ? 'bg-green-500/10 border-green-500/20' 
+                                  : 'bg-yellow-500/10 border-yellow-500/20'
+                              }`}
+                            >
+                              <div className="font-medium">
+                                {detail.success ? '✅' : '⏭️'} {detail.documentName} → {detail.agentName}
+                              </div>
+                              {!detail.success && (
+                                <div className="text-muted-foreground mt-1">
+                                  Motivo: {detail.reason}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Errors */}
+                  {repairReport.summary?.errors?.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-2 text-destructive">⚠️ Errori</h3>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {repairReport.summary.errors.map((error: string, idx: number) => (
+                          <div key={idx} className="p-2 rounded bg-destructive/10 border border-destructive/20 text-xs">
+                            {error}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </AlertDialogDescription>
