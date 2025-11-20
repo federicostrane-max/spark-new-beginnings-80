@@ -28,7 +28,7 @@ serve(async (req) => {
   }
 
   try {
-    const { repo, path, maxFiles = 100, filePattern = "*.md" } = await req.json();
+    const { repo, path, maxFiles = 999999, filePattern = "*.md" } = await req.json();
 
     console.log(`📥 Importing GitHub Markdown from ${repo} (path: ${path}, max: ${maxFiles})`);
 
@@ -66,13 +66,15 @@ serve(async (req) => {
 
     // Filter for markdown files in specified path
     const pattern = filePattern.replace('*.', '.');
-    const markdownFiles = treeData.tree.filter(item => 
+    const allMarkdownFiles = treeData.tree.filter(item => 
       item.type === 'blob' && 
       item.path.startsWith(path) && 
       item.path.endsWith(pattern)
-    ).slice(0, maxFiles);
+    );
+    
+    const markdownFiles = allMarkdownFiles.slice(0, maxFiles);
 
-    console.log(`📄 Found ${markdownFiles.length} markdown files to import`);
+    console.log(`📄 Found ${allMarkdownFiles.length} total markdown files, importing ${markdownFiles.length}`);
 
     const results = {
       total: markdownFiles.length,

@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
+
 
 interface GitHubDocsImportProps {
   onImportComplete: () => void;
@@ -39,7 +39,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [open, setOpen] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [pathFilter, setPathFilter] = useState("");
-  const [maxFiles, setMaxFiles] = useState([100]);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
 
@@ -69,7 +68,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         body: {
           repo: selectedRepo,
           path: pathFilter,
-          maxFiles: maxFiles[0],
+          maxFiles: 999999, // Nessun limite - scarica TUTTO
           filePattern: "*.md"
         }
       });
@@ -218,19 +217,14 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
             </p>
           </div>
 
-          {/* Max Files */}
-          <div className="space-y-2">
-            <Label>Max Files: {maxFiles[0]}</Label>
-            <Slider
-              value={maxFiles}
-              onValueChange={setMaxFiles}
-              min={10}
-              max={500}
-              step={10}
-              disabled={importing}
-            />
-            <p className="text-xs text-muted-foreground">
-              Numero massimo di file da importare
+          {/* Info - Download Completo */}
+          <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground border border-border">
+            <p className="flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              <strong>Download completo senza limiti:</strong>
+            </p>
+            <p className="mt-1 ml-6">
+              Verrà scaricata <strong>TUTTA</strong> la documentazione disponibile dal repository selezionato
             </p>
           </div>
 
