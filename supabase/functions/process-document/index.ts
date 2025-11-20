@@ -54,12 +54,16 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Set timeout for processing
-  const timeoutId = setTimeout(() => {
-    throw new Error('Processing timeout after 5 minutes');
-  }, 5 * 60 * 1000);
-
+  // ✅ Set timeout for processing with proper error handling
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let isTimeout = false;
+  
   try {
+    timeoutId = setTimeout(() => {
+      isTimeout = true;
+      throw new Error('Processing timeout after 5 minutes');
+    }, 5 * 60 * 1000);
+
     const { documentId, fullText: providedFullText, retryCount = 0 }: ProcessRequest = await req.json();
     
     // Validate inputs
@@ -383,7 +387,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     if (existingChunks && existingChunks.length > 0) {
       console.log('[process-document] ✓ Chunks already exist, skipping chunk creation');
     } else {
-      console.log('[process-document] No existing chunks found, creating new chunks...');
+      console.log('[process-document] 🔨 No existing chunks found, creating new chunks...');
       
       // Get document details for chunk metadata
       const { data: doc } = await supabase
@@ -393,10 +397,12 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         .single();
       
       const fileName = doc?.file_name || 'Unknown Document';
+      console.log(`[process-document] Document name: ${fileName}`);
+      console.log(`[process-document] Full text length: ${fullText.length} characters`);
       
       // Chunk the text
       const chunks = chunkText(fullText, 1000, 200);
-      console.log(`[process-document] Created ${chunks.length} chunks`);
+      console.log(`[process-document] ✓ Created ${chunks.length} text chunks for processing`);
       
       // Get OpenAI API key for embeddings
       const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
@@ -471,7 +477,8 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         }
       }
       
-      console.log(`[process-document] ✓ All ${processedChunks} chunks created successfully`);
+      console.log(`[process-document] ✅ Successfully created and inserted ${processedChunks} chunks into agent_knowledge table`);
+      console.log(`[process-document] ✅ Document ${documentId} now has ${processedChunks} searchable chunks in shared pool`);
     }
     
     // ========================================
@@ -546,7 +553,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     console.log('[process-document] Processing completed successfully!');
     console.log('[process-document] ========== END SUCCESS ==========');
     
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
     
     return new Response(JSON.stringify({
       success: true,
@@ -560,7 +567,11 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     console.error('[process-document] Stack:', (error as Error).stack);
     console.log('[process-document] ========== END ERROR ==========');
     
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
+
+    // ✅ Check if this is a timeout error - reset to pending for retry
+    const errorMessage = error instanceof Error ? error.message : 'Processing error';
+    const isTimeoutError = isTimeout || errorMessage.includes('timeout') || errorMessage.includes('Timeout');
 
     // Try to mark as failed in database
     try {
@@ -569,10 +580,14 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
       const supabase = createClient(supabaseUrl, supabaseKey);
 
+      // ✅ If timeout, reset to pending_processing for automatic retry
+      const newStatus = isTimeoutError ? 'pending_processing' : 'processing_failed';
+      console.log(`[process-document] Setting status to: ${newStatus} (isTimeout: ${isTimeoutError})`);
+
       await supabase
         .from('knowledge_documents')
         .update({ 
-          processing_status: 'processing_failed'
+          processing_status: newStatus
         })
         .eq('id', documentId);
 
