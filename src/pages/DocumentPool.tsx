@@ -50,7 +50,8 @@ export default function DocumentPool() {
   const [isRecovering, setIsRecovering] = useState(false);
   const [showRecoverDialog, setShowRecoverDialog] = useState(false);
   const [documentsWithoutFulltext, setDocumentsWithoutFulltext] = useState(0);
-  
+  const [isCleaningBroken, setIsCleaningBroken] = useState(false);
+
   // Backup & restore states
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [backups, setBackups] = useState<any[]>([]);
@@ -575,6 +576,46 @@ export default function DocumentPool() {
     }
   };
 
+  const handleCleanupBrokenPdfs = async () => {
+    setIsCleaningBroken(true);
+    toast.loading('Eliminazione PDF problematici in corso...', { id: 'cleanup-broken' });
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('cleanup-broken-pdfs');
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.success) {
+        const result = data.result;
+        toast.success(
+          `✅ Cleanup completato: ${result.documentsDeleted} PDF eliminati, ${result.chunksDeleted} chunks rimossi, ${result.filesDeleted} file cancellati dallo storage`,
+          { id: 'cleanup-broken', duration: 6000 }
+        );
+        
+        if (result.errors && result.errors.length > 0) {
+          console.warn('[Cleanup Errors]', result.errors);
+          toast.warning(`⚠️ ${result.errors.length} errori durante il cleanup (vedi console)`, { duration: 5000 });
+        }
+        
+        // Refresh all data
+        loadHealthMetrics();
+        checkDocumentsWithoutChunks();
+        checkDocumentsWithoutFulltext();
+        setTableKey(prev => prev + 1);
+      } else {
+        throw new Error(data?.error || 'Errore sconosciuto durante il cleanup');
+      }
+      
+    } catch (error: any) {
+      console.error('[Cleanup Broken PDFs Error]', error);
+      toast.error(`Errore durante l'eliminazione: ${error.message}`, { id: 'cleanup-broken' });
+    } finally {
+      setIsCleaningBroken(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto py-8 px-4">
@@ -763,6 +804,29 @@ export default function DocumentPool() {
                     <p className="text-xs">
                       Recupera documenti validati senza full_text. Verifica storage, estrae testo, 
                       crea chunk. File mancanti → validation_failed. Processo in batch da 10.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </DropdownMenuItem>
+            </TooltipProvider>
+
+            {/* Elimina PDF Problematici */}
+            <TooltipProvider>
+              <DropdownMenuItem
+                onClick={handleCleanupBrokenPdfs}
+                disabled={isCleaningBroken}
+                className="flex items-center justify-between cursor-pointer text-destructive"
+              >
+                <span>Elimina PDF Problematici</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent side="left" className="max-w-xs">
+                    <p className="text-xs">
+                      Elimina definitivamente tutti i PDF che hanno errori di validazione, 
+                      mancano di full_text o non sono in stato "ready_for_assignment". 
+                      Include eliminazione di chunks, link e file fisici. Irreversibile.
                     </p>
                   </TooltipContent>
                 </Tooltip>
