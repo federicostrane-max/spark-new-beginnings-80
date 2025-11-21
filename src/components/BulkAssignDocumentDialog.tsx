@@ -224,18 +224,27 @@ export const BulkAssignDocumentDialog = ({
       
       // Step 2: Fetch existing assignments for validated docs (with batching)
       const assignments = [];
-      const batchSize = 1000;
+      const batchSize = 100; // Reduced from 1000 to avoid URL length limits
+      
+      console.log(`Fetching assignments for ${validatedDocIds.length} documents in batches of ${batchSize}`);
       
       for (let i = 0; i < validatedDocIds.length; i += batchSize) {
         const batch = validatedDocIds.slice(i, i + batchSize);
+        console.log(`Fetching batch ${Math.floor(i / batchSize) + 1}, docs: ${batch.length}`);
+        
         const { data, error } = await supabase
           .from("agent_document_links")
           .select("agent_id, document_id")
           .in("document_id", batch);
         
-        if (error) throw error;
+        if (error) {
+          console.error("Fetch assignments error:", error);
+          throw error;
+        }
         if (data) assignments.push(...data);
       }
+      
+      console.log(`Fetched ${assignments.length} existing assignments`);
 
       setProgressMessage("Calcolo modifiche...");
 
@@ -282,24 +291,23 @@ export const BulkAssignDocumentDialog = ({
         setProgressMessage(`Rimozione ${toDelete.length} assegnazioni...`);
         console.log(`Starting deletion of ${toDelete.length} assignments`);
         
-        // Use smaller batches to avoid query size limits
-        const deleteBatchSize = 100;
+        const deleteBatchSize = 50; // Small batch for delete operations
         for (let i = 0; i < toDelete.length; i += deleteBatchSize) {
           const batch = toDelete.slice(i, i + deleteBatchSize);
-          console.log(`Deleting batch ${i / deleteBatchSize + 1}, items: ${batch.length}`);
+          console.log(`Deleting batch ${Math.floor(i / deleteBatchSize) + 1}, items: ${batch.length}`);
           
-          // Delete one by one in this batch to avoid multiple .in() clauses
-          for (const item of batch) {
-            const { error } = await supabase
-              .from("agent_document_links")
-              .delete()
-              .eq("agent_id", item.agent_id)
-              .eq("document_id", item.document_id);
-            
-            if (error) {
-              console.error("Delete error details:", error);
-              throw error;
-            }
+          const agentIds = [...new Set(batch.map(x => x.agent_id))];
+          const docIds = [...new Set(batch.map(x => x.document_id))];
+          
+          const { error } = await supabase
+            .from("agent_document_links")
+            .delete()
+            .in("agent_id", agentIds)
+            .in("document_id", docIds);
+          
+          if (error) {
+            console.error("Delete error details:", error);
+            throw error;
           }
         }
         console.log("Deletions completed successfully");
