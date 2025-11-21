@@ -280,34 +280,52 @@ export const BulkAssignDocumentDialog = ({
       // Step 4: Execute deletions (batched)
       if (toDelete.length > 0) {
         setProgressMessage(`Rimozione ${toDelete.length} assegnazioni...`);
+        console.log(`Starting deletion of ${toDelete.length} assignments`);
         
-        for (let i = 0; i < toDelete.length; i += batchSize) {
-          const batch = toDelete.slice(i, i + batchSize);
-          const agentIds = [...new Set(batch.map(x => x.agent_id))];
-          const docIds = [...new Set(batch.map(x => x.document_id))];
+        // Use smaller batches to avoid query size limits
+        const deleteBatchSize = 100;
+        for (let i = 0; i < toDelete.length; i += deleteBatchSize) {
+          const batch = toDelete.slice(i, i + deleteBatchSize);
+          console.log(`Deleting batch ${i / deleteBatchSize + 1}, items: ${batch.length}`);
           
-          const { error } = await supabase
-            .from("agent_document_links")
-            .delete()
-            .in("agent_id", agentIds)
-            .in("document_id", docIds);
-          
-          if (error) throw error;
+          // Delete one by one in this batch to avoid multiple .in() clauses
+          for (const item of batch) {
+            const { error } = await supabase
+              .from("agent_document_links")
+              .delete()
+              .eq("agent_id", item.agent_id)
+              .eq("document_id", item.document_id);
+            
+            if (error) {
+              console.error("Delete error details:", error);
+              throw error;
+            }
+          }
         }
+        console.log("Deletions completed successfully");
       }
 
       // Step 5: Execute insertions (batched)
       if (toInsert.length > 0) {
         setProgressMessage(`Aggiunta ${toInsert.length} assegnazioni...`);
+        console.log(`Starting insertion of ${toInsert.length} assignments`);
         
-        for (let i = 0; i < toInsert.length; i += batchSize) {
-          const batch = toInsert.slice(i, i + batchSize);
+        // Use reasonable batch size for inserts
+        const insertBatchSize = 500;
+        for (let i = 0; i < toInsert.length; i += insertBatchSize) {
+          const batch = toInsert.slice(i, i + insertBatchSize);
+          console.log(`Inserting batch ${i / insertBatchSize + 1}, items: ${batch.length}`);
+          
           const { error } = await supabase
             .from("agent_document_links")
             .insert(batch);
           
-          if (error) throw error;
+          if (error) {
+            console.error("Insert error details:", error);
+            throw error;
+          }
         }
+        console.log("Insertions completed successfully");
         
         setProgressMessage("Preparazione sync in background...");
         
@@ -334,7 +352,15 @@ export const BulkAssignDocumentDialog = ({
       onOpenChange(false);
     } catch (error: any) {
       console.error("Assignment error:", error);
-      toast.error(`Errore: ${error.message}`, { duration: 5000 });
+      console.error("Error details:", {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      
+      const errorMsg = error.details || error.hint || error.message || "Errore sconosciuto";
+      toast.error(`Errore: ${errorMsg}`, { duration: 5000 });
     } finally {
       clearTimeout(timeoutId);
       setLoading(false);
