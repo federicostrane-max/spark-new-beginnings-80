@@ -200,7 +200,8 @@ export const BulkAssignDocumentDialog = ({
       let query = supabase
         .from("knowledge_documents")
         .select("id")
-        .eq("processing_status", "ready_for_assignment");
+        .eq("processing_status", "ready_for_assignment")
+        .limit(10000); // Explicit high limit to bypass default 1000 row limit
 
       if (folderName) {
         query = query.like("folder", `${folderName}%`);
