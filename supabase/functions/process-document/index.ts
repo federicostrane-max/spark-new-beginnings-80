@@ -505,9 +505,23 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
       throw new Error(`Failed to verify chunk creation: ${countError.message}`);
     }
     
+    // ✅ CRITICAL FIX: Se i chunk non esistono (es. cancellati dopo prima elaborazione),
+    // non possiamo marcare come ready_for_assignment
     if (!finalChunkCount || finalChunkCount === 0) {
-      console.error('[process-document] ❌ CRITICAL: No chunks were created for document');
-      throw new Error('Document processing failed: No chunks were successfully created in agent_knowledge table');
+      console.error('[process-document] ❌ CRITICAL: No chunks found for document');
+      console.error('[process-document] This document was marked as processed but chunks are missing!');
+      console.error('[process-document] Possible causes: chunks deleted, previous processing incomplete');
+      
+      // Resetta lo stato a pending_processing per ri-elaborare
+      await supabase
+        .from('knowledge_documents')
+        .update({ 
+          processing_status: 'pending_processing',
+          processed_at: null
+        })
+        .eq('id', documentId);
+      
+      throw new Error('Document processing failed: No chunks found in agent_knowledge table. Document reset to pending_processing for re-processing.');
     }
     
     console.log(`[process-document] ✅ Verification passed: ${finalChunkCount} chunks confirmed in database`);
