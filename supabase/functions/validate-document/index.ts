@@ -557,15 +557,17 @@ Se confidence < 70, considera il documento NON rilevante.`;
       });
     }
 
-    // ✅ VALIDATION PASSED - Update to VALIDATED status
-    console.log('[validate-document] ✅ Validation successful! Updating status to VALIDATED...');
+    // ✅ VALIDATION PASSED - Update to PENDING_PROCESSING status
+    console.log('[validate-document] ✅ Validation successful! Updating status to PENDING_PROCESSING...');
 
-    // STEP 4A: Update document status to VALIDATED (BEFORE triggering processing)
+    // STEP 4A: Update document status to PENDING_PROCESSING (NOT validated!)
+    // CRITICAL: This triggers enqueue_document_processing which queues the document
+    // for process-document to create chunks. Only process-document sets ready_for_assignment.
     const { error: updateError } = await supabase
       .from('knowledge_documents')
       .update({ 
         validation_status: 'validated',
-        processing_status: 'validated',
+        processing_status: 'pending_processing',
         validation_reason: `Documento valido: ${aiResult.motivazione}`,
         validation_date: new Date().toISOString(),
         text_length: textLength,
