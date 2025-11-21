@@ -171,19 +171,55 @@ serve(async (req) => {
       console.error(`❌ Errors encountered:`, results.errors);
     }
     
-    // Trigger batch processing for newly imported documents
+    // Trigger continuous batch processing for all imported documents
     if (results.saved > 0) {
-      console.log(`🚀 Triggering batch processing for ${results.saved} documents in folder: ${folder}`);
+      console.log(`🚀 Starting continuous batch processing for ${results.saved} documents in folder: ${folder}`);
+      
       try {
-        supabase.functions.invoke('process-github-batch', {
-          body: { batchSize: 50, folder }
-        }).then(() => {
-          console.log('✓ Batch processing triggered successfully');
-        }).catch((err) => {
-          console.warn('⚠️ Failed to trigger batch processing (non-fatal):', err);
-        });
+        const BATCH_SIZE = 100; // Process 100 at a time
+        let totalProcessed = 0;
+        let batchNumber = 0;
+        let hasMore = true;
+        
+        // Continue processing until no more documents are found
+        while (hasMore && totalProcessed < results.saved) {
+          batchNumber++;
+          console.log(`\n📦 Processing batch ${batchNumber} (processed ${totalProcessed}/${results.saved} so far)...`);
+          
+          const { data: batchResult, error: batchError } = await supabase.functions.invoke(
+            'process-github-batch',
+            { body: { batchSize: BATCH_SIZE, folder } }
+          );
+
+          if (batchError) {
+            console.error(`⚠️ Batch ${batchNumber} failed:`, batchError);
+            break;
+          }
+          
+          const processed = batchResult?.stats?.processed || 0;
+          const failed = batchResult?.stats?.failed || 0;
+          
+          console.log(`✓ Batch ${batchNumber}: ${processed} processed, ${failed} failed`);
+          
+          totalProcessed += processed;
+          
+          // If processed less than batch size, we're done
+          if (processed < BATCH_SIZE) {
+            hasMore = false;
+            console.log('✓ All available documents processed');
+          }
+          
+          // Safety: max 20 batches (2000 docs)
+          if (batchNumber >= 20) {
+            console.warn('⚠️ Reached max batch limit (20), stopping');
+            break;
+          }
+        }
+        
+        console.log(`\n✅ Batch processing complete: ${totalProcessed} documents processed in ${batchNumber} batches`);
+        
       } catch (triggerError) {
-        console.warn('⚠️ Failed to trigger batch processing (non-fatal):', triggerError);
+        console.error('❌ Batch processing error:', triggerError);
       }
     }
 
