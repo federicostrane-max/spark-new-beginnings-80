@@ -46,6 +46,7 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
   const [monitoring, setMonitoring] = useState(false);
   const [processingStats, setProcessingStats] = useState({ total: 0, ready: 0, processing: 0 });
   const [batchImporting, setBatchImporting] = useState(false);
+  const [hasActiveImport, setHasActiveImport] = useState(false);
 
   const handleRepoChange = (value: string) => {
     setSelectedRepo(value);
@@ -57,6 +58,8 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
 
   const monitorProcessing = async (searchQuery: string) => {
     setMonitoring(true);
+    setHasActiveImport(true);
+    
     const pollInterval = setInterval(async () => {
       const { data } = await supabase
         .from('knowledge_documents')
@@ -73,6 +76,7 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
         if (processing === 0 && total > 0) {
           clearInterval(pollInterval);
           setMonitoring(false);
+          setHasActiveImport(false);
           toast.success(`Elaborazione completata: ${ready} documenti pronti`, { duration: 5000 });
         }
       }
@@ -81,6 +85,7 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
     setTimeout(() => {
       clearInterval(pollInterval);
       setMonitoring(false);
+      setHasActiveImport(false);
     }, 300000);
   };
 
@@ -313,13 +318,13 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
           <div className="flex flex-col gap-2 pt-4">
             <Button
               onClick={handleImport}
-              disabled={!selectedRepo || importing}
+              disabled={!selectedRepo || importing || hasActiveImport}
               className="w-full"
             >
-              {importing ? (
+              {importing || hasActiveImport ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Importazione...
+                  {importing ? 'Importazione...' : 'Elaborazione in corso...'}
                 </>
               ) : (
                 <>
@@ -331,13 +336,13 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
 
             <Button
               onClick={handleBatchImport}
-              disabled={importing || batchImporting}
+              disabled={importing || batchImporting || hasActiveImport}
               className="w-full gap-2"
             >
-              {batchImporting ? (
+              {batchImporting || hasActiveImport ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Importazione in corso ({progress.current}/{progress.total})
+                  {batchImporting ? `Importazione in corso (${progress.current}/${progress.total})` : 'Elaborazione in corso...'}
                 </>
               ) : (
                 <>
