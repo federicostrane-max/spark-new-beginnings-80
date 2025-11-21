@@ -51,6 +51,8 @@ import {
   Settings,
   Check,
   ChevronsUpDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -148,6 +150,12 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     documents: KnowledgeDocument[];
   }>>([]);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(100); // 100 documenti per pagina
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   useEffect(() => {
     loadDocuments();
     loadAvailableAgents();
@@ -196,11 +204,17 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     console.log('[DocumentPoolTable] Documents loaded:', documents.length);
   }, [documents]);
 
+  // Reset alla pagina 1 quando cambiano i filtri
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, agentFilter]);
+
   const loadDocuments = async () => {
     try {
       setLoading(true);
       setError(null);
       
+      // Build query
       let query = supabase
         .from("knowledge_documents")
         .select(`
@@ -223,11 +237,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         query = query.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
       }
 
-      const { data, error } = await query.order("created_at", { ascending: false });
+      // Load all documents (up to 5000)
+      const { data, error } = await query
+        .order("created_at", { ascending: false })
+        .limit(5000);
 
       if (error) throw error;
 
-      // Transform data to include agent info
+      // Transform data
       const transformedData = (data || []).map((doc: any) => {
         const links = doc.agent_document_links || [];
         const agentNames = links
@@ -1027,7 +1044,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           <CardTitle className="flex items-center justify-between flex-wrap gap-3">
             <span className="flex items-center gap-3">
               <FileText className="h-5 w-5" />
-              <span className="font-semibold">Documenti ({filteredDocuments.length})</span>
+              <span className="font-semibold">
+                Documenti ({filteredDocuments.length})
+                {filteredDocuments.length < documents.length && (
+                  <span className="text-muted-foreground text-sm font-normal ml-2">
+                    di {documents.length} totali
+                  </span>
+                )}
+              </span>
               <DocumentPoolHealthIndicators sourceType={sourceType} />
             </span>
             <div className="flex items-center gap-2">
@@ -1106,7 +1130,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
               <XCircle className="mx-auto h-12 w-12 text-destructive mb-4" />
               <p className="text-lg font-medium mb-2">Errore nel caricamento</p>
               <p className="text-muted-foreground mb-4">{error}</p>
-              <Button onClick={loadDocuments} variant="outline">
+              <Button onClick={() => loadDocuments()} variant="outline">
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Riprova
               </Button>
@@ -1165,7 +1189,13 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredDocuments.map((doc) => (
+                {(() => {
+                  // Client-side pagination
+                  const from = (currentPage - 1) * pageSize;
+                  const to = currentPage * pageSize;
+                  const paginatedDocs = filteredDocuments.slice(from, to);
+                  
+                  return paginatedDocs.map((doc) => (
                   <TableRow 
                     key={doc.id}
                     className={selectedDocIds.has(doc.id) ? "bg-muted/50" : ""}
@@ -1381,14 +1411,21 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                ));
+                })()}
               </TableBody>
             </Table>
             </div>
 
               {/* Mobile Cards */}
               <div className="md:hidden space-y-4">
-                {filteredDocuments.map((doc) => (
+                {(() => {
+                  // Client-side pagination
+                  const from = (currentPage - 1) * pageSize;
+                  const to = currentPage * pageSize;
+                  const paginatedDocs = filteredDocuments.slice(from, to);
+                  
+                  return paginatedDocs.map((doc) => (
                   <Card key={doc.id} className={selectedDocIds.has(doc.id) ? "ring-2 ring-primary" : ""}>
                     <CardContent className="pt-6 space-y-3">
                       <div className="flex items-start justify-between gap-2">
@@ -1477,10 +1514,112 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                ));
+                })()}
               </div>
             </>
           )}
+
+          {/* Pagination Controls - Client Side */}
+          {viewMode === 'table' && (() => {
+            const totalFiltered = filteredDocuments.length;
+            const totalPagesCalc = Math.ceil(totalFiltered / pageSize);
+            
+            if (totalPagesCalc <= 1) return null;
+            
+            const from = (currentPage - 1) * pageSize;
+            const to = Math.min(currentPage * pageSize, totalFiltered);
+            
+            return (
+              <div className="flex items-center justify-between px-2 py-4 border-t mt-4">
+                <div className="text-sm text-muted-foreground">
+                  Mostra {from + 1}-{to} di {totalFiltered} documenti
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  {/* Previous Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Precedente
+                  </Button>
+                  
+                  {/* Page Numbers */}
+                  <div className="flex items-center gap-1">
+                    {/* First page */}
+                    {currentPage > 2 && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(1)}
+                        >
+                          1
+                        </Button>
+                        {currentPage > 3 && <span className="px-2">...</span>}
+                      </>
+                    )}
+                    
+                    {/* Current - 1 */}
+                    {currentPage > 1 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => p - 1)}
+                      >
+                        {currentPage - 1}
+                      </Button>
+                    )}
+                    
+                    {/* Current page */}
+                    <Button variant="default" size="sm" disabled>
+                      {currentPage}
+                    </Button>
+                    
+                    {/* Current + 1 */}
+                    {currentPage < totalPagesCalc && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(p => p + 1)}
+                      >
+                        {currentPage + 1}
+                      </Button>
+                    )}
+                    
+                    {/* Last page */}
+                    {currentPage < totalPagesCalc - 1 && (
+                      <>
+                        {currentPage < totalPagesCalc - 2 && <span className="px-2">...</span>}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(totalPagesCalc)}
+                        >
+                          {totalPagesCalc}
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Next Button */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(p => Math.min(totalPagesCalc, p + 1))}
+                    disabled={currentPage === totalPagesCalc}
+                  >
+                    Successivo
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 
