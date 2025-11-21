@@ -20,30 +20,38 @@ serve(async (req) => {
     
     console.log(`🔄 Processing queue with batch size: ${batchSize}`);
 
-    // Prendi N documenti pending dalla coda
+    // Prendi N documenti pending dalla coda (SOLO PDF, non GitHub)
     const { data: queueItems, error: queueError } = await supabase
       .from('document_processing_queue')
-      .select('*')
+      .select(`
+        *,
+        document:knowledge_documents(folder)
+      `)
       .eq('status', 'pending')
       .lt('attempts', 3) // Max 3 tentativi
       .order('created_at', { ascending: true })
       .limit(batchSize);
+    
+    // Filtra SOLO documenti non-GitHub (PDF)
+    const filteredItems = queueItems?.filter((item: any) => 
+      !item.document?.folder?.includes('GitHub')
+    ) || [];
 
     if (queueError) throw queueError;
     
-    if (!queueItems || queueItems.length === 0) {
-      console.log('✅ No pending items in queue');
+    if (!filteredItems || filteredItems.length === 0) {
+      console.log('✅ No pending PDF items in queue (GitHub docs excluded)');
       return new Response(
-        JSON.stringify({ processed: 0, message: 'Queue is empty' }),
+        JSON.stringify({ processed: 0, message: 'Queue is empty or only contains GitHub docs' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`📋 Found ${queueItems.length} items to process`);
+    console.log(`📋 Found ${filteredItems.length} PDF items to process (${queueItems?.length || 0} total, GitHub excluded)`);
 
     const results = { processed: 0, failed: 0, errors: [] as string[] };
 
-    for (const item of queueItems) {
+    for (const item of filteredItems) {
       try {
         // Marca come processing
         await supabase
@@ -139,7 +147,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         ...results,
-        message: `Processed ${results.processed}/${queueItems.length} documents`
+        message: `Processed ${results.processed}/${filteredItems.length} PDF documents (GitHub excluded)`
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
