@@ -295,13 +295,12 @@ export const DocumentPoolTable = () => {
         .select('folder, total_files, repo')
         .order('started_at', { ascending: false });
 
-      // Create a map of folder -> total files
+      // Create a map of folder -> total files (use full path as key)
       const folderTotalsMap = new Map();
       if (progressData) {
         progressData.forEach(progress => {
-          const folderName = progress.folder.split('/').pop(); // Get last part (e.g., "Hub" from "Huggingface_GitHub/Hub")
-          if (!folderTotalsMap.has(folderName)) {
-            folderTotalsMap.set(folderName, progress.total_files);
+          if (!folderTotalsMap.has(progress.folder)) {
+            folderTotalsMap.set(progress.folder, progress.total_files);
           }
         });
       }
@@ -414,9 +413,9 @@ export const DocumentPoolTable = () => {
               };
             });
 
-            // Get total files for this child folder
+            // Get total files for this child folder using full path
             const childShortName = child.name.replace(`${parentName}/`, '');
-            const totalFiles = folderTotalsMap.get(childShortName);
+            const totalFiles = folderTotalsMap.get(child.name);
 
             return {
               id: child.id,
