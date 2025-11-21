@@ -234,6 +234,28 @@ serve(async (req) => {
           })
           .eq('document_id', doc.id);
 
+        // Step 6: Generate AI metadata (summary, keywords, topics, complexity)
+        console.log(`🤖 Generating AI metadata for ${doc.file_name}...`);
+        try {
+          const { error: aiError } = await supabase.functions.invoke('process-document', {
+            body: {
+              documentId: doc.id,
+              fullText: doc.full_text,
+              forceRegenerate: true, // Force AI generation
+            }
+          });
+
+          if (aiError) {
+            console.warn(`⚠️ AI metadata generation failed for ${doc.file_name}:`, aiError);
+            // Don't throw - document is already chunked and functional
+          } else {
+            console.log(`✅ AI metadata generated for ${doc.file_name}`);
+          }
+        } catch (aiError) {
+          console.warn(`⚠️ AI metadata generation error:`, aiError);
+          // Continue processing - chunks are already created
+        }
+
         return {
           success: true,
           documentId: doc.id,
