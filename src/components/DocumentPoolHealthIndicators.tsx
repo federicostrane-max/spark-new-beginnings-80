@@ -11,6 +11,7 @@ import { AlertCircle, PackageX, Clock, AlertTriangle } from "lucide-react";
 
 interface HealthData {
   stuckProcessing: { count: number; files: string[] };
+  stuckDownloaded: { count: number; files: string[] };
   noChunks: { count: number; files: string[] };
   stuckQueue: { count: number; files: string[] };
   pendingValidation: { count: number; files: string[] };
@@ -20,6 +21,7 @@ interface HealthData {
 export const DocumentPoolHealthIndicators = () => {
   const [healthData, setHealthData] = useState<HealthData>({
     stuckProcessing: { count: 0, files: [] },
+    stuckDownloaded: { count: 0, files: [] },
     noChunks: { count: 0, files: [] },
     stuckQueue: { count: 0, files: [] },
     pendingValidation: { count: 0, files: [] },
@@ -37,6 +39,16 @@ export const DocumentPoolHealthIndicators = () => {
         .select('file_name', { count: 'exact' })
         .eq('processing_status', 'processing')
         .lt('created_at', tenMinutesAgo)
+        .order('created_at', { ascending: true })
+        .limit(10);
+
+      // 1b. Documenti in downloaded > 5 min (in attesa di essere processati)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: downloadedDocs, count: downloadedCount } = await supabase
+        .from('knowledge_documents')
+        .select('file_name', { count: 'exact' })
+        .eq('processing_status', 'downloaded')
+        .lt('created_at', fiveMinutesAgo)
         .order('created_at', { ascending: true })
         .limit(10);
 
@@ -91,6 +103,10 @@ export const DocumentPoolHealthIndicators = () => {
         stuckProcessing: {
           count: stuckCount || 0,
           files: stuckDocs?.map(d => d.file_name) || []
+        },
+        stuckDownloaded: {
+          count: downloadedCount || 0,
+          files: downloadedDocs?.map(d => d.file_name) || []
         },
         noChunks: {
           count: noChunksCount || 0,
@@ -151,6 +167,42 @@ export const DocumentPoolHealthIndicators = () => {
                     ))}
                     {healthData.stuckProcessing.count > 10 && (
                       <li className="italic text-muted-foreground">... e altri {healthData.stuckProcessing.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {/* Documenti downloaded non processati - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.stuckDownloaded.count === 0 ? "outline" : "destructive"}
+              className={`text-xs cursor-help ${healthData.stuckDownloaded.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
+            >
+              <Clock className="h-3 w-3 mr-1" />
+              Downloaded: {healthData.stuckDownloaded.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.stuckDownloaded.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti scaricati sono stati processati</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-orange-600 dark:text-orange-400">
+                  ⚠️ {healthData.stuckDownloaded.count} documenti in attesa di processing (&gt;5 min)
+                </p>
+                {healthData.stuckDownloaded.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.stuckDownloaded.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file}</li>
+                    ))}
+                    {healthData.stuckDownloaded.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.stuckDownloaded.count - 10}</li>
                     )}
                   </ul>
                 )}
