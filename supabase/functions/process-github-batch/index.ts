@@ -77,8 +77,8 @@ serve(async (req) => {
       errors: [],
     };
 
-    // Process each document
-    for (const doc of documents) {
+    // Process documents with parallel processing
+    const processDocument = async (doc: any) => {
       try {
         console.log(`\n🔄 Processing: ${doc.file_name} (${doc.id})`);
         
@@ -234,9 +234,12 @@ serve(async (req) => {
           })
           .eq('document_id', doc.id);
 
-        stats.processed++;
-        stats.chunksCreated += verifyCount;
-        console.log(`✅ Successfully processed ${doc.file_name}`);
+        return {
+          success: true,
+          documentId: doc.id,
+          fileName: doc.file_name,
+          chunksCreated: verifyCount || 0,
+        };
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -259,14 +262,46 @@ serve(async (req) => {
           })
           .eq('document_id', doc.id);
 
-        stats.failed++;
-        stats.errors.push({
+        return {
+          success: false,
           documentId: doc.id,
           fileName: doc.file_name,
           error: errorMessage,
-        });
+        };
+      }
+    };
+
+    // Process documents in parallel (5 at a time to avoid overwhelming API)
+    const PARALLEL_LIMIT = 5;
+    const results = [];
+    
+    for (let i = 0; i < documents.length; i += PARALLEL_LIMIT) {
+      const batch = documents.slice(i, i + PARALLEL_LIMIT);
+      console.log(`\n📦 Processing batch ${Math.floor(i / PARALLEL_LIMIT) + 1} (${batch.length} documents)`);
+      
+      const batchResults = await Promise.all(batch.map(processDocument));
+      results.push(...batchResults);
+      
+      // Small delay between batches to avoid rate limiting
+      if (i + PARALLEL_LIMIT < documents.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
+
+    // Calculate stats from results
+    results.forEach(result => {
+      if (result.success) {
+        stats.processed++;
+        stats.chunksCreated += result.chunksCreated || 0;
+      } else {
+        stats.failed++;
+        stats.errors.push({
+          documentId: result.documentId,
+          fileName: result.fileName,
+          error: result.error || 'Unknown error',
+        });
+      }
+    });
 
     console.log('\n========== PROCESS GITHUB BATCH COMPLETE ==========');
     console.log(`Total: ${stats.totalDocuments} | Processed: ${stats.processed} | Failed: ${stats.failed}`);
