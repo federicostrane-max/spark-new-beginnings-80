@@ -45,7 +45,7 @@ interface FolderTreeViewProps {
   onDocumentClick: (doc: KnowledgeDocument) => void;
   onFolderAssign?: (folderName: string) => void;
   onFolderDelete?: (folderId: string, folderName: string) => void;
-  onBulkDocumentSelect?: (docIds: string[], shouldSelect: boolean) => void;
+  onBulkDocumentSelect?: (docIds: string[], shouldSelect: boolean, folderName?: string) => void;
 }
 
 export function FolderTreeView({ 
@@ -72,13 +72,13 @@ export function FolderTreeView({
     return allDocs;
   };
 
-  const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], selectedCount: number) => {
+  const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], selectedCount: number, folderName: string) => {
     const shouldSelectAll = selectedCount < folderDocs.length;
     const docIds = folderDocs.map(doc => doc.id);
     
     // Se esiste la funzione bulk, usala (molto più efficiente)
     if (onBulkDocumentSelect) {
-      onBulkDocumentSelect(docIds, shouldSelectAll);
+      onBulkDocumentSelect(docIds, shouldSelectAll, folderName);
     } else {
       // Fallback al metodo uno-per-uno (più lento)
       folderDocs.forEach(doc => {
@@ -155,7 +155,7 @@ export function FolderTreeView({
                         el.indeterminate = true;
                       }
                     }}
-                    onCheckedChange={() => handleFolderCheckboxChange(allFolderDocs, selectedInFolder)}
+                    onCheckedChange={() => handleFolderCheckboxChange(allFolderDocs, selectedInFolder, folder.fullName || folder.name)}
                     onClick={(e) => e.stopPropagation()}
                     className="mr-1"
                   />
@@ -191,7 +191,7 @@ export function FolderTreeView({
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleFolderCheckboxChange(allFolderDocs, 0);
+                        handleFolderCheckboxChange(allFolderDocs, 0, folder.fullName || folder.name);
                       }}
                     >
                       <FolderCheck className="mr-2 h-4 w-4" />
@@ -254,7 +254,7 @@ export function FolderTreeView({
                                     el.indeterminate = true;
                                   }
                                 }}
-                                onCheckedChange={() => handleFolderCheckboxChange(childDocs, selectedInChild)}
+                                onCheckedChange={() => handleFolderCheckboxChange(childDocs, selectedInChild, childFolder.fullName || childFolder.name)}
                                 onClick={(e) => e.stopPropagation()}
                                 className="mr-1"
                               />
