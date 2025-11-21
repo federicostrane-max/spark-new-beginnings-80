@@ -52,36 +52,25 @@ export const DocumentPoolHealthIndicators = () => {
         .order('created_at', { ascending: true })
         .limit(10);
 
-      // 2. Documenti senza chunks - prima il count
-      const { data: noChunksCount, error: rpcError } = await supabase
-        .rpc('count_documents_without_chunks');
-
-      if (rpcError) {
-        console.error('[HealthIndicators] RPC Error:', rpcError);
-      }
-
-      // Query separata per ottenere i nomi dei file senza chunks
-      const { data: allDocs } = await supabase
+      // 2. Documenti senza chunks - query ottimizzata con LEFT JOIN
+      // Questa query fa un LEFT JOIN e conta solo documenti ready_for_assignment senza chunks
+      const { data: docsWithoutChunksData, error: chunksError } = await supabase
         .from('knowledge_documents')
-        .select('id, file_name')
+        .select(`
+          id,
+          file_name,
+          agent_knowledge!left(id)
+        `)
         .eq('processing_status', 'ready_for_assignment')
-        .limit(100);
+        .is('agent_knowledge.id', null)
+        .limit(10);
 
-      // Verifica quali non hanno chunks
-      const docsWithoutChunks: string[] = [];
-      if (allDocs && noChunksCount && noChunksCount > 0) {
-        for (const doc of allDocs.slice(0, 10)) {
-          const { count } = await supabase
-            .from('agent_knowledge')
-            .select('*', { count: 'exact', head: true })
-            .eq('pool_document_id', doc.id);
-          
-          if (!count || count === 0) {
-            docsWithoutChunks.push(doc.file_name);
-            if (docsWithoutChunks.length >= 10) break;
-          }
-        }
+      if (chunksError) {
+        console.error('[HealthIndicators] Chunks Error:', chunksError);
       }
+
+      const docsWithoutChunks = docsWithoutChunksData?.map(d => d.file_name) || [];
+      const noChunksCount = docsWithoutChunks.length;
 
       // 3. Job queue in processing > 10 min - con file names
       const { data: queueDocs, count: queueStuckCount } = await supabase
