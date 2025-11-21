@@ -45,15 +45,41 @@ serve(async (req) => {
 
     const treeData: any = await treeResponse.json();
     const pattern = filePattern.replace('*.', '.');
+    
+    // ⭐ Filtro intelligente con path opzionale
     const markdownFiles = treeData.tree
-      .filter((item: GitHubTreeItem) => 
-        item.type === 'blob' && 
-        item.path.startsWith(path) && 
-        item.path.endsWith(pattern)
-      )
+      .filter((item: GitHubTreeItem) => {
+        // Deve essere un file e finire con il pattern
+        if (item.type !== 'blob' || !item.path.endsWith(pattern)) return false;
+        
+        // Se path è vuoto/null/undefined → scarica TUTTO il repository (con esclusioni intelligenti)
+        if (!path || path === '') {
+          // Escludi automaticamente cartelle comuni da ignorare
+          const excludePaths = [
+            '.github/',      // GitHub Actions e config
+            'node_modules/', // Dependencies
+            'tests/',        // Test files
+            'test/',         // Test files (alt)
+            'examples/',     // Example code
+            '__pycache__/',  // Python cache
+            '.git/',         // Git internals
+            'dist/',         // Build output
+            'build/',        // Build output
+            '.vscode/',      // Editor config
+            '.idea/',        // JetBrains config
+            'coverage/',     // Test coverage
+          ];
+          
+          // Ritorna false se il path contiene una delle cartelle da escludere
+          return !excludePaths.some(exclude => item.path.includes(exclude));
+        }
+        
+        // Altrimenti filtra per il path specificato (comportamento attuale)
+        return item.path.startsWith(path);
+      })
       .slice(0, maxFiles);
 
-    console.log(`📄 Found ${markdownFiles.length} markdown files`);
+    console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
 
     const results = { total: markdownFiles.length, saved: 0, skipped: 0, failed: 0, errors: [] as string[] };
 
