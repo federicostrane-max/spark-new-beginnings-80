@@ -209,13 +209,18 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     setCurrentPage(1);
   }, [searchQuery, statusFilter, agentFilter]);
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (page: number = currentPage) => {
     try {
       setLoading(true);
       setError(null);
       
-      // Build query
-      let query = supabase
+      // Step 1: Build base count query
+      let countQuery = supabase
+        .from("knowledge_documents")
+        .select("id", { count: 'exact', head: true });
+
+      // Step 2: Build data query
+      let dataQuery = supabase
         .from("knowledge_documents")
         .select(`
           *,
@@ -230,21 +235,35 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           )
         `);
 
-      // Filter based on sourceType
+      // Step 3: Apply SAME filters to both queries
       if (sourceType === 'github') {
-        query = query.like('folder', 'Huggingface_GitHub%');
+        countQuery = countQuery.like('folder', 'Huggingface_GitHub%');
+        dataQuery = dataQuery.like('folder', 'Huggingface_GitHub%');
       } else if (sourceType === 'pdf') {
-        query = query.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        countQuery = countQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        dataQuery = dataQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
       }
 
-      // Load all documents (up to 5000)
-      const { data, error } = await query
+      // Step 4: Get TOTAL count from database
+      const { count, error: countError } = await countQuery;
+      if (countError) throw countError;
+      
+      const total = count || 0;
+      setTotalCount(total);
+      setTotalPages(Math.ceil(total / pageSize));
+
+      // Step 5: Calculate range for current page
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      // Step 6: Get ONLY current page data
+      const { data, error } = await dataQuery
         .order("created_at", { ascending: false })
-        .limit(5000);
+        .range(from, to);
 
       if (error) throw error;
 
-      // Transform data
+      // Step 7: Transform data
       const transformedData = (data || []).map((doc: any) => {
         const links = doc.agent_document_links || [];
         const agentNames = links
@@ -272,6 +291,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       });
 
       setDocuments(transformedData);
+      setCurrentPage(page);
     } catch (error: any) {
       console.error('[DocumentPoolTable] Load error:', error);
       setError(error.message || "Errore sconosciuto");
