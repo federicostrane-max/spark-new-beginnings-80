@@ -169,7 +169,7 @@ serve(async (req) => {
           full_text: content,
           text_length: content.length,
           extracted_title: title,
-          ai_summary: description || `GitHub docs from ${repo}`,
+          ai_summary: null, // Force AI generation in process-document
           folder: documentFolder,
           source_url: `https://github.com/${owner}/${repoName}/blob/main/${file.path}`,
           search_query: `GitHub:${repo}`,
