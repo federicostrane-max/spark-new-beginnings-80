@@ -249,27 +249,16 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const loadAvailableAgents = async () => {
     try {
-      // Query per ottenere solo gli agenti che hanno almeno un documento assegnato
+      // Query per ottenere TUTTI gli agenti attivi del sistema
       const { data, error } = await supabase
-        .from("agent_document_links")
-        .select(`
-          agents(id, name)
-        `);
+        .from("agents")
+        .select("id, name")
+        .eq("active", true)
+        .order("name");
 
       if (error) throw error;
 
-      // Estrarre agenti unici
-      const uniqueAgents = new Map<string, { id: string; name: string }>();
-      data?.forEach((link: any) => {
-        if (link.agents) {
-          uniqueAgents.set(link.agents.id, {
-            id: link.agents.id,
-            name: link.agents.name,
-          });
-        }
-      });
-
-      setAvailableAgents(Array.from(uniqueAgents.values()).sort((a, b) => a.name.localeCompare(b.name)));
+      setAvailableAgents(data || []);
     } catch (error: any) {
       console.error('[DocumentPoolTable] Error loading agents:', error);
     }
@@ -902,7 +891,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
     const matchesAgent =
       agentFilter === "all" ||
-      (agentFilter === "none" && doc.agents_count === 0) ||
       ((doc as any).agent_ids?.includes(agentFilter));
 
     return matchesSearch && matchesStatus && matchesAgent;
@@ -957,15 +945,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-background">
-                  <SelectItem value="all">Tutti</SelectItem>
-                  <SelectItem value="none">Nessuno</SelectItem>
-                  {availableAgents.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+                  <SelectContent className="bg-background">
+                    <SelectItem value="all">Tutti</SelectItem>
+                    {availableAgents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
               </Select>
             </div>
           </div>
