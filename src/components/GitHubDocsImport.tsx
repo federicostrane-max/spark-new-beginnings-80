@@ -29,12 +29,13 @@ interface GitHubDocsImportProps {
   isRecategorizing: boolean;
 }
 
+// ⭐ Path vuoto = import COMPLETO del repository (con filtri intelligenti)
 const HUGGINGFACE_REPOS = [
-  { value: "huggingface/hub-docs", label: "Hub Documentation", path: "docs/hub" },
-  { value: "huggingface/transformers", label: "Transformers", path: "docs/source/en" },
-  { value: "huggingface/datasets", label: "Datasets", path: "docs/source" },
-  { value: "huggingface/diffusers", label: "Diffusers", path: "docs/source/en" },
-  { value: "huggingface/peft", label: "PEFT", path: "docs/source" },
+  { value: "huggingface/hub-docs", label: "Hub Documentation", path: "" },
+  { value: "huggingface/transformers", label: "Transformers", path: "" },
+  { value: "huggingface/datasets", label: "Datasets", path: "" },
+  { value: "huggingface/diffusers", label: "Diffusers", path: "" },
+  { value: "huggingface/peft", label: "PEFT", path: "" },
 ];
 
 export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategorizing }: GitHubDocsImportProps) => {
@@ -288,29 +289,32 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
 
           {/* Path Filter */}
           <div className="space-y-2">
-            <Label htmlFor="path">Path Filter</Label>
+            <Label htmlFor="path">Path Filter (opzionale)</Label>
             <Input
               id="path"
               value={pathFilter}
               onChange={(e) => setPathFilter(e.target.value)}
-              placeholder="es: docs/hub/en"
+              placeholder="Vuoto = intero repository, oppure es: docs/source"
               disabled={importing}
             />
             <p className="text-xs text-muted-foreground">
-              Filtra per directory specifica (opzionale)
+              💡 <strong>Lascia vuoto per import completo automatico</strong> del repository.
+              Il sistema escluderà automaticamente cartelle non rilevanti (.github, tests, examples, ecc.)
             </p>
           </div>
 
-          {/* Info - Download Completo */}
+          {/* Info - Import Automatico Completo */}
           <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground border border-border">
             <p className="flex items-center gap-2">
               <Download className="w-4 h-4" />
-              <strong>Download completo senza limiti:</strong>
+              <strong>✨ Import automatico completo:</strong>
             </p>
-            <p className="mt-1 ml-6">
-              L'import è ottimizzato per scaricare repository complete senza timeout. 
-              I documenti vengono elaborati in background dopo l'import.
-            </p>
+            <ul className="mt-2 ml-6 space-y-1 text-xs">
+              <li>• <strong>Path vuoto</strong>: scarica TUTTI i markdown del repository</li>
+              <li>• <strong>Filtri intelligenti</strong>: esclude automaticamente .github, tests, examples, ecc.</li>
+              <li>• <strong>Nessuna configurazione manuale</strong>: funziona con qualsiasi struttura di repository</li>
+              <li>• <strong>Elaborazione background</strong>: i documenti vengono processati dopo l'import</li>
+            </ul>
           </div>
 
           {/* Progress */}
