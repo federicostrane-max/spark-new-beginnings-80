@@ -121,7 +121,7 @@ serve(async (req) => {
           folder,
           source_url: `https://github.com/${owner}/${repoName}/blob/main/${file.path}`,
           search_query: `GitHub:${repo}`,
-          processing_status: 'pending_processing', // Will be processed by process-github-batch
+          processing_status: 'downloaded', // Avoid triggering old processing system
           validation_status: 'validated', // GitHub docs are pre-validated
           chunking_strategy: 'sliding_window',
           metadata_extraction_method: 'text',

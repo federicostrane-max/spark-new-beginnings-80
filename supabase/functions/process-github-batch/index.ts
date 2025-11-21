@@ -37,11 +37,11 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch documents to process
+    // Fetch documents to process (downloaded = ready for chunking)
     let query = supabase
       .from('knowledge_documents')
       .select('id, file_name, full_text, folder')
-      .eq('processing_status', 'pending_processing')
+      .eq('processing_status', 'downloaded')
       .not('full_text', 'is', null)
       .limit(batchSize);
 
