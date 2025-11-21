@@ -96,6 +96,21 @@ serve(async (req) => {
 
         const content = await contentResponse.text();
 
+        // Upload file to storage
+        const storagePath = `github/${repo}/${file.path}`;
+        const { error: uploadError } = await supabase.storage
+          .from('shared-pool-uploads')
+          .upload(storagePath, content, {
+            contentType: 'text/markdown',
+            upsert: true
+          });
+
+        if (uploadError) {
+          throw new Error(`Storage upload failed: ${uploadError.message}`);
+        }
+
+        console.log(`✓ Uploaded: ${storagePath}`);
+
         // Extract frontmatter
         let title = file.path.split('/').pop()?.replace('.md', '') || 'Untitled';
         let description = '';
@@ -107,10 +122,10 @@ serve(async (req) => {
           if (descMatch) description = descMatch[1].trim();
         }
 
-        // Force redeploy 2025-01-25: Fix metadata_extraction_method to use 'text' instead of 'github_frontmatter'
+        // Use storage path instead of raw URL
         documentsToInsert.push({
           file_name: file.path,
-          file_path: rawUrl,
+          file_path: storagePath,
           full_text: content,
           text_length: content.length,
           extracted_title: title,
