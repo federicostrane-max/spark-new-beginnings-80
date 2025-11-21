@@ -133,6 +133,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   // Bulk actions state
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
   const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
+  const [bulkAssignFolderName, setBulkAssignFolderName] = useState<string | undefined>(undefined);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   
   // Folder management state
@@ -817,30 +818,15 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   // Handler for folder bulk assignment by folder name
   const handleFolderAssignByName = async (folderName: string) => {
     try {
-      console.log('📋 [DocumentPoolTable] handleFolderAssignByName called with:', folderName);
+      console.log('📋 [DocumentPoolTable] handleFolderAssignByName:', folderName);
       
-      // Query database for ALL document IDs in this folder (including subfolders)
-      const { data, error } = await supabase
-        .from("knowledge_documents")
-        .select("id")
-        .eq("processing_status", "ready_for_assignment")
-        .like("folder", `${folderName}%`);
-      
-      if (error) throw error;
-      
-      if (!data || data.length === 0) {
-        toast.error("Nessun documento pronto per l'assegnazione in questa cartella");
-        return;
-      }
-      
-      console.log('✅ [DocumentPoolTable] Found documents:', data.length);
-      
-      // Set the selected document IDs and open the bulk assign dialog
-      setSelectedDocIds(new Set(data.map(d => d.id)));
+      // Don't fetch IDs - just pass folder name to dialog
+      setBulkAssignFolderName(folderName);
+      setSelectedDocIds(new Set()); // Clear manual selections
       setBulkAssignDialogOpen(true);
     } catch (error) {
-      console.error("Error loading folder documents:", error);
-      toast.error("Errore nel caricamento dei documenti della cartella");
+      console.error("Error opening folder assignment:", error);
+      toast.error("Errore nell'apertura del dialogo");
     }
   };
 
@@ -1745,11 +1731,18 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       {/* Bulk Assign Dialog */}
       <BulkAssignDocumentDialog
-        documentIds={Array.from(selectedDocIds)}
+        documentIds={bulkAssignFolderName ? undefined : Array.from(selectedDocIds)}
+        folderName={bulkAssignFolderName}
         open={bulkAssignDialogOpen}
-        onOpenChange={setBulkAssignDialogOpen}
+        onOpenChange={(open) => {
+          setBulkAssignDialogOpen(open);
+          if (!open) {
+            setBulkAssignFolderName(undefined); // Reset on close
+          }
+        }}
         onAssigned={() => {
           setSelectedDocIds(new Set());
+          setBulkAssignFolderName(undefined);
           loadDocuments();
         }}
       />
