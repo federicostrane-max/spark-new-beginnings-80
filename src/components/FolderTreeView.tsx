@@ -32,6 +32,9 @@ interface FolderData {
   name: string;
   documentCount: number;
   documents: KnowledgeDocument[];
+  children?: FolderData[];
+  isChild?: boolean;
+  fullName?: string;
 }
 
 interface FolderTreeViewProps {
@@ -211,6 +214,101 @@ export function FolderTreeView({
               </div>
 
               <CollapsibleContent className="border-t">
+                {/* Render children folders if they exist */}
+                {folder.children && folder.children.length > 0 && (
+                  <div className="border-l-2 border-border ml-12 my-2">
+                    {folder.children.map((childFolder) => {
+                      const isChildExpanded = expandedFolders.has(childFolder.id);
+                      const childDocs = childFolder.documents;
+                      const selectedInChild = childDocs.filter(doc => selectedDocuments.has(doc.id)).length;
+                      
+                      return (
+                        <Collapsible
+                          key={childFolder.id}
+                          open={isChildExpanded}
+                          onOpenChange={() => toggleFolder(childFolder.id)}
+                          className="border rounded-lg mx-2 mb-2"
+                        >
+                          <div className="flex items-center justify-between p-2 bg-muted/30 hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center gap-2 flex-1">
+                              <Checkbox
+                                checked={selectedInChild === childDocs.length && childDocs.length > 0}
+                                ref={(el: any) => {
+                                  if (el && selectedInChild > 0 && selectedInChild < childDocs.length) {
+                                    el.indeterminate = true;
+                                  }
+                                }}
+                                onCheckedChange={() => handleFolderCheckboxChange(childDocs, selectedInChild)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="mr-1"
+                              />
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                                  {isChildExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                </Button>
+                              </CollapsibleTrigger>
+                              {isChildExpanded ? (
+                                <FolderOpen className="h-4 w-4 text-blue-400" />
+                              ) : (
+                                <Folder className="h-4 w-4 text-blue-400" />
+                              )}
+                              <span className="text-sm font-medium">{childFolder.name}</span>
+                              <Badge variant="secondary" className="ml-1 text-xs">
+                                {childFolder.documentCount}
+                              </Badge>
+                              {selectedInChild > 0 && (
+                                <Badge variant="outline" className="ml-1 text-xs">
+                                  {selectedInChild} sel.
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <CollapsibleContent className="border-t">
+                            {childDocs.length === 0 ? (
+                              <div className="p-4 text-center text-muted-foreground text-xs">
+                                <FileText className="h-6 w-6 mx-auto mb-1 opacity-50" />
+                                Nessun documento
+                              </div>
+                            ) : (
+                              <div className="divide-y">
+                                {childDocs.map((doc) => (
+                                  <div
+                                    key={doc.id}
+                                    className="flex items-center gap-2 p-2 hover:bg-muted/20 transition-colors cursor-pointer text-sm"
+                                    onClick={() => onDocumentClick(doc)}
+                                  >
+                                    <Checkbox
+                                      checked={selectedDocuments.has(doc.id)}
+                                      onCheckedChange={() => onDocumentSelect(doc.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <div className="flex items-center gap-1 min-w-0">
+                                      {getStatusIcon(doc.validation_status, doc.processing_status)}
+                                      <FileText className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-medium truncate">{doc.file_name}</p>
+                                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                                        <span>{formatDistanceToNow(new Date(doc.created_at), { addSuffix: true, locale: it })}</span>
+                                        {doc.page_count && (<><span>•</span><span>{doc.page_count}p</span></>)}
+                                      </div>
+                                    </div>
+                                    <Badge variant={getStatusBadgeVariant(doc.validation_status, doc.processing_status)} className="text-[10px] flex-shrink-0">
+                                      {doc.processing_status === "ready_for_assignment" ? "✓" : "⏳"}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </CollapsibleContent>
+                        </Collapsible>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {/* Render direct documents if no children or if folder has both children and direct docs */}
                 {folderDocs.length === 0 ? (
                   <div className="p-6 text-center text-muted-foreground text-sm">
                     <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />

@@ -48,6 +48,13 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
   const [processingStats, setProcessingStats] = useState({ total: 0, ready: 0, processing: 0 });
   const [batchImporting, setBatchImporting] = useState(false);
   const [hasActiveImport, setHasActiveImport] = useState(false);
+  const [importProgress, setImportProgress] = useState<Map<string, {
+    total: number;
+    downloaded: number;
+    processed: number;
+    failed: number;
+    status: string;
+  }>>(new Map());
 
   const handleRepoChange = (value: string) => {
     setSelectedRepo(value);
@@ -156,7 +163,8 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
   };
 
   const handleBatchImport = async () => {
-    setImporting(true);
+    setBatchImporting(true);
+    setImportProgress(new Map());
     
     try {
       toast.loading('Importazione batch Hugging Face docs...', { id: 'batch-import' });
@@ -164,6 +172,30 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
       let totalSaved = 0;
       let totalSkipped = 0;
       let totalFailed = 0;
+
+      // Start polling for progress
+      const reposToTrack = HUGGINGFACE_REPOS.map(r => r.value);
+      const pollInterval = setInterval(async () => {
+        const { data } = await supabase
+          .from('github_import_progress')
+          .select('*')
+          .in('repo', reposToTrack)
+          .order('started_at', { ascending: false });
+        
+        if (data) {
+          const progressMap = new Map();
+          data.forEach(item => {
+            progressMap.set(item.repo, {
+              total: item.total_files,
+              downloaded: item.downloaded,
+              processed: item.processed,
+              failed: item.failed,
+              status: item.status
+            });
+          });
+          setImportProgress(progressMap);
+        }
+      }, 2000);
 
       // FASE 1: Import TUTTI i repos SENZA processing
       for (const repo of HUGGINGFACE_REPOS) {
@@ -234,9 +266,9 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
         { id: 'batch-import', duration: 5000 }
       );
 
-      HUGGINGFACE_REPOS.forEach(repo => {
-        monitorProcessing(`GitHub: ${repo.value}`);
-      });
+      // Wait a bit for final progress updates
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      clearInterval(pollInterval);
 
       setOpen(false);
       onImportComplete();
@@ -245,7 +277,8 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
       console.error('❌ Batch import error:', error);
       toast.error(`Errore batch import: ${error.message}`, { id: 'batch-import' });
     } finally {
-      setImporting(false);
+      setBatchImporting(false);
+      setImportProgress(new Map());
     }
   };
 
@@ -325,6 +358,45 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
             </div>
           )}
 
+          {/* Import Progress Monitor */}
+          {importProgress.size > 0 && (
+            <div className="space-y-3 p-4 bg-muted/50 rounded-lg border">
+              <h4 className="text-sm font-semibold">📊 Stato Import per Repository:</h4>
+              {HUGGINGFACE_REPOS.map(repo => {
+                const progress = importProgress.get(repo.value);
+                if (!progress) return null;
+                
+                return (
+                  <div key={repo.value} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium">{repo.label}</span>
+                      <span className="text-muted-foreground font-mono">
+                        {progress.status === 'discovering' && '🔍 Scansione repo...'}
+                        {progress.status === 'downloading' && 
+                          `📥 ${progress.downloaded}/${progress.total} scaricati`}
+                        {progress.status === 'processing' && 
+                          `⚙️ ${progress.processed}/${progress.total} elaborati`}
+                        {progress.status === 'completed' && 
+                          `✓ ${progress.total}/${progress.total} completati`}
+                        {progress.failed > 0 && ` (${progress.failed} ❌)`}
+                      </span>
+                    </div>
+                    <Progress 
+                      value={
+                        progress.status === 'completed' 
+                          ? 100 
+                          : progress.status === 'processing'
+                          ? 50 + ((progress.processed / progress.total) * 50)
+                          : ((progress.downloaded / progress.total) * 50)
+                      }
+                      className="h-1.5"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          
           {/* Processing Monitor */}
           {monitoring && processingStats.total > 0 && (
             <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
