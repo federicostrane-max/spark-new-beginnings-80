@@ -129,17 +129,22 @@ serve(async (req) => {
         });
 
         if (documentsToInsert.length >= BATCH_SIZE) {
-          const { error } = await supabase.from('knowledge_documents').insert(documentsToInsert);
+          console.log(`📤 Inserting batch of ${documentsToInsert.length} documents...`);
+          const { error, data } = await supabase.from('knowledge_documents').insert(documentsToInsert);
           if (error) {
+            console.error(`❌ Batch insert error:`, error);
+            console.error(`Error details:`, JSON.stringify(error, null, 2));
             results.failed += documentsToInsert.length;
-            results.errors.push(`Batch error: ${error.message}`);
+            results.errors.push(`Batch error: ${error.message} (${error.code || 'no code'})`);
           } else {
+            console.log(`✅ Batch inserted successfully: ${documentsToInsert.length} documents`);
             results.saved += documentsToInsert.length;
           }
           documentsToInsert.length = 0;
         }
 
       } catch (error: any) {
+        console.error(`❌ Failed to process file ${file.path}:`, error.message);
         results.failed++;
         results.errors.push(`${file.path}: ${error.message}`);
       }
@@ -147,16 +152,24 @@ serve(async (req) => {
 
     // Insert remaining
     if (documentsToInsert.length > 0) {
-      const { error } = await supabase.from('knowledge_documents').insert(documentsToInsert);
+      console.log(`📤 Inserting final batch of ${documentsToInsert.length} documents...`);
+      const { error, data } = await supabase.from('knowledge_documents').insert(documentsToInsert);
       if (error) {
+        console.error(`❌ Final batch insert error:`, error);
+        console.error(`Error details:`, JSON.stringify(error, null, 2));
+        console.error(`Failed documents:`, documentsToInsert.map(d => d.file_name));
         results.failed += documentsToInsert.length;
-        results.errors.push(`Final batch: ${error.message}`);
+        results.errors.push(`Final batch: ${error.message} (${error.code || 'no code'})`);
       } else {
+        console.log(`✅ Final batch inserted successfully: ${documentsToInsert.length} documents`);
         results.saved += documentsToInsert.length;
       }
     }
 
     console.log(`✅ Import complete: ${results.saved} saved, ${results.skipped} skipped, ${results.failed} failed`);
+    if (results.errors.length > 0) {
+      console.error(`❌ Errors encountered:`, results.errors);
+    }
     console.log('[ASYNC] Triggers will auto-process all documents');
 
     return new Response(
