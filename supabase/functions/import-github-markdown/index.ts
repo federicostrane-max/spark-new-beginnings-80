@@ -121,10 +121,10 @@ serve(async (req) => {
           folder,
           source_url: `https://github.com/${owner}/${repoName}/blob/main/${file.path}`,
           search_query: `GitHub:${repo}`,
-          processing_status: 'pending_processing', // ✅ Trigger auto-processes
-          validation_status: 'pending', // ✅ Correct state
+          processing_status: 'pending_processing', // Will be processed by process-github-batch
+          validation_status: 'validated', // GitHub docs are pre-validated
           chunking_strategy: 'sliding_window',
-          metadata_extraction_method: 'text', // ✅ FIXED: Use 'text' (valid constraint value)
+          metadata_extraction_method: 'text',
           metadata_confidence: 'high'
         });
 
@@ -170,13 +170,28 @@ serve(async (req) => {
     if (results.errors.length > 0) {
       console.error(`❌ Errors encountered:`, results.errors);
     }
-    console.log('[ASYNC] Triggers will auto-process all documents');
+    
+    // Trigger batch processing for newly imported documents
+    if (results.saved > 0) {
+      console.log(`🚀 Triggering batch processing for ${results.saved} documents in folder: ${folder}`);
+      try {
+        supabase.functions.invoke('process-github-batch', {
+          body: { batchSize: 50, folder }
+        }).then(() => {
+          console.log('✓ Batch processing triggered successfully');
+        }).catch((err) => {
+          console.warn('⚠️ Failed to trigger batch processing (non-fatal):', err);
+        });
+      } catch (triggerError) {
+        console.warn('⚠️ Failed to trigger batch processing (non-fatal):', triggerError);
+      }
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
         results,
-        message: 'Documents imported. Auto-processing started via triggers.'
+        message: `Documents imported. Batch processing triggered for ${results.saved} documents.`
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
