@@ -31,6 +31,7 @@ interface FolderData {
   id: string;
   name: string;
   documentCount: number;
+  totalFiles?: number;
   documents: KnowledgeDocument[];
   children?: FolderData[];
   isChild?: boolean;
@@ -156,7 +157,9 @@ export function FolderTreeView({
                   )}
                   <span className="font-medium">{folder.name}</span>
                   <Badge variant="secondary" className="ml-2">
-                    {folder.documentCount} {folder.documentCount === 1 ? 'documento' : 'documenti'}
+                    {folder.totalFiles 
+                      ? `${folder.documentCount}/${folder.totalFiles}` 
+                      : `${folder.documentCount}`} {!folder.totalFiles && (folder.documentCount === 1 ? 'documento' : 'documenti')}
                   </Badge>
                   {selectedInFolder > 0 && (
                     <Badge variant="outline" className="ml-1">
@@ -254,7 +257,9 @@ export function FolderTreeView({
                               )}
                               <span className="text-sm font-medium">{childFolder.name}</span>
                               <Badge variant="secondary" className="ml-1 text-xs">
-                                {childFolder.documentCount}
+                                {childFolder.totalFiles 
+                                  ? `${childFolder.documentCount}/${childFolder.totalFiles}` 
+                                  : childFolder.documentCount}
                               </Badge>
                               {selectedInChild > 0 && (
                                 <Badge variant="outline" className="ml-1 text-xs">

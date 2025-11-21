@@ -289,6 +289,23 @@ export const DocumentPoolTable = () => {
 
       if (foldersError) throw foldersError;
 
+      // Load github import progress data
+      const { data: progressData } = await supabase
+        .from('github_import_progress')
+        .select('folder, total_files, repo')
+        .order('started_at', { ascending: false });
+
+      // Create a map of folder -> total files
+      const folderTotalsMap = new Map();
+      if (progressData) {
+        progressData.forEach(progress => {
+          const folderName = progress.folder.split('/').pop(); // Get last part (e.g., "Hub" from "Huggingface_GitHub/Hub")
+          if (!folderTotalsMap.has(folderName)) {
+            folderTotalsMap.set(folderName, progress.total_files);
+          }
+        });
+      }
+
       // Separate parent folders from child folders
       const parentFolders = new Map();
       const childFoldersByParent = new Map();
@@ -312,6 +329,47 @@ export const DocumentPoolTable = () => {
       // Process parent folders with their children
       for (const [parentName, parentFolder] of parentFolders) {
         const children = childFoldersByParent.get(parentName) || [];
+        
+        // Load documents for parent folder directly (not in subfolders)
+        const { data: parentDocs, error: parentDocsError } = await supabase
+          .from('knowledge_documents')
+          .select(`
+            *,
+            agent_document_links(
+              agent_id,
+              agents(id, name)
+            )
+          `)
+          .eq('folder', parentName)
+          .order('created_at', { ascending: false });
+
+        if (parentDocsError) throw parentDocsError;
+
+        const transformedParentDocs = (parentDocs || []).map((doc: any) => {
+          const links = doc.agent_document_links || [];
+          const agentNames = links
+            .map((link: any) => link.agents?.name)
+            .filter(Boolean);
+
+          return {
+            id: doc.id,
+            file_name: doc.file_name,
+            validation_status: doc.validation_status,
+            validation_reason: doc.validation_reason || "",
+            processing_status: doc.processing_status,
+            ai_summary: doc.ai_summary,
+            text_length: doc.text_length,
+            page_count: doc.page_count,
+            created_at: doc.created_at,
+            agent_names: agentNames,
+            agents_count: agentNames.length,
+            folder: doc.folder,
+            keywords: doc.keywords || [],
+            topics: doc.topics || [],
+            complexity_level: doc.complexity_level || "",
+            agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+          };
+        });
         
         // Load documents for children
         const childrenWithDocs = await Promise.all(
@@ -356,25 +414,37 @@ export const DocumentPoolTable = () => {
               };
             });
 
+            // Get total files for this child folder
+            const childShortName = child.name.replace(`${parentName}/`, '');
+            const totalFiles = folderTotalsMap.get(childShortName);
+
             return {
               id: child.id,
-              name: child.name.replace(`${parentName}/`, ''), // Remove parent prefix for display
+              name: childShortName, // Remove parent prefix for display
               fullName: child.name, // Keep full name for reference
               documentCount: transformedDocs.length,
+              totalFiles: totalFiles,
               documents: transformedDocs,
               isChild: true
             };
           })
         );
         
-        // Aggregate all documents from children
+        // Aggregate all documents from children AND parent
         const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
+        const allDocs = [...transformedParentDocs, ...allChildDocs];
+        
+        // Calculate total files for parent (sum of all children)
+        const parentTotalFiles = childrenWithDocs.reduce((sum, child) => {
+          return sum + (child.totalFiles || 0);
+        }, 0);
         
         hierarchicalFolders.push({
           id: parentFolder.id,
           name: parentName,
-          documentCount: allChildDocs.length,
-          documents: allChildDocs,
+          documentCount: allDocs.length,
+          totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
+          documents: allDocs,
           children: childrenWithDocs
         });
       }
