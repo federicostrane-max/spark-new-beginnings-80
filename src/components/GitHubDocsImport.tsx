@@ -30,7 +30,7 @@ interface GitHubDocsImportProps {
 }
 
 const HUGGINGFACE_REPOS = [
-  { value: "huggingface/hub-docs", label: "Hub Documentation", path: "docs/hub/en" },
+  { value: "huggingface/hub-docs", label: "Hub Documentation", path: "docs/hub" },
   { value: "huggingface/transformers", label: "Transformers", path: "docs/source/en" },
   { value: "huggingface/datasets", label: "Datasets", path: "docs/source" },
   { value: "huggingface/diffusers", label: "Diffusers", path: "docs/source/en" },
