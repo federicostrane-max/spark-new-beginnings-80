@@ -164,6 +164,7 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
       let totalSkipped = 0;
       let totalFailed = 0;
 
+      // FASE 1: Import TUTTI i repos SENZA processing
       for (const repo of HUGGINGFACE_REPOS) {
         try {
           console.log(`📥 Importing ${repo.label}...`);
@@ -175,11 +176,15 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
               repo: repo.value,
               path: repo.path,
               maxFiles: 999999,
-              filePattern: "*.md"
+              filePattern: "*.md",
+              skipProcessing: true  // ⭐ NON avviare batch processing automatico
             }
           });
 
-          if (error) throw error;
+          if (error) {
+            console.error(`❌ Error importing ${repo.label}:`, error);
+            throw error;
+          }
 
           const results = data.results || data;
           totalSaved += results.saved;
@@ -193,12 +198,33 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
 
           console.log(`✅ ${repo.label}: ${results.saved} saved, ${results.skipped} skipped`);
           
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Pausa più lunga tra repos per evitare rate limit GitHub
+          await new Promise(resolve => setTimeout(resolve, 2000));
           
         } catch (error: any) {
           console.error(`❌ Failed to import ${repo.label}:`, error);
           totalFailed++;
           toast.error(`Errore ${repo.label}: ${error.message}`, { id: `batch-${repo.value}` });
+          // ⭐ Continua con il prossimo repo anche in caso di errore
+        }
+      }
+
+      // FASE 2: Processa TUTTI i documenti in una volta
+      if (totalSaved > 0) {
+        console.log(`\n🚀 Starting batch processing for all ${totalSaved} imported documents...`);
+        toast.loading('Processing documenti importati...', { id: 'batch-processing' });
+        
+        try {
+          const { error: processError } = await supabase.functions.invoke('process-github-batch', {
+            body: { batchSize: 100 }  // Processa tutti i documenti in batches di 100
+          });
+          
+          if (processError) throw processError;
+          
+          toast.success('Processing avviato con successo', { id: 'batch-processing' });
+        } catch (processError: any) {
+          console.error('❌ Processing error:', processError);
+          toast.error(`Errore processing: ${processError.message}`, { id: 'batch-processing' });
         }
       }
 

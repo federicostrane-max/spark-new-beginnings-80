@@ -18,7 +18,7 @@ serve(async (req) => {
   }
 
   try {
-    const { repo, path, maxFiles = 999999, filePattern = "*.md" } = await req.json();
+    const { repo, path, maxFiles = 999999, filePattern = "*.md", skipProcessing = false } = await req.json();
     console.log(`📥 Importing from ${repo}/${path}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -171,8 +171,8 @@ serve(async (req) => {
       console.error(`❌ Errors encountered:`, results.errors);
     }
     
-    // Trigger continuous batch processing for all imported documents
-    if (results.saved > 0) {
+    // Trigger continuous batch processing ONLY if skipProcessing is false
+    if (results.saved > 0 && !skipProcessing) {
       console.log(`🚀 Starting continuous batch processing for ${results.saved} documents in folder: ${folder}`);
       
       try {
@@ -221,6 +221,8 @@ serve(async (req) => {
       } catch (triggerError) {
         console.error('❌ Batch processing error:', triggerError);
       }
+    } else if (skipProcessing) {
+      console.log('⏭️ Skipping automatic batch processing (skipProcessing=true)');
     }
 
     return new Response(
