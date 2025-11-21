@@ -52,25 +52,40 @@ export const DocumentPoolHealthIndicators = () => {
         .order('created_at', { ascending: true })
         .limit(10);
 
-      // 2. Documenti senza chunks - query ottimizzata con LEFT JOIN
-      // Questa query fa un LEFT JOIN e conta solo documenti ready_for_assignment senza chunks
-      const { data: docsWithoutChunksData, error: chunksError } = await supabase
-        .from('knowledge_documents')
-        .select(`
-          id,
-          file_name,
-          agent_knowledge!left(id)
-        `)
-        .eq('processing_status', 'ready_for_assignment')
-        .is('agent_knowledge.id', null)
-        .limit(10);
+      // 2. Documenti senza chunks - usa la funzione RPC per il count
+      const { data: noChunksTotal, error: rpcError } = await supabase
+        .rpc('count_documents_without_chunks');
 
-      if (chunksError) {
-        console.error('[HealthIndicators] Chunks Error:', chunksError);
+      if (rpcError) {
+        console.error('[HealthIndicators] RPC Error:', rpcError);
       }
 
-      const docsWithoutChunks = docsWithoutChunksData?.map(d => d.file_name) || [];
-      const noChunksCount = docsWithoutChunks.length;
+      // Solo se ci sono documenti senza chunks, recupera i primi 10 nomi
+      let docsWithoutChunks: string[] = [];
+      if (noChunksTotal && noChunksTotal > 0) {
+        // Recupera tutti i documenti ready e filtra quelli senza chunks
+        const { data: allDocs } = await supabase
+          .from('knowledge_documents')
+          .select('id, file_name')
+          .eq('processing_status', 'ready_for_assignment')
+          .limit(100);
+
+        if (allDocs) {
+          // Verifica quali non hanno chunks
+          for (const doc of allDocs) {
+            const { count } = await supabase
+              .from('agent_knowledge')
+              .select('*', { count: 'exact', head: true })
+              .eq('pool_document_id', doc.id);
+            
+            if (!count || count === 0) {
+              docsWithoutChunks.push(doc.file_name);
+              if (docsWithoutChunks.length >= 10) break;
+            }
+          }
+        }
+      }
+      const noChunksCount = noChunksTotal || 0;
 
       // 3. Job queue in processing > 10 min - con file names
       const { data: queueDocs, count: queueStuckCount } = await supabase
