@@ -81,16 +81,6 @@ serve(async (req) => {
 
     console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
 
-    const results = { total: markdownFiles.length, saved: 0, skipped: 0, failed: 0, errors: [] as string[] };
-
-    // Check existing
-    const { data: existingDocs } = await supabase
-      .from('knowledge_documents')
-      .select('file_name')
-      .in('file_name', markdownFiles.map((f: any) => f.path));
-    
-    const existingSet = new Set(existingDocs?.map(d => d.file_name) || []);
-
     // Determine folder
     const folderMap: Record<string, string> = {
       'huggingface/transformers': 'Huggingface_GitHub/Transformers',
@@ -100,6 +90,33 @@ serve(async (req) => {
       'huggingface/hub-docs': 'Huggingface_GitHub/Hub'
     };
     const folder = folderMap[repo] || `GitHub/${repo}`;
+
+    // ⭐ Insert initial progress record
+    const { data: progressRecord } = await supabase
+      .from('github_import_progress')
+      .insert({
+        repo,
+        folder,
+        total_files: markdownFiles.length,
+        downloaded: 0,
+        processed: 0,
+        failed: 0,
+        status: 'discovering'
+      })
+      .select()
+      .single();
+
+    const progressId = progressRecord?.id;
+
+    const results = { total: markdownFiles.length, saved: 0, skipped: 0, failed: 0, errors: [] as string[] };
+
+    // Check existing
+    const { data: existingDocs } = await supabase
+      .from('knowledge_documents')
+      .select('file_name')
+      .in('file_name', markdownFiles.map((f: any) => f.path));
+    
+    const existingSet = new Set(existingDocs?.map(d => d.file_name) || []);
 
     const BATCH_SIZE = 50;
     const documentsToInsert = [];
@@ -167,6 +184,18 @@ serve(async (req) => {
             results.saved += documentsToInsert.length;
           }
           documentsToInsert.length = 0;
+          
+          // ⭐ Update progress every batch
+          if (progressId) {
+            await supabase
+              .from('github_import_progress')
+              .update({ 
+                downloaded: results.saved + results.skipped,
+                failed: results.failed,
+                status: 'downloading'
+              })
+              .eq('id', progressId);
+          }
         }
 
       } catch (error: any) {
@@ -189,6 +218,18 @@ serve(async (req) => {
       } else {
         console.log(`✅ Final batch inserted successfully: ${documentsToInsert.length} documents`);
         results.saved += documentsToInsert.length;
+      }
+      
+      // ⭐ Update progress after final batch
+      if (progressId) {
+        await supabase
+          .from('github_import_progress')
+          .update({ 
+            downloaded: results.saved + results.skipped,
+            failed: results.failed,
+            status: 'downloading'
+          })
+          .eq('id', progressId);
       }
     }
 
@@ -229,6 +270,17 @@ serve(async (req) => {
           
           totalProcessed += processed;
           
+          // ⭐ Update progress after each batch
+          if (progressId) {
+            await supabase
+              .from('github_import_progress')
+              .update({ 
+                processed: totalProcessed,
+                status: 'processing'
+              })
+              .eq('id', progressId);
+          }
+          
           // If processed less than batch size, we're done
           if (processed < BATCH_SIZE) {
             hasMore = false;
@@ -243,6 +295,18 @@ serve(async (req) => {
         }
         
         console.log(`\n✅ Batch processing complete: ${totalProcessed} documents processed in ${batchNumber} batches`);
+        
+        // ⭐ Mark as completed
+        if (progressId) {
+          await supabase
+            .from('github_import_progress')
+            .update({ 
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+              processed: totalProcessed
+            })
+            .eq('id', progressId);
+        }
         
       } catch (triggerError) {
         console.error('❌ Batch processing error:', triggerError);

@@ -289,58 +289,151 @@ export const DocumentPoolTable = () => {
 
       if (foldersError) throw foldersError;
 
-      // Load documents for each folder
-      const foldersWithDocs = await Promise.all(
-        (foldersDbData || []).map(async (folder) => {
-          const { data: docs, error: docsError } = await supabase
-            .from('knowledge_documents')
-            .select(`
-              *,
-              agent_document_links(
-                agent_id,
-                agents(id, name)
-              )
-            `)
-            .eq('folder', folder.name)
-            .order('created_at', { ascending: false });
+      // Separate parent folders from child folders
+      const parentFolders = new Map();
+      const childFoldersByParent = new Map();
+      
+      (foldersDbData || []).forEach(folder => {
+        if (folder.parent_folder) {
+          // It's a child folder
+          if (!childFoldersByParent.has(folder.parent_folder)) {
+            childFoldersByParent.set(folder.parent_folder, []);
+          }
+          childFoldersByParent.get(folder.parent_folder).push(folder);
+        } else {
+          // It's a parent folder
+          parentFolders.set(folder.name, folder);
+        }
+      });
 
-          if (docsError) throw docsError;
+      // Build hierarchical structure
+      const hierarchicalFolders = [];
+      
+      // Process parent folders with their children
+      for (const [parentName, parentFolder] of parentFolders) {
+        const children = childFoldersByParent.get(parentName) || [];
+        
+        // Load documents for children
+        const childrenWithDocs = await Promise.all(
+          children.map(async (child) => {
+            const { data: docs, error: docsError } = await supabase
+              .from('knowledge_documents')
+              .select(`
+                *,
+                agent_document_links(
+                  agent_id,
+                  agents(id, name)
+                )
+              `)
+              .eq('folder', child.name)
+              .order('created_at', { ascending: false });
 
-          // Transform documents
-          const transformedDocs = (docs || []).map((doc: any) => {
-            const links = doc.agent_document_links || [];
-            const agentNames = links
-              .map((link: any) => link.agents?.name)
-              .filter(Boolean);
+            if (docsError) throw docsError;
+
+            const transformedDocs = (docs || []).map((doc: any) => {
+              const links = doc.agent_document_links || [];
+              const agentNames = links
+                .map((link: any) => link.agents?.name)
+                .filter(Boolean);
+
+              return {
+                id: doc.id,
+                file_name: doc.file_name,
+                validation_status: doc.validation_status,
+                validation_reason: doc.validation_reason || "",
+                processing_status: doc.processing_status,
+                ai_summary: doc.ai_summary,
+                text_length: doc.text_length,
+                page_count: doc.page_count,
+                created_at: doc.created_at,
+                agent_names: agentNames,
+                agents_count: agentNames.length,
+                folder: doc.folder,
+                keywords: doc.keywords || [],
+                topics: doc.topics || [],
+                complexity_level: doc.complexity_level || "",
+                agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+              };
+            });
 
             return {
-              id: doc.id,
-              file_name: doc.file_name,
-              validation_status: doc.validation_status,
-              validation_reason: doc.validation_reason || "",
-              processing_status: doc.processing_status,
-              ai_summary: doc.ai_summary,
-              text_length: doc.text_length,
-              page_count: doc.page_count,
-              created_at: doc.created_at,
-              agent_names: agentNames,
-              agents_count: agentNames.length,
-              folder: doc.folder,
-              keywords: doc.keywords || [],
-              topics: doc.topics || [],
-              complexity_level: doc.complexity_level || "",
-              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+              id: child.id,
+              name: child.name.replace(`${parentName}/`, ''), // Remove parent prefix for display
+              fullName: child.name, // Keep full name for reference
+              documentCount: transformedDocs.length,
+              documents: transformedDocs,
+              isChild: true
             };
-          });
+          })
+        );
+        
+        // Aggregate all documents from children
+        const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
+        
+        hierarchicalFolders.push({
+          id: parentFolder.id,
+          name: parentName,
+          documentCount: allChildDocs.length,
+          documents: allChildDocs,
+          children: childrenWithDocs
+        });
+      }
+      
+      // Add standalone folders (no parent, no children)
+      const standaloneFolders = await Promise.all(
+        (foldersDbData || [])
+          .filter(folder => !folder.parent_folder && !childFoldersByParent.has(folder.name))
+          .map(async (folder) => {
+            const { data: docs, error: docsError } = await supabase
+              .from('knowledge_documents')
+              .select(`
+                *,
+                agent_document_links(
+                  agent_id,
+                  agents(id, name)
+                )
+              `)
+              .eq('folder', folder.name)
+              .order('created_at', { ascending: false });
 
-          return {
-            id: folder.id,
-            name: folder.name,
-            documentCount: transformedDocs.length,
-            documents: transformedDocs,
-          };
-        })
+            if (docsError) throw docsError;
+
+            const transformedDocs = (docs || []).map((doc: any) => {
+              const links = doc.agent_document_links || [];
+              const agentNames = links
+                .map((link: any) => link.agents?.name)
+                .filter(Boolean);
+
+              return {
+                id: doc.id,
+                file_name: doc.file_name,
+                validation_status: doc.validation_status,
+                validation_reason: doc.validation_reason || "",
+                processing_status: doc.processing_status,
+                ai_summary: doc.ai_summary,
+                text_length: doc.text_length,
+                page_count: doc.page_count,
+                created_at: doc.created_at,
+                agent_names: agentNames,
+                agents_count: agentNames.length,
+                folder: doc.folder,
+                keywords: doc.keywords || [],
+                topics: doc.topics || [],
+                complexity_level: doc.complexity_level || "",
+                agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+              };
+            });
+
+            return {
+              id: folder.id,
+              name: folder.name,
+              documentCount: transformedDocs.length,
+              documents: transformedDocs,
+            };
+          })
       );
+      
+      hierarchicalFolders.push(...standaloneFolders);
 
       // Add "Senza Cartella" folder for documents without a folder
       const { data: noFolderDocs, error: noFolderError } = await supabase
@@ -384,7 +477,7 @@ export const DocumentPoolTable = () => {
           };
         });
 
-        foldersWithDocs.push({
+        hierarchicalFolders.push({
           id: 'no-folder',
           name: 'Senza Cartella',
           documentCount: transformedNoFolderDocs.length,
@@ -392,7 +485,7 @@ export const DocumentPoolTable = () => {
         });
       }
 
-      setFoldersData(foldersWithDocs);
+      setFoldersData(hierarchicalFolders);
     } catch (error: any) {
       console.error('[DocumentPoolTable] Error loading folders data:', error);
     }

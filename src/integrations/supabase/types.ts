@@ -991,6 +991,7 @@ export type Database = {
           icon: string | null
           id: string
           name: string
+          parent_folder: string | null
           updated_at: string | null
         }
         Insert: {
@@ -1000,6 +1001,7 @@ export type Database = {
           icon?: string | null
           id?: string
           name: string
+          parent_folder?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -1009,7 +1011,53 @@ export type Database = {
           icon?: string | null
           id?: string
           name?: string
+          parent_folder?: string | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      github_import_progress: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          downloaded: number | null
+          error_message: string | null
+          failed: number | null
+          folder: string
+          id: string
+          processed: number | null
+          repo: string
+          started_at: string | null
+          status: string | null
+          total_files: number | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          downloaded?: number | null
+          error_message?: string | null
+          failed?: number | null
+          folder: string
+          id?: string
+          processed?: number | null
+          repo: string
+          started_at?: string | null
+          status?: string | null
+          total_files?: number | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          downloaded?: number | null
+          error_message?: string | null
+          failed?: number | null
+          folder?: string
+          id?: string
+          processed?: number | null
+          repo?: string
+          started_at?: string | null
+          status?: string | null
+          total_files?: number | null
         }
         Relationships: []
       }
