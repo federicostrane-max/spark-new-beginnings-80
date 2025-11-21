@@ -1732,7 +1732,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       {/* Bulk Assign Dialog */}
       <BulkAssignDocumentDialog
-        documents={validatedSelectedDocs}
+        documentIds={Array.from(selectedDocIds)}
         open={bulkAssignDialogOpen}
         onOpenChange={setBulkAssignDialogOpen}
         onAssigned={() => {

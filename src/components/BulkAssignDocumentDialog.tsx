@@ -29,14 +29,14 @@ interface KnowledgeDocument {
 }
 
 interface BulkAssignDocumentDialogProps {
-  documents: KnowledgeDocument[];
+  documentIds: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned: () => void;
 }
 
 export const BulkAssignDocumentDialog = ({
-  documents,
+  documentIds,
   open,
   onOpenChange,
   onAssigned,
@@ -46,12 +46,40 @@ export const BulkAssignDocumentDialog = ({
   const [loading, setLoading] = useState(false);
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [agentSearchQuery, setAgentSearchQuery] = useState("");
+  const [documentCount, setDocumentCount] = useState(0);
+  const [validatedCount, setValidatedCount] = useState(0);
+
+  const countDocuments = async () => {
+    try {
+      // Count all selected documents
+      const { count: totalCount } = await supabase
+        .from("knowledge_documents")
+        .select("id", { count: 'exact', head: true })
+        .in("id", documentIds);
+      
+      setDocumentCount(totalCount || 0);
+
+      // Count validated documents (ready_for_assignment)
+      const { count: validCount } = await supabase
+        .from("knowledge_documents")
+        .select("id", { count: 'exact', head: true })
+        .in("id", documentIds)
+        .eq("processing_status", "ready_for_assignment");
+      
+      setValidatedCount(validCount || 0);
+    } catch (error) {
+      console.error("Error counting documents:", error);
+      setDocumentCount(0);
+      setValidatedCount(0);
+    }
+  };
 
   useEffect(() => {
     if (open) {
       loadAgents();
+      countDocuments();
     }
-  }, [open, documents]);
+  }, [open, documentIds]);
 
   const loadAgents = async () => {
     try {
@@ -66,11 +94,11 @@ export const BulkAssignDocumentDialog = ({
       setAgents(data || []);
 
       // Load existing assignments for the selected documents
-      if (documents.length > 0) {
+      if (documentIds.length > 0) {
         const { data: assignmentsData, error: assignmentsError } = await supabase
           .from("agent_document_links")
           .select("agent_id, document_id")
-          .in("document_id", documents.map(d => d.id));
+          .in("document_id", documentIds);
 
         if (assignmentsError) throw assignmentsError;
 
@@ -83,7 +111,7 @@ export const BulkAssignDocumentDialog = ({
         // Pre-select only agents that are assigned to ALL selected documents
         const commonlyAssignedIds = new Set(
           Array.from(agentCounts.entries())
-            .filter(([_, count]) => count === documents.length)
+            .filter(([_, count]) => count === documentIds.length)
             .map(([agentId, _]) => agentId)
         );
 
@@ -128,8 +156,32 @@ export const BulkAssignDocumentDialog = ({
   };
 
   const handleAssign = async () => {
+    if (selectedAgentIds.size === 0) {
+      toast.error("Seleziona almeno un agente");
+      return;
+    }
+
+    if (validatedCount === 0) {
+      toast.error("Nessun documento validato da assegnare");
+      return;
+    }
+
     try {
       setLoading(true);
+      
+      // Fetch ALL validated documents with the provided IDs
+      const { data: validatedDocs, error: fetchError } = await supabase
+        .from("knowledge_documents")
+        .select("id, file_name")
+        .in("id", documentIds)
+        .eq("processing_status", "ready_for_assignment");
+
+      if (fetchError) throw fetchError;
+
+      if (!validatedDocs || validatedDocs.length === 0) {
+        toast.error("Nessun documento validato da assegnare");
+        return;
+      }
       
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
@@ -225,14 +277,6 @@ export const BulkAssignDocumentDialog = ({
     }
   };
 
-  // Only show ready_for_assignment documents
-  const validatedDocs = documents.filter(d => 
-    d.processing_status === 'ready_for_assignment'
-  );
-  const invalidDocs = documents.filter(d => 
-    d.processing_status !== 'ready_for_assignment'
-  );
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
@@ -242,10 +286,10 @@ export const BulkAssignDocumentDialog = ({
             Assegnazione Multipla
           </DialogTitle>
           <DialogDescription>
-            Assegna {validatedDocs.length} {validatedDocs.length === 1 ? 'documento' : 'documenti'} a uno o più agenti
-            {invalidDocs.length > 0 && (
-              <span className="block mt-1 text-amber-600">
-                ({invalidDocs.length} {invalidDocs.length === 1 ? 'documento' : 'documenti'} non pronto sarà ignorato)
+            Documenti: {validatedCount}
+            {documentCount > validatedCount && (
+              <span className="text-amber-600 ml-2">
+                ({documentCount - validatedCount} non validati saranno ignorati)
               </span>
             )}
           </DialogDescription>
@@ -350,12 +394,12 @@ export const BulkAssignDocumentDialog = ({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Annulla
           </Button>
-          <Button
-            onClick={handleAssign}
-            disabled={loading || validatedDocs.length === 0 || selectedAgentIds.size === 0}
-          >
-            {loading ? "Salvando..." : "Salva Assegnazioni"}
-          </Button>
+        <Button
+          onClick={handleAssign}
+          disabled={loading || validatedCount === 0 || selectedAgentIds.size === 0}
+        >
+          {loading ? "Salvando..." : "Salva Assegnazioni"}
+        </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
