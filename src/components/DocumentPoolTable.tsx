@@ -447,9 +447,9 @@ export const DocumentPoolTable = () => {
         hierarchicalFolders.push({
           id: parentFolder.id,
           name: parentName,
-          documentCount: allDocs.length,
+          documentCount: filteredParentDocs.length + allChildDocs.length,
           totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
-          documents: allDocs,
+          documents: filteredParentDocs,
           children: childrenWithDocs
         });
       }
