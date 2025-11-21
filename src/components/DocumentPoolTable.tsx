@@ -89,14 +89,17 @@ interface KnowledgeDocument {
   folder?: string;
 }
 
-export const DocumentPoolTable = () => {
+interface DocumentPoolTableProps {
+  sourceType?: 'pdf' | 'github';
+}
+
+export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
-  const [folderFilter, setFolderFilter] = useState<string>("all");
   const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [availableFolders, setAvailableFolders] = useState<string[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
@@ -180,7 +183,8 @@ export const DocumentPoolTable = () => {
     try {
       setLoading(true);
       setError(null);
-      const { data, error } = await supabase
+      
+      let query = supabase
         .from("knowledge_documents")
         .select(`
           *,
@@ -193,8 +197,16 @@ export const DocumentPoolTable = () => {
             agent_id,
             agents(id, name)
           )
-        `)
-        .order("created_at", { ascending: false });
+        `);
+
+      // Filter based on sourceType
+      if (sourceType === 'github') {
+        query = query.like('folder', 'Huggingface_GitHub%');
+      } else if (sourceType === 'pdf') {
+        query = query.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+      }
+
+      const { data, error } = await query.order("created_at", { ascending: false });
 
       if (error) throw error;
 
@@ -853,18 +865,47 @@ export const DocumentPoolTable = () => {
       doc.ai_summary?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.agent_names?.some((name) => name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-    const matchesStatus =
-      statusFilter === "all" || doc.validation_status === statusFilter;
+    // Aggiorna matchesStatus per supportare i nuovi filtri
+    let matchesStatus = true;
+    if (statusFilter !== "all") {
+      switch (statusFilter) {
+        case "blocked":
+          // Documenti bloccati in processing > 10 min
+          const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+          matchesStatus = doc.processing_status === 'processing' && 
+                         new Date(doc.created_at) < tenMinutesAgo;
+          break;
+        case "no_chunks":
+          // Documenti senza chunks (handled in query, always false in filter)
+          matchesStatus = false; // This would require additional query
+          break;
+        case "in_queue":
+          // Documenti in coda (handled in query, always false in filter)
+          matchesStatus = false; // This would require additional query
+          break;
+        case "not_processed":
+          // Documenti non processati (processing_status != ready_for_assignment e validati)
+          matchesStatus = doc.processing_status !== 'ready_for_assignment' && 
+                         doc.validation_status === 'validated';
+          break;
+        case "ready":
+          matchesStatus = doc.processing_status === 'ready_for_assignment';
+          break;
+        case "failed":
+          matchesStatus = doc.processing_status === 'processing_failed';
+          break;
+        default:
+          matchesStatus = doc.validation_status === statusFilter || 
+                         doc.processing_status === statusFilter;
+      }
+    }
 
     const matchesAgent =
       agentFilter === "all" ||
       (agentFilter === "none" && doc.agents_count === 0) ||
       ((doc as any).agent_ids?.includes(agentFilter));
 
-    const matchesFolder =
-      folderFilter === "all" || doc.folder === folderFilter;
-
-    return matchesSearch && matchesStatus && matchesAgent && matchesFolder;
+    return matchesSearch && matchesStatus && matchesAgent;
   });
 
   return (
@@ -878,9 +919,9 @@ export const DocumentPoolTable = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Cerca</label>
+              <label className="text-sm font-medium">Cerca per nome</label>
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -900,17 +941,18 @@ export const DocumentPoolTable = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-background">
                   <SelectItem value="all">Tutti</SelectItem>
-                  <SelectItem value="validated">Validato e Pronto</SelectItem>
-                  <SelectItem value="validating">In Validazione</SelectItem>
-                  <SelectItem value="validation_failed">⚠️ Non Disponibile</SelectItem>
-                  <SelectItem value="ready_for_assignment">Pronto</SelectItem>
-                  <SelectItem value="processing">In Elaborazione</SelectItem>
+                  <SelectItem value="blocked">Bloccati</SelectItem>
+                  <SelectItem value="no_chunks">Senza Chunks</SelectItem>
+                  <SelectItem value="in_queue">In Queue</SelectItem>
+                  <SelectItem value="not_processed">Non Processati</SelectItem>
+                  <SelectItem value="ready">Pronti</SelectItem>
+                  <SelectItem value="failed">Falliti</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Agente</label>
+              <label className="text-sm font-medium">Cerca per agente</label>
               <Select value={agentFilter} onValueChange={setAgentFilter}>
                 <SelectTrigger>
                   <SelectValue />
@@ -921,23 +963,6 @@ export const DocumentPoolTable = () => {
                   {availableAgents.map((agent) => (
                     <SelectItem key={agent.id} value={agent.id}>
                       {agent.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Cartella</label>
-              <Select value={folderFilter} onValueChange={setFolderFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Tutte le cartelle" />
-                </SelectTrigger>
-                <SelectContent className="bg-background">
-                  <SelectItem value="all">Tutte le cartelle</SelectItem>
-                  {availableFolders.map((folder) => (
-                    <SelectItem key={folder} value={folder}>
-                      {folder}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -954,7 +979,7 @@ export const DocumentPoolTable = () => {
             <span className="flex items-center gap-3">
               <FileText className="h-5 w-5" />
               <span className="font-semibold">Documenti ({filteredDocuments.length})</span>
-              <DocumentPoolHealthIndicators />
+              <DocumentPoolHealthIndicators sourceType={sourceType} />
             </span>
             <div className="flex items-center gap-2">
               {/* Toggle Vista: Cartelle/Tabella - Sempre Visibile */}

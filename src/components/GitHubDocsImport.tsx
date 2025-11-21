@@ -3,17 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Github, Loader2, Download, FolderGit2, FolderTree } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Github, Loader2, Download, FolderGit2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -37,7 +30,6 @@ const HUGGINGFACE_REPOS = [
 ];
 
 export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) => {
-  const [open, setOpen] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [pathFilter, setPathFilter] = useState("");
   const [importing, setImporting] = useState(false);
@@ -146,7 +138,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         );
       }
 
-      setOpen(false);
       onImportComplete();
 
     } catch (error: any) {
@@ -268,7 +259,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       await new Promise(resolve => setTimeout(resolve, 3000));
       clearInterval(pollInterval);
 
-      setOpen(false);
       onImportComplete();
 
     } catch (error: any) {
@@ -281,200 +271,191 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2">
-          <Github className="h-4 w-4" />
-          Import da GitHub
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Github className="h-5 w-5" />
-            Importa Documentazione da GitHub
-          </DialogTitle>
-          <DialogDescription>
-            Scarica automaticamente documentazione Markdown da repository GitHub.
-            I documenti saranno processati e indicizzati per la ricerca semantica.
-            <br />
-            <span className="text-xs text-muted-foreground mt-2 inline-block">
-              💡 I file già esistenti vengono automaticamente saltati. È sicuro re-importare 
-              per aggiungere eventuali file mancanti o nuove sotto-cartelle.
-            </span>
-          </DialogDescription>
-        </DialogHeader>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Github className="h-5 w-5" />
+          Importa Documentazione da GitHub
+        </CardTitle>
+        <CardDescription>
+          Scarica automaticamente documentazione Markdown da repository GitHub.
+          I documenti saranno processati e indicizzati per la ricerca semantica.
+          <br />
+          <span className="text-xs text-muted-foreground mt-2 inline-block">
+            💡 I file già esistenti vengono automaticamente saltati. È sicuro re-importare 
+            per aggiungere eventuali file mancanti o nuove sotto-cartelle.
+          </span>
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Repository Selection */}
+        <div className="space-y-2">
+          <Label htmlFor="repo">Repository Hugging Face</Label>
+          <Select value={selectedRepo} onValueChange={handleRepoChange}>
+            <SelectTrigger id="repo">
+              <SelectValue placeholder="Seleziona repository..." />
+            </SelectTrigger>
+            <SelectContent>
+              {HUGGINGFACE_REPOS.map(repo => (
+                <SelectItem key={repo.value} value={repo.value}>
+                  {repo.label} ({repo.value})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-        <div className="space-y-6 py-4">
-          {/* Repository Selection */}
+        {/* Path Filter */}
+        <div className="space-y-2">
+          <Label htmlFor="path">Path Filter (opzionale)</Label>
+          <Input
+            id="path"
+            value={pathFilter}
+            onChange={(e) => setPathFilter(e.target.value)}
+            placeholder="Vuoto = intero repository, oppure es: docs/source"
+            disabled={importing}
+          />
+          <p className="text-xs text-muted-foreground">
+            💡 <strong>Lascia vuoto per import completo automatico</strong> del repository.
+            Il sistema escluderà automaticamente cartelle non rilevanti (.github, tests, examples, ecc.)
+          </p>
+        </div>
+
+        {/* Info - Import Automatico Completo */}
+        <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground border border-border">
+          <p className="flex items-center gap-2">
+            <Download className="w-4 h-4" />
+            <strong>✨ Import automatico completo:</strong>
+          </p>
+          <ul className="mt-2 ml-6 space-y-1 text-xs">
+            <li>• <strong>Path vuoto</strong>: scarica TUTTI i markdown del repository</li>
+            <li>• <strong>Filtri intelligenti</strong>: esclude automaticamente .github, tests, examples, ecc.</li>
+            <li>• <strong>Nessuna configurazione manuale</strong>: funziona con qualsiasi struttura di repository</li>
+            <li>• <strong>Elaborazione background</strong>: i documenti vengono processati dopo l'import</li>
+          </ul>
+        </div>
+
+        {/* Progress */}
+        {importing && (
           <div className="space-y-2">
-            <Label htmlFor="repo">Repository Hugging Face</Label>
-            <Select value={selectedRepo} onValueChange={handleRepoChange}>
-              <SelectTrigger id="repo">
-                <SelectValue placeholder="Seleziona repository..." />
-              </SelectTrigger>
-              <SelectContent>
-                {HUGGINGFACE_REPOS.map(repo => (
-                  <SelectItem key={repo.value} value={repo.value}>
-                    {repo.label} ({repo.value})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Progress value={33} className="w-full" />
+            <p className="text-sm text-muted-foreground">Import in corso...</p>
           </div>
+        )}
 
-          {/* Path Filter */}
-          <div className="space-y-2">
-            <Label htmlFor="path">Path Filter (opzionale)</Label>
-            <Input
-              id="path"
-              value={pathFilter}
-              onChange={(e) => setPathFilter(e.target.value)}
-              placeholder="Vuoto = intero repository, oppure es: docs/source"
-              disabled={importing}
+        {/* Import Progress Monitor */}
+        {importProgress.size > 0 && (
+          <div className="space-y-3 p-4 bg-muted/50 rounded-lg border">
+            <h4 className="text-sm font-semibold">📊 Stato Import per Repository:</h4>
+            {HUGGINGFACE_REPOS.map(repo => {
+              const progress = importProgress.get(repo.value);
+              if (!progress) return null;
+              
+              return (
+                <div key={repo.value} className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">{repo.label}</span>
+                    <span className="text-muted-foreground font-mono">
+                      {progress.status === 'discovering' && '🔍 Scansione repo...'}
+                      {progress.status === 'downloading' && 
+                        `📥 ${progress.downloaded}/${progress.total} scaricati`}
+                      {progress.status === 'processing' && 
+                        `⚙️ ${progress.processed}/${progress.total} elaborati`}
+                      {progress.status === 'completed' && 
+                        `✓ ${progress.total}/${progress.total} completati`}
+                      {progress.failed > 0 && ` (${progress.failed} ❌)`}
+                    </span>
+                  </div>
+                  <Progress 
+                    value={
+                      progress.status === 'completed' 
+                        ? 100 
+                        : progress.status === 'processing'
+                        ? 50 + ((progress.processed / progress.total) * 50)
+                        : ((progress.downloaded / progress.total) * 50)
+                    }
+                    className="h-1.5"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        
+        {/* Processing Monitor */}
+        {monitoring && processingStats.total > 0 && (
+          <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Elaborazione in corso...</span>
+              <span className="text-sm text-muted-foreground">
+                {processingStats.ready} / {processingStats.total} pronti
+              </span>
+            </div>
+            <Progress 
+              value={(processingStats.ready / processingStats.total) * 100} 
+              className="w-full" 
             />
             <p className="text-xs text-muted-foreground">
-              💡 <strong>Lascia vuoto per import completo automatico</strong> del repository.
-              Il sistema escluderà automaticamente cartelle non rilevanti (.github, tests, examples, ecc.)
+              {processingStats.processing} documenti in elaborazione
             </p>
           </div>
+        )}
 
-          {/* Info - Import Automatico Completo */}
-          <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground border border-border">
-            <p className="flex items-center gap-2">
-              <Download className="w-4 h-4" />
-              <strong>✨ Import automatico completo:</strong>
-            </p>
-            <ul className="mt-2 ml-6 space-y-1 text-xs">
-              <li>• <strong>Path vuoto</strong>: scarica TUTTI i markdown del repository</li>
-              <li>• <strong>Filtri intelligenti</strong>: esclude automaticamente .github, tests, examples, ecc.</li>
-              <li>• <strong>Nessuna configurazione manuale</strong>: funziona con qualsiasi struttura di repository</li>
-              <li>• <strong>Elaborazione background</strong>: i documenti vengono processati dopo l'import</li>
-            </ul>
-          </div>
+        {/* Actions */}
+        <div className="flex flex-col gap-2 pt-4">
+          <Button
+            onClick={handleImport}
+            disabled={!selectedRepo || importing || hasActiveImport}
+            className="w-full"
+          >
+            {importing || hasActiveImport ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                {importing ? 'Importazione...' : 'Elaborazione in corso...'}
+              </>
+            ) : (
+              <>
+                <Download className="mr-2 h-4 w-4" />
+                Importa Documenti
+              </>
+            )}
+          </Button>
 
-          {/* Progress */}
-          {importing && (
-            <div className="space-y-2">
-              <Progress value={33} className="w-full" />
-              <p className="text-sm text-muted-foreground">Import in corso...</p>
-            </div>
-          )}
-
-          {/* Import Progress Monitor */}
-          {importProgress.size > 0 && (
-            <div className="space-y-3 p-4 bg-muted/50 rounded-lg border">
-              <h4 className="text-sm font-semibold">📊 Stato Import per Repository:</h4>
-              {HUGGINGFACE_REPOS.map(repo => {
-                const progress = importProgress.get(repo.value);
-                if (!progress) return null;
-                
-                return (
-                  <div key={repo.value} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium">{repo.label}</span>
-                      <span className="text-muted-foreground font-mono">
-                        {progress.status === 'discovering' && '🔍 Scansione repo...'}
-                        {progress.status === 'downloading' && 
-                          `📥 ${progress.downloaded}/${progress.total} scaricati`}
-                        {progress.status === 'processing' && 
-                          `⚙️ ${progress.processed}/${progress.total} elaborati`}
-                        {progress.status === 'completed' && 
-                          `✓ ${progress.total}/${progress.total} completati`}
-                        {progress.failed > 0 && ` (${progress.failed} ❌)`}
-                      </span>
-                    </div>
-                    <Progress 
-                      value={
-                        progress.status === 'completed' 
-                          ? 100 
-                          : progress.status === 'processing'
-                          ? 50 + ((progress.processed / progress.total) * 50)
-                          : ((progress.downloaded / progress.total) * 50)
-                      }
-                      className="h-1.5"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          
-          {/* Processing Monitor */}
-          {monitoring && processingStats.total > 0 && (
-            <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Elaborazione in corso...</span>
-                <span className="text-sm text-muted-foreground">
-                  {processingStats.ready} / {processingStats.total} pronti
-                </span>
-              </div>
-              <Progress 
-                value={(processingStats.ready / processingStats.total) * 100} 
-                className="w-full" 
-              />
-              <p className="text-xs text-muted-foreground">
-                {processingStats.processing} documenti in elaborazione
-              </p>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex flex-col gap-2 pt-4">
-            <Button
-              onClick={handleImport}
-              disabled={!selectedRepo || importing || hasActiveImport}
-              className="w-full"
-            >
-              {importing || hasActiveImport ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {importing ? 'Importazione...' : 'Elaborazione in corso...'}
-                </>
-              ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" />
-                  Importa Documenti
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={handleBatchImport}
-              disabled={importing || batchImporting || hasActiveImport}
-              className="w-full gap-2"
-            >
-              {batchImporting || hasActiveImport ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {batchImporting ? `Importazione in corso (${progress.current}/${progress.total})` : 'Elaborazione in corso...'}
-                </>
-              ) : (
-                <>
-                  <FolderGit2 className="h-4 w-4" />
-                  Importa Tutti Repos Huggingface
-                </>
-              )}
-            </Button>
-
-          </div>
-
-          {/* Info */}
-          <div className="rounded-lg border bg-muted/50 p-4">
-            <p className="text-sm text-muted-foreground">
-              <strong>💡 Vantaggi GitHub API:</strong>
-              <br />
-              • Documenti in Markdown puro (alta qualità)
-              <br />
-              • Gratuito e veloce (fino a 5000 req/ora)
-              <br />
-              • Change detection automatico
-              <br />
-              • Zero costi di scraping
-            </p>
-          </div>
+          <Button
+            onClick={handleBatchImport}
+            disabled={importing || batchImporting || hasActiveImport}
+            variant="secondary"
+            className="w-full gap-2"
+          >
+            {batchImporting || hasActiveImport ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {batchImporting ? `Importazione in corso (${progress.current}/${progress.total})` : 'Elaborazione in corso...'}
+              </>
+            ) : (
+              <>
+                <FolderGit2 className="h-4 w-4" />
+                Importa Tutti Repos Huggingface
+              </>
+            )}
+          </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {/* Info */}
+        <div className="rounded-lg border bg-muted/50 p-4">
+          <p className="text-sm text-muted-foreground">
+            <strong>💡 Vantaggi GitHub API:</strong>
+            <br />
+            • Documenti in Markdown puro (alta qualità)
+            <br />
+            • Gratuito e veloce (fino a 5000 req/ora)
+            <br />
+            • Change detection automatico
+            <br />
+            • Zero costi di scraping
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
