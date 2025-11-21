@@ -29,7 +29,8 @@ interface KnowledgeDocument {
 }
 
 interface BulkAssignDocumentDialogProps {
-  documentIds: string[];
+  documentIds?: string[];       // For manual selection (max ~100 docs)
+  folderName?: string;          // For folder selection (any quantity)
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned: () => void;
@@ -37,6 +38,7 @@ interface BulkAssignDocumentDialogProps {
 
 export const BulkAssignDocumentDialog = ({
   documentIds,
+  folderName,
   open,
   onOpenChange,
   onAssigned,
@@ -51,22 +53,39 @@ export const BulkAssignDocumentDialog = ({
 
   const countDocuments = async () => {
     try {
-      // Count all selected documents
-      const { count: totalCount } = await supabase
-        .from("knowledge_documents")
-        .select("id", { count: 'exact', head: true })
-        .in("id", documentIds);
-      
-      setDocumentCount(totalCount || 0);
+      if (folderName) {
+        // Use folder-based query for large selections
+        const { count: totalCount } = await supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .like("folder", `${folderName}%`);
+        
+        setDocumentCount(totalCount || 0);
 
-      // Count validated documents (ready_for_assignment)
-      const { count: validCount } = await supabase
-        .from("knowledge_documents")
-        .select("id", { count: 'exact', head: true })
-        .in("id", documentIds)
-        .eq("processing_status", "ready_for_assignment");
-      
-      setValidatedCount(validCount || 0);
+        const { count: validCount } = await supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .like("folder", `${folderName}%`)
+          .eq("processing_status", "ready_for_assignment");
+        
+        setValidatedCount(validCount || 0);
+      } else if (documentIds && documentIds.length > 0) {
+        // Use .in() only for small selections (< 1000)
+        const { count: totalCount } = await supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .in("id", documentIds);
+        
+        setDocumentCount(totalCount || 0);
+
+        const { count: validCount } = await supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .in("id", documentIds)
+          .eq("processing_status", "ready_for_assignment");
+        
+        setValidatedCount(validCount || 0);
+      }
     } catch (error) {
       console.error("Error counting documents:", error);
       setDocumentCount(0);
@@ -79,7 +98,7 @@ export const BulkAssignDocumentDialog = ({
       loadAgents();
       countDocuments();
     }
-  }, [open, documentIds]);
+  }, [open, documentIds, folderName]);
 
   const loadAgents = async () => {
     try {
@@ -93,8 +112,8 @@ export const BulkAssignDocumentDialog = ({
       if (error) throw error;
       setAgents(data || []);
 
-      // Load existing assignments for the selected documents
-      if (documentIds.length > 0) {
+      // Pre-select agents ONLY for manual selections (not folder-based)
+      if (documentIds && documentIds.length > 0 && documentIds.length < 100 && !folderName) {
         const { data: assignmentsData, error: assignmentsError } = await supabase
           .from("agent_document_links")
           .select("agent_id, document_id")
@@ -117,6 +136,7 @@ export const BulkAssignDocumentDialog = ({
 
         setSelectedAgentIds(commonlyAssignedIds);
       } else {
+        // For folder selections or large selections, don't pre-select (too many docs)
         setSelectedAgentIds(new Set());
       }
     } catch (error: any) {
@@ -166,112 +186,141 @@ export const BulkAssignDocumentDialog = ({
       return;
     }
 
+    setLoading(true);
+
     try {
-      setLoading(true);
-      
-      // Fetch ALL validated documents with the provided IDs
-      const { data: validatedDocs, error: fetchError } = await supabase
+      // Step 1: Fetch ALL validated documents
+      let query = supabase
         .from("knowledge_documents")
-        .select("id, file_name")
-        .in("id", documentIds)
+        .select("id")
         .eq("processing_status", "ready_for_assignment");
 
-      if (fetchError) throw fetchError;
+      if (folderName) {
+        query = query.like("folder", `${folderName}%`);
+      } else if (documentIds) {
+        query = query.in("id", documentIds);
+      }
 
+      const { data: validatedDocs, error: fetchError } = await query;
+      
+      if (fetchError) throw fetchError;
+      
       if (!validatedDocs || validatedDocs.length === 0) {
-        toast.error("Nessun documento validato da assegnare");
+        toast.error("Nessun documento validato trovato");
+        setLoading(false);
         return;
       }
+
+      const validatedDocIds = validatedDocs.map(d => d.id);
       
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-
-      const syncPromises = [];
-      let totalAdded = 0;
-      let totalRemoved = 0;
-
-      // Process each validated document
-      for (const doc of validatedDocs) {
-        // Get current assignments for this document
-        const { data: currentAssignments } = await supabase
+      // Step 2: Fetch existing assignments for validated docs (with batching)
+      const assignments = [];
+      const batchSize = 1000;
+      
+      for (let i = 0; i < validatedDocIds.length; i += batchSize) {
+        const batch = validatedDocIds.slice(i, i + batchSize);
+        const { data, error } = await supabase
           .from("agent_document_links")
-          .select("agent_id")
-          .eq("document_id", doc.id);
+          .select("agent_id, document_id")
+          .in("document_id", batch);
+        
+        if (error) throw error;
+        if (data) assignments.push(...data);
+      }
 
-        const currentAgentIds = new Set(
-          currentAssignments?.map(a => a.agent_id) || []
-        );
+      // Step 3: Calculate changes
+      const existingMap = new Map<string, Set<string>>();
+      assignments.forEach(link => {
+        if (!existingMap.has(link.document_id)) {
+          existingMap.set(link.document_id, new Set());
+        }
+        existingMap.get(link.document_id)!.add(link.agent_id);
+      });
 
-        // Determine who to add and who to remove
-        const toAdd = Array.from(selectedAgentIds).filter(
-          id => !currentAgentIds.has(id)
-        );
-        const toRemove = Array.from(currentAgentIds).filter(
-          id => !selectedAgentIds.has(id)
-        );
+      const selectedAgents = Array.from(selectedAgentIds);
+      const toDelete: Array<{ agent_id: string; document_id: string }> = [];
+      const toInsert: Array<{ agent_id: string; document_id: string; assignment_type: string; assigned_by?: string }> = [];
 
-        // Remove deselected agents
-        if (toRemove.length > 0) {
-          const { error: deleteError } = await supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      validatedDocIds.forEach(docId => {
+        const existingAgents = existingMap.get(docId) || new Set();
+        
+        // Remove unselected agents
+        existingAgents.forEach(agentId => {
+          if (!selectedAgentIds.has(agentId)) {
+            toDelete.push({ agent_id: agentId, document_id: docId });
+          }
+        });
+        
+        // Add newly selected agents
+        selectedAgents.forEach(agentId => {
+          if (!existingAgents.has(agentId)) {
+            toInsert.push({
+              agent_id: agentId,
+              document_id: docId,
+              assignment_type: 'manual',
+              assigned_by: user?.id
+            });
+          }
+        });
+      });
+
+      // Step 4: Execute deletions (batched)
+      if (toDelete.length > 0) {
+        for (let i = 0; i < toDelete.length; i += batchSize) {
+          const batch = toDelete.slice(i, i + batchSize);
+          const agentIds = [...new Set(batch.map(x => x.agent_id))];
+          const docIds = [...new Set(batch.map(x => x.document_id))];
+          
+          const { error } = await supabase
             .from("agent_document_links")
             .delete()
-            .eq("document_id", doc.id)
-            .in("agent_id", toRemove);
-
-          if (deleteError) throw deleteError;
-          totalRemoved += toRemove.length;
+            .in("agent_id", agentIds)
+            .in("document_id", docIds);
+          
+          if (error) throw error;
         }
+      }
 
-        // Add new agents
-        if (toAdd.length > 0) {
-          const { error: insertError } = await supabase
+      // Step 5: Execute insertions (batched)
+      if (toInsert.length > 0) {
+        for (let i = 0; i < toInsert.length; i += batchSize) {
+          const batch = toInsert.slice(i, i + batchSize);
+          const { error } = await supabase
             .from("agent_document_links")
-            .insert(
-              toAdd.map(agentId => ({
-                document_id: doc.id,
-                agent_id: agentId,
-                assignment_type: 'manual',
-                assigned_by: user.id
-              }))
-            );
+            .insert(batch);
+          
+          if (error) throw error;
+        }
+        
+        // Sync new assignments
+        const newAgentDocPairs = new Map<string, Set<string>>();
+        toInsert.forEach(({ agent_id, document_id }) => {
+          if (!newAgentDocPairs.has(agent_id)) {
+            newAgentDocPairs.set(agent_id, new Set());
+          }
+          newAgentDocPairs.get(agent_id)!.add(document_id);
+        });
 
-          if (insertError) throw insertError;
-          totalAdded += toAdd.length;
-
-          // Sync only newly added agents
-          for (const agentId of toAdd) {
-            syncPromises.push(
-              supabase.functions.invoke('sync-pool-document', {
-                body: {
-                  documentId: doc.id,
-                  agentId: agentId
-                }
-              })
-            );
+        for (const [agentId, docIds] of newAgentDocPairs.entries()) {
+          for (const docId of docIds) {
+            await supabase.functions.invoke("sync-pool-document", {
+              body: { agentId, documentId: docId }
+            });
           }
         }
       }
 
-      // Execute all syncs in parallel
-      if (syncPromises.length > 0) {
-        await Promise.allSettled(syncPromises);
-      }
-
-      // Show appropriate success message
-      if (selectedAgentIds.size === 0) {
-        toast.success(`Assegnazioni rimosse per ${validatedDocs.length} ${validatedDocs.length === 1 ? 'documento' : 'documenti'}`);
-      } else {
-        const parts = [];
-        if (totalAdded > 0) parts.push(`${totalAdded} aggiunte`);
-        if (totalRemoved > 0) parts.push(`${totalRemoved} rimosse`);
-        toast.success(`${validatedDocs.length} ${validatedDocs.length === 1 ? 'documento aggiornato' : 'documenti aggiornati'} (${parts.join(', ')})`);
-      }
-
+      toast.success(
+        `Assegnazione completata! ${validatedDocs.length} documenti → ${selectedAgentIds.size} agenti`
+      );
+      
       onAssigned();
       onOpenChange(false);
     } catch (error: any) {
-      console.error("Error assigning documents:", error);
-      toast.error("Errore nell'assegnazione dei documenti");
+      console.error("Assignment error:", error);
+      toast.error(`Errore durante l'assegnazione: ${error.message}`);
     } finally {
       setLoading(false);
     }
