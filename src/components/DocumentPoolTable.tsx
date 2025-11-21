@@ -21,6 +21,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   CheckCircle2,
   XCircle,
   Clock,
@@ -36,7 +49,10 @@ import {
   Folder,
   Plus,
   Settings,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { AssignDocumentDialog } from "./AssignDocumentDialog";
 import { DocumentDetailsDialog } from "./DocumentDetailsDialog";
@@ -100,6 +116,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
+  const [agentPopoverOpen, setAgentPopoverOpen] = useState(false);
   const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [availableFolders, setAvailableFolders] = useState<string[]>([]);
   const [selectedDoc, setSelectedDoc] = useState<KnowledgeDocument | null>(null);
@@ -941,19 +958,64 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Cerca per agente</label>
-              <Select value={agentFilter} onValueChange={setAgentFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                  <SelectContent className="bg-background">
-                    <SelectItem value="all">Tutti</SelectItem>
-                    {availableAgents.map((agent) => (
-                      <SelectItem key={agent.id} value={agent.id}>
-                        {agent.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-              </Select>
+              <Popover open={agentPopoverOpen} onOpenChange={setAgentPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={agentPopoverOpen}
+                    className="w-full justify-between"
+                  >
+                    {agentFilter === "all"
+                      ? "Tutti"
+                      : availableAgents.find((agent) => agent.id === agentFilter)?.name || "Seleziona agente..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[300px] p-0 bg-background" align="start">
+                  <Command>
+                    <CommandInput placeholder="Cerca agente..." />
+                    <CommandList>
+                      <CommandEmpty>Nessun agente trovato.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="all"
+                          onSelect={() => {
+                            setAgentFilter("all");
+                            setAgentPopoverOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              agentFilter === "all" ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          Tutti
+                        </CommandItem>
+                        {availableAgents.map((agent) => (
+                          <CommandItem
+                            key={agent.id}
+                            value={agent.name}
+                            onSelect={() => {
+                              setAgentFilter(agent.id);
+                              setAgentPopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                agentFilter === agent.id ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            {agent.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </CardContent>
