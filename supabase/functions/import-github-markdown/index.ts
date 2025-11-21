@@ -96,20 +96,8 @@ serve(async (req) => {
 
         const content = await contentResponse.text();
 
-        // Upload file to storage
+        // Use file path for reference (storage upload is optional, we have full_text)
         const storagePath = `github/${repo}/${file.path}`;
-        const { error: uploadError } = await supabase.storage
-          .from('shared-pool-uploads')
-          .upload(storagePath, content, {
-            contentType: 'text/markdown',
-            upsert: true
-          });
-
-        if (uploadError) {
-          throw new Error(`Storage upload failed: ${uploadError.message}`);
-        }
-
-        console.log(`✓ Uploaded: ${storagePath}`);
 
         // Extract frontmatter
         let title = file.path.split('/').pop()?.replace('.md', '') || 'Untitled';
