@@ -38,6 +38,10 @@ export function chunkText(
   // Calculate total chunks (approximate)
   const totalChunks = Math.ceil(textLength / (chunkSize - overlap));
 
+  let lastPosition = -1;
+  let safetyCounter = 0;
+  const maxChunks = Math.ceil(textLength / (chunkSize - overlap)) + 10; // Extra margin
+
   while (position < textLength) {
     const end = Math.min(position + chunkSize, textLength);
     const chunkContent = text.slice(position, end);
@@ -55,13 +59,22 @@ export function chunkText(
     });
 
     chunkIndex++;
-    position += chunkSize - overlap;
-
-    // Safety check: prevent infinite loops
-    if (position <= chunkSize - overlap && chunkIndex > 0) {
-      console.warn('[chunkingService] Detected potential infinite loop, breaking');
+    const newPosition = position + chunkSize - overlap;
+    
+    // Safety checks: prevent infinite loops
+    if (newPosition === lastPosition) {
+      console.warn('[chunkingService] Position not advancing, stopping to prevent infinite loop');
       break;
     }
+    
+    if (safetyCounter > maxChunks) {
+      console.warn(`[chunkingService] Exceeded max expected chunks (${maxChunks}), stopping`);
+      break;
+    }
+    
+    lastPosition = position;
+    position = newPosition;
+    safetyCounter++;
   }
 
   console.log(`[chunkingService] Created ${chunks.length} chunks from ${textLength} characters`);
