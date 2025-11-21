@@ -135,6 +135,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
   const [bulkAssignFolderName, setBulkAssignFolderName] = useState<string | undefined>(undefined);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [selectedFolderForAssignment, setSelectedFolderForAssignment] = useState<string | undefined>(undefined);
   
   // Folder management state
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
@@ -788,7 +789,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     }
   };
 
-  const handleBulkDocumentSelect = (docIds: string[], shouldSelect: boolean) => {
+  const handleBulkDocumentSelect = (docIds: string[], shouldSelect: boolean, folderName?: string) => {
     setSelectedDocIds((prevSelected) => {
       const newSelected = new Set(prevSelected);
       
@@ -802,6 +803,13 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       
       return newSelected;
     });
+    
+    // Gestisci il tracking della cartella separatamente
+    if (shouldSelect && folderName) {
+      setSelectedFolderForAssignment(folderName);
+    } else if (!shouldSelect && folderName && selectedFolderForAssignment === folderName) {
+      setSelectedFolderForAssignment(undefined);
+    }
   };
 
   const getFolderInfo = () => {
@@ -899,6 +907,9 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
   const validatedSelectedDocs = selectedDocuments.filter((d) => d.processing_status === "ready_for_assignment");
+  
+  // Se c'è una cartella selezionata, considera quella invece del conteggio documenti
+  const hasValidSelection = selectedFolderForAssignment ? true : validatedSelectedDocs.length > 0;
 
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch =
@@ -1683,8 +1694,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setBulkAssignDialogOpen(true)}
-                  disabled={validatedSelectedDocs.length === 0}
+                  onClick={() => {
+                    if (selectedFolderForAssignment) {
+                      // Se c'è una cartella selezionata, passa il nome della cartella
+                      setBulkAssignFolderName(selectedFolderForAssignment);
+                    }
+                    setBulkAssignDialogOpen(true);
+                  }}
+                  disabled={!hasValidSelection}
                 >
                   <LinkIcon className="h-4 w-4 mr-2" />
                   Assegna Agenti
@@ -1700,7 +1717,10 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setSelectedDocIds(new Set())}
+                  onClick={() => {
+                    setSelectedDocIds(new Set());
+                    setSelectedFolderForAssignment(undefined);
+                  }}
                 >
                   <X className="h-4 w-4 mr-2" />
                   Deseleziona
@@ -1743,6 +1763,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         onAssigned={() => {
           setSelectedDocIds(new Set());
           setBulkAssignFolderName(undefined);
+          setSelectedFolderForAssignment(undefined);
           loadDocuments();
         }}
       />
