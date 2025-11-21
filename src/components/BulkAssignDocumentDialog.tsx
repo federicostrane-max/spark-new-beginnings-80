@@ -50,6 +50,7 @@ export const BulkAssignDocumentDialog = ({
   const [agentSearchQuery, setAgentSearchQuery] = useState("");
   const [documentCount, setDocumentCount] = useState(0);
   const [validatedCount, setValidatedCount] = useState(0);
+  const [progressMessage, setProgressMessage] = useState<string>("");
 
   const countDocuments = async () => {
     try {
@@ -187,8 +188,14 @@ export const BulkAssignDocumentDialog = ({
     }
 
     setLoading(true);
+    const OPERATION_TIMEOUT = 120000; // 2 minuti max
+    const timeoutId = setTimeout(() => {
+      throw new Error("Operazione timeout dopo 2 minuti");
+    }, OPERATION_TIMEOUT);
 
     try {
+      setProgressMessage("Caricamento documenti...");
+      
       // Step 1: Fetch ALL validated documents
       let query = supabase
         .from("knowledge_documents")
@@ -213,6 +220,8 @@ export const BulkAssignDocumentDialog = ({
 
       const validatedDocIds = validatedDocs.map(d => d.id);
       
+      setProgressMessage("Caricamento assegnazioni esistenti...");
+      
       // Step 2: Fetch existing assignments for validated docs (with batching)
       const assignments = [];
       const batchSize = 1000;
@@ -227,6 +236,8 @@ export const BulkAssignDocumentDialog = ({
         if (error) throw error;
         if (data) assignments.push(...data);
       }
+
+      setProgressMessage("Calcolo modifiche...");
 
       // Step 3: Calculate changes
       const existingMap = new Map<string, Set<string>>();
@@ -268,6 +279,8 @@ export const BulkAssignDocumentDialog = ({
 
       // Step 4: Execute deletions (batched)
       if (toDelete.length > 0) {
+        setProgressMessage(`Rimozione ${toDelete.length} assegnazioni...`);
+        
         for (let i = 0; i < toDelete.length; i += batchSize) {
           const batch = toDelete.slice(i, i + batchSize);
           const agentIds = [...new Set(batch.map(x => x.agent_id))];
@@ -285,6 +298,8 @@ export const BulkAssignDocumentDialog = ({
 
       // Step 5: Execute insertions (batched)
       if (toInsert.length > 0) {
+        setProgressMessage(`Aggiunta ${toInsert.length} assegnazioni...`);
+        
         for (let i = 0; i < toInsert.length; i += batchSize) {
           const batch = toInsert.slice(i, i + batchSize);
           const { error } = await supabase
@@ -294,35 +309,36 @@ export const BulkAssignDocumentDialog = ({
           if (error) throw error;
         }
         
-        // Sync new assignments
-        const newAgentDocPairs = new Map<string, Set<string>>();
-        toInsert.forEach(({ agent_id, document_id }) => {
-          if (!newAgentDocPairs.has(agent_id)) {
-            newAgentDocPairs.set(agent_id, new Set());
-          }
-          newAgentDocPairs.get(agent_id)!.add(document_id);
-        });
-
-        for (const [agentId, docIds] of newAgentDocPairs.entries()) {
-          for (const docId of docIds) {
-            await supabase.functions.invoke("sync-pool-document", {
-              body: { agentId, documentId: docId }
-            });
-          }
+        setProgressMessage("Preparazione sync in background...");
+        
+        // Mark for background sync instead of sequential calls
+        const docIds = [...new Set(toInsert.map(x => x.document_id))];
+        for (let i = 0; i < docIds.length; i += batchSize) {
+          const batch = docIds.slice(i, i + batchSize);
+          await supabase
+            .from("agent_document_links")
+            .update({ sync_status: 'pending' })
+            .in("document_id", batch)
+            .in("agent_id", Array.from(selectedAgentIds));
         }
       }
 
+      setProgressMessage("Finalizzazione...");
+
       toast.success(
-        `Assegnazione completata! ${validatedDocs.length} documenti → ${selectedAgentIds.size} agenti`
+        `Assegnazione completata! ${validatedDocs.length} documenti → ${selectedAgentIds.size} agenti. Sync in background...`,
+        { duration: 5000 }
       );
       
       onAssigned();
       onOpenChange(false);
     } catch (error: any) {
       console.error("Assignment error:", error);
-      toast.error(`Errore durante l'assegnazione: ${error.message}`);
+      toast.error(`Errore: ${error.message}`, { duration: 5000 });
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
+      setProgressMessage("");
     }
   };
 
@@ -447,7 +463,7 @@ export const BulkAssignDocumentDialog = ({
           onClick={handleAssign}
           disabled={loading || validatedCount === 0 || selectedAgentIds.size === 0}
         >
-          {loading ? "Salvando..." : "Salva Assegnazioni"}
+          {loading ? (progressMessage || "Salvando...") : "Salva Assegnazioni"}
         </Button>
         </DialogFooter>
       </DialogContent>
