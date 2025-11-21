@@ -43,7 +43,7 @@ interface FolderTreeViewProps {
   onDocumentSelect: (docId: string) => void;
   selectedDocuments: Set<string>;
   onDocumentClick: (doc: KnowledgeDocument) => void;
-  onFolderAssign?: (folderDocs: KnowledgeDocument[]) => void;
+  onFolderAssign?: (folderName: string) => void;
   onFolderDelete?: (folderId: string, folderName: string) => void;
   onBulkDocumentSelect?: (docIds: string[], shouldSelect: boolean) => void;
 }
@@ -202,8 +202,7 @@ export function FolderTreeView({
                       onClick={(e) => {
                         e.stopPropagation();
                         if (onFolderAssign) {
-                          const readyDocs = allFolderDocs.filter(d => d.processing_status === 'ready_for_assignment');
-                          onFolderAssign(readyDocs);
+                          onFolderAssign(folder.fullName || folder.name);
                         }
                       }}
                       disabled={allFolderDocs.filter(d => d.processing_status === 'ready_for_assignment').length === 0}
