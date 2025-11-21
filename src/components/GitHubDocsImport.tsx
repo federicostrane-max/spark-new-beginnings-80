@@ -297,6 +297,11 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
           <DialogDescription>
             Scarica automaticamente documentazione Markdown da repository GitHub.
             I documenti saranno processati e indicizzati per la ricerca semantica.
+            <br />
+            <span className="text-xs text-muted-foreground mt-2 inline-block">
+              💡 I file già esistenti vengono automaticamente saltati. È sicuro re-importare 
+              per aggiungere eventuali file mancanti o nuove sotto-cartelle.
+            </span>
           </DialogDescription>
         </DialogHeader>
 

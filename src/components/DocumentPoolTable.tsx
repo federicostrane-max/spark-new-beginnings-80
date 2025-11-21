@@ -429,9 +429,15 @@ export const DocumentPoolTable = () => {
           })
         );
         
-        // Aggregate all documents from children AND parent
+        // Filter parent docs to exclude those that are actually in subfolders
+        const childFolderPaths = new Set(childrenWithDocs.map(c => c.fullName));
+        const filteredParentDocs = transformedParentDocs.filter((doc: any) => 
+          !childFolderPaths.has(doc.folder)
+        );
+        
+        // Aggregate all documents from children AND filtered parent
         const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
-        const allDocs = [...transformedParentDocs, ...allChildDocs];
+        const allDocs = [...filteredParentDocs, ...allChildDocs];
         
         // Calculate total files for parent (sum of all children)
         const parentTotalFiles = childrenWithDocs.reduce((sum, child) => {
