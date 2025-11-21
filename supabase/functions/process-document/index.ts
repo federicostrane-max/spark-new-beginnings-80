@@ -25,6 +25,7 @@ interface ProcessRequest {
   documentId: string;
   fullText?: string; // Complete extracted text (optional, can be fetched from DB)
   retryCount?: number; // Numero di retry già effettuati
+  forceRegenerate?: boolean; // Force regeneration of AI summary even if it exists
 }
 
 interface AIAnalysis {
@@ -64,7 +65,7 @@ serve(async (req) => {
       throw new Error('Processing timeout after 5 minutes');
     }, 5 * 60 * 1000);
 
-    const { documentId, fullText: providedFullText, retryCount = 0 }: ProcessRequest = await req.json();
+    const { documentId, fullText: providedFullText, retryCount = 0, forceRegenerate = false }: ProcessRequest = await req.json();
     
     // Validate inputs
     validateUUID(documentId, 'documentId');
@@ -213,9 +214,10 @@ serve(async (req) => {
 
     let analysis: AIAnalysis;
 
-    if (docData?.ai_summary && docData?.keywords && docData?.topics && docData?.complexity_level) {
+    // If forceRegenerate is true, skip reusing existing summary
+    if (!forceRegenerate && docData?.ai_summary && docData?.keywords && docData?.topics && docData?.complexity_level) {
       // AI summary already exists from validation phase - reuse it
-      console.log('[process-document] ✅ Using AI summary from validation phase');
+      console.log('[process-document] ✅ Using existing AI summary');
       analysis = {
         summary: docData.ai_summary,
         keywords: docData.keywords,

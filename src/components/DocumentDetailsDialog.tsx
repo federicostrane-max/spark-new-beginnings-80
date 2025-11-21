@@ -35,12 +35,14 @@ interface DocumentDetailsDialogProps {
   document: KnowledgeDocument | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onRefresh?: () => void;
 }
 
 export const DocumentDetailsDialog = ({
   document,
   open,
   onOpenChange,
+  onRefresh,
 }: DocumentDetailsDialogProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   
@@ -58,6 +60,7 @@ export const DocumentDetailsDialog = ({
       const { error } = await supabase.functions.invoke("process-document", {
         body: {
           documentId: document.id,
+          forceRegenerate: !hasNoSummary, // Force regeneration if summary already exists
         },
       });
 
@@ -66,7 +69,10 @@ export const DocumentDetailsDialog = ({
       toast.success(hasNoSummary ? "Documento elaborato con successo!" : "Summary rigenerato con successo!");
       onOpenChange(false);
       
-      setTimeout(() => window.location.reload(), 1000);
+      // Trigger parent refresh instead of full page reload
+      if (onRefresh) {
+        onRefresh();
+      }
     } catch (error) {
       console.error("Error processing document:", error);
       toast.error("Errore durante l'elaborazione");
