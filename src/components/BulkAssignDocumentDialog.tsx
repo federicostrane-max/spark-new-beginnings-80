@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Link as LinkIcon } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Link as LinkIcon, Search } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -44,6 +45,7 @@ export const BulkAssignDocumentDialog = ({
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [loadingAgents, setLoadingAgents] = useState(true);
+  const [agentSearchQuery, setAgentSearchQuery] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -107,6 +109,22 @@ export const BulkAssignDocumentDialog = ({
       }
       return newSet;
     });
+  };
+
+  const handleSelectAll = () => {
+    const filteredAgents = agentSearchQuery.trim() === ""
+      ? agents
+      : agents.filter(agent =>
+          agent.name.toLowerCase().includes(agentSearchQuery.toLowerCase())
+        );
+    
+    setSelectedAgentIds(new Set(filteredAgents.map(a => a.id)));
+    toast.success(`${filteredAgents.length} ${filteredAgents.length === 1 ? 'agente selezionato' : 'agenti selezionati'}`);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedAgentIds(new Set());
+    toast.success("Tutti gli agenti deselezionati");
   };
 
   const handleAssign = async () => {
@@ -234,24 +252,56 @@ export const BulkAssignDocumentDialog = ({
         </DialogHeader>
 
         <div className="flex-1 overflow-hidden space-y-4">
-          {/* Documents preview */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium">Documenti da assegnare:</h4>
-            <ScrollArea className="h-24 rounded-md border p-3">
-              <div className="space-y-1">
-                {validatedDocs.map((doc) => (
-                  <div key={doc.id} className="text-sm text-muted-foreground truncate" title={doc.file_name}>
-                    • {doc.file_name}
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
-
           {/* Agent selection */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium">Seleziona agenti:</h4>
-            <ScrollArea className="h-48 rounded-md border p-3">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium">Seleziona agenti:</h4>
+              <div className="text-xs text-muted-foreground">
+                {selectedAgentIds.size} / {agents.length} selezionati
+              </div>
+            </div>
+            
+            {/* Search Input */}
+            {agents.length > 5 && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Cerca agente..."
+                  value={agentSearchQuery}
+                  onChange={(e) => setAgentSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            )}
+            
+            {/* Select/Deselect All Buttons */}
+            {agents.length > 0 && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSelectAll}
+                  disabled={loadingAgents}
+                  className="flex-1"
+                >
+                  Seleziona tutti
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDeselectAll}
+                  disabled={loadingAgents || selectedAgentIds.size === 0}
+                  className="flex-1"
+                >
+                  Deseleziona tutti
+                </Button>
+              </div>
+            )}
+            
+            {/* Agent List */}
+            <ScrollArea className="h-64 rounded-md border p-3">
               {loadingAgents ? (
                 <div className="text-sm text-muted-foreground text-center py-4">
                   Caricamento agenti...
@@ -260,44 +310,39 @@ export const BulkAssignDocumentDialog = ({
                 <div className="text-sm text-muted-foreground text-center py-4">
                   Nessun agente disponibile
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {agents.map((agent) => (
-                    <div key={agent.id} className="flex items-center space-x-3">
-                      <Checkbox
-                        id={`agent-${agent.id}`}
-                        checked={selectedAgentIds.has(agent.id)}
-                        onCheckedChange={() => handleToggleAgent(agent.id)}
-                      />
-                      <label
-                        htmlFor={`agent-${agent.id}`}
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                      >
-                        {agent.name}
-                      </label>
+              ) : (() => {
+                  const filteredAgents = agentSearchQuery.trim() === ""
+                    ? agents
+                    : agents.filter(agent =>
+                        agent.name.toLowerCase().includes(agentSearchQuery.toLowerCase())
+                      );
+                  
+                  return filteredAgents.length === 0 ? (
+                    <div className="text-sm text-muted-foreground text-center py-4">
+                      Nessun agente trovato per "{agentSearchQuery}"
                     </div>
-                  ))}
-                </div>
-              )}
+                  ) : (
+                    <div className="space-y-3">
+                      {filteredAgents.map((agent) => (
+                        <div key={agent.id} className="flex items-center space-x-3">
+                          <Checkbox
+                            id={`agent-${agent.id}`}
+                            checked={selectedAgentIds.has(agent.id)}
+                            onCheckedChange={() => handleToggleAgent(agent.id)}
+                          />
+                          <label
+                            htmlFor={`agent-${agent.id}`}
+                            className="text-sm font-medium leading-none cursor-pointer flex-1"
+                          >
+                            {agent.name}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              }
             </ScrollArea>
-          </div>
-
-          {/* Preview */}
-          <div className="p-3 rounded-md bg-muted space-y-2">
-            <div className="text-sm font-medium">Riepilogo:</div>
-            {selectedAgentIds.size > 0 ? (
-              <div className="text-sm text-muted-foreground">
-                Assegnerai <Badge variant="secondary">{validatedDocs.length}</Badge> {validatedDocs.length === 1 ? 'documento' : 'documenti'} a{" "}
-                <Badge variant="secondary">{selectedAgentIds.size}</Badge> {selectedAgentIds.size === 1 ? 'agente' : 'agenti'}
-                <span className="block mt-1">
-                  Totale: <strong>{validatedDocs.length * selectedAgentIds.size}</strong> assegnazioni
-                </span>
-              </div>
-            ) : (
-              <div className="text-sm text-amber-600">
-                ⚠️ Rimuoverai tutte le assegnazioni per {validatedDocs.length === 1 ? 'questo documento' : 'questi documenti'}
-              </div>
-            )}
           </div>
         </div>
 
@@ -307,7 +352,7 @@ export const BulkAssignDocumentDialog = ({
           </Button>
           <Button
             onClick={handleAssign}
-            disabled={loading || validatedDocs.length === 0}
+            disabled={loading || validatedDocs.length === 0 || selectedAgentIds.size === 0}
           >
             {loading ? "Salvando..." : "Salva Assegnazioni"}
           </Button>
