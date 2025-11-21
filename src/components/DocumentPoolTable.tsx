@@ -1558,6 +1558,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         document={docToView}
         open={detailsDialogOpen}
         onOpenChange={setDetailsDialogOpen}
+        onRefresh={() => loadDocuments()}
       />
 
       {/* Assign Dialog */}
