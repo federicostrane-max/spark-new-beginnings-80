@@ -11,20 +11,24 @@ import { AlertCircle, PackageX, Clock, AlertTriangle } from "lucide-react";
 
 interface HealthData {
   stuckProcessing: { count: number; files: string[] };
-  stuckDownloaded: { count: number; files: string[] };
   noChunks: { count: number; files: string[] };
   stuckQueue: { count: number; files: string[] };
   pendingValidation: { count: number; files: string[] };
+  notProcessed: { count: number; files: Array<{ name: string; status: string }> };
   loading: boolean;
 }
 
-export const DocumentPoolHealthIndicators = () => {
+interface DocumentPoolHealthIndicatorsProps {
+  sourceType?: 'pdf' | 'github';
+}
+
+export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthIndicatorsProps = {}) => {
   const [healthData, setHealthData] = useState<HealthData>({
     stuckProcessing: { count: 0, files: [] },
-    stuckDownloaded: { count: 0, files: [] },
     noChunks: { count: 0, files: [] },
     stuckQueue: { count: 0, files: [] },
     pendingValidation: { count: 0, files: [] },
+    notProcessed: { count: 0, files: [] },
     loading: true
   });
 
@@ -33,22 +37,20 @@ export const DocumentPoolHealthIndicators = () => {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       
-      // 1. Documenti in processing > 10 min - con file names
-      const { data: stuckDocs, count: stuckCount } = await supabase
+      // 1. Documenti in processing > 10 min
+      let stuckQuery = supabase
         .from('knowledge_documents')
         .select('file_name', { count: 'exact' })
         .eq('processing_status', 'processing')
-        .lt('created_at', tenMinutesAgo)
-        .order('created_at', { ascending: true })
-        .limit(10);
-
-      // 1b. Documenti in downloaded > 5 min (in attesa di essere processati)
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const { data: downloadedDocs, count: downloadedCount } = await supabase
-        .from('knowledge_documents')
-        .select('file_name', { count: 'exact' })
-        .eq('processing_status', 'downloaded')
-        .lt('created_at', fiveMinutesAgo)
+        .lt('created_at', tenMinutesAgo);
+      
+      if (sourceType === 'github') {
+        stuckQuery = stuckQuery.like('folder', 'Huggingface_GitHub%');
+      } else if (sourceType === 'pdf') {
+        stuckQuery = stuckQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+      }
+      
+      const { data: stuckDocs, count: stuckCount } = await stuckQuery
         .order('created_at', { ascending: true })
         .limit(10);
 
@@ -63,12 +65,18 @@ export const DocumentPoolHealthIndicators = () => {
       // Solo se ci sono documenti senza chunks, recupera i primi 10 nomi
       let docsWithoutChunks: string[] = [];
       if (noChunksTotal && noChunksTotal > 0) {
-        // Recupera tutti i documenti ready e filtra quelli senza chunks
-        const { data: allDocs } = await supabase
+        let allDocsQuery = supabase
           .from('knowledge_documents')
           .select('id, file_name')
-          .eq('processing_status', 'ready_for_assignment')
-          .limit(100);
+          .eq('processing_status', 'ready_for_assignment');
+        
+        if (sourceType === 'github') {
+          allDocsQuery = allDocsQuery.like('folder', 'Huggingface_GitHub%');
+        } else if (sourceType === 'pdf') {
+          allDocsQuery = allDocsQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        }
+
+        const { data: allDocs } = await allDocsQuery.limit(100);
 
         if (allDocs) {
           // Verifica quali non hanno chunks
@@ -87,7 +95,7 @@ export const DocumentPoolHealthIndicators = () => {
       }
       const noChunksCount = noChunksTotal || 0;
 
-      // 3. Job queue in processing > 10 min - con file names
+      // 3. Job queue in processing > 10 min
       const { data: queueDocs, count: queueStuckCount } = await supabase
         .from('document_processing_queue')
         .select('document_id, knowledge_documents!inner(file_name)', { count: 'exact' })
@@ -95,22 +103,50 @@ export const DocumentPoolHealthIndicators = () => {
         .lt('started_at', tenMinutesAgo)
         .limit(10);
 
-      // 4. Documenti pending validation - con file names
-      const { data: pendingDocs, count: pendingCount } = await supabase
+      // 4. Documenti pending validation (solo per PDF)
+      const shouldQueryPendingValidation = !sourceType || sourceType === 'pdf';
+      let pendingCount = 0;
+      let pendingDocs: any[] = [];
+      
+      if (shouldQueryPendingValidation) {
+        let pendingQuery = supabase
+          .from('knowledge_documents')
+          .select('file_name', { count: 'exact' })
+          .eq('validation_status', 'pending');
+        
+        if (sourceType === 'pdf') {
+          pendingQuery = pendingQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        }
+
+        const result = await pendingQuery
+          .order('created_at', { ascending: true })
+          .limit(10);
+        
+        pendingCount = result.count || 0;
+        pendingDocs = result.data || [];
+      }
+
+      // 5. Documenti non processati (processing_status != ready_for_assignment e validati)
+      let notProcessedQuery = supabase
         .from('knowledge_documents')
-        .select('file_name', { count: 'exact' })
-        .eq('validation_status', 'pending')
-        .order('created_at', { ascending: true })
+        .select('file_name, processing_status', { count: 'exact' })
+        .neq('processing_status', 'ready_for_assignment')
+        .eq('validation_status', 'validated');
+      
+      if (sourceType === 'github') {
+        notProcessedQuery = notProcessedQuery.like('folder', 'Huggingface_GitHub%');
+      } else if (sourceType === 'pdf') {
+        notProcessedQuery = notProcessedQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+      }
+
+      const { data: notProcessedDocs, count: notProcessedCount } = await notProcessedQuery
+        .order('updated_at', { ascending: false })
         .limit(10);
 
       setHealthData({
         stuckProcessing: {
           count: stuckCount || 0,
           files: stuckDocs?.map(d => d.file_name) || []
-        },
-        stuckDownloaded: {
-          count: downloadedCount || 0,
-          files: downloadedDocs?.map(d => d.file_name) || []
         },
         noChunks: {
           count: noChunksCount || 0,
@@ -121,8 +157,12 @@ export const DocumentPoolHealthIndicators = () => {
           files: queueDocs?.map(q => q.knowledge_documents?.file_name).filter(Boolean) || []
         },
         pendingValidation: {
-          count: pendingCount || 0,
-          files: pendingDocs?.map(d => d.file_name) || []
+          count: pendingCount,
+          files: pendingDocs.map(d => d.file_name)
+        },
+        notProcessed: {
+          count: notProcessedCount || 0,
+          files: notProcessedDocs?.map(d => ({ name: d.file_name, status: d.processing_status })) || []
         },
         loading: false,
       });
@@ -180,42 +220,6 @@ export const DocumentPoolHealthIndicators = () => {
         </Tooltip>
       </TooltipProvider>
 
-      {/* Documenti downloaded non processati - SEMPRE VISIBILE */}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger>
-            <Badge 
-              variant={healthData.stuckDownloaded.count === 0 ? "outline" : "destructive"}
-              className={`text-xs cursor-help ${healthData.stuckDownloaded.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
-            >
-              <Clock className="h-3 w-3 mr-1" />
-              Downloaded: {healthData.stuckDownloaded.count}
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-sm">
-            {healthData.stuckDownloaded.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti scaricati sono stati processati</p>
-            ) : (
-              <div>
-                <p className="font-semibold text-orange-600 dark:text-orange-400">
-                  ⚠️ {healthData.stuckDownloaded.count} documenti in attesa di processing (&gt;5 min)
-                </p>
-                {healthData.stuckDownloaded.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.stuckDownloaded.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file}</li>
-                    ))}
-                    {healthData.stuckDownloaded.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.stuckDownloaded.count - 10}</li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
       {/* Documenti senza chunks - SEMPRE VISIBILE */}
       <TooltipProvider>
         <Tooltip>
@@ -247,6 +251,49 @@ export const DocumentPoolHealthIndicators = () => {
                     ))}
                     {healthData.noChunks.count > 10 && (
                       <li className="italic text-muted-foreground">... e altri {healthData.noChunks.count - 10}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {/* Documenti non processati - SEMPRE VISIBILE */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.notProcessed.count === 0 ? "outline" : "destructive"}
+              className={`text-xs cursor-help ${
+                healthData.notProcessed.count === 0 
+                  ? "border-green-500 text-green-700 dark:text-green-500" 
+                  : ""
+              }`}
+            >
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Non Processati: {healthData.notProcessed.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.notProcessed.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti validati sono stati processati</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-red-600 dark:text-red-400">
+                  ⚠️ {healthData.notProcessed.count} documenti validati non processati
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Documenti validati ma con errori di processing
+                </p>
+                {healthData.notProcessed.files.length > 0 && (
+                  <ul className="text-xs mt-2 space-y-1">
+                    {healthData.notProcessed.files.map((file, idx) => (
+                      <li key={idx} className="truncate">• {file.name} ({file.status})</li>
+                    ))}
+                    {healthData.notProcessed.count > 10 && (
+                      <li className="italic text-muted-foreground">... e altri {healthData.notProcessed.count - 10}</li>
                     )}
                   </ul>
                 )}
@@ -292,45 +339,47 @@ export const DocumentPoolHealthIndicators = () => {
         </Tooltip>
       </TooltipProvider>
 
-      {/* Documenti pending validation - SEMPRE VISIBILE */}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger>
-            <Badge 
-              variant={healthData.pendingValidation.count === 0 ? "outline" : "destructive"}
-              className={`text-xs cursor-help ${
-                healthData.pendingValidation.count === 0 
-                  ? "border-green-500 text-green-700 dark:text-green-500" 
-                  : ""
-              }`}
-            >
-              <AlertTriangle className="h-3 w-3 mr-1" />
-              Pending: {healthData.pendingValidation.count}
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-sm">
-            {healthData.pendingValidation.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento in attesa di validazione</p>
-            ) : (
-              <div>
-                <p className="font-semibold text-yellow-600 dark:text-yellow-400">
-                  ⚠️ {healthData.pendingValidation.count} documenti in attesa di validazione
-                </p>
-                {healthData.pendingValidation.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.pendingValidation.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file}</li>
-                    ))}
-                    {healthData.pendingValidation.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.pendingValidation.count - 10}</li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      {/* Documenti pending validation - SOLO PER PDF */}
+      {(!sourceType || sourceType === 'pdf') && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger>
+              <Badge 
+                variant={healthData.pendingValidation.count === 0 ? "outline" : "destructive"}
+                className={`text-xs cursor-help ${
+                  healthData.pendingValidation.count === 0 
+                    ? "border-green-500 text-green-700 dark:text-green-500" 
+                    : ""
+                }`}
+              >
+                <AlertTriangle className="h-3 w-3 mr-1" />
+                Pending: {healthData.pendingValidation.count}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-sm">
+              {healthData.pendingValidation.count === 0 ? (
+                <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento in attesa di validazione</p>
+              ) : (
+                <div>
+                  <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                    ⚠️ {healthData.pendingValidation.count} documenti in attesa di validazione
+                  </p>
+                  {healthData.pendingValidation.files.length > 0 && (
+                    <ul className="text-xs mt-2 space-y-1">
+                      {healthData.pendingValidation.files.map((file, idx) => (
+                        <li key={idx} className="truncate">• {file}</li>
+                      ))}
+                      {healthData.pendingValidation.count > 10 && (
+                        <li className="italic text-muted-foreground">... e altri {healthData.pendingValidation.count - 10}</li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
     </div>
   );
 };
