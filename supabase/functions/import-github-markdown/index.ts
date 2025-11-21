@@ -81,22 +81,16 @@ serve(async (req) => {
 
     console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
 
-    // Determine folder
-    const folderMap: Record<string, string> = {
-      'huggingface/transformers': 'Huggingface_GitHub/Transformers',
-      'huggingface/diffusers': 'Huggingface_GitHub/Diffusers',
-      'huggingface/datasets': 'Huggingface_GitHub/Datasets',
-      'huggingface/peft': 'Huggingface_GitHub/PEFT',
-      'huggingface/hub-docs': 'Huggingface_GitHub/Hub'
-    };
-    const folder = folderMap[repo] || `GitHub/${repo}`;
+    // Determine base folder for repository
+    const repoBaseName = repo.split('/')[1];
+    const baseFolder = `Huggingface_GitHub/${repoBaseName.charAt(0).toUpperCase() + repoBaseName.slice(1)}`;
 
-    // ⭐ Insert initial progress record
+    // ⭐ Insert initial progress record (using base folder)
     const { data: progressRecord } = await supabase
       .from('github_import_progress')
       .insert({
         repo,
-        folder,
+        folder: baseFolder,
         total_files: markdownFiles.length,
         downloaded: 0,
         processed: 0,
@@ -119,6 +113,7 @@ serve(async (req) => {
     const existingSet = new Set(existingDocs?.map(d => d.file_name) || []);
 
     const BATCH_SIZE = 50;
+    const allFolders = new Set<string>();
     const documentsToInsert = [];
 
     for (const file of markdownFiles) {
@@ -138,6 +133,20 @@ serve(async (req) => {
         }
 
         const content = await contentResponse.text();
+
+        // Extract folder structure from file path
+        const filePath = file.path;
+        const pathParts = filePath.split('/');
+        pathParts.pop(); // Remove filename
+        
+        // Build complete folder path
+        let documentFolder = baseFolder;
+        if (pathParts.length > 0) {
+          documentFolder = `${baseFolder}/${pathParts.join('/')}`;
+        }
+        
+        // Add to unique folders set
+        allFolders.add(documentFolder);
 
         // Use file path for reference (storage upload is optional, we have full_text)
         const storagePath = `github/${repo}/${file.path}`;
@@ -161,7 +170,7 @@ serve(async (req) => {
           text_length: content.length,
           extracted_title: title,
           ai_summary: description || `GitHub docs from ${repo}`,
-          folder,
+          folder: documentFolder,
           source_url: `https://github.com/${owner}/${repoName}/blob/main/${file.path}`,
           search_query: `GitHub:${repo}`,
           processing_status: 'downloaded', // Avoid triggering old processing system
@@ -205,6 +214,38 @@ serve(async (req) => {
       }
     }
 
+    // Create folder hierarchy in database
+    console.log(`📁 Creating ${allFolders.size} folders in database...`);
+    for (const folderPath of allFolders) {
+      const parts = folderPath.split('/');
+      let currentPath = '';
+      
+      for (let i = 0; i < parts.length; i++) {
+        currentPath = i === 0 ? parts[0] : `${currentPath}/${parts[i]}`;
+        const parentPath = i === 0 ? null : parts.slice(0, i).join('/');
+        
+        // Check if folder exists
+        const { data: existing } = await supabase
+          .from('folders')
+          .select('id')
+          .eq('name', currentPath)
+          .maybeSingle();
+        
+        if (!existing) {
+          await supabase
+            .from('folders')
+            .insert({
+              name: currentPath,
+              parent_folder: parentPath,
+              description: `Imported from GitHub: ${repo}`,
+              icon: 'folder',
+              color: 'blue'
+            });
+          console.log(`✅ Created folder: ${currentPath}`);
+        }
+      }
+    }
+
     // Insert remaining
     if (documentsToInsert.length > 0) {
       console.log(`📤 Inserting final batch of ${documentsToInsert.length} documents...`);
@@ -240,7 +281,7 @@ serve(async (req) => {
     
     // Trigger continuous batch processing ONLY if skipProcessing is false
     if (results.saved > 0 && !skipProcessing) {
-      console.log(`🚀 Starting continuous batch processing for ${results.saved} documents in folder: ${folder}`);
+      console.log(`🚀 Starting continuous batch processing for ${results.saved} documents in folder: ${baseFolder}`);
       
       try {
         const BATCH_SIZE = 100; // Process 100 at a time
@@ -255,7 +296,7 @@ serve(async (req) => {
           
           const { data: batchResult, error: batchError } = await supabase.functions.invoke(
             'process-github-batch',
-            { body: { batchSize: BATCH_SIZE, folder } }
+            { body: { batchSize: BATCH_SIZE, folder: baseFolder } }
           );
 
           if (batchError) {

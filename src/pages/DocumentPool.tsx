@@ -11,33 +11,9 @@ import { toast } from "sonner";
 export default function DocumentPool() {
   const navigate = useNavigate();
   const [tableKey, setTableKey] = useState(0);
-  const [isRecategorizing, setIsRecategorizing] = useState(false);
 
   const handleUploadComplete = () => {
     setTableKey(prev => prev + 1);
-  };
-
-  const handleRecategorizeGitHub = async () => {
-    try {
-      setIsRecategorizing(true);
-      toast.loading('Ricategorizzazione documenti GitHub in corso...', { id: 'recategorize' });
-
-      const { data, error } = await supabase.rpc('recategorize_github_documents');
-
-      if (error) throw error;
-
-      toast.success(`${data} documenti ricategorizzati con successo`, { 
-        id: 'recategorize',
-        duration: 5000 
-      });
-
-      setTableKey(prev => prev + 1);
-    } catch (error: any) {
-      console.error('[Recategorize Error]', error);
-      toast.error(`Errore: ${error.message}`, { id: 'recategorize' });
-    } finally {
-      setIsRecategorizing(false);
-    }
   };
 
   return (
@@ -66,11 +42,7 @@ export default function DocumentPool() {
       {/* Upload & Import Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
-        <GitHubDocsImport 
-          onImportComplete={handleUploadComplete}
-          onRecategorize={handleRecategorizeGitHub}
-          isRecategorizing={isRecategorizing}
-        />
+        <GitHubDocsImport onImportComplete={handleUploadComplete} />
       </div>
 
       {/* Documents Table */}

@@ -25,8 +25,6 @@ import {
 
 interface GitHubDocsImportProps {
   onImportComplete: () => void;
-  onRecategorize: () => void;
-  isRecategorizing: boolean;
 }
 
 // ⭐ Path vuoto = import COMPLETO del repository (con filtri intelligenti)
@@ -38,7 +36,7 @@ const HUGGINGFACE_REPOS = [
   { value: "huggingface/peft", label: "PEFT", path: "" },
 ];
 
-export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategorizing }: GitHubDocsImportProps) => {
+export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) => {
   const [open, setOpen] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState("");
   const [pathFilter, setPathFilter] = useState("");
@@ -454,24 +452,6 @@ export const GitHubDocsImport = ({ onImportComplete, onRecategorize, isRecategor
               )}
             </Button>
 
-            <Button
-              onClick={onRecategorize}
-              disabled={isRecategorizing}
-              variant="outline"
-              className="w-full gap-2"
-            >
-              {isRecategorizing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Ricategorizzazione...
-                </>
-              ) : (
-                <>
-                  <FolderTree className="h-4 w-4" />
-                  Riorganizza Documenti GitHub
-                </>
-              )}
-            </Button>
           </div>
 
           {/* Info */}
