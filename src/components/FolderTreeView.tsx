@@ -59,6 +59,19 @@ export function FolderTreeView({
 }: FolderTreeViewProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
 
+  // Raccoglie ricorsivamente TUTTI i documenti (parent + children)
+  const getAllDocsIncludingChildren = (folder: FolderData): KnowledgeDocument[] => {
+    let allDocs = [...folder.documents];
+    
+    if (folder.children && folder.children.length > 0) {
+      folder.children.forEach(child => {
+        allDocs = [...allDocs, ...getAllDocsIncludingChildren(child)];
+      });
+    }
+    
+    return allDocs;
+  };
+
   const handleFolderCheckboxChange = (folderDocs: KnowledgeDocument[], selectedCount: number) => {
     const shouldSelectAll = selectedCount < folderDocs.length;
     const docIds = folderDocs.map(doc => doc.id);
@@ -123,7 +136,8 @@ export function FolderTreeView({
         folders.map((folder) => {
           const isExpanded = expandedFolders.has(folder.id);
           const folderDocs = folder.documents;
-          const selectedInFolder = folderDocs.filter(doc => selectedDocuments.has(doc.id)).length;
+          const allFolderDocs = getAllDocsIncludingChildren(folder);
+          const selectedInFolder = allFolderDocs.filter(doc => selectedDocuments.has(doc.id)).length;
           
           return (
             <Collapsible
@@ -135,13 +149,13 @@ export function FolderTreeView({
               <div className="flex items-center justify-between p-3 bg-muted/50 hover:bg-muted transition-colors">
                 <div className="flex items-center gap-2 flex-1">
                   <Checkbox
-                    checked={selectedInFolder === folderDocs.length && folderDocs.length > 0}
+                    checked={selectedInFolder === allFolderDocs.length && allFolderDocs.length > 0}
                     ref={(el: any) => {
-                      if (el && selectedInFolder > 0 && selectedInFolder < folderDocs.length) {
+                      if (el && selectedInFolder > 0 && selectedInFolder < allFolderDocs.length) {
                         el.indeterminate = true;
                       }
                     }}
-                    onCheckedChange={() => handleFolderCheckboxChange(folderDocs, selectedInFolder)}
+                    onCheckedChange={() => handleFolderCheckboxChange(allFolderDocs, selectedInFolder)}
                     onClick={(e) => e.stopPropagation()}
                     className="mr-1"
                   />
@@ -177,22 +191,22 @@ export function FolderTreeView({
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleFolderCheckboxChange(folderDocs, 0);
+                        handleFolderCheckboxChange(allFolderDocs, 0);
                       }}
                     >
                       <FolderCheck className="mr-2 h-4 w-4" />
-                      Seleziona tutti ({folder.documentCount})
+                      Seleziona tutti ({allFolderDocs.length})
                     </DropdownMenuItem>
                     
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
                         if (onFolderAssign) {
-                          const readyDocs = folderDocs.filter(d => d.processing_status === 'ready_for_assignment');
+                          const readyDocs = allFolderDocs.filter(d => d.processing_status === 'ready_for_assignment');
                           onFolderAssign(readyDocs);
                         }
                       }}
-                      disabled={folderDocs.filter(d => d.processing_status === 'ready_for_assignment').length === 0}
+                      disabled={allFolderDocs.filter(d => d.processing_status === 'ready_for_assignment').length === 0}
                     >
                       <Users className="mr-2 h-4 w-4" />
                       Assegna cartella a agente
