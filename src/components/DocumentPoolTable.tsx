@@ -814,21 +814,34 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   };
 
 
-  const handleFolderAssign = (folderDocs: KnowledgeDocument[]) => {
-    // Seleziona automaticamente i documenti della cartella pronti per l'assegnazione
-    const readyDocIds = folderDocs
-      .filter(d => d.processing_status === 'ready_for_assignment')
-      .map(d => d.id);
-    
-    if (readyDocIds.length === 0) {
-      toast.error("Nessun documento pronto per l'assegnazione in questa cartella");
-      return;
+  // Handler for folder bulk assignment by folder name
+  const handleFolderAssignByName = async (folderName: string) => {
+    try {
+      console.log('📋 [DocumentPoolTable] handleFolderAssignByName called with:', folderName);
+      
+      // Query database for ALL document IDs in this folder (including subfolders)
+      const { data, error } = await supabase
+        .from("knowledge_documents")
+        .select("id")
+        .eq("processing_status", "ready_for_assignment")
+        .like("folder", `${folderName}%`);
+      
+      if (error) throw error;
+      
+      if (!data || data.length === 0) {
+        toast.error("Nessun documento pronto per l'assegnazione in questa cartella");
+        return;
+      }
+      
+      console.log('✅ [DocumentPoolTable] Found documents:', data.length);
+      
+      // Set the selected document IDs and open the bulk assign dialog
+      setSelectedDocIds(new Set(data.map(d => d.id)));
+      setBulkAssignDialogOpen(true);
+    } catch (error) {
+      console.error("Error loading folder documents:", error);
+      toast.error("Errore nel caricamento dei documenti della cartella");
     }
-    
-    setSelectedDocIds(new Set(readyDocIds));
-    
-    // Apri il dialogo di assegnazione bulk
-    setBulkAssignDialogOpen(true);
   };
 
   const handleFolderDelete = async (folderId: string, folderName: string) => {
@@ -1177,7 +1190,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                   setDetailsDialogOpen(true);
                 }
               }}
-              onFolderAssign={handleFolderAssign}
+              onFolderAssign={handleFolderAssignByName}
               onFolderDelete={handleFolderDelete}
             />
           ) : filteredDocuments.length === 0 ? (
