@@ -181,8 +181,9 @@ serve(async (req) => {
     console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
 
     // Determine base folder for repository
+    const orgName = repo.split('/')[0];
     const repoBaseName = repo.split('/')[1];
-    const baseFolder = `Huggingface_GitHub/${repoBaseName.charAt(0).toUpperCase() + repoBaseName.slice(1)}`;
+    const baseFolder = `${orgName.charAt(0).toUpperCase() + orgName.slice(1)}/${repoBaseName.charAt(0).toUpperCase() + repoBaseName.slice(1)}`;
 
     // ⭐ Insert initial progress record (using base folder)
     const { data: progressRecord } = await supabase
