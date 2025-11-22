@@ -28,7 +28,12 @@ serve(async (req) => {
 
     if (!githubToken) throw new Error('GitHub token not configured');
 
+    // Validate repo format
     const [owner, repoName] = repo.split('/');
+    if (!owner || !repoName || repo.split('/').length !== 2) {
+      throw new Error(`Invalid repository format: "${repo}". Expected format: "owner/repository" (e.g., "facebook/react", "huggingface/transformers")`);
+    }
+
     const treeUrl = `https://api.github.com/repos/${owner}/${repoName}/git/trees/main?recursive=1`;
     
     const treeResponse = await fetch(treeUrl, {
