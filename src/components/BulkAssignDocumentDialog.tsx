@@ -220,6 +220,7 @@ export const BulkAssignDocumentDialog = ({
         .from("knowledge_documents")
         .select("id")
         .eq("processing_status", "ready_for_assignment")
+        .eq("validation_status", "validated")
         .limit(10000); // Explicit high limit to bypass default 1000 row limit
 
       if (folderName) {
