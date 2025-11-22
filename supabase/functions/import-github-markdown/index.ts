@@ -162,49 +162,72 @@ serve(async (req) => {
     const pattern = filePattern.replace('*.', '.');
     console.log(`🔍 File pattern: "${filePattern}" → regex pattern: "${pattern}"`);
     
-    // ⭐ Filtro intelligente con path opzionale - SEMPRE ricorsivo
+    // ⭐ Filtro intelligente: documentazione + configurazione + codice sorgente
     const markdownFiles = treeData.tree
       .filter((item: GitHubTreeItem) => {
         // Deve essere un file
         if (item.type !== 'blob') return false;
         
-        // Supporta tutti i formati di documentazione comuni
-        const supportedExtensions = [
-          '.md',        // Markdown
-          '.mdx',       // MDX (Markdown + JSX)
-          '.txt',       // Plain text
-          '.rst',       // reStructuredText (Python docs)
-          '.adoc',      // AsciiDoc
-          '.asciidoc',  // AsciiDoc (alt)
-          '.org',       // Org-mode
-          '.textile',   // Textile markup
-          '.wiki'       // MediaWiki
+        // 1️⃣ DOCUMENTAZIONE (sempre utile)
+        const docsExtensions = [
+          '.md', '.mdx', '.txt', '.rst', '.adoc', '.asciidoc', '.org', '.textile', '.wiki'
         ];
         
-        const hasValidExtension = supportedExtensions.some(ext => item.path.toLowerCase().endsWith(ext));
+        // 2️⃣ CONFIGURAZIONE (leggibile, spesso spiega la struttura)
+        const configExtensions = [
+          '.json', '.yaml', '.yml', '.toml', '.xml', '.ini', '.env', '.conf'
+        ];
+        
+        // 3️⃣ CODICE SORGENTE (utile per capire API, esempi, architettura)
+        const codeExtensions = [
+          '.py', '.js', '.ts', '.jsx', '.tsx', '.go', '.java', '.php', '.rb', '.rs',
+          '.cpp', '.cxx', '.h', '.hpp', '.c', '.cs', '.swift', '.kt', '.dart',
+          '.sh', '.bash', '.ps1', '.r', '.scala', '.lua', '.pl', '.sql'
+        ];
+        
+        // File speciali (senza estensione ma importanti)
+        const specialFiles = [
+          'README', 'CHANGELOG', 'LICENSE', 'CONTRIBUTING', 'AUTHORS', 
+          'Dockerfile', 'Makefile', 'Rakefile', 'Gemfile', 'Pipfile'
+        ];
+        
+        const fileName = item.path.split('/').pop() || '';
+        const lowerPath = item.path.toLowerCase();
+        
+        // Controlla estensioni supportate
+        const hasValidExtension = 
+          docsExtensions.some(ext => lowerPath.endsWith(ext)) ||
+          configExtensions.some(ext => lowerPath.endsWith(ext)) ||
+          codeExtensions.some(ext => lowerPath.endsWith(ext)) ||
+          specialFiles.some(special => fileName.toUpperCase().startsWith(special.toUpperCase()));
+        
         if (!hasValidExtension) return false;
         
-        // Escludi automaticamente cartelle comuni da ignorare
+        // ❌ ESCLUDI directory inutili (build, cache, dependencies)
         const excludePaths = [
-          '.github/',      // GitHub Actions e config
-          'node_modules/', // Dependencies
-          'tests/',        // Test files
-          'test/',         // Test files (alt)
-          '__tests__/',    // Test files
-          'examples/',     // Example code (optional, can be removed if needed)
-          '__pycache__/',  // Python cache
-          '.git/',         // Git internals
-          'dist/',         // Build output
-          'build/',        // Build output
-          '.vscode/',      // Editor config
-          '.idea/',        // JetBrains config
-          'coverage/',     // Test coverage
-          'vendor/',       // Dependencies (PHP, Go)
-          'target/',       // Build output (Java, Rust)
+          'node_modules/', 'vendor/', '__pycache__/', '.git/', '.vscode/', '.idea/',
+          'dist/', 'build/', 'target/', 'out/', 'bin/', 'obj/',
+          '.cache/', '.pytest_cache/', '.mypy_cache/', 'coverage/',
+          '.github/workflows/', 'tests/', 'test/', '__tests__/', 'spec/',
+          'examples/', 'docs/examples/', 'public/', 'assets/', 'images/', 'static/'
         ];
         
         // Ritorna false se il path contiene una delle cartelle da escludere
-        if (excludePaths.some(exclude => item.path.includes(exclude))) {
+        if (excludePaths.some(exclude => lowerPath.includes(exclude))) {
+          return false;
+        }
+        
+        // ❌ ESCLUDI binari e asset (inutili per LLM)
+        const binaryExtensions = [
+          '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.bmp',
+          '.pdf', '.zip', '.tar', '.gz', '.rar', '.7z',
+          '.mp4', '.mp3', '.avi', '.mov', '.wav', '.flac',
+          '.woff', '.woff2', '.ttf', '.otf', '.eot',
+          '.bin', '.exe', '.dll', '.so', '.dylib',
+          '.model', '.weights', '.ckpt', '.pth', '.h5', '.pickle', '.pkl'
+        ];
+        
+        if (binaryExtensions.some(ext => lowerPath.endsWith(ext))) {
           return false;
         }
         
@@ -218,7 +241,7 @@ serve(async (req) => {
       })
       .slice(0, maxFiles);
 
-    console.log(`📄 Found ${markdownFiles.length} documentation files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
+    console.log(`📄 Found ${markdownFiles.length} files (docs + config + code)${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
     
     // 🔍 DEBUG: Log found files
     if (markdownFiles.length > 0) {
