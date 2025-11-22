@@ -165,8 +165,12 @@ serve(async (req) => {
     // ⭐ Filtro intelligente con path opzionale - SEMPRE ricorsivo
     const markdownFiles = treeData.tree
       .filter((item: GitHubTreeItem) => {
-        // Deve essere un file e finire con il pattern
-        if (item.type !== 'blob' || !item.path.endsWith(pattern)) return false;
+        // Deve essere un file
+        if (item.type !== 'blob') return false;
+        
+        // Supporta sia .md che .mdx
+        const isMarkdown = item.path.endsWith('.md') || item.path.endsWith('.mdx');
+        if (!isMarkdown) return false;
         
         // Escludi automaticamente cartelle comuni da ignorare
         const excludePaths = [
