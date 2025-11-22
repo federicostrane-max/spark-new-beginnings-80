@@ -33,7 +33,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Check duplicate
+    // Check duplicate in database
     const { data: existingDoc } = await supabase
       .from('knowledge_documents')
       .select('id')
@@ -44,7 +44,7 @@ serve(async (req) => {
       throw new Error(`Il documento "${fileName}" è già presente (ID: ${existingDoc.id})`);
     }
 
-    // Upload to storage
+    // Upload to storage (with upsert to handle existing files)
     let storagePath = '';
     if (fileData) {
       const binaryString = atob(fileData);
@@ -53,16 +53,18 @@ serve(async (req) => {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
+      // Use upsert: true to overwrite if file exists in storage
+      // (this handles cases where storage file exists but DB record doesn't)
       const { error: uploadError } = await supabase.storage
         .from('shared-pool-uploads')
         .upload(fileName, bytes, {
           contentType: 'application/pdf',
-          upsert: false
+          upsert: true
         });
 
       if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
       storagePath = `shared-pool-uploads/${fileName}`;
-      console.log('[STORAGE] PDF uploaded');
+      console.log('[STORAGE] PDF uploaded/updated');
     }
 
     // Insert document in PENDING state - trigger will handle processing
