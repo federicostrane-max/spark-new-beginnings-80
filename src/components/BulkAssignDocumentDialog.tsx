@@ -352,8 +352,26 @@ export const BulkAssignDocumentDialog = ({
 
       setProgressMessage("Finalizzazione...");
 
+      // 🚀 Trigger background sync process
+      console.log('[BulkAssign] Triggering background sync for pending documents...');
+      try {
+        const { error: syncError } = await supabase.functions.invoke('process-sync-queue', {
+          body: { batchSize: 50 }
+        });
+
+        if (syncError) {
+          console.error('[BulkAssign] Failed to start sync process:', syncError);
+          toast.error(
+            `Documenti assegnati ma la sincronizzazione automatica potrebbe aver fallito. Controlla lo stato.`,
+            { duration: 5000 }
+          );
+        }
+      } catch (syncTriggerError) {
+        console.error('[BulkAssign] Exception triggering sync:', syncTriggerError);
+      }
+
       toast.success(
-        `Assegnazione completata! ${validatedDocs.length} documenti → ${selectedAgentIds.size} agenti. Sync in background...`,
+        `Assegnati ${validatedDocs.length} documenti a ${selectedAgentIds.size} agenti. Sincronizzazione in background avviata.`,
         { duration: 5000 }
       );
       

@@ -168,3 +168,7 @@ timeout = 300
 
 [functions.cleanup-broken-pdfs]
 verify_jwt = false
+
+[functions.process-sync-queue]
+verify_jwt = true
+timeout = 900
