@@ -62,6 +62,7 @@ import { BulkAssignDocumentDialog } from "./BulkAssignDocumentDialog";
 import { CreateFolderDialog } from "./CreateFolderDialog";
 import { AssignToFolderDialog } from "./AssignToFolderDialog";
 import { ManageFoldersDialog } from "./ManageFoldersDialog";
+import { RenameFolderDialog } from "./RenameFolderDialog";
 import { FolderTreeView } from "./FolderTreeView";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DocumentPoolHealthIndicators } from "./DocumentPoolHealthIndicators";
@@ -141,6 +142,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const [createFolderDialogOpen, setCreateFolderDialogOpen] = useState(false);
   const [assignToFolderDialogOpen, setAssignToFolderDialogOpen] = useState(false);
   const [manageFoldersDialogOpen, setManageFoldersDialogOpen] = useState(false);
+  const [renameFolderDialogOpen, setRenameFolderDialogOpen] = useState(false);
+  const [folderToRename, setFolderToRename] = useState<{ id: string; name: string } | null>(null);
   const [docsToAssignToFolder, setDocsToAssignToFolder] = useState<{ ids: string[]; names: string[] }>({ ids: [], names: [] });
   
   // View mode state
@@ -1189,6 +1192,23 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
               }}
               onFolderAssign={handleFolderAssignByName}
               onFolderDelete={handleFolderDelete}
+              onFolderRename={(folderId, currentName) => {
+                setFolderToRename({ id: folderId, name: currentName });
+                setRenameFolderDialogOpen(true);
+              }}
+              onFolderMove={(folderName) => {
+                // Get selected documents from this folder
+                const folderDocs = documents.filter(
+                  d => d.folder === folderName && selectedDocIds.has(d.id)
+                );
+                if (folderDocs.length > 0) {
+                  setDocsToAssignToFolder({
+                    ids: folderDocs.map(d => d.id),
+                    names: folderDocs.map(d => d.file_name)
+                  });
+                  setAssignToFolderDialogOpen(true);
+                }
+              }}
             />
           ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -1799,6 +1819,19 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         onFoldersChanged={() => {
           loadDocuments();
           loadAvailableFolders();
+        }}
+      />
+
+      <RenameFolderDialog
+        open={renameFolderDialogOpen}
+        onOpenChange={setRenameFolderDialogOpen}
+        folderId={folderToRename?.id || ""}
+        currentName={folderToRename?.name || ""}
+        existingFolders={availableFolders}
+        onRenamed={() => {
+          loadDocuments();
+          loadAvailableFolders();
+          setFolderToRename(null);
         }}
       />
 
