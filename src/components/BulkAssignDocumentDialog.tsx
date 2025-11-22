@@ -67,7 +67,8 @@ export const BulkAssignDocumentDialog = ({
           .from("knowledge_documents")
           .select("id", { count: 'exact', head: true })
           .like("folder", `${folderName}%`)
-          .eq("processing_status", "ready_for_assignment");
+          .eq("processing_status", "ready_for_assignment")
+          .eq("validation_status", "validated");
         
         setValidatedCount(validCount || 0);
       } else if (documentIds && documentIds.length > 0) {
@@ -83,7 +84,8 @@ export const BulkAssignDocumentDialog = ({
           .from("knowledge_documents")
           .select("id", { count: 'exact', head: true })
           .in("id", documentIds)
-          .eq("processing_status", "ready_for_assignment");
+          .eq("processing_status", "ready_for_assignment")
+          .eq("validation_status", "validated");
         
         setValidatedCount(validCount || 0);
       }
