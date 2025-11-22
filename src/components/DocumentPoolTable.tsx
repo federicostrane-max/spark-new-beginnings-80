@@ -490,10 +490,12 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
         const allDocs = [...transformedParentDocs, ...allChildDocs];
         
-        // Calculate total files for parent (sum of all children)
-        const parentTotalFiles = childrenWithDocs.reduce((sum, child) => {
+        // Calculate total files for parent: check parent's own totalFiles first, then sum children
+        const parentOwnTotal = folderTotalsMap.get(parentName) || 0;
+        const childrenTotal = childrenWithDocs.reduce((sum, child) => {
           return sum + (child.totalFiles || 0);
         }, 0);
+        const parentTotalFiles = parentOwnTotal + childrenTotal;
         
         hierarchicalFolders.push({
           id: parentFolder.id,
@@ -550,10 +552,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
               };
             });
 
+            // Get total files for standalone folder
+            const totalFiles = folderTotalsMap.get(folder.name);
+            
             return {
               id: folder.id,
               name: folder.name,
               documentCount: transformedDocs.length,
+              totalFiles: totalFiles,
               documents: transformedDocs,
             };
           })
