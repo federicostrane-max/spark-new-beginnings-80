@@ -167,6 +167,13 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     console.log('🔍 [checkSyncStatusesDirect] START - docs count:', docs.length);
     
     try {
+      // Se non ci sono documenti, imposta tutti come vuoti e ritorna
+      if (docs.length === 0) {
+        console.log('ℹ️ No documents to check, skipping query');
+        setDocuments([]);
+        return;
+      }
+
       const docIds = docs.map(d => d.id);
       console.log('🔍 Looking for chunks with IDs:', docIds.slice(0, 3));
       
