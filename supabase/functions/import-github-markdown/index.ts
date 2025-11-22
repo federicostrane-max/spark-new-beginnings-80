@@ -231,13 +231,9 @@ serve(async (req) => {
           return false;
         }
         
-        // Se path è specificato, filtra per il path (ma SEMPRE ricorsivo, non solo top-level)
-        // Se path è vuoto/null/undefined → scarica TUTTO il repository
-        if (path && path !== '') {
-          return item.path.startsWith(path);
-        }
-        
-        return true; // Include all remaining files
+        // ✅ SEMPRE ricorsivo: scarica TUTTO il repository senza filtri sul path
+        // Il parametro 'path' viene ignorato per evitare di perdere cartelle
+        return true; // Include all valid files
       })
       .slice(0, maxFiles);
 
@@ -346,7 +342,7 @@ serve(async (req) => {
           folder: documentFolder,
           source_url: `https://github.com/${owner}/${repoName}/blob/main/${file.path}`,
           search_query: `GitHub:${repo}`,
-          processing_status: 'downloaded', // Avoid triggering old processing system
+          processing_status: 'pending_processing', // ✅ Triggera il processing automatico
           validation_status: 'validated', // GitHub docs are pre-validated
           chunking_strategy: 'sliding_window',
           metadata_extraction_method: 'text',
