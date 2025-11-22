@@ -78,6 +78,16 @@ export function AssignToFolderDialog({
     setIsLoading(true);
 
     try {
+      // Se sta creando una nuova cartella, crearla prima nella tabella folders
+      if (isCreatingNew) {
+        const { error: folderError } = await supabase
+          .from('folders')
+          .insert({ name: folderToAssign });
+
+        if (folderError) throw folderError;
+      }
+
+      // Assegna i documenti alla cartella
       const { error } = await supabase
         .from('knowledge_documents')
         .update({ folder: folderToAssign })
