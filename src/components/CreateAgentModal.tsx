@@ -624,6 +624,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                     <span className="text-xs text-muted-foreground">Advanced reasoning, high quality</span>
                   </div>
                 </SelectItem>
+                <SelectItem value="google">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Google Gemini</span>
+                    <span className="text-xs text-muted-foreground">Multimodal, fast, cost-effective</span>
+                  </div>
+                </SelectItem>
                 <SelectItem value="deepseek">
                   <div className="flex flex-col">
                     <span className="font-medium">DeepSeek Reasoner</span>
@@ -634,6 +640,18 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                   <div className="flex flex-col">
                     <span className="font-medium">OpenAI GPT</span>
                     <span className="text-xs text-muted-foreground">Versatile, widely supported</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="mistral">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Mistral AI</span>
+                    <span className="text-xs text-muted-foreground">European AI, efficient, multilingual</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="x-ai">
+                  <div className="flex flex-col">
+                    <span className="font-medium">xAI Grok</span>
+                    <span className="text-xs text-muted-foreground">Real-time info, humor, latest tech</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="openrouter">
@@ -679,6 +697,114 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               <p className="text-xs text-muted-foreground mt-1">
                 Reasoner include &lt;think&gt; tags per mostrare il ragionamento step-by-step
               </p>
+            </div>
+          )}
+
+          {/* Google Gemini Model Selection */}
+          {llmProvider === 'google' && (
+            <div>
+              <Label htmlFor="aiModel">Google Gemini Model *</Label>
+              <Select 
+                value={aiModel || 'gemini-2.0-flash-exp'} 
+                onValueChange={setAiModel}
+                disabled={loading}
+              >
+                <SelectTrigger id="aiModel">
+                  <SelectValue placeholder="Select Gemini model" />
+                </SelectTrigger>
+                <SelectContent className="bg-background z-50">
+                  <SelectItem value="gemini-2.0-flash-exp">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini 2.0 Flash</span>
+                      <span className="text-xs text-muted-foreground">Latest, fastest, multimodal</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="gemini-exp-1206">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini Experimental 1206</span>
+                      <span className="text-xs text-muted-foreground">Advanced experimental features</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="gemini-1.5-pro-latest">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini 1.5 Pro</span>
+                      <span className="text-xs text-muted-foreground">Large context, high quality</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="gemini-1.5-flash">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini 1.5 Flash</span>
+                      <span className="text-xs text-muted-foreground">Fast, cost-effective</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Mistral Model Selection */}
+          {llmProvider === 'mistral' && (
+            <div>
+              <Label htmlFor="aiModel">Mistral Model *</Label>
+              <Select 
+                value={aiModel || 'mistral-large-latest'} 
+                onValueChange={setAiModel}
+                disabled={loading}
+              >
+                <SelectTrigger id="aiModel">
+                  <SelectValue placeholder="Select Mistral model" />
+                </SelectTrigger>
+                <SelectContent className="bg-background z-50">
+                  <SelectItem value="mistral-large-latest">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Mistral Large</span>
+                      <span className="text-xs text-muted-foreground">Most capable, complex tasks</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="mistral-medium-latest">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Mistral Medium</span>
+                      <span className="text-xs text-muted-foreground">Balanced performance</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="mistral-small-latest">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Mistral Small</span>
+                      <span className="text-xs text-muted-foreground">Fast, cost-effective</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* xAI Grok Model Selection */}
+          {llmProvider === 'x-ai' && (
+            <div>
+              <Label htmlFor="aiModel">xAI Grok Model *</Label>
+              <Select 
+                value={aiModel || 'grok-beta'} 
+                onValueChange={setAiModel}
+                disabled={loading}
+              >
+                <SelectTrigger id="aiModel">
+                  <SelectValue placeholder="Select Grok model" />
+                </SelectTrigger>
+                <SelectContent className="bg-background z-50">
+                  <SelectItem value="grok-beta">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Grok Beta</span>
+                      <span className="text-xs text-muted-foreground">Latest Grok with real-time info</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="grok-vision-beta">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Grok Vision Beta</span>
+                      <span className="text-xs text-muted-foreground">Multimodal with vision</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           )}
 
