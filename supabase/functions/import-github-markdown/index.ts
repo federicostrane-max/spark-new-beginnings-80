@@ -18,9 +18,8 @@ serve(async (req) => {
   }
 
   try {
-    const { repo, path, maxFiles = 999999, filePattern = "*.md", skipProcessing = false } = await req.json();
-    console.log(`📥 Importing from ${repo}/${path}`);
-
+    const { repo, path, maxFiles = 999999, filePattern = "*.md", skipProcessing = false, importAllOrgRepos = false } = await req.json();
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const githubToken = Deno.env.get('GITHUB_TOKEN');
@@ -28,7 +27,102 @@ serve(async (req) => {
 
     if (!githubToken) throw new Error('GitHub token not configured');
 
-    // Validate repo format
+    // ⭐ NEW: Import all repos from organization
+    if (importAllOrgRepos) {
+      const orgName = repo; // In this case, repo is the organization name
+      console.log(`🏢 Importing ALL repositories from organization: ${orgName}`);
+      
+      // Get all repos from organization
+      const orgReposUrl = `https://api.github.com/orgs/${orgName}/repos?per_page=100`;
+      const orgReposResponse = await fetch(orgReposUrl, {
+        headers: {
+          'Authorization': `Bearer ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'Supabase-Function'
+        }
+      });
+
+      if (!orgReposResponse.ok) {
+        throw new Error(`GitHub API error fetching org repos: ${orgReposResponse.status}`);
+      }
+
+      const repos = await orgReposResponse.json();
+      console.log(`📚 Found ${repos.length} repositories in ${orgName}`);
+
+      const allResults = {
+        organization: orgName,
+        totalRepos: repos.length,
+        successful: 0,
+        failed: 0,
+        repos: [] as any[]
+      };
+
+      // Import each repository
+      for (const repoInfo of repos) {
+        const repoFullName = repoInfo.full_name; // e.g., "lovablelabs/repo-name"
+        console.log(`\n📦 Importing repository: ${repoFullName}`);
+
+        try {
+          // Recursively call this same function for each repo
+          const { data: repoResult, error: repoError } = await supabase.functions.invoke(
+            'import-github-markdown',
+            {
+              body: {
+                repo: repoFullName,
+                path: path || "",
+                maxFiles,
+                filePattern,
+                skipProcessing,
+                importAllOrgRepos: false // Important: don't recurse infinitely!
+              }
+            }
+          );
+
+          if (repoError) {
+            console.error(`❌ Failed to import ${repoFullName}:`, repoError);
+            allResults.failed++;
+            allResults.repos.push({
+              name: repoFullName,
+              status: 'failed',
+              error: repoError.message
+            });
+          } else {
+            console.log(`✅ Successfully imported ${repoFullName}`);
+            allResults.successful++;
+            allResults.repos.push({
+              name: repoFullName,
+              status: 'success',
+              results: repoResult
+            });
+          }
+        } catch (error: any) {
+          console.error(`❌ Exception importing ${repoFullName}:`, error);
+          allResults.failed++;
+          allResults.repos.push({
+            name: repoFullName,
+            status: 'failed',
+            error: error.message
+          });
+        }
+      }
+
+      console.log(`\n🎉 Organization import complete: ${allResults.successful} successful, ${allResults.failed} failed`);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          mode: 'organization',
+          results: allResults,
+          message: `Imported ${allResults.successful}/${allResults.totalRepos} repositories from ${orgName}`
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      );
+    }
+
+    // ⭐ ORIGINAL: Single repository import
+    console.log(`📥 Importing from ${repo}/${path}`);
+
+    // Validate repo format for single repo
     const [owner, repoName] = repo.split('/');
     if (!owner || !repoName || repo.split('/').length !== 2) {
       throw new Error(`Invalid repository format: "${repo}". Expected format: "owner/repository" (e.g., "facebook/react", "huggingface/transformers")`);
