@@ -453,18 +453,19 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
             Inserisci il nome dell'organizzazione GitHub (es: "lovablelabs", "facebook", "huggingface") 
             per importare automaticamente TUTTI i suoi repository pubblici in un colpo solo.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <Input
               id="orgName"
               placeholder="es: lovablelabs"
               value={orgName}
               onChange={(e) => setOrgName(e.target.value)}
               disabled={orgImporting}
+              className="flex-1"
             />
             <Button
               onClick={handleOrgImport}
               disabled={orgImporting || !orgName}
-              className="whitespace-nowrap"
+              className="whitespace-nowrap w-full sm:w-auto"
             >
               {orgImporting ? (
                 <>
@@ -474,7 +475,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
               ) : (
                 <>
                   <FolderGit2 className="mr-2 h-4 w-4" />
-                  Importa Organizzazione
+                  Importa
                 </>
               )}
             </Button>
