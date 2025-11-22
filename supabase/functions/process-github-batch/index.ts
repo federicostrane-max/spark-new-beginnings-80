@@ -46,7 +46,8 @@ serve(async (req) => {
       .limit(batchSize);
 
     if (folder) {
-      query = query.eq('folder', folder);
+      // Use LIKE to include subfolders (e.g., "Lovablelabs/Docs" matches "Lovablelabs/Docs/features")
+      query = query.like('folder', `${folder}%`);
     }
 
     const { data: documents, error: fetchError } = await query;
