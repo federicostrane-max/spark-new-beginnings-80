@@ -84,7 +84,15 @@ export function AssignToFolderDialog({
           .from('folders')
           .insert({ name: folderToAssign });
 
-        if (folderError) throw folderError;
+        if (folderError) {
+          console.error('[AssignToFolderDialog] Error creating folder:', folderError);
+          toast({
+            title: "Errore creazione cartella",
+            description: folderError.message,
+            variant: "destructive",
+          });
+          return;
+        }
       }
 
       // Assegna i documenti alla cartella
