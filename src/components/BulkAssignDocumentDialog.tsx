@@ -217,23 +217,38 @@ export const BulkAssignDocumentDialog = ({
     try {
       setProgressMessage("Caricamento documenti...");
       
-      // Step 1: Fetch ALL validated documents
-      let query = supabase
-        .from("knowledge_documents")
-        .select("id")
-        .eq("processing_status", "ready_for_assignment")
-        .eq("validation_status", "validated")
-        .limit(10000); // Explicit high limit to bypass default 1000 row limit
+      // Step 1: Fetch ALL validated documents (using pagination to bypass 1000 row limit)
+      const allValidatedDocs = [];
+      let from = 0;
+      const pageSize = 1000;
+      
+      while (true) {
+        let query = supabase
+          .from("knowledge_documents")
+          .select("id")
+          .eq("processing_status", "ready_for_assignment")
+          .eq("validation_status", "validated")
+          .range(from, from + pageSize - 1);
 
-      if (folderName) {
-        query = query.like("folder", `${folderName}%`);
-      } else if (documentIds) {
-        query = query.in("id", documentIds);
+        if (folderName) {
+          query = query.like("folder", `${folderName}%`);
+        } else if (documentIds) {
+          query = query.in("id", documentIds);
+        }
+
+        const { data, error } = await query;
+        
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        
+        allValidatedDocs.push(...data);
+        console.log(`Fetched ${allValidatedDocs.length} documents so far...`);
+        
+        if (data.length < pageSize) break; // Last page
+        from += pageSize;
       }
 
-      const { data: validatedDocs, error: fetchError } = await query;
-      
-      if (fetchError) throw fetchError;
+      const validatedDocs = allValidatedDocs;
       
       if (!validatedDocs || validatedDocs.length === 0) {
         toast.error("Nessun documento validato trovato");
