@@ -47,6 +47,8 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   }>>(new Map());
   const [customUrl, setCustomUrl] = useState("");
   const [customImporting, setCustomImporting] = useState(false);
+  const [orgName, setOrgName] = useState("");
+  const [orgImporting, setOrgImporting] = useState(false);
 
   const handleRepoChange = (value: string) => {
     setSelectedRepo(value);
@@ -242,6 +244,69 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     }
   };
 
+  const handleOrgImport = async () => {
+    if (!orgName) {
+      toast.error("Inserisci il nome dell'organizzazione GitHub");
+      return;
+    }
+
+    setOrgImporting(true);
+
+    try {
+      console.log(`🏢 Starting organization import from ${orgName}`);
+      
+      toast.loading(`Importazione di tutti i repository da ${orgName}...`, { id: 'org-github-import' });
+
+      const { data, error } = await supabase.functions.invoke('import-github-markdown', {
+        body: {
+          repo: orgName, // This is the organization name
+          path: "",
+          maxFiles: 999999,
+          filePattern: "*.md",
+          importAllOrgRepos: true // Key flag for organization import
+        }
+      });
+
+      if (error) throw error;
+
+      console.log('✅ Organization import result:', data);
+
+      const results = data.results;
+      
+      if (results.successful > 0) {
+        toast.success(
+          `✅ Importati ${results.successful}/${results.totalRepos} repository da ${orgName}!`,
+          { id: 'org-github-import', duration: 5000 }
+        );
+        setOrgName("");
+      } else {
+        toast.warning(
+          `⚠️ Nessun repository importato da ${orgName}. Potrebbero essere già presenti o non accessibili.`,
+          { id: 'org-github-import' }
+        );
+      }
+
+      if (results.failed > 0) {
+        console.warn('⚠️ Some repos failed:', results.repos.filter((r: any) => r.status === 'failed'));
+        toast.warning(
+          `${results.failed} repository non importati. Vedi console per dettagli.`,
+          { duration: 5000 }
+        );
+      }
+
+      onImportComplete();
+
+    } catch (error: any) {
+      console.error('❌ Organization import error:', error);
+      toast.error(
+        `Errore durante l'import dell'organizzazione: ${error.message}`,
+        { id: 'org-github-import' }
+      );
+    } finally {
+      setOrgImporting(false);
+    }
+  };
+
   const handleBatchImport = async () => {
     setBatchImporting(true);
     setImportProgress(new Map());
@@ -379,10 +444,50 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Organization Import - NEW FEATURE */}
+        <div className="space-y-3 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border-2 border-purple-500/20">
+          <Label htmlFor="orgName" className="text-base font-semibold">
+            🏢 Importa TUTTI i Repository di un'Organizzazione
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Inserisci il nome dell'organizzazione GitHub (es: "lovablelabs", "facebook", "huggingface") 
+            per importare automaticamente TUTTI i suoi repository pubblici in un colpo solo.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              id="orgName"
+              placeholder="es: lovablelabs"
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              disabled={orgImporting}
+            />
+            <Button
+              onClick={handleOrgImport}
+              disabled={orgImporting || !orgName}
+              className="whitespace-nowrap"
+            >
+              {orgImporting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importazione...
+                </>
+              ) : (
+                <>
+                  <FolderGit2 className="mr-2 h-4 w-4" />
+                  Importa Organizzazione
+                </>
+              )}
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded">
+            💡 <strong>Esempio:</strong> Inserendo "lovablelabs" importerai automaticamente tutti i repository pubblici di Lovable
+          </div>
+        </div>
+
         {/* Custom URL Import */}
         <div className="space-y-3 p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
           <Label htmlFor="customUrl" className="text-base font-semibold">
-            🌟 Importa Repository Personalizzato
+            📦 Importa Repository Singolo
           </Label>
           <div className="flex gap-2">
             <Input
