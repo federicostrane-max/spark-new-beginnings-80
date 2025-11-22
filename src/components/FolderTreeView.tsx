@@ -3,7 +3,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle, MoreVertical, Users, Trash2, FolderCheck } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle, MoreVertical, Users, Trash2, FolderCheck, Edit2, FolderInput } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
 import {
@@ -45,6 +45,8 @@ interface FolderTreeViewProps {
   onDocumentClick: (doc: KnowledgeDocument) => void;
   onFolderAssign?: (folderName: string) => void;
   onFolderDelete?: (folderId: string, folderName: string) => void;
+  onFolderRename?: (folderId: string, currentName: string) => void;
+  onFolderMove?: (folderName: string) => void;
   onBulkDocumentSelect?: (docIds: string[], shouldSelect: boolean, folderName?: string) => void;
 }
 
@@ -55,6 +57,8 @@ export function FolderTreeView({
   onDocumentClick,
   onFolderAssign,
   onFolderDelete,
+  onFolderRename,
+  onFolderMove,
   onBulkDocumentSelect
 }: FolderTreeViewProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -210,8 +214,34 @@ export function FolderTreeView({
                       <Users className="mr-2 h-4 w-4" />
                       Assegna cartella a agente
                     </DropdownMenuItem>
+
+                    {selectedInFolder > 0 && (
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onFolderMove) {
+                            onFolderMove(folder.fullName || folder.name);
+                          }
+                        }}
+                      >
+                        <FolderInput className="mr-2 h-4 w-4" />
+                        Sposta documenti selezionati
+                      </DropdownMenuItem>
+                    )}
                     
                     <DropdownMenuSeparator />
+
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onFolderRename) {
+                          onFolderRename(folder.id, folder.name);
+                        }
+                      }}
+                    >
+                      <Edit2 className="mr-2 h-4 w-4" />
+                      Rinomina cartella
+                    </DropdownMenuItem>
                     
                     <DropdownMenuItem
                       onClick={(e) => {
