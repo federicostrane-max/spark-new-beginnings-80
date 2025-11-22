@@ -262,7 +262,6 @@ export const FilterPromptEditor = () => {
                 <SelectValue placeholder="Seleziona modello" />
               </SelectTrigger>
               <SelectContent>
-                {/* Lovable AI Models (Gratuiti) */}
                 <SelectItem value="google/gemini-2.5-flash">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Flash</span>
@@ -273,6 +272,12 @@ export const FilterPromptEditor = () => {
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Pro</span>
                     <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Avanzato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-3-pro-preview">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Gemini 3 Pro Preview</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Nuova generazione</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="google/gemini-2.5-flash-lite">

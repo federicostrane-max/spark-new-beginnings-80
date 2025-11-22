@@ -300,6 +300,12 @@ export const AlignmentPromptEditor = () => {
                     <span className="text-xs text-muted-foreground">Massima qualità • Ragionamento avanzato</span>
                   </div>
                 </SelectItem>
+                <SelectItem value="google/gemini-3-pro-preview">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Google Gemini 3 Pro Preview</span>
+                    <span className="text-xs text-muted-foreground">Nuova generazione • Preview</span>
+                  </div>
+                </SelectItem>
                 <SelectItem value="google/gemini-2.5-flash-lite">
                   <div className="flex flex-col">
                     <span className="font-medium">Google Gemini 2.5 Flash Lite</span>
@@ -455,7 +461,6 @@ export const AlignmentPromptEditor = () => {
                 <SelectValue placeholder="Seleziona modello" />
               </SelectTrigger>
               <SelectContent>
-                {/* Lovable AI Models (Gratuiti) */}
                 <SelectItem value="google/gemini-2.5-flash">
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Flash</span>
@@ -466,6 +471,12 @@ export const AlignmentPromptEditor = () => {
                   <div className="flex flex-col">
                     <span className="font-medium text-sm">Gemini 2.5 Pro</span>
                     <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Avanzato</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="google/gemini-3-pro-preview">
+                  <div className="flex flex-col">
+                    <span className="font-medium text-sm">Gemini 3 Pro Preview</span>
+                    <span className="text-xs text-muted-foreground">Lovable AI • Gratuito • Nuova generazione</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="google/gemini-2.5-flash-lite">
