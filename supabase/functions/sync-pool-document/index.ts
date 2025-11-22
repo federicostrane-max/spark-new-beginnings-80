@@ -196,77 +196,11 @@ serve(async (req) => {
     console.log(`[sync-pool-document] Sample chunks found: ${sampleChunks?.length || 0}`);
 
     if (sampleChunks && sampleChunks.length > 0) {
-      console.log('[sync-pool-document] Document has chunks, fetching ALL for copy (including shared pool)...');
+      // ✓ Shared pool chunks exist - NO COPYING needed!
+      // Agent will access them via agent_document_links
+      console.log(`[sync-pool-document] ✓ Found ${sampleChunks.length} chunks in shared pool. Agent can access them via agent_document_links.`);
       
-      // Fetch ALL chunks for this document in batches to avoid timeout
-      const FETCH_BATCH_SIZE = 100;
-      let allChunks = [];
-      let offset = 0;
-      let hasMore = true;
-      
-      while (hasMore) {
-        const { data: chunkBatch, error: batchError } = await supabase
-          .from('agent_knowledge')
-          .select('document_name, content, category, summary, embedding')
-          .eq('pool_document_id', documentId)
-          .or('agent_id.is.null,agent_id.not.is.null')
-          .range(offset, offset + FETCH_BATCH_SIZE - 1);
-
-        if (batchError) {
-          console.error('[sync-pool-document] Error fetching chunk batch:', batchError);
-          throw batchError;
-        }
-
-        if (!chunkBatch || chunkBatch.length === 0) {
-          hasMore = false;
-        } else {
-          allChunks.push(...chunkBatch);
-          offset += FETCH_BATCH_SIZE;
-          console.log(`[sync-pool-document] Fetched ${allChunks.length} chunks so far...`);
-          
-          if (chunkBatch.length < FETCH_BATCH_SIZE) {
-            hasMore = false;
-          }
-        }
-      }
-
-      console.log(`[sync-pool-document] Found ${allChunks.length} total chunks to copy`);
-
-      // Copy ALL chunks and assign to agent
-      const chunksToInsert = allChunks.map(chunk => ({
-        agent_id: agentId,
-        document_name: chunk.document_name,
-        content: chunk.content,
-        category: chunk.category || 'General',
-        summary: chunk.summary || `Part of ${poolDoc.file_name}`,
-        embedding: chunk.embedding,
-        source_type: 'shared_pool',
-        pool_document_id: documentId,
-      }));
-
-      // Insert in batches to avoid timeout with large documents
-      const BATCH_SIZE = 50;
-      let totalInserted = 0;
-      
-      for (let i = 0; i < chunksToInsert.length; i += BATCH_SIZE) {
-        const batch = chunksToInsert.slice(i, i + BATCH_SIZE);
-        console.log(`[sync-pool-document] Inserting batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(chunksToInsert.length / BATCH_SIZE)} (${batch.length} chunks)`);
-        
-        const { error: insertError } = await supabase
-          .from('agent_knowledge')
-          .insert(batch);
-
-        if (insertError) {
-          console.error('[sync-pool-document] Error copying batch:', insertError);
-          throw insertError;
-        }
-        
-        totalInserted += batch.length;
-      }
-
-      console.log(`[sync-pool-document] ✓ Successfully copied ${totalInserted} chunks to agent`);
-
-      // Mark sync as completed
+      // Mark sync as completed - no copying needed!
       await supabase
         .from('agent_document_links')
         .update({
@@ -279,9 +213,9 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true,
-        chunksCount: totalInserted,
-        totalChunks: totalInserted,
-        method: 'copied_all_chunks'
+        chunksCount: sampleChunks.length,
+        totalChunks: sampleChunks.length,
+        method: 'shared_pool_access'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
