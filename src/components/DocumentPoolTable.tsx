@@ -1795,6 +1795,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         existingFolders={availableFolders}
         onFolderCreated={() => {
           loadAvailableFolders();
+          loadFolders();
         }}
       />
 
@@ -1807,6 +1808,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         onAssigned={() => {
           loadDocuments();
           loadAvailableFolders();
+          loadFolders();
           setSelectedDocIds(new Set());
           setDocsToAssignToFolder({ ids: [], names: [] });
         }}
@@ -1819,6 +1821,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         onFoldersChanged={() => {
           loadDocuments();
           loadAvailableFolders();
+          loadFolders();
         }}
       />
 
@@ -1831,6 +1834,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         onRenamed={() => {
           loadDocuments();
           loadAvailableFolders();
+          loadFolders();
           setFolderToRename(null);
         }}
       />
