@@ -20,43 +20,17 @@ interface GitHubDocsImportProps {
   onImportComplete: () => void;
 }
 
-// ⭐ Path vuoto = import COMPLETO del repository (con filtri intelligenti)
-const HUGGINGFACE_REPOS = [
-  { value: "huggingface/hub-docs", label: "Hub Documentation", path: "" },
-  { value: "huggingface/transformers", label: "Transformers", path: "" },
-  { value: "huggingface/datasets", label: "Datasets", path: "" },
-  { value: "huggingface/diffusers", label: "Diffusers", path: "" },
-  { value: "huggingface/peft", label: "PEFT", path: "" },
-];
+// Rimosso: la funzionalità di import Hugging Face è stata sostituita dall'import generico di organizzazioni
 
 export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) => {
-  const [selectedRepo, setSelectedRepo] = useState("");
-  const [pathFilter, setPathFilter] = useState("");
-  const [importing, setImporting] = useState(false);
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [monitoring, setMonitoring] = useState(false);
   const [processingStats, setProcessingStats] = useState({ total: 0, ready: 0, processing: 0 });
-  const [batchImporting, setBatchImporting] = useState(false);
   const [hasActiveImport, setHasActiveImport] = useState(false);
-  const [importProgress, setImportProgress] = useState<Map<string, {
-    total: number;
-    downloaded: number;
-    processed: number;
-    failed: number;
-    status: string;
-  }>>(new Map());
   const [customUrl, setCustomUrl] = useState("");
   const [customImporting, setCustomImporting] = useState(false);
   const [orgName, setOrgName] = useState("");
   const [orgImporting, setOrgImporting] = useState(false);
 
-  const handleRepoChange = (value: string) => {
-    setSelectedRepo(value);
-    const repo = HUGGINGFACE_REPOS.find(r => r.value === value);
-    if (repo) {
-      setPathFilter(repo.path);
-    }
-  };
 
   const monitorProcessing = async (searchQuery: string) => {
     setMonitoring(true);
@@ -91,69 +65,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     }, 300000);
   };
 
-  const handleImport = async () => {
-    if (!selectedRepo) {
-      toast.error("Seleziona un repository");
-      return;
-    }
-
-    setImporting(true);
-    setProgress({ current: 0, total: 0 });
-
-    try {
-      console.log(`📥 Starting GitHub import from ${selectedRepo}`);
-      
-      toast.loading(`Importazione da ${selectedRepo}...`, { id: 'github-import' });
-
-      const { data, error } = await supabase.functions.invoke('import-github-markdown', {
-        body: {
-          repo: selectedRepo,
-          path: pathFilter,
-          maxFiles: 999999, // Nessun limite - scarica TUTTO
-          filePattern: "*.md"
-        }
-      });
-
-      if (error) throw error;
-
-      console.log('✅ GitHub import result:', data);
-
-      const results = data.results || data;
-      
-      if (results.saved > 0) {
-        toast.success(
-          `${results.saved} documenti importati da GitHub! Elaborazione in corso...`,
-          { id: 'github-import', duration: 5000 }
-        );
-        
-        monitorProcessing(`GitHub: ${selectedRepo}`);
-      } else {
-        toast.info(
-          'Nessun nuovo documento trovato (potrebbero essere già presenti)',
-          { id: 'github-import' }
-        );
-      }
-
-      if (results.failed > 0) {
-        console.warn('⚠️ Some files failed:', results.errors);
-        toast.warning(
-          `${results.failed} file non importati. Vedi console per dettagli.`,
-          { duration: 5000 }
-        );
-      }
-
-      onImportComplete();
-
-    } catch (error: any) {
-      console.error('❌ GitHub import error:', error);
-      toast.error(
-        `Errore durante l'import: ${error.message}`,
-        { id: 'github-import' }
-      );
-    } finally {
-      setImporting(false);
-    }
-  };
 
   const parseGitHubUrl = (url: string): { owner: string; repo: string } | null => {
     try {
@@ -307,124 +218,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     }
   };
 
-  const handleBatchImport = async () => {
-    setBatchImporting(true);
-    setImportProgress(new Map());
-    
-    try {
-      toast.loading('Importazione batch Hugging Face docs...', { id: 'batch-import' });
-
-      let totalSaved = 0;
-      let totalSkipped = 0;
-      let totalFailed = 0;
-
-      // Start polling for progress
-      const reposToTrack = HUGGINGFACE_REPOS.map(r => r.value);
-      const pollInterval = setInterval(async () => {
-        const { data } = await supabase
-          .from('github_import_progress')
-          .select('*')
-          .in('repo', reposToTrack)
-          .order('started_at', { ascending: false });
-        
-        if (data) {
-          const progressMap = new Map();
-          data.forEach(item => {
-            progressMap.set(item.repo, {
-              total: item.total_files,
-              downloaded: item.downloaded,
-              processed: item.processed,
-              failed: item.failed,
-              status: item.status
-            });
-          });
-          setImportProgress(progressMap);
-        }
-      }, 2000);
-
-      // FASE 1: Import TUTTI i repos SENZA processing
-      for (const repo of HUGGINGFACE_REPOS) {
-        try {
-          console.log(`📥 Importing ${repo.label}...`);
-          
-          toast.loading(`Importazione ${repo.label}...`, { id: `batch-${repo.value}` });
-
-          const { data, error } = await supabase.functions.invoke('import-github-markdown', {
-            body: {
-              repo: repo.value,
-              path: repo.path,
-              maxFiles: 999999,
-              filePattern: "*.md",
-              skipProcessing: true  // ⭐ NON avviare batch processing automatico
-            }
-          });
-
-          if (error) {
-            console.error(`❌ Error importing ${repo.label}:`, error);
-            throw error;
-          }
-
-          const results = data.results || data;
-          totalSaved += results.saved;
-          totalSkipped += results.skipped;
-          totalFailed += results.failed;
-
-          toast.success(
-            `${repo.label}: ${results.saved} importati, ${results.skipped} già presenti`,
-            { id: `batch-${repo.value}` }
-          );
-
-          console.log(`✅ ${repo.label}: ${results.saved} saved, ${results.skipped} skipped`);
-          
-          // Pausa più lunga tra repos per evitare rate limit GitHub
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-        } catch (error: any) {
-          console.error(`❌ Failed to import ${repo.label}:`, error);
-          totalFailed++;
-          toast.error(`Errore ${repo.label}: ${error.message}`, { id: `batch-${repo.value}` });
-          // ⭐ Continua con il prossimo repo anche in caso di errore
-        }
-      }
-
-      // FASE 2: Processa TUTTI i documenti in una volta
-      if (totalSaved > 0) {
-        console.log(`\n🚀 Starting batch processing for all ${totalSaved} imported documents...`);
-        toast.loading('Processing documenti importati...', { id: 'batch-processing' });
-        
-        try {
-          const { error: processError } = await supabase.functions.invoke('process-github-batch', {
-            body: { batchSize: 100 }  // Processa tutti i documenti in batches di 100
-          });
-          
-          if (processError) throw processError;
-          
-          toast.success('Processing avviato con successo', { id: 'batch-processing' });
-        } catch (processError: any) {
-          console.error('❌ Processing error:', processError);
-          toast.error(`Errore processing: ${processError.message}`, { id: 'batch-processing' });
-        }
-      }
-
-      toast.success(
-        `Batch completato: ${totalSaved} importati, ${totalSkipped} già presenti, ${totalFailed} errori`,
-        { id: 'batch-import', duration: 5000 }
-      );
-
-      // Wait a bit for final progress updates
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      clearInterval(pollInterval);
-
-      onImportComplete();
-
-    } catch (error: any) {
-      console.error('❌ Batch import error:', error);
-      toast.error(`Errore batch import: ${error.message}`, { id: 'batch-import' });
-    } finally {
-      setBatchImporting(false);
-      setImportProgress(new Map());
-    }
-  };
 
   return (
     <Card>
@@ -444,19 +237,19 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Organization Import - NEW FEATURE */}
+        {/* Organization Import - PRIMARY FEATURE */}
         <div className="space-y-3 p-4 bg-gradient-to-r from-purple-500/10 to-blue-500/10 rounded-lg border-2 border-purple-500/20">
           <Label htmlFor="orgName" className="text-base font-semibold">
             🏢 Importa TUTTI i Repository di un'Organizzazione
           </Label>
           <p className="text-sm text-muted-foreground">
-            Inserisci il nome dell'organizzazione GitHub (es: "lovablelabs", "facebook", "huggingface") 
-            per importare automaticamente TUTTI i suoi repository pubblici in un colpo solo.
+            Inserisci il nome dell'organizzazione GitHub per importare automaticamente TUTTI i suoi repository pubblici.
+            La struttura delle cartelle viene mantenuta esattamente come su GitHub.
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
             <Input
               id="orgName"
-              placeholder="es: lovablelabs"
+              placeholder="es: huggingface, lovablelabs, facebook"
               value={orgName}
               onChange={(e) => setOrgName(e.target.value)}
               disabled={orgImporting}
@@ -475,13 +268,14 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
               ) : (
                 <>
                   <FolderGit2 className="mr-2 h-4 w-4" />
-                  Importa
+                  Importa Organizzazione
                 </>
               )}
             </Button>
           </div>
-          <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded">
-            💡 <strong>Esempio:</strong> Inserendo "lovablelabs" importerai automaticamente tutti i repository pubblici di Lovable
+          <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded space-y-1">
+            <div>💡 <strong>Hugging Face:</strong> "huggingface" → importa transformers, diffusers, datasets, hub-docs, peft</div>
+            <div>💡 <strong>Lovable:</strong> "lovablelabs" → importa tutti i repository pubblici di Lovable</div>
           </div>
         </div>
 
