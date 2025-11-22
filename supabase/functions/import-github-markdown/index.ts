@@ -168,9 +168,21 @@ serve(async (req) => {
         // Deve essere un file
         if (item.type !== 'blob') return false;
         
-        // Supporta sia .md che .mdx
-        const isMarkdown = item.path.endsWith('.md') || item.path.endsWith('.mdx');
-        if (!isMarkdown) return false;
+        // Supporta tutti i formati di documentazione comuni
+        const supportedExtensions = [
+          '.md',        // Markdown
+          '.mdx',       // MDX (Markdown + JSX)
+          '.txt',       // Plain text
+          '.rst',       // reStructuredText (Python docs)
+          '.adoc',      // AsciiDoc
+          '.asciidoc',  // AsciiDoc (alt)
+          '.org',       // Org-mode
+          '.textile',   // Textile markup
+          '.wiki'       // MediaWiki
+        ];
+        
+        const hasValidExtension = supportedExtensions.some(ext => item.path.toLowerCase().endsWith(ext));
+        if (!hasValidExtension) return false;
         
         // Escludi automaticamente cartelle comuni da ignorare
         const excludePaths = [
@@ -206,7 +218,7 @@ serve(async (req) => {
       })
       .slice(0, maxFiles);
 
-    console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
+    console.log(`📄 Found ${markdownFiles.length} documentation files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
     
     // 🔍 DEBUG: Log found files
     if (markdownFiles.length > 0) {
