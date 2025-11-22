@@ -486,15 +486,9 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           })
         );
         
-        // Filter parent docs to exclude those that are actually in subfolders
-        const childFolderPaths = new Set(childrenWithDocs.map(c => c.fullName));
-        const filteredParentDocs = transformedParentDocs.filter((doc: any) => 
-          !childFolderPaths.has(doc.folder)
-        );
-        
-        // Aggregate all documents from children AND filtered parent
+        // Aggregate all documents: parent docs + all children docs
         const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
-        const allDocs = [...filteredParentDocs, ...allChildDocs];
+        const allDocs = [...transformedParentDocs, ...allChildDocs];
         
         // Calculate total files for parent (sum of all children)
         const parentTotalFiles = childrenWithDocs.reduce((sum, child) => {
@@ -504,9 +498,9 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         hierarchicalFolders.push({
           id: parentFolder.id,
           name: parentName,
-          documentCount: filteredParentDocs.length + allChildDocs.length,
+          documentCount: transformedParentDocs.length + allChildDocs.length,
           totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
-          documents: filteredParentDocs,
+          documents: transformedParentDocs,
           children: childrenWithDocs
         });
       }
