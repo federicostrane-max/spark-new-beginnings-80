@@ -175,26 +175,38 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       }
 
       const docIds = docs.map(d => d.id);
-      console.log('🔍 Looking for chunks with IDs:', docIds.slice(0, 3));
+      console.log('🔍 Looking for chunks for', docIds.length, 'documents');
       
-      // Query chunk counts directly from agent_knowledge
-      const { data: chunkCounts, error } = await supabase
-        .from('agent_knowledge')
-        .select('pool_document_id')
-        .eq('agent_id', agentId)
-        .eq('is_active', true)
-        .in('pool_document_id', docIds);
+      // CRITICAL: Supabase .in() has a limit, so we batch large arrays
+      const BATCH_SIZE = 1000;
+      const allChunkCounts: any[] = [];
+      
+      for (let i = 0; i < docIds.length; i += BATCH_SIZE) {
+        const batchIds = docIds.slice(i, i + BATCH_SIZE);
+        console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchIds.length} docs)`);
+        
+        const { data: batchChunks, error } = await supabase
+          .from('agent_knowledge')
+          .select('pool_document_id')
+          .eq('agent_id', agentId)
+          .eq('is_active', true)
+          .in('pool_document_id', batchIds);
 
-      if (error) {
-        console.error('❌ Error querying agent_knowledge:', error);
-        throw error;
+        if (error) {
+          console.error(`❌ Error in batch ${Math.floor(i / BATCH_SIZE) + 1}:`, error);
+          throw error;
+        }
+
+        if (batchChunks) {
+          allChunkCounts.push(...batchChunks);
+        }
       }
 
-      console.log('✅ Found chunks:', chunkCounts?.length);
+      console.log('✅ Found', allChunkCounts.length, 'total chunks across all batches');
 
       // Count chunks per document
       const chunkCountMap = new Map<string, number>();
-      chunkCounts?.forEach(chunk => {
+      allChunkCounts.forEach(chunk => {
         if (chunk.pool_document_id) {
           chunkCountMap.set(
             chunk.pool_document_id,
