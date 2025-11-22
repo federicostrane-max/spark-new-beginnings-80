@@ -13,6 +13,15 @@ function sanitizeText(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
+function sanitizeFileName(fileName: string): string {
+  // Remove or replace invalid characters for storage keys
+  return fileName
+    .replace(/[\[\]]/g, '_')  // Replace brackets with underscores
+    .replace(/[^\w\s\-\.]/g, '_')  // Replace other special chars with underscores
+    .replace(/_+/g, '_')  // Collapse multiple underscores
+    .replace(/^_+|_+$/g, '');  // Remove leading/trailing underscores
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -26,6 +35,14 @@ serve(async (req) => {
 
     if (!text || !fileName) {
       throw new Error('Missing required parameters: text or fileName');
+    }
+
+    // Sanitize filename for storage compatibility
+    const originalFileName = fileName;
+    fileName = sanitizeFileName(fileName);
+    
+    if (originalFileName !== fileName) {
+      console.log(`[SANITIZE] Filename changed: "${originalFileName}" -> "${fileName}"`);
     }
 
     text = sanitizeText(text);
