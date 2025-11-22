@@ -143,7 +143,24 @@ serve(async (req) => {
     }
 
     const treeData: any = await treeResponse.json();
+    
+    // 🔍 DEBUG: Log tree data
+    console.log(`🌳 GitHub tree response:`, {
+      totalEntries: treeData.tree?.length || 0,
+      truncated: treeData.truncated,
+      sha: treeData.sha
+    });
+    
+    // Log first few entries for debugging
+    if (treeData.tree && treeData.tree.length > 0) {
+      console.log(`📋 First 10 tree entries:`, treeData.tree.slice(0, 10).map((e: any) => ({
+        path: e.path,
+        type: e.type
+      })));
+    }
+    
     const pattern = filePattern.replace('*.', '.');
+    console.log(`🔍 File pattern: "${filePattern}" → regex pattern: "${pattern}"`);
     
     // ⭐ Filtro intelligente con path opzionale - SEMPRE ricorsivo
     const markdownFiles = treeData.tree
@@ -186,6 +203,11 @@ serve(async (req) => {
       .slice(0, maxFiles);
 
     console.log(`📄 Found ${markdownFiles.length} markdown files${!path || path === '' ? ' (full repository scan)' : ` in ${path}`}`);
+    
+    // 🔍 DEBUG: Log found files
+    if (markdownFiles.length > 0) {
+      console.log(`📝 Files found:`, markdownFiles.map((f: any) => f.path));
+    }
 
     // Determine base folder for repository
     const orgName = repo.split('/')[0];
