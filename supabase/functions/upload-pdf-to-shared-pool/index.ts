@@ -44,7 +44,7 @@ serve(async (req) => {
       throw new Error(`Il documento "${fileName}" è già presente (ID: ${existingDoc.id})`);
     }
 
-    // Upload to storage (with upsert to handle existing files)
+    // Upload to storage (delete first if exists, due to upsert bug)
     let storagePath = '';
     if (fileData) {
       const binaryString = atob(fileData);
@@ -53,18 +53,29 @@ serve(async (req) => {
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Use upsert: true to overwrite if file exists in storage
-      // (this handles cases where storage file exists but DB record doesn't)
+      // Check if file exists in storage and delete it
+      const { data: existingFiles } = await supabase.storage
+        .from('shared-pool-uploads')
+        .list('', { search: fileName });
+
+      if (existingFiles && existingFiles.length > 0) {
+        console.log(`[STORAGE] Deleting existing file: ${fileName}`);
+        await supabase.storage
+          .from('shared-pool-uploads')
+          .remove([fileName]);
+      }
+
+      // Now upload the new file
       const { error: uploadError } = await supabase.storage
         .from('shared-pool-uploads')
         .upload(fileName, bytes, {
           contentType: 'application/pdf',
-          upsert: true
+          upsert: false
         });
 
       if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
       storagePath = `shared-pool-uploads/${fileName}`;
-      console.log('[STORAGE] PDF uploaded/updated');
+      console.log('[STORAGE] PDF uploaded successfully');
     }
 
     // Insert document in PENDING state - trigger will handle processing
