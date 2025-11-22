@@ -126,6 +126,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     let successCount = 0;
     let errorCount = 0;
     const totalFiles = filesToUpload.length;
+    const errors: string[] = [];
     
     try {
       for (let fileIndex = 0; fileIndex < filesToUpload.length; fileIndex++) {
@@ -134,37 +135,53 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
         
         try {
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
+          console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          // Step 1: Extract text from PDF
+          // Step 1: Extract text from PDF with timeout
           setProgress((fileIndex / totalFiles) * 100 + 10);
-          let text = await extractTextFromPDF(file);
+          
+          const extractionPromise = extractTextFromPDF(file);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout estrazione testo (60s)')), 60000)
+          );
+          
+          let text = await Promise.race([extractionPromise, timeoutPromise]) as string;
           console.log(`✓ Extracted ${text.length} characters from ${file.name}`);
           
-          // Se l'estrazione nativa fallisce (PDF scannerizzato), 
-          // inviamo un placeholder e l'edge function farà OCR automaticamente
           if (!text || text.length < 10) {
             console.warn(`⚠️ Estrazione nativa fallita per ${file.name}, verrà usato OCR`);
-            text = '[REQUIRES_OCR]'; // Placeholder per triggare OCR nell'edge function
+            text = '[REQUIRES_OCR]';
           }
 
-          // Step 1.5: Convert PDF file to base64 for storage (using FileReader to avoid stack overflow)
-          const base64Data = await new Promise<string>((resolve, reject) => {
+          // Step 2: Convert PDF to base64 with timeout
+          setProgress((fileIndex / totalFiles) * 100 + 20);
+          
+          const base64Promise = new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
+            const timeout = setTimeout(() => reject(new Error('Timeout conversione file (30s)')), 30000);
+            
             reader.onloadend = () => {
+              clearTimeout(timeout);
               const result = reader.result as string;
-              // Remove the "data:application/pdf;base64," prefix
               resolve(result.split(',')[1]);
             };
-            reader.onerror = reject;
+            reader.onerror = () => {
+              clearTimeout(timeout);
+              reject(new Error('Errore lettura file'));
+            };
             reader.readAsDataURL(file);
           });
+          
+          const base64Data = await base64Promise;
+          console.log(`✓ File converted to base64`);
 
-          // Step 2: Upload to shared pool (all processing happens in edge function)
-          setProgress((fileIndex / totalFiles) * 100 + 30);
+          // Step 3: Upload to pool with increased timeout for large files
+          setProgress((fileIndex / totalFiles) * 100 + 40);
           
-          console.log(`Uploading "${file.name}" to shared pool (with PDF file)...`);
+          const uploadTimeout = file.size > 5 * 1024 * 1024 ? 120000 : 60000; // 2min for >5MB, 1min for smaller
+          console.log(`Uploading "${file.name}" (timeout: ${uploadTimeout/1000}s)...`);
           
-          const { data, error } = await supabase.functions.invoke('upload-pdf-to-shared-pool', {
+          const uploadPromise = supabase.functions.invoke('upload-pdf-to-shared-pool', {
             body: {
               text: text,
               fileName: file.name,
@@ -172,35 +189,52 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
               fileData: base64Data
             }
           });
-
-          console.log('Edge function response:', { data, error });
+          
+          const uploadTimeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout upload (${uploadTimeout/1000}s)`)), uploadTimeout)
+          );
+          
+          const { data, error } = await Promise.race([uploadPromise, uploadTimeoutPromise]) as any;
 
           if (error) {
-            console.error('Edge function error:', error);
             throw new Error(`Upload fallito: ${error.message}`);
           }
           
           if (!data?.success) {
-            console.error('Edge function returned failure:', data);
             throw new Error(`Upload fallito: ${data?.error || 'Errore sconosciuto'}`);
           }
           
-          console.log(`✓ ${file.name} uploaded - ${data.chunksProcessed} chunks created, document ID: ${data.documentId}`);
-          toast.success(`${file.name} caricato con successo`);
+          console.log(`✓ ${file.name} caricato - documento ID: ${data.documentId}`);
+          toast.success(`${file.name} caricato`);
           
           successCount++;
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
 
         } catch (error: any) {
           console.error(`✗ Error with ${file.name}:`, error);
-          toast.error(`Errore con ${file.name}: ${error.message}`);
+          const errorMsg = error.message || 'Errore sconosciuto';
+          errors.push(`${file.name}: ${errorMsg}`);
+          toast.error(`Errore: ${file.name}`, { description: errorMsg });
           errorCount++;
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
+          
+          // Continue with next file even on error
+          console.log(`Continuing with next file... (${errorCount} errors so far)`);
         }
       }
 
-      if (successCount > 0) {
-        toast.success(`${successCount} documento${successCount > 1 ? 'i' : ''} caricato${successCount > 1 ? 'i' : ''} con successo`);
+      // Summary
+      const summaryMsg = `Caricamento completato: ${successCount} riusciti, ${errorCount} falliti`;
+      console.log(`\n=== ${summaryMsg} ===`);
+      
+      if (errorCount > 0) {
+        console.error('Errori dettagliati:', errors);
+        toast.warning(summaryMsg, { 
+          description: `File con errori: ${errors.slice(0, 3).map(e => e.split(':')[0]).join(', ')}${errors.length > 3 ? '...' : ''}`,
+          duration: 8000 
+        });
+      } else if (successCount > 0) {
+        toast.success(summaryMsg);
       }
       
       // Reset form
@@ -214,13 +248,12 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       }, 1000);
 
     } catch (error: any) {
-      console.error('=== ERROR IN SHARED POOL UPLOAD ===', error);
-      toast.error('Errore durante il caricamento');
+      console.error('=== FATAL ERROR IN UPLOAD ===', error);
+      toast.error('Errore critico durante il caricamento', { description: error.message });
     } finally {
       setUploading(false);
       setCurrentFile("");
       setProgress(0);
-      console.log(`=== END UPLOAD === Success: ${successCount}, Errors: ${errorCount}`);
     }
   };
 

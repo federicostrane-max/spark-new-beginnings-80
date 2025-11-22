@@ -45,7 +45,7 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
 
   const handleUpload = async () => {
     if (selectedFiles.length === 0) {
-      console.warn("Nessun file selezionato");
+      toast.error("Nessun file selezionato");
       return;
     }
 
@@ -68,29 +68,29 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
         try {
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
-          console.log(`File type: ${file.type}`);
           
-          // Step 1: Extract text from PDF in browser
+          // Step 1: Extract text with timeout
           setProgress((fileIndex / totalFiles) * 100 + 10);
-          console.log(`Extracting text from ${file.name}...`);
-          const text = await extractTextFromPDF(file);
-          console.log(`✓ Extraction complete: ${text.length} characters`);
           
-          console.log(`Extracted ${text.length} characters from ${file.name}`);
+          const extractionPromise = extractTextFromPDF(file);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout estrazione (60s)')), 60000)
+          );
+          
+          const text = await Promise.race([extractionPromise, timeoutPromise]) as string;
+          console.log(`✓ Extraction complete: ${text.length} characters`);
           
           if (!text || text.length < 10) {
             throw new Error('PDF vuoto o non leggibile');
           }
 
-          // Step 2: Upload directly (chunking happens in backend)
-          setProgress((fileIndex / totalFiles) * 100 + 20);
-
-          // Step 3: Upload to pool (all processing happens in edge function)
+          // Step 2: Upload with increased timeout for large files
           setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          console.log(`Uploading "${file.name}" to pool...`);
+          const uploadTimeout = file.size > 5 * 1024 * 1024 ? 120000 : 60000;
+          console.log(`Uploading "${file.name}" (timeout: ${uploadTimeout/1000}s)...`);
           
-          const { data, error } = await supabase.functions.invoke('upload-pdf-to-pool', {
+          const uploadPromise = supabase.functions.invoke('upload-pdf-to-pool', {
             body: {
               text: text,
               fileName: file.name,
@@ -98,6 +98,12 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
               fileSize: file.size
             }
           });
+          
+          const uploadTimeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout upload (${uploadTimeout/1000}s)`)), uploadTimeout)
+          );
+          
+          const { data, error } = await Promise.race([uploadPromise, uploadTimeoutPromise]) as any;
 
           if (error) {
             throw new Error(`Upload failed: ${error.message}`);
@@ -107,23 +113,37 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
             throw new Error(`Upload failed: ${data?.error || 'Unknown error'}`);
           }
           
-          console.log(`✓ ${file.name} uploaded to pool - ${data.chunksProcessed} chunks created, document ID: ${data.documentId}`);
+          console.log(`✓ ${file.name} uploaded - documento ID: ${data.documentId}`);
+          toast.success(`${file.name} caricato`);
           
           successCount++;
-          // Update progress based on successfully completed files
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
 
         } catch (error: any) {
           console.error(`✗ Error with ${file.name}:`, error);
+          const errorMsg = error.message || 'Errore sconosciuto';
+          errors.push(`${file.name}: ${errorMsg}`);
+          toast.error(`Errore: ${file.name}`, { description: errorMsg });
           errorCount++;
-          errors.push(`${file.name}: ${error.message}`);
-          // Update progress even on error
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
+          
+          // Continue with next file
+          console.log(`Continuing... (${errorCount} errors so far)`);
         }
       }
 
+      // Summary
+      const summaryMsg = `Upload completato: ${successCount} riusciti, ${errorCount} falliti`;
+      console.log(`\n=== ${summaryMsg} ===`);
+      
       if (errorCount > 0) {
-        console.error('Upload errors:', errors);
+        console.error('Errori:', errors);
+        toast.warning(summaryMsg, { 
+          description: `File con errori: ${errors.slice(0, 3).map(e => e.split(':')[0]).join(', ')}${errors.length > 3 ? '...' : ''}`,
+          duration: 8000
+        });
+      } else if (successCount > 0) {
+        toast.success(summaryMsg);
       }
       
       // Reset form
@@ -131,18 +151,18 @@ export const PDFKnowledgeUpload = ({ agentId, onUploadComplete }: PDFKnowledgeUp
       setCurrentFile("");
       setProgress(0);
       
-      // Wait a bit for background processing to complete before reloading the document list
+      // Wait for processing
       setTimeout(() => {
         onUploadComplete();
       }, 2000);
 
     } catch (error: any) {
-      console.error('=== ERROR IN PDF UPLOAD ===', error);
+      console.error('=== FATAL ERROR ===', error);
+      toast.error('Errore critico', { description: error.message });
     } finally {
       setUploading(false);
       setCurrentFile("");
       setProgress(0);
-      console.log(`=== END UPLOAD === Success: ${successCount}, Errors: ${errorCount}`);
     }
   };
 
