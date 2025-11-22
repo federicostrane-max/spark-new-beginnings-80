@@ -237,13 +237,14 @@ serve(async (req) => {
 
     const results = { total: markdownFiles.length, saved: 0, skipped: 0, failed: 0, errors: [] as string[] };
 
-    // Check existing
+    // Check existing - use file_name + folder combination to avoid false positives
     const { data: existingDocs } = await supabase
       .from('knowledge_documents')
-      .select('file_name')
+      .select('file_name, folder')
       .in('file_name', markdownFiles.map((f: any) => f.path));
     
-    const existingSet = new Set(existingDocs?.map(d => d.file_name) || []);
+    // Create a set of "file_name|folder" combinations for accurate duplicate detection
+    const existingSet = new Set(existingDocs?.map(d => `${d.file_name}|${d.folder}`) || []);
 
     const BATCH_SIZE = 50;
     const allFolders = new Set<string>();
@@ -251,7 +252,20 @@ serve(async (req) => {
 
     for (const file of markdownFiles) {
       try {
-        if (existingSet.has(file.path)) {
+        // Build complete folder path FIRST (before checking duplicates)
+        const filePath = file.path;
+        const pathParts = filePath.split('/');
+        pathParts.pop(); // Remove filename
+        
+        // Build complete folder path
+        let documentFolder = baseFolder;
+        if (pathParts.length > 0) {
+          documentFolder = `${baseFolder}/${pathParts.join('/')}`;
+        }
+        
+        // Check if this specific file+folder combination exists
+        const uniqueKey = `${file.path}|${documentFolder}`;
+        if (existingSet.has(uniqueKey)) {
           results.skipped++;
           continue;
         }
@@ -267,16 +281,7 @@ serve(async (req) => {
 
         const content = await contentResponse.text();
 
-        // Extract folder structure from file path
-        const filePath = file.path;
-        const pathParts = filePath.split('/');
-        pathParts.pop(); // Remove filename
-        
-        // Build complete folder path
-        let documentFolder = baseFolder;
-        if (pathParts.length > 0) {
-          documentFolder = `${baseFolder}/${pathParts.join('/')}`;
-        }
+        // documentFolder already calculated above, just add to folders set
         
         // Add to unique folders set
         allFolders.add(documentFolder);
