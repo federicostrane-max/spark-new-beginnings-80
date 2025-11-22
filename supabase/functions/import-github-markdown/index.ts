@@ -145,36 +145,43 @@ serve(async (req) => {
     const treeData: any = await treeResponse.json();
     const pattern = filePattern.replace('*.', '.');
     
-    // ⭐ Filtro intelligente con path opzionale
+    // ⭐ Filtro intelligente con path opzionale - SEMPRE ricorsivo
     const markdownFiles = treeData.tree
       .filter((item: GitHubTreeItem) => {
         // Deve essere un file e finire con il pattern
         if (item.type !== 'blob' || !item.path.endsWith(pattern)) return false;
         
-        // Se path è vuoto/null/undefined → scarica TUTTO il repository (con esclusioni intelligenti)
-        if (!path || path === '') {
-          // Escludi automaticamente cartelle comuni da ignorare
-          const excludePaths = [
-            '.github/',      // GitHub Actions e config
-            'node_modules/', // Dependencies
-            'tests/',        // Test files
-            'test/',         // Test files (alt)
-            'examples/',     // Example code
-            '__pycache__/',  // Python cache
-            '.git/',         // Git internals
-            'dist/',         // Build output
-            'build/',        // Build output
-            '.vscode/',      // Editor config
-            '.idea/',        // JetBrains config
-            'coverage/',     // Test coverage
-          ];
-          
-          // Ritorna false se il path contiene una delle cartelle da escludere
-          return !excludePaths.some(exclude => item.path.includes(exclude));
+        // Escludi automaticamente cartelle comuni da ignorare
+        const excludePaths = [
+          '.github/',      // GitHub Actions e config
+          'node_modules/', // Dependencies
+          'tests/',        // Test files
+          'test/',         // Test files (alt)
+          '__tests__/',    // Test files
+          'examples/',     // Example code (optional, can be removed if needed)
+          '__pycache__/',  // Python cache
+          '.git/',         // Git internals
+          'dist/',         // Build output
+          'build/',        // Build output
+          '.vscode/',      // Editor config
+          '.idea/',        // JetBrains config
+          'coverage/',     // Test coverage
+          'vendor/',       // Dependencies (PHP, Go)
+          'target/',       // Build output (Java, Rust)
+        ];
+        
+        // Ritorna false se il path contiene una delle cartelle da escludere
+        if (excludePaths.some(exclude => item.path.includes(exclude))) {
+          return false;
         }
         
-        // Altrimenti filtra per il path specificato (comportamento attuale)
-        return item.path.startsWith(path);
+        // Se path è specificato, filtra per il path (ma SEMPRE ricorsivo, non solo top-level)
+        // Se path è vuoto/null/undefined → scarica TUTTO il repository
+        if (path && path !== '') {
+          return item.path.startsWith(path);
+        }
+        
+        return true; // Include all remaining files
       })
       .slice(0, maxFiles);
 
