@@ -510,10 +510,10 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         });
       }
       
-      // Add standalone folders (no parent, no children)
+      // Add standalone folders (no parent, no children, and not already processed as parent)
       const standaloneFolders = await Promise.all(
         (foldersDbData || [])
-          .filter(folder => !folder.parent_folder && !childFoldersByParent.has(folder.name))
+          .filter(folder => !folder.parent_folder && !parentFolders.has(folder.name))
           .map(async (folder) => {
             const { data: docs, error: docsError } = await supabase
               .from('knowledge_documents')
