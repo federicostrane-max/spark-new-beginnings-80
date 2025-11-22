@@ -176,6 +176,25 @@ export const BulkAssignDocumentDialog = ({
     toast.success("Tutti gli agenti deselezionati");
   };
 
+  const processPendingSync = async () => {
+    try {
+      toast.info("Avvio sincronizzazione documenti pending...");
+      const { data, error } = await supabase.functions.invoke('process-sync-queue', {
+        body: { batchSize: 100 }
+      });
+      
+      if (error) throw error;
+      
+      toast.success(`Elaborazione completata: ${data.stats?.successCount || 0} documenti sincronizzati`);
+      if (data.stats?.failedCount > 0) {
+        toast.warning(`${data.stats.failedCount} documenti falliti`);
+      }
+    } catch (error) {
+      console.error("Errore sync pending:", error);
+      toast.error("Errore durante la sincronizzazione");
+    }
+  };
+
   const handleAssign = async () => {
     if (selectedAgentIds.size === 0) {
       toast.error("Seleziona almeno un agente");
@@ -508,16 +527,23 @@ export const BulkAssignDocumentDialog = ({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
             Annulla
           </Button>
-        <Button
-          onClick={handleAssign}
-          disabled={loading || validatedCount === 0 || selectedAgentIds.size === 0}
-        >
-          {loading ? (progressMessage || "Salvando...") : "Salva Assegnazioni"}
-        </Button>
+          <Button
+            variant="secondary"
+            onClick={processPendingSync}
+            disabled={loading}
+          >
+            🔄 Processa Pending
+          </Button>
+          <Button
+            onClick={handleAssign}
+            disabled={loading || validatedCount === 0 || selectedAgentIds.size === 0}
+          >
+            {loading ? (progressMessage || "Salvando...") : "Salva Assegnazioni"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
