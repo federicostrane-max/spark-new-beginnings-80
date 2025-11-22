@@ -45,9 +45,10 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
         .lt('created_at', tenMinutesAgo);
       
       if (sourceType === 'github') {
-        stuckQuery = stuckQuery.like('folder', 'Huggingface_GitHub%');
+        // GitHub documents can be from any org, not just Huggingface
+        stuckQuery = stuckQuery.not('folder', 'is', null);
       } else if (sourceType === 'pdf') {
-        stuckQuery = stuckQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        stuckQuery = stuckQuery.is('folder', null);
       }
       
       const { data: stuckDocs, count: stuckCount } = await stuckQuery
@@ -71,9 +72,9 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
           .eq('processing_status', 'ready_for_assignment');
         
         if (sourceType === 'github') {
-          allDocsQuery = allDocsQuery.like('folder', 'Huggingface_GitHub%');
+          allDocsQuery = allDocsQuery.not('folder', 'is', null);
         } else if (sourceType === 'pdf') {
-          allDocsQuery = allDocsQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+          allDocsQuery = allDocsQuery.is('folder', null);
         }
 
         const { data: allDocs } = await allDocsQuery.limit(100);
@@ -115,7 +116,7 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
           .eq('validation_status', 'pending');
         
         if (sourceType === 'pdf') {
-          pendingQuery = pendingQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+          pendingQuery = pendingQuery.is('folder', null);
         }
 
         const result = await pendingQuery
@@ -134,9 +135,9 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
         .eq('validation_status', 'validated');
       
       if (sourceType === 'github') {
-        notProcessedQuery = notProcessedQuery.like('folder', 'Huggingface_GitHub%');
+        notProcessedQuery = notProcessedQuery.not('folder', 'is', null);
       } else if (sourceType === 'pdf') {
-        notProcessedQuery = notProcessedQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        notProcessedQuery = notProcessedQuery.is('folder', null);
       }
 
       const { data: notProcessedDocs, count: notProcessedCount } = await notProcessedQuery
