@@ -45,6 +45,8 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     failed: number;
     status: string;
   }>>(new Map());
+  const [customUrl, setCustomUrl] = useState("");
+  const [customImporting, setCustomImporting] = useState(false);
 
   const handleRepoChange = (value: string) => {
     setSelectedRepo(value);
@@ -148,6 +150,95 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       );
     } finally {
       setImporting(false);
+    }
+  };
+
+  const parseGitHubUrl = (url: string): { owner: string; repo: string } | null => {
+    try {
+      const urlObj = new URL(url.trim());
+      const pathParts = urlObj.pathname.split('/').filter(p => p);
+      
+      if (pathParts.length >= 2) {
+        return { owner: pathParts[0], repo: pathParts[1] };
+      }
+    } catch (e) {
+      // Try as owner/repo format
+      const parts = url.trim().split('/').filter(p => p);
+      if (parts.length >= 2) {
+        return { owner: parts[0], repo: parts[1] };
+      }
+    }
+    return null;
+  };
+
+  const handleCustomImport = async () => {
+    if (!customUrl) {
+      toast.error("Inserisci un URL GitHub");
+      return;
+    }
+
+    const parsed = parseGitHubUrl(customUrl);
+    if (!parsed) {
+      toast.error("URL non valido. Usa formato: https://github.com/owner/repo oppure owner/repo");
+      return;
+    }
+
+    const repoPath = `${parsed.owner}/${parsed.repo}`;
+    setCustomImporting(true);
+
+    try {
+      console.log(`📥 Starting custom GitHub import from ${repoPath}`);
+      
+      toast.loading(`Importazione da ${repoPath}...`, { id: 'custom-github-import' });
+
+      const { data, error } = await supabase.functions.invoke('import-github-markdown', {
+        body: {
+          repo: repoPath,
+          path: "",
+          maxFiles: 999999,
+          filePattern: "*.md"
+        }
+      });
+
+      if (error) throw error;
+
+      console.log('✅ Custom GitHub import result:', data);
+
+      const results = data.results || data;
+      
+      if (results.saved > 0) {
+        toast.success(
+          `${results.saved} documenti importati da ${repoPath}! Elaborazione in corso...`,
+          { id: 'custom-github-import', duration: 5000 }
+        );
+        
+        monitorProcessing(`GitHub:${repoPath}`);
+        setCustomUrl("");
+      } else {
+        toast.info(
+          'Nessun nuovo documento trovato (potrebbero essere già presenti)',
+          { id: 'custom-github-import' }
+        );
+      }
+
+      if (results.failed > 0) {
+        console.warn('⚠️ Some files failed:', results.errors);
+        toast.warning(
+          `${results.failed} file non importati. Vedi console per dettagli.`,
+          { duration: 5000 }
+        );
+      }
+
+      onImportComplete();
+
+    } catch (error: any) {
+      console.error('❌ Custom GitHub import error:', error);
+      toast.error(
+        `Errore durante l'import: ${error.message}`,
+        { id: 'custom-github-import' }
+      );
+    } finally {
+      setCustomImporting(false);
     }
   };
 
@@ -288,9 +379,40 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Custom URL Import */}
+        <div className="space-y-3 p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
+          <Label htmlFor="customUrl" className="text-base font-semibold">
+            🌟 Importa Repository Personalizzato
+          </Label>
+          <div className="flex gap-2">
+            <Input
+              id="customUrl"
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo oppure owner/repo"
+              disabled={customImporting || hasActiveImport}
+              className="flex-1"
+            />
+            <Button
+              onClick={handleCustomImport}
+              disabled={!customUrl || customImporting || hasActiveImport}
+              size="default"
+            >
+              {customImporting || hasActiveImport ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            💡 Incolla l'URL di qualsiasi repository GitHub per importarne la documentazione Markdown
+          </p>
+        </div>
+
         {/* Repository Selection */}
         <div className="space-y-2">
-          <Label htmlFor="repo">Repository Hugging Face</Label>
+          <Label htmlFor="repo">Repository Hugging Face (Preconfigurati)</Label>
           <Select value={selectedRepo} onValueChange={handleRepoChange}>
             <SelectTrigger id="repo">
               <SelectValue placeholder="Seleziona repository..." />
