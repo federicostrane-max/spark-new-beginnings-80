@@ -439,7 +439,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                   agents(id, name)
                 )
               `)
-              .eq('folder', child.name)
+              .or(`folder.eq.${child.name},folder.like.${child.name}/%`)
               .order('created_at', { ascending: false });
 
             if (docsError) throw docsError;
@@ -478,7 +478,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
               id: child.id,
               name: childShortName, // Remove parent prefix for display
               fullName: child.name, // Keep full name for reference
-              documentCount: transformedDocs.length,
+              documentCount: transformedDocs.length, // Includes all documents recursively from subfolders
               totalFiles: totalFiles,
               documents: transformedDocs,
               isChild: true
