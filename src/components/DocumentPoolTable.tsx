@@ -333,7 +333,6 @@ export const DocumentPoolTable = () => {
   };
 
   const loadGitHubFolders = async () => {
-
     // Load all GitHub documents
     const { data: githubDocs, error } = await supabase
       .from('knowledge_documents')
@@ -349,132 +348,108 @@ export const DocumentPoolTable = () => {
 
     if (error) throw error;
 
-    // Extract folders from the folder field
-    const folderMap = new Map<string, any[]>();
+    // Helper per trasformare un documento
+    const transformDoc = (doc: any) => {
+      const links = doc.agent_document_links || [];
+      const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
 
+      return {
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.validation_status,
+        validation_reason: doc.validation_reason || "",
+        processing_status: doc.processing_status,
+        ai_summary: doc.ai_summary,
+        text_length: doc.text_length,
+        page_count: doc.page_count,
+        created_at: doc.created_at,
+        agent_names: agentNames,
+        agents_count: agentNames.length,
+        folder: doc.folder,
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || "",
+        agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+      };
+    };
+
+    // Mappa documenti per folder path
+    const docsByFolder = new Map<string, any[]>();
     (githubDocs || []).forEach(doc => {
-      const folderPath = doc.folder;
+      if (doc.folder) {
+        if (!docsByFolder.has(doc.folder)) {
+          docsByFolder.set(doc.folder, []);
+        }
+        docsByFolder.get(doc.folder)!.push(transformDoc(doc));
+      }
+    });
+
+    // Costruisci albero gerarchico ricorsivo
+    const allFolderPaths = Array.from(docsByFolder.keys()).sort();
+    
+    // Trova tutte le root folders (quelle senza slash o il primo livello)
+    const rootPaths = new Set<string>();
+    allFolderPaths.forEach(path => {
+      const parts = path.split('/');
+      rootPaths.add(parts[0]);
+    });
+
+    // Funzione ricorsiva per costruire gerarchia
+    const buildFolderTree = (parentPath: string, depth: number = 0): any => {
+      const children: any[] = [];
+      const parentDocs = docsByFolder.get(parentPath) || [];
       
-      if (folderPath) {
-        if (!folderMap.has(folderPath)) {
-          folderMap.set(folderPath, []);
+      // Trova tutte le sottocartelle dirette di parentPath
+      const childPaths = allFolderPaths.filter(path => {
+        if (!path.startsWith(parentPath + '/')) return false;
+        
+        // Verifica che sia un figlio diretto, non un nipote
+        const remainder = path.substring(parentPath.length + 1);
+        return !remainder.includes('/');
+      });
+
+      // Costruisci ricorsivamente ogni sottocartella
+      childPaths.forEach(childPath => {
+        const childTree = buildFolderTree(childPath, depth + 1);
+        if (childTree) {
+          const childName = childPath.substring(parentPath.length + 1);
+          children.push({
+            ...childTree,
+            name: childName,
+            isChild: true,
+          });
         }
-        folderMap.get(folderPath)!.push(doc);
-      }
-    });
+      });
 
-    // Build folder hierarchy
-    const folderPaths = Array.from(folderMap.keys()).sort();
-    const rootFolders = new Map<string, any>();
-    const childFoldersByParent = new Map<string, any[]>();
-
-    // Identify root and child folders
-    folderPaths.forEach(path => {
-      const slashIndex = path.indexOf('/');
-      if (slashIndex === -1) {
-        // Root folder
-        rootFolders.set(path, {
-          id: `github-${path}`,
-          name: path,
-          fullPath: path,
-        });
-      } else {
-        // Child folder - find parent
-        const parentPath = path.substring(0, slashIndex);
-        if (!childFoldersByParent.has(parentPath)) {
-          childFoldersByParent.set(parentPath, []);
+      // Conta tutti i documenti (diretti + in sottocartelle)
+      const getAllDocs = (node: any): any[] => {
+        let docs = [...(node.documents || [])];
+        if (node.children) {
+          node.children.forEach((child: any) => {
+            docs = [...docs, ...getAllDocs(child)];
+          });
         }
-        childFoldersByParent.get(parentPath)!.push({
-          id: `github-${path}`,
-          name: path.substring(slashIndex + 1),
-          fullPath: path,
-        });
-      }
-    });
+        return docs;
+      };
 
+      const totalDocs = parentDocs.length + children.reduce((sum, child) => {
+        return sum + getAllDocs(child).length;
+      }, 0);
 
-    const hierarchicalFolders = [];
+      return {
+        id: `github-${parentPath}`,
+        name: parentPath,
+        fullName: parentPath,
+        documentCount: totalDocs,
+        documents: parentDocs,
+        children: children.length > 0 ? children : undefined,
+      };
+    };
 
-    // Build hierarchical structure
-    for (const [rootPath, rootFolder] of rootFolders) {
-      const children = childFoldersByParent.get(rootPath) || [];
-
-      // Get documents for this root folder (not in subfolders)
-      const rootDocs = folderMap.get(rootPath) || [];
-
-      // Get documents for all children
-      const childrenWithDocs = children.map(child => {
-        const childDocs = folderMap.get(child.fullPath) || [];
-
-        const transformedDocs = childDocs.map((doc: any) => {
-          const links = doc.agent_document_links || [];
-          const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
-          return {
-            id: doc.id,
-            file_name: doc.file_name,
-            validation_status: doc.validation_status,
-            validation_reason: doc.validation_reason || "",
-            processing_status: doc.processing_status,
-            ai_summary: doc.ai_summary,
-            text_length: doc.text_length,
-            page_count: doc.page_count,
-            created_at: doc.created_at,
-            agent_names: agentNames,
-            agents_count: agentNames.length,
-            folder: child.fullPath,
-            keywords: doc.keywords || [],
-            topics: doc.topics || [],
-            complexity_level: doc.complexity_level || "",
-            agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-          };
-        });
-
-        return {
-          id: child.id,
-          name: child.name,
-          fullName: child.fullPath,
-          documentCount: transformedDocs.length,
-          documents: transformedDocs,
-          isChild: true,
-        };
-      });
-
-      // Transform root docs
-      const transformedRootDocs = rootDocs.map((doc: any) => {
-        const links = doc.agent_document_links || [];
-        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
-        return {
-          id: doc.id,
-          file_name: doc.file_name,
-          validation_status: doc.validation_status,
-          validation_reason: doc.validation_reason || "",
-          processing_status: doc.processing_status,
-          ai_summary: doc.ai_summary,
-          text_length: doc.text_length,
-          page_count: doc.page_count,
-          created_at: doc.created_at,
-          agent_names: agentNames,
-          agents_count: agentNames.length,
-          folder: rootPath,
-          keywords: doc.keywords || [],
-          topics: doc.topics || [],
-          complexity_level: doc.complexity_level || "",
-          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-        };
-      });
-
-      const allChildDocs = childrenWithDocs.flatMap(c => c.documents);
-
-      hierarchicalFolders.push({
-        id: rootFolder.id,
-        name: rootPath,
-        documentCount: transformedRootDocs.length + allChildDocs.length,
-        documents: transformedRootDocs,
-        children: childrenWithDocs,
-      });
-    }
+    // Costruisci la foresta di root folders
+    const hierarchicalFolders = Array.from(rootPaths).map(rootPath => {
+      return buildFolderTree(rootPath);
+    }).filter(folder => folder && folder.documentCount > 0);
 
     return hierarchicalFolders;
   };
