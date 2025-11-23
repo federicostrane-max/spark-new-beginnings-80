@@ -170,6 +170,9 @@ export const DocumentPoolTable = () => {
     loadAvailableFolders();
     loadFolders();
 
+    // Setup debounce for folder reload to prevent infinite loops
+    let folderReloadTimeout: NodeJS.Timeout;
+
     // Setup realtime subscription for knowledge_documents
     const channel = supabase
       .channel('knowledge-documents-changes')
@@ -182,12 +185,18 @@ export const DocumentPoolTable = () => {
         },
         (payload) => {
           loadDocuments();
-          loadFolders();
+          
+          // Debounce folder reload (solo ogni 5 secondi)
+          clearTimeout(folderReloadTimeout);
+          folderReloadTimeout = setTimeout(() => {
+            loadFolders();
+          }, 5000);
         }
       )
       .subscribe();
 
     return () => {
+      clearTimeout(folderReloadTimeout);
       supabase.removeChannel(channel);
     };
   }, []);
