@@ -175,3 +175,7 @@ timeout = 900
 
 [functions.delete-github-documents]
 verify_jwt = false
+
+[functions.process-pending-batch]
+verify_jwt = false
+timeout = 900
