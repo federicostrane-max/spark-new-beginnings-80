@@ -380,16 +380,13 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
     console.log('[DocumentPoolTable] GitHub docs loaded:', githubDocs?.length || 0);
 
-    // Extract folders from file_name (path before last /)
+    // Extract folders from the folder field
     const folderMap = new Map<string, any[]>();
 
     (githubDocs || []).forEach(doc => {
-      const fileName = doc.file_name;
-      const lastSlashIndex = fileName.lastIndexOf('/');
+      const folderPath = doc.folder;
       
-      if (lastSlashIndex > 0) {
-        const folderPath = fileName.substring(0, lastSlashIndex);
-        
+      if (folderPath) {
         if (!folderMap.has(folderPath)) {
           folderMap.set(folderPath, []);
         }
