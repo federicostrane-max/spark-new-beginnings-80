@@ -163,6 +163,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const [totalPages, setTotalPages] = useState(0);
 
   useEffect(() => {
+    console.log('[DocumentPoolTable] Main useEffect triggered with sourceType:', sourceType);
     loadDocuments();
     loadAvailableAgents();
     loadAvailableFolders();
@@ -179,23 +180,9 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           table: 'knowledge_documents'
         },
         (payload) => {
-          console.log('[DocumentPoolTable] Realtime update:', payload);
-          // Reload documents on any change
+          console.log('[DocumentPoolTable] Realtime event received:', payload);
           loadDocuments();
           loadFolders();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'folders'
-        },
-        (payload) => {
-          console.log('[DocumentPoolTable] Folders update:', payload);
-          loadFolders();
-          loadAvailableFolders();
         }
       )
       .subscribe();
@@ -346,6 +333,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     try {
       setIsLoadingFolders(true);
       console.log('[DocumentPoolTable] loadFolders called with sourceType:', sourceType);
+      console.log('[DocumentPoolTable] Calling loadFolders for:', sourceType === 'github' ? 'GitHub' : 'PDF');
 
       if (sourceType === 'github') {
         await loadGitHubFolders();
