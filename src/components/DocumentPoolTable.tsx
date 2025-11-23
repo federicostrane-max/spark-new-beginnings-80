@@ -246,9 +246,9 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         countQuery = countQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
         dataQuery = dataQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
       } else if (sourceType === 'pdf') {
-        // PDF docs: no source_url AND (no search_query OR search_query doesn't start with "GitHub:")
-        countQuery = countQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
-        dataQuery = dataQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
+        // PDF docs: NO source_url OR (has source_url but NOT from github AND search_query doesn't start with GitHub:)
+        countQuery = countQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
+        dataQuery = dataQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
       }
 
       // Step 4: Get TOTAL count from database
@@ -355,7 +355,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       if (sourceType === 'github') {
         folderQuery = folderQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
       } else if (sourceType === 'pdf') {
-        folderQuery = folderQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
+        // PDF docs: NO source_url OR (has source_url but NOT from github AND search_query doesn't start with GitHub:)
+        folderQuery = folderQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
       }
 
       const { data: docsWithFolders, error: docsError } = await folderQuery;
