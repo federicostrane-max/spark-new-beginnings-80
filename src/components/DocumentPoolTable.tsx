@@ -242,13 +242,13 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       // Step 3: Apply SAME filters to both queries
       if (sourceType === 'github') {
-        // GitHub docs have source_url pointing to github.com and folder starts with repo names
-        countQuery = countQuery.not('source_url', 'is', null);
-        dataQuery = dataQuery.not('source_url', 'is', null);
+        // GitHub docs: have source_url with github.com OR search_query starting with "GitHub:"
+        countQuery = countQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
+        dataQuery = dataQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
       } else if (sourceType === 'pdf') {
-        // PDF docs don't have source_url (uploaded files)
-        countQuery = countQuery.is('source_url', null);
-        dataQuery = dataQuery.is('source_url', null);
+        // PDF docs: no source_url AND (no search_query OR search_query doesn't start with "GitHub:")
+        countQuery = countQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
+        dataQuery = dataQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
       }
 
       // Step 4: Get TOTAL count from database
@@ -351,12 +351,11 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         .select('folder')
         .not('folder', 'is', null);
 
-      // Filter by sourceType based on actual GitHub markers
+      // Filter by sourceType - use SAME logic as document queries
       if (sourceType === 'github') {
-        folderQuery = folderQuery.or('source_url.like.%github.com%,search_query.like.GitHub:%');
+        folderQuery = folderQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
       } else if (sourceType === 'pdf') {
-        folderQuery = folderQuery
-          .or('source_url.is.null,and(source_url.not.like.%github.com%,search_query.is.null),and(source_url.not.like.%github.com%,search_query.not.like.GitHub:%)')
+        folderQuery = folderQuery.is('source_url', null).or('search_query.is.null,search_query.not.ilike.GitHub:%');
       }
 
       const { data: docsWithFolders, error: docsError } = await folderQuery;
