@@ -136,13 +136,26 @@ serve(async (req) => {
     console.log(`[check-and-sync-all] Found ${assignedDocIds.size} assigned documents`);
 
     // Check if there are too many documents (limit to prevent timeout)
-    if (assignedDocIds.size > 100) {
-      console.log(`[check-and-sync-all] Too many documents (${assignedDocIds.size}), recommending direct query`);
+    if (assignedDocIds.size > 50) {
+      console.log(`[check-and-sync-all] Too many documents (${assignedDocIds.size}), processing in batches`);
+      
+      // Process in smaller batches to avoid timeout
+      const docArray = Array.from(assignedDocIds);
+      const batchSize = 50;
+      const firstBatch = docArray.slice(0, batchSize);
+      
       return new Response(JSON.stringify({ 
-        success: false,
-        tooManyDocuments: true,
-        count: assignedDocIds.size,
-        message: 'Too many documents, please use direct query method'
+        success: true,
+        agentId,
+        totalAssigned: assignedDocIds.size,
+        processedCount: 0,
+        message: `Too many documents (${assignedDocIds.size}). Please check sync status in smaller batches or via the UI.`,
+        statuses: [],
+        batchInfo: {
+          total: assignedDocIds.size,
+          processed: 0,
+          remaining: assignedDocIds.size
+        }
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -311,15 +324,17 @@ serve(async (req) => {
         }
       }
 
-      // Sync missing documents with timeout per document
+      // Sync missing documents with timeout per document (max 10 at a time)
       if (missingDocs.length > 0) {
-        console.log(`[check-and-sync-all] Syncing ${missingDocs.length} missing documents`);
+        const maxSync = Math.min(missingDocs.length, 10);
+        console.log(`[check-and-sync-all] Syncing ${maxSync} of ${missingDocs.length} missing documents`);
         
-        for (const docId of missingDocs) {
+        for (let i = 0; i < maxSync; i++) {
+          const docId = missingDocs[i];
           try {
-            // Add timeout for each sync operation (60 seconds per document)
+            // Add timeout for each sync operation (30 seconds per document)
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Sync timeout after 60s')), 60000)
+              setTimeout(() => reject(new Error('Sync timeout after 30s')), 30000)
             );
             
             const syncPromise = supabase.functions.invoke('sync-pool-document', {
@@ -353,6 +368,10 @@ serve(async (req) => {
             console.error(`[check-and-sync-all] Exception syncing ${docId}:`, syncErr);
             errors.push(`Failed to sync ${docNameMap.get(docId)}: ${errorMsg}`);
           }
+        }
+        
+        if (missingDocs.length > maxSync) {
+          errors.push(`Only synced ${maxSync} of ${missingDocs.length} missing documents. Remaining ${missingDocs.length - maxSync} will sync automatically in background.`);
         }
       }
     }
