@@ -163,7 +163,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const [totalPages, setTotalPages] = useState(0);
 
   useEffect(() => {
-    console.log('[DocumentPoolTable] Main useEffect triggered with sourceType:', sourceType);
     loadDocuments();
     loadAvailableAgents();
     loadAvailableFolders();
@@ -180,7 +179,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           table: 'knowledge_documents'
         },
         (payload) => {
-          console.log('[DocumentPoolTable] Realtime event received:', payload);
           loadDocuments();
           loadFolders();
         }
@@ -332,8 +330,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   const loadFolders = async () => {
     try {
       setIsLoadingFolders(true);
-      console.log('[DocumentPoolTable] loadFolders called with sourceType:', sourceType);
-      console.log('[DocumentPoolTable] Calling loadFolders for:', sourceType === 'github' ? 'GitHub' : 'PDF');
 
       if (sourceType === 'github') {
         await loadGitHubFolders();
@@ -366,8 +362,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
     if (error) throw error;
 
-    console.log('[DocumentPoolTable] GitHub docs loaded:', githubDocs?.length || 0);
-
     // Extract folders from the folder field
     const folderMap = new Map<string, any[]>();
 
@@ -381,8 +375,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         folderMap.get(folderPath)!.push(doc);
       }
     });
-
-    console.log('[DocumentPoolTable] Extracted GitHub folders:', Array.from(folderMap.keys()));
 
     // Build folder hierarchy
     const folderPaths = Array.from(folderMap.keys()).sort();
