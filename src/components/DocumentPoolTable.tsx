@@ -1099,12 +1099,7 @@ export const DocumentPoolTable = () => {
             <span className="flex items-center gap-3">
               <FileText className="h-5 w-5" />
               <span className="font-semibold">
-                Documenti ({filteredDocuments.length})
-                {filteredDocuments.length < totalCount && (
-                  <span className="text-muted-foreground text-sm font-normal ml-2">
-                    di {totalCount} totali in database
-                  </span>
-                )}
+                Documenti ({totalCount})
               </span>
               <DocumentPoolHealthIndicators />
             </span>
