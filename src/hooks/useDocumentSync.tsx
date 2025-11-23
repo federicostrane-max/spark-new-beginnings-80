@@ -55,25 +55,20 @@ export const useDocumentSync = (agentId: string) => {
         return;
       }
 
-      // Step 3: Conta i chunks per ogni documento
-      // Query semplice: prendi TUTTI i chunks shared pool per questi documenti
-      const { data: chunks, error: chunksError } = await supabase
-        .from('agent_knowledge')
-        .select('pool_document_id')
-        .is('agent_id', null)  // Solo shared pool chunks
-        .eq('is_active', true)
-        .in('pool_document_id', documentIds);
+      // Step 3: Conta i chunks usando RPC function (più efficiente e affidabile)
+      const { data: chunkCountsData, error: chunksError } = await supabase
+        .rpc('get_document_chunks_count', { document_ids: documentIds });
 
-      if (chunksError) throw chunksError;
+      if (chunksError) {
+        console.error('Error counting chunks:', chunksError);
+        throw chunksError;
+      }
 
-      // Step 4: Crea mappa dei conteggi
+      // Step 4: Crea mappa dei conteggi dai risultati RPC
       const chunkCounts = new Map<string, number>();
-      chunks?.forEach(chunk => {
-        if (chunk.pool_document_id) {
-          chunkCounts.set(
-            chunk.pool_document_id,
-            (chunkCounts.get(chunk.pool_document_id) || 0) + 1
-          );
+      chunkCountsData?.forEach(row => {
+        if (row.document_id) {
+          chunkCounts.set(row.document_id, Number(row.chunk_count));
         }
       });
 

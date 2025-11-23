@@ -1882,6 +1882,13 @@ export type Database = {
           summary: string
         }[]
       }
+      get_document_chunks_count: {
+        Args: { document_ids: string[] }
+        Returns: {
+          chunk_count: number
+          document_id: string
+        }[]
+      }
       get_or_create_conversation: {
         Args: { p_agent_id: string; p_user_id: string }
         Returns: string
