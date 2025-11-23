@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -6,14 +6,71 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Github, Loader2, FolderGit2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 interface GitHubDocsImportProps {
   onImportComplete: () => void;
 }
 
+interface ImportProgress {
+  repo: string;
+  folder: string;
+  total_files: number;
+  downloaded: number;
+  processed: number;
+  failed: number;
+  status: string;
+}
+
 export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) => {
   const [orgName, setOrgName] = useState("");
   const [orgImporting, setOrgImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress[]>([]);
+  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Poll github_import_progress table
+  const startProgressPolling = () => {
+    // Clear any existing interval
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+    }
+
+    // Poll every 2 seconds
+    progressIntervalRef.current = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('github_import_progress')
+          .select('*')
+          .order('started_at', { ascending: false })
+          .limit(10);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          setImportProgress(data as ImportProgress[]);
+        }
+      } catch (error) {
+        console.error('Error polling progress:', error);
+      }
+    }, 2000);
+  };
+
+  const stopProgressPolling = () => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+    setImportProgress([]);
+  };
 
   const handleOrgImport = async () => {
     if (!orgName) {
@@ -22,6 +79,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
     }
 
     setOrgImporting(true);
+    startProgressPolling(); // ⭐ Start polling progress
 
     try {
       console.log(`🏢 Starting organization import from ${orgName}`);
@@ -112,6 +170,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       );
     } finally {
       setOrgImporting(false);
+      stopProgressPolling(); // ⭐ Stop polling when done
     }
   };
 
@@ -167,6 +226,45 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
             💡 <strong>Esempio:</strong> Inserendo "huggingface" importerai tutti i repository pubblici mantenendo la struttura delle cartelle originale
           </div>
         </div>
+
+        {/* ⭐ PROGRESS DISPLAY */}
+        {importProgress.length > 0 && (
+          <div className="space-y-3 border-t pt-4">
+            <h4 className="text-sm font-semibold flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Import in corso
+            </h4>
+            {importProgress.map((progress) => {
+              const percentage = progress.total_files > 0 
+                ? Math.round((progress.downloaded / progress.total_files) * 100) 
+                : 0;
+              
+              const statusEmoji = progress.status === 'completed' ? '✅' 
+                : progress.status === 'failed' ? '❌' 
+                : progress.status === 'downloading' ? '📥' 
+                : '🔍';
+
+              return (
+                <div key={progress.repo} className="space-y-2 p-3 bg-muted/30 rounded-lg">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium flex items-center gap-2">
+                      {statusEmoji} {progress.folder}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {progress.downloaded}/{progress.total_files} documenti
+                    </span>
+                  </div>
+                  <Progress value={percentage} className="h-2" />
+                  {progress.failed > 0 && (
+                    <p className="text-xs text-destructive">
+                      ⚠️ {progress.failed} documenti falliti
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
