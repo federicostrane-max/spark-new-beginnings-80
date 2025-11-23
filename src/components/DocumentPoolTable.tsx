@@ -369,6 +369,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       });
 
       console.log('[DocumentPoolTable] Unique folders from documents:', Array.from(uniqueFolderNames));
+      console.log('[DocumentPoolTable] Current sourceType:', sourceType);
 
       // Load github import progress data ONLY for GitHub sourceType
       const folderTotalsMap = new Map();
@@ -455,6 +456,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         const { data: parentDocs, error: parentDocsError } = await parentDocsQuery
           .order('created_at', { ascending: false });
 
+        console.log(`[DocumentPoolTable] Parent folder "${parentName}" - docs found:`, parentDocs?.length || 0);
         if (parentDocsError) throw parentDocsError;
 
         const transformedParentDocs = (parentDocs || []).map((doc: any) => {
@@ -604,6 +606,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             const { data: docs, error: docsError } = await standaloneDocsQuery
               .order('created_at', { ascending: false });
 
+            console.log(`[DocumentPoolTable] Standalone folder "${folder.name}" (sourceType=${sourceType}) - docs found:`, docs?.length || 0);
             if (docsError) throw docsError;
 
             const transformedDocs = (docs || []).map((doc: any) => {
@@ -650,7 +653,14 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       );
       
       // Filter out null values (folders with no documents)
-      hierarchicalFolders.push(...standaloneFolders.filter(f => f !== null));
+      const validStandaloneFolders = standaloneFolders.filter(f => f !== null);
+      
+      console.log('[DocumentPoolTable] Hierarchical folders count:', hierarchicalFolders.length);
+      console.log('[DocumentPoolTable] Standalone folders count:', validStandaloneFolders.length);
+      console.log('[DocumentPoolTable] Hierarchical folder names:', hierarchicalFolders.map(f => f.name));
+      console.log('[DocumentPoolTable] Standalone folder names:', validStandaloneFolders.map(f => f.name));
+      
+      hierarchicalFolders.push(...validStandaloneFolders);
 
       // Add "Senza Cartella" folder for documents without a folder
       let noFolderQuery = supabase
