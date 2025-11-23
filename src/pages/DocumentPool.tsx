@@ -40,7 +40,7 @@ export default function DocumentPool() {
       </div>
 
       {/* Tabs for PDF and GitHub Pipelines */}
-      <Tabs defaultValue="github" className="w-full">
+      <Tabs defaultValue="pdf" className="w-full">
         <TabsList className="grid w-full max-w-md mx-auto grid-cols-2">
           <TabsTrigger value="pdf" className="gap-2">
             <FileText className="h-4 w-4" />
