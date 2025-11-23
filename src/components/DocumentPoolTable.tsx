@@ -242,11 +242,13 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       // Step 3: Apply SAME filters to both queries
       if (sourceType === 'github') {
-        countQuery = countQuery.like('folder', 'Huggingface_GitHub%');
-        dataQuery = dataQuery.like('folder', 'Huggingface_GitHub%');
+        // GitHub docs have source_url pointing to github.com and folder starts with repo names
+        countQuery = countQuery.not('source_url', 'is', null);
+        dataQuery = dataQuery.not('source_url', 'is', null);
       } else if (sourceType === 'pdf') {
-        countQuery = countQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
-        dataQuery = dataQuery.or('folder.is.null,folder.not.like.Huggingface_GitHub%');
+        // PDF docs don't have source_url (uploaded files)
+        countQuery = countQuery.is('source_url', null);
+        dataQuery = dataQuery.is('source_url', null);
       }
 
       // Step 4: Get TOTAL count from database
@@ -341,20 +343,11 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const loadFolders = async () => {
     try {
-      // Load folders from database with sourceType filter
-      let foldersQuery = supabase
+      // Load ALL folders from database (we'll filter documents, not folders themselves)
+      const { data: foldersDbData, error: foldersError } = await supabase
         .from('folders')
         .select('*')
         .order('name');
-
-      // Apply same filter logic as loadDocuments
-      if (sourceType === 'github') {
-        foldersQuery = foldersQuery.like('name', 'Huggingface_GitHub%');
-      } else if (sourceType === 'pdf') {
-        foldersQuery = foldersQuery.or('name.not.like.Huggingface_GitHub%');
-      }
-
-      const { data: foldersDbData, error: foldersError } = await foldersQuery;
 
       if (foldersError) throw foldersError;
 
@@ -398,8 +391,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       for (const [parentName, parentFolder] of parentFolders) {
         const children = childFoldersByParent.get(parentName) || [];
         
-        // Load documents for parent folder directly (not in subfolders)
-        const { data: parentDocs, error: parentDocsError } = await supabase
+        // Load documents for parent folder directly (not in subfolders) with sourceType filter
+        let parentDocsQuery = supabase
           .from('knowledge_documents')
           .select(`
             *,
@@ -408,7 +401,16 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
               agents(id, name)
             )
           `)
-          .eq('folder', parentName)
+          .eq('folder', parentName);
+
+        // Apply sourceType filter
+        if (sourceType === 'github') {
+          parentDocsQuery = parentDocsQuery.not('source_url', 'is', null);
+        } else if (sourceType === 'pdf') {
+          parentDocsQuery = parentDocsQuery.is('source_url', null);
+        }
+
+        const { data: parentDocs, error: parentDocsError } = await parentDocsQuery
           .order('created_at', { ascending: false });
 
         if (parentDocsError) throw parentDocsError;
@@ -442,7 +444,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         // Load documents for children
         const childrenWithDocs = await Promise.all(
           children.map(async (child) => {
-            const { data: docs, error: docsError } = await supabase
+            let childDocsQuery = supabase
               .from('knowledge_documents')
               .select(`
                 *,
@@ -451,7 +453,16 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                   agents(id, name)
                 )
               `)
-              .or(`folder.eq.${child.name},folder.like.${child.name}/%`)
+              .or(`folder.eq.${child.name},folder.like.${child.name}/%`);
+
+            // Apply sourceType filter
+            if (sourceType === 'github') {
+              childDocsQuery = childDocsQuery.not('source_url', 'is', null);
+            } else if (sourceType === 'pdf') {
+              childDocsQuery = childDocsQuery.is('source_url', null);
+            }
+
+            const { data: docs, error: docsError } = await childDocsQuery
               .order('created_at', { ascending: false });
 
             if (docsError) throw docsError;
@@ -524,7 +535,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         (foldersDbData || [])
           .filter(folder => !folder.parent_folder && !parentFolders.has(folder.name))
           .map(async (folder) => {
-            const { data: docs, error: docsError } = await supabase
+            let standaloneDocsQuery = supabase
               .from('knowledge_documents')
               .select(`
                 *,
@@ -533,7 +544,16 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                   agents(id, name)
                 )
               `)
-              .eq('folder', folder.name)
+              .eq('folder', folder.name);
+
+            // Apply sourceType filter
+            if (sourceType === 'github') {
+              standaloneDocsQuery = standaloneDocsQuery.not('source_url', 'is', null);
+            } else if (sourceType === 'pdf') {
+              standaloneDocsQuery = standaloneDocsQuery.is('source_url', null);
+            }
+
+            const { data: docs, error: docsError } = await standaloneDocsQuery
               .order('created_at', { ascending: false });
 
             if (docsError) throw docsError;
@@ -591,14 +611,11 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         `)
         .is('folder', null);
 
-      // Apply sourceType filter for no-folder documents too
+      // Apply sourceType filter for no-folder documents
       if (sourceType === 'github') {
-        // For github, we want documents with folder LIKE 'Huggingface_GitHub%' OR null
-        // Since we already filter is.null, skip github docs without folder
-        noFolderQuery = noFolderQuery.limit(0); // No github docs should be without folder
+        noFolderQuery = noFolderQuery.not('source_url', 'is', null);
       } else if (sourceType === 'pdf') {
-        // For PDF, we want documents with folder IS NULL or NOT LIKE 'Huggingface_GitHub%'
-        // Since we already filter is.null, this is correct - include all null folders for PDF
+        noFolderQuery = noFolderQuery.is('source_url', null);
       }
 
       const { data: noFolderDocs, error: noFolderError } = await noFolderQuery
