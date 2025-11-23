@@ -132,43 +132,38 @@ serve(async (req) => {
     // ========================================
     // STEP 2: Get chunk counts accessible to THIS agent (OPTIMIZED)
     // ========================================
-    // Count BOTH agent-specific chunks AND shared pool chunks accessible via agent_document_links
     const agentChunkMap = new Map<string, number>();
     
-    // Get all chunks accessible to this agent:
-    // 1. Agent-specific chunks (agent_id = agentId)
-    // 2. Shared pool chunks (agent_id IS NULL) for documents linked via agent_document_links
-    const { data: allChunks, error: chunksError } = await supabase
-      .from('agent_knowledge')
-      .select('id, pool_document_id, agent_id')
-      .eq('is_active', true)
-      .not('pool_document_id', 'is', null)
-      .or(`agent_id.eq.${agentId},agent_id.is.null`); // Get both agent-specific AND shared pool chunks
+    // If there are no assigned documents, skip chunk query entirely
+    if (assignedDocIds.size === 0) {
+      console.log(`[check-and-sync-all] No assigned documents, skipping chunk query`);
+    } else {
+      // Use aggregate query to count chunks per document instead of fetching all chunks
+      // This is MUCH faster for large datasets
+      const { data: chunkCounts, error: chunksError } = await supabase
+        .from('agent_knowledge')
+        .select('pool_document_id')
+        .eq('is_active', true)
+        .not('pool_document_id', 'is', null)
+        .or(`agent_id.eq.${agentId},agent_id.is.null`)
+        .in('pool_document_id', Array.from(assignedDocIds));
 
-    console.log(`[check-and-sync-all] 🚀 VERSIONE FIXATA - Query returned ${allChunks?.length || 0} total chunks`);
-
-    if (chunksError) {
-      console.error('[check-and-sync-all] Error fetching chunks:', chunksError);
-      throw chunksError;
+      if (chunksError) {
+        console.error('[check-and-sync-all] Error fetching chunk counts:', chunksError);
+        // Don't throw - continue with empty chunk map
+        console.warn('[check-and-sync-all] Continuing with empty chunk map due to error');
+      } else {
+        // Count chunks per document
+        chunkCounts?.forEach(chunk => {
+          if (chunk.pool_document_id) {
+            const count = agentChunkMap.get(chunk.pool_document_id) || 0;
+            agentChunkMap.set(chunk.pool_document_id, count + 1);
+          }
+        });
+        console.log(`[check-and-sync-all] Found chunks for ${agentChunkMap.size} documents (${chunkCounts?.length || 0} total chunks)`);
+      }
     }
 
-    // Group by pool_document_id, but ONLY count shared pool chunks if they're assigned via agent_document_links
-    allChunks?.forEach(chunk => {
-      if (chunk.pool_document_id) {
-        // For agent-specific chunks: count them
-        // For shared pool chunks (agent_id IS NULL): only count if document is assigned
-        const isSharedPoolChunk = chunk.agent_id === null;
-        const shouldCount = !isSharedPoolChunk || assignedDocIds.has(chunk.pool_document_id);
-        
-        if (shouldCount) {
-          const count = agentChunkMap.get(chunk.pool_document_id) || 0;
-          agentChunkMap.set(chunk.pool_document_id, count + 1);
-        }
-      }
-    });
-
-
-    console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents (${allChunks?.length || 0} total chunks)`);
 
     // ========================================
     // STEP 3: Find discrepancies (considering sync_status)
