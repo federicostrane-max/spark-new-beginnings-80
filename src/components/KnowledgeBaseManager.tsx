@@ -324,38 +324,38 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
             </Card>
           ) : (
             <Card>
-              <ScrollArea className="h-[500px]">
+              <ScrollArea className="h-[calc(100vh-280px)] min-h-[400px]">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Nome File</TableHead>
-                      <TableHead>Riepilogo</TableHead>
-                      <TableHead>Stato</TableHead>
-                      <TableHead>Assegnato</TableHead>
-                      <TableHead className="text-right">Azioni</TableHead>
+                    <TableRow className="h-10">
+                      <TableHead className="py-2">Nome File</TableHead>
+                      <TableHead className="py-2">Riepilogo</TableHead>
+                      <TableHead className="py-2">Stato</TableHead>
+                      <TableHead className="py-2">Assegnato</TableHead>
+                      <TableHead className="py-2 text-right">Azioni</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {documents.map((doc) => (
-                      <TableRow key={doc.id}>
-                        <TableCell className="font-medium">
+                      <TableRow key={doc.id} className="h-12">
+                        <TableCell className="py-2 font-medium">
                           <div className="flex items-center gap-2">
                             <FileText className="h-4 w-4 text-muted-foreground" />
-                            {doc.file_name}
+                            <span className="text-sm">{doc.file_name}</span>
                           </div>
                         </TableCell>
-                        <TableCell className="max-w-[300px]">
-                          <p className="text-sm text-muted-foreground truncate">
+                        <TableCell className="max-w-[300px] py-2">
+                          <p className="text-xs text-muted-foreground truncate">
                             {doc.ai_summary || 'Nessun riepilogo disponibile'}
                           </p>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="py-2">
                           {getSyncStatusBadge(doc)}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="py-2 text-xs text-muted-foreground">
                           {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true })}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="py-2 text-right">
                           <div className="flex justify-end gap-2">
                             {doc.syncStatus === 'missing' && (
                               <Button
@@ -396,7 +396,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       {/* Assign Dialog */}
       <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
+        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Assegna Documenti dal Pool</DialogTitle>
             <DialogDescription>
