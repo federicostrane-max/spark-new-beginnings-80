@@ -705,7 +705,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             <div>
               <Label htmlFor="aiModel">Google Gemini Model *</Label>
               <Select 
-                value={aiModel || 'gemini-2.0-flash-exp'} 
+                value={aiModel || 'google/gemini-2.5-flash'} 
                 onValueChange={setAiModel}
                 disabled={loading}
               >
@@ -713,28 +713,34 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                   <SelectValue placeholder="Select Gemini model" />
                 </SelectTrigger>
                 <SelectContent className="bg-background z-50">
-                  <SelectItem value="gemini-2.0-flash-exp">
+                  <SelectItem value="google/gemini-2.5-flash">
                     <div className="flex flex-col">
-                      <span className="font-medium">Gemini 2.0 Flash</span>
-                      <span className="text-xs text-muted-foreground">Latest, fastest, multimodal</span>
+                      <span className="font-medium">Gemini 2.5 Flash</span>
+                      <span className="text-xs text-muted-foreground">Balanced and fast [Default]</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="gemini-exp-1206">
+                  <SelectItem value="google/gemini-2.5-pro">
                     <div className="flex flex-col">
-                      <span className="font-medium">Gemini Experimental 1206</span>
-                      <span className="text-xs text-muted-foreground">Advanced experimental features</span>
+                      <span className="font-medium">Gemini 2.5 Pro</span>
+                      <span className="text-xs text-muted-foreground">Top tier for complex reasoning</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="gemini-1.5-pro-latest">
+                  <SelectItem value="google/gemini-3-pro-preview">
                     <div className="flex flex-col">
-                      <span className="font-medium">Gemini 1.5 Pro</span>
-                      <span className="text-xs text-muted-foreground">Large context, high quality</span>
+                      <span className="font-medium">Gemini 3 Pro Preview</span>
+                      <span className="text-xs text-muted-foreground">Next-generation, advanced reasoning</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="gemini-1.5-flash">
+                  <SelectItem value="google/gemini-3-pro-image-preview">
                     <div className="flex flex-col">
-                      <span className="font-medium">Gemini 1.5 Flash</span>
-                      <span className="text-xs text-muted-foreground">Fast, cost-effective</span>
+                      <span className="font-medium">Gemini 3 Pro Image Preview</span>
+                      <span className="text-xs text-muted-foreground">Next-gen image generation</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="google/gemini-2.5-flash-lite">
+                    <div className="flex flex-col">
+                      <span className="font-medium">Gemini 2.5 Flash Lite</span>
+                      <span className="text-xs text-muted-foreground">Fastest and most economical</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
