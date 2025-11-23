@@ -38,7 +38,19 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Edge function error:', error);
+        
+        // Registra alert nel database
+        await supabase.from('agent_alerts').insert({
+          alert_type: 'github_import_error',
+          severity: 'error',
+          title: 'Errore Importazione GitHub',
+          message: `Errore durante l'importazione di ${orgName}: ${error.message}`
+        });
+        
+        throw error;
+      }
 
       console.log('✅ Organization import result:', data);
 
@@ -59,6 +71,15 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
 
       if (results.failed > 0) {
         console.warn('⚠️ Some repos failed:', results.repos.filter((r: any) => r.status === 'failed'));
+        
+        // Registra alert per repository falliti
+        await supabase.from('agent_alerts').insert({
+          alert_type: 'github_import_warning',
+          severity: 'warning',
+          title: 'Repository Non Importati',
+          message: `${results.failed} repository da ${orgName} non sono stati importati. Possibili timeout o problemi di connessione.`
+        });
+        
         toast.warning(
           `${results.failed} repository non importati. Vedi console per dettagli.`,
           { duration: 5000 }
@@ -69,8 +90,24 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
 
     } catch (error: any) {
       console.error('❌ Organization import error:', error);
+      
+      const errorMessage = error.message || 'Errore sconosciuto';
+      const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('504');
+      
+      // Registra alert nel database
+      await supabase.from('agent_alerts').insert({
+        alert_type: isTimeout ? 'github_timeout' : 'github_import_error',
+        severity: 'error',
+        title: isTimeout ? 'Timeout Importazione GitHub' : 'Errore Importazione GitHub',
+        message: isTimeout 
+          ? `L'importazione di ${orgName} ha superato il tempo limite. I repository potrebbero essere troppo grandi. Prova a importare singoli repository.`
+          : `Errore durante l'importazione di ${orgName}: ${errorMessage}`
+      });
+      
       toast.error(
-        `Errore durante l'import dell'organizzazione: ${error.message}`,
+        isTimeout 
+          ? `⏱️ Timeout durante l'importazione. Repository troppo grandi.`
+          : `Errore: ${errorMessage}`,
         { id: 'org-github-import' }
       );
     } finally {
