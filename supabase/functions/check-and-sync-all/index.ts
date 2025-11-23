@@ -130,20 +130,21 @@ serve(async (req) => {
     }
 
     // ========================================
-    // STEP 2: Get chunk counts for THIS agent only (OPTIMIZED)
+    // STEP 2: Get chunk counts accessible to THIS agent (OPTIMIZED)
     // ========================================
-    // Use RPC to count chunks grouped by document efficiently
+    // Count BOTH agent-specific chunks AND shared pool chunks accessible via agent_document_links
     const agentChunkMap = new Map<string, number>();
     
-    // Get all chunks with both id and pool_document_id to count correctly
+    // Get all chunks accessible to this agent:
+    // 1. Agent-specific chunks (agent_id = agentId)
+    // 2. Shared pool chunks (agent_id IS NULL) for documents linked via agent_document_links
     const { data: allChunks, error: chunksError } = await supabase
       .from('agent_knowledge')
-      .select('id, pool_document_id')
-      .eq('agent_id', agentId)
+      .select('id, pool_document_id, agent_id')
+      .eq('is_active', true)
       .not('pool_document_id', 'is', null)
-      .eq('is_active', true);
+      .or(`agent_id.eq.${agentId},agent_id.is.null`); // Get both agent-specific AND shared pool chunks
 
-    // 🔍 LOGGING DETTAGLIATO PER DEBUG - Timestamp: ${new Date().toISOString()}
     console.log(`[check-and-sync-all] 🚀 VERSIONE FIXATA - Query returned ${allChunks?.length || 0} total chunks`);
 
     if (chunksError) {
@@ -151,13 +152,21 @@ serve(async (req) => {
       throw chunksError;
     }
 
-    // Group by pool_document_id client-side
+    // Group by pool_document_id, but ONLY count shared pool chunks if they're assigned via agent_document_links
     allChunks?.forEach(chunk => {
       if (chunk.pool_document_id) {
-        const count = agentChunkMap.get(chunk.pool_document_id) || 0;
-        agentChunkMap.set(chunk.pool_document_id, count + 1);
+        // For agent-specific chunks: count them
+        // For shared pool chunks (agent_id IS NULL): only count if document is assigned
+        const isSharedPoolChunk = chunk.agent_id === null;
+        const shouldCount = !isSharedPoolChunk || assignedDocIds.has(chunk.pool_document_id);
+        
+        if (shouldCount) {
+          const count = agentChunkMap.get(chunk.pool_document_id) || 0;
+          agentChunkMap.set(chunk.pool_document_id, count + 1);
+        }
       }
     });
+
 
     console.log(`[check-and-sync-all] Agent has chunks for ${agentChunkMap.size} documents (${allChunks?.length || 0} total chunks)`);
 
