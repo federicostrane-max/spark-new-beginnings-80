@@ -1833,6 +1833,14 @@ export type Database = {
         Args: { prompt_id: string }
         Returns: undefined
       }
+      cleanup_orphaned_document_links: {
+        Args: never
+        Returns: {
+          agent_id: string
+          deleted_link_id: string
+          document_id: string
+        }[]
+      }
       consolidate_pool_chunks: {
         Args: never
         Returns: {
