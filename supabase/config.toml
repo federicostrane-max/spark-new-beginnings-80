@@ -179,3 +179,7 @@ verify_jwt = false
 [functions.process-pending-batch]
 verify_jwt = false
 timeout = 900
+
+[functions.airtop-browser-automation]
+verify_jwt = true
+timeout = 600
