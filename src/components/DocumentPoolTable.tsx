@@ -315,10 +315,18 @@ export const DocumentPoolTable = () => {
       setIsLoadingFolders(true);
 
       // Load both GitHub and PDF folders
-      await Promise.all([loadGitHubFolders(), loadPDFFolders()]);
+      const [githubFolders, pdfFolders] = await Promise.all([
+        loadGitHubFolders(),
+        loadPDFFolders()
+      ]);
+
+      // Combine folders from both sources
+      const allFolders = [...(githubFolders || []), ...(pdfFolders || [])];
+      setFoldersData(allFolders);
     } catch (error) {
       console.error('[DocumentPoolTable] Error loading folders:', error);
       toast.error('Errore nel caricamento delle cartelle');
+      setFoldersData([]); // Set empty array on error
     } finally {
       setIsLoadingFolders(false);
     }
