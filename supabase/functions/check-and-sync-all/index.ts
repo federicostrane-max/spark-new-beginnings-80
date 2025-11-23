@@ -144,51 +144,55 @@ serve(async (req) => {
     if (assignedDocIds.size === 0) {
       console.log(`[check-and-sync-all] No assigned documents, skipping chunk query`);
     } else {
-      // Use aggregate query with retry logic
-      let chunkCounts = null;
-      let chunkRetries = 3;
+      // Process documents in batches to avoid timeouts with large document sets
+      const BATCH_SIZE = 50;
+      const docIdArray = Array.from(assignedDocIds);
       
-      while (chunkRetries > 0) {
-        const { data, error: chunksError } = await supabase
-          .from('agent_knowledge')
-          .select('pool_document_id')
-          .eq('is_active', true)
-          .not('pool_document_id', 'is', null)
-          .or(`agent_id.eq.${agentId},agent_id.is.null`)
-          .in('pool_document_id', Array.from(assignedDocIds));
+      console.log(`[check-and-sync-all] Processing ${docIdArray.length} documents in batches of ${BATCH_SIZE}`);
+      
+      for (let i = 0; i < docIdArray.length; i += BATCH_SIZE) {
+        const batch = docIdArray.slice(i, i + BATCH_SIZE);
+        let chunkRetries = 2;
+        
+        while (chunkRetries > 0) {
+          const { data, error: chunksError } = await supabase
+            .from('agent_knowledge')
+            .select('pool_document_id')
+            .eq('is_active', true)
+            .not('pool_document_id', 'is', null)
+            .is('agent_id', null) // Only check shared pool chunks (more efficient)
+            .in('pool_document_id', batch);
 
-        if (!chunksError) {
-          chunkCounts = data;
-          break;
+          if (!chunksError) {
+            // Count chunks per document
+            data?.forEach(chunk => {
+              if (chunk.pool_document_id) {
+                const count = agentChunkMap.get(chunk.pool_document_id) || 0;
+                agentChunkMap.set(chunk.pool_document_id, count + 1);
+              }
+            });
+            break;
+          }
+        
+          const errorCode = (chunksError as any)?.code;
+          const errorMsg = (chunksError as any)?.message || '';
+          
+          console.warn(`[check-and-sync-all] Chunk query error for batch ${i / BATCH_SIZE + 1} (${chunkRetries} retries left):`, {
+            code: errorCode,
+            message: errorMsg
+          });
+          
+          chunkRetries--;
+          if (chunkRetries === 0) {
+            console.error('[check-and-sync-all] Batch chunk query failed after retries, continuing');
+            break;
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        
-        const errorCode = (chunksError as any)?.code;
-        const errorMsg = (chunksError as any)?.message || '';
-        
-        console.warn(`[check-and-sync-all] Chunk query error (${chunkRetries} retries left):`, {
-          code: errorCode,
-          message: errorMsg
-        });
-        
-        chunkRetries--;
-        if (chunkRetries === 0) {
-          console.error('[check-and-sync-all] Chunk query failed after retries, continuing with empty map');
-          break;
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
       }
       
-      if (chunkCounts) {
-        // Count chunks per document
-        chunkCounts.forEach(chunk => {
-          if (chunk.pool_document_id) {
-            const count = agentChunkMap.get(chunk.pool_document_id) || 0;
-            agentChunkMap.set(chunk.pool_document_id, count + 1);
-          }
-        });
-        console.log(`[check-and-sync-all] Found chunks for ${agentChunkMap.size} documents (${chunkCounts.length || 0} total chunks)`);
-      }
+      console.log(`[check-and-sync-all] Found chunks for ${agentChunkMap.size} documents`);
     }
 
 
