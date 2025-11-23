@@ -178,27 +178,26 @@ serve(async (req) => {
     // ========================================
     // STEP 4: Copy ALL existing chunks for this document (including shared pool chunks with agent_id = NULL)
     // ========================================
-    console.log('[sync-pool-document] Looking for existing chunks (any agent or shared pool)...');
+    console.log('[sync-pool-document] Looking for existing chunks (shared pool)...');
     
-    // First check if ANY chunks exist for this document (including shared pool AND other agents)
-    const { data: sampleChunks, error: sampleError } = await supabase
+    // Check if shared pool chunks exist for this document (agent_id IS NULL)
+    const { data: sharedPoolChunks, error: sharedError } = await supabase
       .from('agent_knowledge')
       .select('id')
       .eq('pool_document_id', documentId)
-      .or('agent_id.is.null,agent_id.not.is.null') // Include both shared pool (null) and assigned chunks
-      .limit(1);
+      .is('agent_id', null); // Only check shared pool chunks
 
-    if (sampleError) {
-      console.error('[sync-pool-document] Error checking for chunks:', sampleError);
-      throw sampleError;
+    if (sharedError) {
+      console.error('[sync-pool-document] Error checking for shared pool chunks:', sharedError);
+      throw sharedError;
     }
 
-    console.log(`[sync-pool-document] Sample chunks found: ${sampleChunks?.length || 0}`);
+    console.log(`[sync-pool-document] Shared pool chunks found: ${sharedPoolChunks?.length || 0}`);
 
-    if (sampleChunks && sampleChunks.length > 0) {
+    if (sharedPoolChunks && sharedPoolChunks.length > 0) {
       // ✓ Shared pool chunks exist - NO COPYING needed!
       // Agent will access them via agent_document_links
-      console.log(`[sync-pool-document] ✓ Found ${sampleChunks.length} chunks in shared pool. Agent can access them via agent_document_links.`);
+      console.log(`[sync-pool-document] ✓ Found ${sharedPoolChunks.length} chunks in shared pool. Agent can access them via agent_document_links.`);
       
       // Mark sync as completed - no copying needed!
       await supabase
@@ -213,8 +212,8 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true,
-        chunksCount: sampleChunks.length,
-        totalChunks: sampleChunks.length,
+        chunksCount: sharedPoolChunks.length,
+        totalChunks: sharedPoolChunks.length,
         method: 'shared_pool_access'
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

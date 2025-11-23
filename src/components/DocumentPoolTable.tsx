@@ -351,11 +351,12 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         .select('folder')
         .not('folder', 'is', null);
 
-      // Filter by sourceType
+      // Filter by sourceType based on actual GitHub markers
       if (sourceType === 'github') {
-        folderQuery = folderQuery.not('source_url', 'is', null);
+        folderQuery = folderQuery.or('source_url.like.%github.com%,search_query.like.GitHub:%');
       } else if (sourceType === 'pdf') {
-        folderQuery = folderQuery.is('source_url', null);
+        folderQuery = folderQuery
+          .or('source_url.is.null,and(source_url.not.like.%github.com%,search_query.is.null),and(source_url.not.like.%github.com%,search_query.not.like.GitHub:%)')
       }
 
       const { data: docsWithFolders, error: docsError } = await folderQuery;
