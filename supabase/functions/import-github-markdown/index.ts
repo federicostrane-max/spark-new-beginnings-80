@@ -32,8 +32,51 @@ serve(async (req) => {
       const orgName = repo; // In this case, repo is the organization name
       console.log(`🏢 Importing ALL repositories from organization: ${orgName}`);
       
+      // First, check if the organization exists and is accessible
+      const orgCheckUrl = `https://api.github.com/orgs/${orgName}`;
+      console.log(`🔍 Checking if organization exists: ${orgName}`);
+      
+      const orgCheckResponse = await fetch(orgCheckUrl, {
+        headers: {
+          'Authorization': `Bearer ${githubToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'Supabase-Function'
+        }
+      });
+
+      if (!orgCheckResponse.ok) {
+        const errorBody = await orgCheckResponse.text();
+        console.error(`❌ Organization check failed:`, {
+          status: orgCheckResponse.status,
+          statusText: orgCheckResponse.statusText,
+          body: errorBody
+        });
+        
+        if (orgCheckResponse.status === 404) {
+          throw new Error(
+            `Organization "${orgName}" not found. Please verify:\n` +
+            `1. The organization name is spelled correctly\n` +
+            `2. The organization exists and is public, or\n` +
+            `3. Your GitHub token has access to this organization`
+          );
+        } else if (orgCheckResponse.status === 401) {
+          throw new Error(
+            `GitHub authentication failed. Please verify:\n` +
+            `1. Your GitHub token is valid\n` +
+            `2. The token has not expired`
+          );
+        } else {
+          throw new Error(`GitHub API error checking organization: ${orgCheckResponse.status} - ${errorBody}`);
+        }
+      }
+
+      const orgData = await orgCheckResponse.json();
+      console.log(`✅ Organization found: ${orgData.login} (${orgData.name || 'No name'})`);
+      
       // Get all repos from organization
-      const orgReposUrl = `https://api.github.com/orgs/${orgName}/repos?per_page=100`;
+      const orgReposUrl = `https://api.github.com/orgs/${orgName}/repos?per_page=100&type=all`;
+      console.log(`📚 Fetching repositories from organization...`);
+      
       const orgReposResponse = await fetch(orgReposUrl, {
         headers: {
           'Authorization': `Bearer ${githubToken}`,
@@ -43,7 +86,20 @@ serve(async (req) => {
       });
 
       if (!orgReposResponse.ok) {
-        throw new Error(`GitHub API error fetching org repos: ${orgReposResponse.status}`);
+        const errorBody = await orgReposResponse.text();
+        console.error(`❌ Repos fetch failed:`, {
+          status: orgReposResponse.status,
+          statusText: orgReposResponse.statusText,
+          body: errorBody
+        });
+        
+        throw new Error(
+          `Failed to fetch repositories: ${orgReposResponse.status}\n` +
+          `This may be because:\n` +
+          `1. Your token doesn't have 'repo' or 'read:org' permissions\n` +
+          `2. The organization has no public repositories\n` +
+          `Error details: ${errorBody}`
+        );
       }
 
       const repos = await orgReposResponse.json();
