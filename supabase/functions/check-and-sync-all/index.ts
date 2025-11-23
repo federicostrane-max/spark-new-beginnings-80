@@ -135,32 +135,6 @@ serve(async (req) => {
 
     console.log(`[check-and-sync-all] Found ${assignedDocIds.size} assigned documents`);
 
-    // Check if there are too many documents (limit to prevent timeout)
-    if (assignedDocIds.size > 50) {
-      console.log(`[check-and-sync-all] Too many documents (${assignedDocIds.size}), processing in batches`);
-      
-      // Process in smaller batches to avoid timeout
-      const docArray = Array.from(assignedDocIds);
-      const batchSize = 50;
-      const firstBatch = docArray.slice(0, batchSize);
-      
-      return new Response(JSON.stringify({ 
-        success: true,
-        agentId,
-        totalAssigned: assignedDocIds.size,
-        processedCount: 0,
-        message: `Too many documents (${assignedDocIds.size}). Please check sync status in smaller batches or via the UI.`,
-        statuses: [],
-        batchInfo: {
-          total: assignedDocIds.size,
-          processed: 0,
-          remaining: assignedDocIds.size
-        }
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
     // ========================================
     // STEP 2: Get chunk counts accessible to THIS agent (OPTIMIZED)
     // ========================================
