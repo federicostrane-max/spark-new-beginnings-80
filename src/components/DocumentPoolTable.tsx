@@ -343,13 +343,61 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const loadFolders = async () => {
     try {
-      // Load ALL folders from database (we'll filter documents, not folders themselves)
+      // Load folders from database
       const { data: foldersDbData, error: foldersError } = await supabase
         .from('folders')
         .select('*')
         .order('name');
 
       if (foldersError) throw foldersError;
+
+      // ALSO get unique folder names from documents based on sourceType
+      let folderNamesQuery = supabase
+        .from('knowledge_documents')
+        .select('folder')
+        .not('folder', 'is', null);
+
+      // Filter by sourceType
+      if (sourceType === 'github') {
+        folderNamesQuery = folderNamesQuery.not('source_url', 'is', null);
+      } else if (sourceType === 'pdf') {
+        folderNamesQuery = folderNamesQuery.is('source_url', null);
+      }
+
+      const { data: folderNamesData, error: folderNamesError } = await folderNamesQuery;
+      
+      if (folderNamesError) throw folderNamesError;
+
+      // Extract unique folder names from documents
+      const documentFolderNames = new Set<string>();
+      (folderNamesData || []).forEach(doc => {
+        if (doc.folder) {
+          documentFolderNames.add(doc.folder);
+        }
+      });
+
+      // Merge DB folders with document folder names
+      const allFolderNames = new Set([
+        ...(foldersDbData || []).map(f => f.name),
+        ...Array.from(documentFolderNames)
+      ]);
+
+      // Create virtual folder objects for folders that exist in documents but not in DB
+      const virtualFolders = Array.from(documentFolderNames)
+        .filter(name => !(foldersDbData || []).some(f => f.name === name))
+        .map(name => ({
+          id: `virtual-${name}`,
+          name: name,
+          parent_folder: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          description: null,
+          icon: null,
+          color: null
+        }));
+
+      // Combine DB folders with virtual folders
+      const allFoldersData = [...(foldersDbData || []), ...virtualFolders];
 
       // Load github import progress data
       const { data: progressData } = await supabase
@@ -371,7 +419,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       const parentFolders = new Map();
       const childFoldersByParent = new Map();
       
-      (foldersDbData || []).forEach(folder => {
+      allFoldersData.forEach(folder => {
         if (folder.parent_folder) {
           // It's a child folder
           if (!childFoldersByParent.has(folder.parent_folder)) {
@@ -532,7 +580,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       
       // Add standalone folders (no parent, no children, and not already processed as parent)
       const standaloneFolders = await Promise.all(
-        (foldersDbData || [])
+        allFoldersData
           .filter(folder => !folder.parent_folder && !parentFolders.has(folder.name))
           .map(async (folder) => {
             let standaloneDocsQuery = supabase
