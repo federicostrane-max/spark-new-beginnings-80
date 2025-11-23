@@ -11,9 +11,16 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Use service role key for full access
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
     );
 
     console.log('[delete-github-documents] Starting deletion of GitHub documents');
