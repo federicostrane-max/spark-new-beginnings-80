@@ -345,15 +345,29 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     try {
       console.log('[DocumentPoolTable] loadFolders called with sourceType:', sourceType);
       
-      // Load ALL folders from database
-      const { data: foldersDbData, error: foldersError } = await supabase
-        .from('folders')
-        .select('*')
-        .order('name');
+      // Get unique folder names from documents based on sourceType
+      let folderQuery = supabase
+        .from('knowledge_documents')
+        .select('folder')
+        .not('folder', 'is', null);
 
-      if (foldersError) throw foldersError;
-      
-      console.log('[DocumentPoolTable] Loaded folders from DB:', foldersDbData?.length);
+      // Filter by sourceType
+      if (sourceType === 'github') {
+        folderQuery = folderQuery.not('source_url', 'is', null);
+      } else if (sourceType === 'pdf') {
+        folderQuery = folderQuery.is('source_url', null);
+      }
+
+      const { data: docsWithFolders, error: docsError } = await folderQuery;
+      if (docsError) throw docsError;
+
+      // Extract unique folder names
+      const uniqueFolderNames = new Set<string>();
+      (docsWithFolders || []).forEach(doc => {
+        if (doc.folder) uniqueFolderNames.add(doc.folder);
+      });
+
+      console.log('[DocumentPoolTable] Unique folders from documents:', Array.from(uniqueFolderNames));
 
       // Load github import progress data
       const { data: progressData } = await supabase
@@ -371,20 +385,41 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         });
       }
 
-      // Separate parent folders from child folders
+      // Separate parent and child folders based on what exists in documents
       const parentFolders = new Map();
       const childFoldersByParent = new Map();
       
-      (foldersDbData || []).forEach(folder => {
-        if (folder.parent_folder) {
-          // It's a child folder
-          if (!childFoldersByParent.has(folder.parent_folder)) {
-            childFoldersByParent.set(folder.parent_folder, []);
+      Array.from(uniqueFolderNames).forEach(folderName => {
+        // Check if this is a child folder (has a parent path)
+        const pathParts = folderName.split('/');
+        if (pathParts.length > 1) {
+          // It's a child folder - find its parent
+          const parentPath = pathParts.slice(0, -1).join('/');
+          if (!childFoldersByParent.has(parentPath)) {
+            childFoldersByParent.set(parentPath, []);
           }
-          childFoldersByParent.get(folder.parent_folder).push(folder);
+          childFoldersByParent.get(parentPath).push({
+            id: `virtual-${folderName}`,
+            name: folderName,
+            parent_folder: parentPath,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            description: null,
+            icon: null,
+            color: null
+          });
         } else {
           // It's a parent folder
-          parentFolders.set(folder.name, folder);
+          parentFolders.set(folderName, {
+            id: `virtual-${folderName}`,
+            name: folderName,
+            parent_folder: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            description: null,
+            icon: null,
+            color: null
+          });
         }
       });
 
@@ -536,8 +571,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       
       // Add standalone folders (no parent, no children, and not already processed as parent)
       const standaloneFolders = await Promise.all(
-        (foldersDbData || [])
-          .filter(folder => !folder.parent_folder && !parentFolders.has(folder.name))
+        Array.from(parentFolders.values())
+          .filter(folder => !childFoldersByParent.has(folder.name))
           .map(async (folder) => {
             let standaloneDocsQuery = supabase
               .from('knowledge_documents')
