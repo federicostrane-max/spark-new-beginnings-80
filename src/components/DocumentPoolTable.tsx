@@ -203,7 +203,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [sourceType]);
 
   useEffect(() => {
     console.log('[DocumentPoolTable] Component mounted');
