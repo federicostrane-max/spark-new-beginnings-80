@@ -18,11 +18,7 @@ interface HealthData {
   loading: boolean;
 }
 
-interface DocumentPoolHealthIndicatorsProps {
-  sourceType?: 'pdf' | 'github';
-}
-
-export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthIndicatorsProps = {}) => {
+export const DocumentPoolHealthIndicators = () => {
   const [healthData, setHealthData] = useState<HealthData>({
     stuckProcessing: { count: 0, files: [] },
     noChunks: { count: 0, files: [] },
@@ -37,21 +33,12 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       
-      // 1. Documenti in processing > 10 min
-      let stuckQuery = supabase
+      // 1. Documenti in processing > 10 min - ALL documents
+      const { data: stuckDocs, count: stuckCount } = await supabase
         .from('knowledge_documents')
         .select('file_name', { count: 'exact' })
         .eq('processing_status', 'processing')
-        .lt('created_at', tenMinutesAgo);
-      
-      if (sourceType === 'github') {
-        // GitHub documents can be from any org, not just Huggingface
-        stuckQuery = stuckQuery.not('folder', 'is', null);
-      } else if (sourceType === 'pdf') {
-        stuckQuery = stuckQuery.is('folder', null);
-      }
-      
-      const { data: stuckDocs, count: stuckCount } = await stuckQuery
+        .lt('created_at', tenMinutesAgo)
         .order('created_at', { ascending: true })
         .limit(10);
 
@@ -66,18 +53,11 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
       // Solo se ci sono documenti senza chunks, recupera i primi 10 nomi
       let docsWithoutChunks: string[] = [];
       if (noChunksTotal && noChunksTotal > 0) {
-        let allDocsQuery = supabase
+        const { data: allDocs } = await supabase
           .from('knowledge_documents')
           .select('id, file_name')
-          .eq('processing_status', 'ready_for_assignment');
-        
-        if (sourceType === 'github') {
-          allDocsQuery = allDocsQuery.not('folder', 'is', null);
-        } else if (sourceType === 'pdf') {
-          allDocsQuery = allDocsQuery.is('folder', null);
-        }
-
-        const { data: allDocs } = await allDocsQuery.limit(100);
+          .eq('processing_status', 'ready_for_assignment')
+          .limit(100);
 
         if (allDocs) {
           // Verifica quali non hanno chunks
@@ -96,7 +76,7 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
       }
       const noChunksCount = noChunksTotal || 0;
 
-      // 3. Job queue in processing > 10 min
+      // 3. Job queue in processing > 10 min - ALL documents
       const { data: queueDocs, count: queueStuckCount } = await supabase
         .from('document_processing_queue')
         .select('document_id, knowledge_documents!inner(file_name)', { count: 'exact' })
@@ -104,43 +84,20 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
         .lt('started_at', tenMinutesAgo)
         .limit(10);
 
-      // 4. Documenti pending validation (solo per PDF)
-      const shouldQueryPendingValidation = !sourceType || sourceType === 'pdf';
-      let pendingCount = 0;
-      let pendingDocs: any[] = [];
-      
-      if (shouldQueryPendingValidation) {
-        let pendingQuery = supabase
-          .from('knowledge_documents')
-          .select('file_name', { count: 'exact' })
-          .eq('validation_status', 'pending');
-        
-        if (sourceType === 'pdf') {
-          pendingQuery = pendingQuery.is('folder', null);
-        }
+      // 4. Documenti pending validation - ALL documents
+      const { data: pendingDocs, count: pendingCount } = await supabase
+        .from('knowledge_documents')
+        .select('file_name', { count: 'exact' })
+        .eq('validation_status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(10);
 
-        const result = await pendingQuery
-          .order('created_at', { ascending: true })
-          .limit(10);
-        
-        pendingCount = result.count || 0;
-        pendingDocs = result.data || [];
-      }
-
-      // 5. Documenti non processati (processing_status != ready_for_assignment e validati)
-      let notProcessedQuery = supabase
+      // 5. Documenti non processati (processing_status != ready_for_assignment e validati) - ALL documents
+      const { data: notProcessedDocs, count: notProcessedCount } = await supabase
         .from('knowledge_documents')
         .select('file_name, processing_status', { count: 'exact' })
         .neq('processing_status', 'ready_for_assignment')
-        .eq('validation_status', 'validated');
-      
-      if (sourceType === 'github') {
-        notProcessedQuery = notProcessedQuery.not('folder', 'is', null);
-      } else if (sourceType === 'pdf') {
-        notProcessedQuery = notProcessedQuery.is('folder', null);
-      }
-
-      const { data: notProcessedDocs, count: notProcessedCount } = await notProcessedQuery
+        .eq('validation_status', 'validated')
         .order('updated_at', { ascending: false })
         .limit(10);
 
@@ -340,8 +297,8 @@ export const DocumentPoolHealthIndicators = ({ sourceType }: DocumentPoolHealthI
         </Tooltip>
       </TooltipProvider>
 
-      {/* Documenti pending validation - SOLO PER PDF */}
-      {(!sourceType || sourceType === 'pdf') && (
+      {/* Documenti pending validation */}
+      {(
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger>

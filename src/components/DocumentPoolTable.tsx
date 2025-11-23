@@ -53,6 +53,7 @@ import {
   ChevronsUpDown,
   ChevronLeft,
   ChevronRight,
+  Github,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -100,6 +101,7 @@ interface KnowledgeDocument {
   complexity_level?: string;
   agent_ids?: string[];
   search_query?: string;
+  source_url?: string;
   extracted_title?: string;
   extracted_authors?: string[];
   metadata_verified_online?: boolean;
@@ -109,10 +111,10 @@ interface KnowledgeDocument {
 }
 
 interface DocumentPoolTableProps {
-  sourceType?: 'pdf' | 'github';
+  // No props needed - shows all pool documents
 }
 
-export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) => {
+export const DocumentPoolTable = () => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -188,21 +190,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [sourceType]);
-
-  useEffect(() => {
-    console.log('[DocumentPoolTable] 📊 foldersData state changed:', {
-      length: foldersData.length,
-      folders: foldersData.map(f => ({ name: f.name, docCount: f.documentCount })),
-      sourceType,
-      viewMode
-    });
-  }, [foldersData, sourceType, viewMode]);
-
-  useEffect(() => {
-    console.log('[DocumentPoolTable] Component mounted');
-    console.log('[DocumentPoolTable] Documents loaded:', documents.length);
-  }, [documents]);
+  }, []);
 
   // Reset alla pagina 1 quando cambiano i filtri
   useEffect(() => {
@@ -214,13 +202,12 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       setLoading(true);
       setError(null);
       
-      // Step 1: Build base count query
-      let countQuery = supabase
+      // Load ALL pool documents without filtering by source type
+      const countQuery = supabase
         .from("knowledge_documents")
         .select("id", { count: 'exact', head: true });
 
-      // Step 2: Build data query
-      let dataQuery = supabase
+      const dataQuery = supabase
         .from("knowledge_documents")
         .select(`
           *,
@@ -235,18 +222,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           )
         `);
 
-      // Step 3: Apply SAME filters to both queries
-      if (sourceType === 'github') {
-        // GitHub docs: have source_url with github.com OR search_query starting with "GitHub:"
-        countQuery = countQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
-        dataQuery = dataQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
-      } else if (sourceType === 'pdf') {
-        // PDF docs: NO source_url OR (has source_url but NOT from github AND search_query doesn't start with GitHub:)
-        countQuery = countQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
-        dataQuery = dataQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
-      }
-
-      // Step 4: Get TOTAL count from database
       const { count, error: countError } = await countQuery;
       if (countError) throw countError;
       
@@ -254,18 +229,15 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      // Step 5: Calculate range for current page
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      // Step 6: Get ONLY current page data
       const { data, error } = await dataQuery
         .order("created_at", { ascending: false })
         .range(from, to);
 
       if (error) throw error;
 
-      // Step 7: Transform data
       const transformedData = (data || []).map((doc: any) => {
         const links = doc.agent_document_links || [];
         const agentNames = links
@@ -289,6 +261,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
           complexity_level: doc.complexity_level || "",
           agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
           folder: doc.folder,
+          search_query: doc.search_query,
+          source_url: doc.source_url,
         };
       });
 
@@ -340,11 +314,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     try {
       setIsLoadingFolders(true);
 
-      if (sourceType === 'github') {
-        await loadGitHubFolders();
-      } else {
-        await loadPDFFolders();
-      }
+      // Load both GitHub and PDF folders
+      await Promise.all([loadGitHubFolders(), loadPDFFolders()]);
     } catch (error) {
       console.error('[DocumentPoolTable] Error loading folders:', error);
       toast.error('Errore nel caricamento delle cartelle');
@@ -354,8 +325,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   };
 
   const loadGitHubFolders = async () => {
-    console.log('[DocumentPoolTable] 🔍 loadGitHubFolders started');
-    console.log('[DocumentPoolTable] Current foldersData length before:', foldersData.length);
 
     // Load all GitHub documents
     const { data: githubDocs, error } = await supabase
@@ -415,8 +384,6 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       }
     });
 
-    console.log('[DocumentPoolTable] Root folders:', Array.from(rootFolders.keys()));
-    console.log('[DocumentPoolTable] Child folders by parent:', Array.from(childFoldersByParent.entries()));
 
     const hierarchicalFolders = [];
 
@@ -501,19 +468,10 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       });
     }
 
-    console.log('[DocumentPoolTable] GitHub hierarchical folders built:', hierarchicalFolders.length);
-    console.log('[DocumentPoolTable] GitHub folders structure:', hierarchicalFolders.map(f => ({ name: f.name, docCount: f.documentCount, children: f.children?.length })));
-
-    if (hierarchicalFolders.length === 0) {
-      console.warn('[DocumentPoolTable] ⚠️ No GitHub folders created! Check folder data in docs');
-    }
-
-    setFoldersData(hierarchicalFolders);
-    console.log('[DocumentPoolTable] ✅ setFoldersData called with', hierarchicalFolders.length, 'GitHub folders');
+    return hierarchicalFolders;
   };
 
   const loadPDFFolders = async () => {
-    console.log('[DocumentPoolTable] loadPDFFolders started');
 
     // Get unique folder names from documents with 'folder' column
     const { data: docsWithFolders, error: docsError } = await supabase
@@ -529,7 +487,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       if (doc.folder) uniqueFolderNames.add(doc.folder);
     });
 
-    console.log('[DocumentPoolTable] PDF unique folders:', Array.from(uniqueFolderNames));
+    
 
     // Separate parent and child folders
     const parentFolders = new Map();
@@ -777,11 +735,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       });
     }
 
-    console.log('[DocumentPoolTable] PDF folders loaded:', hierarchicalFolders.length);
-    console.log('[DocumentPoolTable] PDF folders structure:', hierarchicalFolders.map(f => ({ name: f.name, docCount: f.documentCount, children: f.children?.length })));
-
-    setFoldersData(hierarchicalFolders);
-    console.log('[DocumentPoolTable] setFoldersData called with', hierarchicalFolders.length, 'folders');
+    return hierarchicalFolders;
   };
 
   const getStatusIcon = (status: string) => {
@@ -1243,7 +1197,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                   </span>
                 )}
               </span>
-              <DocumentPoolHealthIndicators sourceType={sourceType} />
+              <DocumentPoolHealthIndicators />
             </span>
             <div className="flex items-center gap-2">
               {/* Toggle Vista: Cartelle/Tabella - Sempre Visibile */}
@@ -1418,6 +1372,18 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
                     <TableCell className="max-w-0">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
+                          {/* Badge GitHub/PDF */}
+                          {doc.search_query?.startsWith('GitHub:') || doc.source_url?.includes('github.com') ? (
+                            <Badge variant="outline" className="gap-1 shrink-0">
+                              <Github className="h-3 w-3" />
+                              GitHub
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="gap-1 shrink-0">
+                              <FileText className="h-3 w-3" />
+                              PDF
+                            </Badge>
+                          )}
                           <div className="font-medium truncate text-sm" title={doc.file_name}>
                             {doc.file_name}
                           </div>
