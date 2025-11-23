@@ -514,114 +514,89 @@ export const DocumentPoolTable = () => {
       }
     });
 
+    // OTTIMIZZAZIONE: Singola query per TUTTI i documenti con folder
+    const { data: allFolderDocs, error: allDocsError } = await supabase
+      .from('knowledge_documents')
+      .select(`
+        *,
+        agent_document_links(
+          agent_id,
+          agents(id, name)
+        )
+      `)
+      .not('folder', 'is', null)
+      .is('source_url', null)
+      .order('created_at', { ascending: false });
+
+    if (allDocsError) throw allDocsError;
+
+    // Trasforma tutti i documenti in un unico passaggio
+    const allTransformedDocs = (allFolderDocs || []).map((doc: any) => {
+      const links = doc.agent_document_links || [];
+      const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+
+      return {
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.validation_status,
+        validation_reason: doc.validation_reason || "",
+        processing_status: doc.processing_status,
+        ai_summary: doc.ai_summary,
+        text_length: doc.text_length,
+        page_count: doc.page_count,
+        created_at: doc.created_at,
+        agent_names: agentNames,
+        agents_count: agentNames.length,
+        folder: doc.folder,
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || "",
+        agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+      };
+    });
+
+    // Raggruppa i documenti per cartella in memoria (molto più veloce)
+    const docsByFolder = new Map<string, any[]>();
+    allTransformedDocs.forEach(doc => {
+      if (!docsByFolder.has(doc.folder)) {
+        docsByFolder.set(doc.folder, []);
+      }
+      docsByFolder.get(doc.folder)!.push(doc);
+    });
+
     const hierarchicalFolders = [];
     const processedFolderNames = new Set<string>();
     
     for (const [parentName, parentFolder] of parentFolders) {
       const children = childFoldersByParent.get(parentName) || [];
       
-      const { data: parentDocs, error: parentDocsError } = await supabase
-        .from('knowledge_documents')
-        .select(`
-          *,
-          agent_document_links(
-            agent_id,
-            agents(id, name)
-          )
-        `)
-        .eq('folder', parentName)
-        .is('source_url', null)
-        .order('created_at', { ascending: false });
-
-      if (parentDocsError) throw parentDocsError;
-
-      const transformedParentDocs = (parentDocs || []).map((doc: any) => {
-        const links = doc.agent_document_links || [];
-        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+      // Ottieni documenti parent dalla mappa
+      const parentDocs = docsByFolder.get(parentName) || [];
+      
+      // Elabora children
+      const childrenWithDocs = children.map(child => {
+        const childDocs = docsByFolder.get(child.name) || [];
+        const childShortName = child.name.replace(`${parentName}/`, '');
 
         return {
-          id: doc.id,
-          file_name: doc.file_name,
-          validation_status: doc.validation_status,
-          validation_reason: doc.validation_reason || "",
-          processing_status: doc.processing_status,
-          ai_summary: doc.ai_summary,
-          text_length: doc.text_length,
-          page_count: doc.page_count,
-          created_at: doc.created_at,
-          agent_names: agentNames,
-          agents_count: agentNames.length,
-          folder: doc.folder,
-          keywords: doc.keywords || [],
-          topics: doc.topics || [],
-          complexity_level: doc.complexity_level || "",
-          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+          id: child.id,
+          name: childShortName,
+          fullName: child.name,
+          documentCount: childDocs.length,
+          documents: childDocs,
+          isChild: true
         };
       });
       
-      const childrenWithDocs = await Promise.all(
-        children.map(async (child) => {
-          const { data: docs, error: docsError } = await supabase
-            .from('knowledge_documents')
-            .select(`
-              *,
-              agent_document_links(
-                agent_id,
-                agents(id, name)
-              )
-            `)
-            .or(`folder.eq.${child.name},folder.like.${child.name}/%`)
-            .is('source_url', null)
-            .order('created_at', { ascending: false });
-
-          if (docsError) throw docsError;
-
-          const transformedDocs = (docs || []).map((doc: any) => {
-            const links = doc.agent_document_links || [];
-            const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
-            return {
-              id: doc.id,
-              file_name: doc.file_name,
-              validation_status: doc.validation_status,
-              validation_reason: doc.validation_reason || "",
-              processing_status: doc.processing_status,
-              ai_summary: doc.ai_summary,
-              text_length: doc.text_length,
-              page_count: doc.page_count,
-              created_at: doc.created_at,
-              agent_names: agentNames,
-              agents_count: agentNames.length,
-              folder: doc.folder,
-              keywords: doc.keywords || [],
-              topics: doc.topics || [],
-              complexity_level: doc.complexity_level || "",
-              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-            };
-          });
-
-          const childShortName = child.name.replace(`${parentName}/`, '');
-
-          return {
-            id: child.id,
-            name: childShortName,
-            fullName: child.name,
-            documentCount: transformedDocs.length,
-            documents: transformedDocs,
-            isChild: true
-          };
-        })
-      );
-      
       const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
-      const allDocs = [...transformedParentDocs, ...allChildDocs];
+      const allDocs = [...parentDocs, ...allChildDocs];
       
       if (allDocs.length > 0) {
         hierarchicalFolders.push({
           id: parentFolder.id,
           name: parentName,
-          documentCount: transformedParentDocs.length + allChildDocs.length,
-          documents: transformedParentDocs,
+          documentCount: parentDocs.length + allChildDocs.length,
+          documents: parentDocs,
           children: childrenWithDocs
         });
         
@@ -629,62 +604,25 @@ export const DocumentPoolTable = () => {
       }
     }
     
-    const standaloneFolders = await Promise.all(
-      Array.from(parentFolders.values())
-        .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
-        .map(async (folder) => {
-          const { data: docs, error: docsError } = await supabase
-            .from('knowledge_documents')
-            .select(`
-              *,
-              agent_document_links(
-                agent_id,
-                agents(id, name)
-              )
-            `)
-            .eq('folder', folder.name)
-            .is('source_url', null)
-            .order('created_at', { ascending: false });
-
-          if (docsError) throw docsError;
-
-          const transformedDocs = (docs || []).map((doc: any) => {
-            const links = doc.agent_document_links || [];
-            const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
-            return {
-              id: doc.id,
-              file_name: doc.file_name,
-              validation_status: doc.validation_status,
-              validation_reason: doc.validation_reason || "",
-              processing_status: doc.processing_status,
-              ai_summary: doc.ai_summary,
-              text_length: doc.text_length,
-              page_count: doc.page_count,
-              created_at: doc.created_at,
-              agent_names: agentNames,
-              agents_count: agentNames.length,
-              folder: doc.folder,
-              keywords: doc.keywords || [],
-              topics: doc.topics || [],
-              complexity_level: doc.complexity_level || "",
-              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-            };
-          });
-          
-          if (transformedDocs.length > 0) {
-            return {
-              id: folder.id,
-              name: folder.name,
-              documentCount: transformedDocs.length,
-              documents: transformedDocs,
-            };
-          }
-          return null;
-        })
-    );
+    // Aggiungi cartelle standalone (senza figli) dalla mappa in memoria
+    const standaloneFolders = Array.from(parentFolders.values())
+      .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
+      .map(folder => {
+        const docs = docsByFolder.get(folder.name) || [];
+        
+        if (docs.length > 0) {
+          return {
+            id: folder.id,
+            name: folder.name,
+            documentCount: docs.length,
+            documents: docs,
+          };
+        }
+        return null;
+      })
+      .filter(f => f !== null);
     
-    hierarchicalFolders.push(...standaloneFolders.filter(f => f !== null));
+    hierarchicalFolders.push(...standaloneFolders);
 
     // Add "Senza Cartella" for PDFs without folder
     const { data: noFolderDocs, error: noFolderError } = await supabase
