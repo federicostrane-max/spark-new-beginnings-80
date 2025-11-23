@@ -321,8 +321,13 @@ export const DocumentPoolTable = () => {
         loadPDFFolders()
       ]);
 
+      console.log('[DocumentPoolTable] GitHub folders loaded:', githubFolders?.length || 0, githubFolders);
+      console.log('[DocumentPoolTable] PDF folders loaded:', pdfFolders?.length || 0, pdfFolders);
+
       // Combine folders from both sources
       const allFolders = [...(githubFolders || []), ...(pdfFolders || [])];
+      console.log('[DocumentPoolTable] Total folders:', allFolders.length, allFolders);
+      
       setFoldersData(allFolders);
     } catch (error) {
       console.error('[DocumentPoolTable] Error loading folders:', error);
@@ -342,6 +347,8 @@ export const DocumentPoolTable = () => {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
+
+    console.log('[loadGitHubFolders] Loaded GitHub docs:', githubDocs?.length || 0);
 
     // Helper per trasformare un documento (simplified, no agent data)
     const transformDoc = (doc: any) => {
@@ -370,6 +377,8 @@ export const DocumentPoolTable = () => {
       }
     });
 
+    console.log('[loadGitHubFolders] Docs by folder:', docsByFolder.size, 'unique folders');
+
     // Costruisci albero gerarchico ricorsivo
     const allFolderPaths = Array.from(docsByFolder.keys()).sort();
     
@@ -382,8 +391,12 @@ export const DocumentPoolTable = () => {
 
     // Funzione ricorsiva per costruire gerarchia
     const buildFolderTree = (parentPath: string, depth: number = 0): any => {
+      console.log(`[buildFolderTree] Building tree for: "${parentPath}" at depth ${depth}`);
+      
       const children: any[] = [];
       const parentDocs = docsByFolder.get(parentPath) || [];
+      
+      console.log(`[buildFolderTree] "${parentPath}" has ${parentDocs.length} direct docs`);
       
       // Trova tutte le sottocartelle dirette di parentPath
       const childPaths = allFolderPaths.filter(path => {
@@ -422,6 +435,8 @@ export const DocumentPoolTable = () => {
         return sum + getAllDocs(child).length;
       }, 0);
 
+      console.log(`[buildFolderTree] "${parentPath}" total: ${totalDocs} (direct: ${parentDocs.length}, children: ${children.length})`);
+
       return {
         id: `github-${parentPath}`,
         name: parentPath,
@@ -437,6 +452,8 @@ export const DocumentPoolTable = () => {
     const hierarchicalFolders = Array.from(rootPaths).map(rootPath => {
       return buildFolderTree(rootPath);
     }).filter(folder => folder && (folder.totalDocumentCount || folder.documentCount) > 0);
+
+    console.log('[loadGitHubFolders] Built hierarchical folders:', hierarchicalFolders.length, hierarchicalFolders);
 
     return hierarchicalFolders;
   };
