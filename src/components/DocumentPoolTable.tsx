@@ -515,8 +515,10 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     }
 
     console.log('[DocumentPoolTable] GitHub hierarchical folders built:', hierarchicalFolders.length);
+    console.log('[DocumentPoolTable] GitHub folders structure:', hierarchicalFolders.map(f => ({ name: f.name, docCount: f.documentCount, children: f.children?.length })));
 
     setFoldersData(hierarchicalFolders);
+    console.log('[DocumentPoolTable] setFoldersData called with', hierarchicalFolders.length, 'folders');
   };
 
   const loadPDFFolders = async () => {
@@ -785,8 +787,10 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     }
 
     console.log('[DocumentPoolTable] PDF folders loaded:', hierarchicalFolders.length);
+    console.log('[DocumentPoolTable] PDF folders structure:', hierarchicalFolders.map(f => ({ name: f.name, docCount: f.documentCount, children: f.children?.length })));
 
     setFoldersData(hierarchicalFolders);
+    console.log('[DocumentPoolTable] setFoldersData called with', hierarchicalFolders.length, 'folders');
   };
 
   const getStatusIcon = (status: string) => {
