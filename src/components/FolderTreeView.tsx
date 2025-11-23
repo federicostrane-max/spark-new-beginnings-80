@@ -30,7 +30,8 @@ interface KnowledgeDocument {
 interface FolderData {
   id: string;
   name: string;
-  documentCount: number;
+  documentCount: number; // Documenti DIRETTI nella cartella (non include sottocartelle)
+  totalDocumentCount?: number; // Totale RICORSIVO (include sottocartelle) - usato quando collassata
   totalFiles?: number;
   documents: KnowledgeDocument[];
   children?: FolderData[];
@@ -175,9 +176,10 @@ export function FolderTreeView({
                   )}
                   <span className="font-medium">{folder.name}</span>
                   <Badge variant="secondary" className="ml-2">
-                    {folder.totalFiles 
-                      ? `${folder.documentCount}/${folder.totalFiles}` 
-                      : `${folder.documentCount}`} {!folder.totalFiles && (folder.documentCount === 1 ? 'documento' : 'documenti')}
+                    {isExpanded 
+                      ? `${folder.documentCount}` // Quando espansa: solo documenti diretti
+                      : `${folder.totalDocumentCount || folder.documentCount}`} {/* Quando collassata: totale ricorsivo */}
+                    {' '}{(isExpanded ? folder.documentCount : (folder.totalDocumentCount || folder.documentCount)) === 1 ? 'documento' : 'documenti'}
                   </Badge>
                   {selectedInFolder > 0 && (
                     <Badge variant="outline" className="ml-1">

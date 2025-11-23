@@ -426,7 +426,8 @@ export const DocumentPoolTable = () => {
         id: `github-${parentPath}`,
         name: parentPath,
         fullName: parentPath,
-        documentCount: totalDocs,
+        documentCount: parentDocs.length, // Solo documenti DIRETTI
+        totalDocumentCount: totalDocs, // Totale RICORSIVO (include sottocartelle)
         documents: parentDocs,
         children: children.length > 0 ? children : undefined,
       };
@@ -564,7 +565,8 @@ export const DocumentPoolTable = () => {
         hierarchicalFolders.push({
           id: parentFolder.id,
           name: parentName,
-          documentCount: parentDocs.length + allChildDocs.length,
+          documentCount: parentDocs.length, // Solo documenti DIRETTI
+          totalDocumentCount: parentDocs.length + allChildDocs.length, // Totale RICORSIVO
           documents: parentDocs,
           children: childrenWithDocs
         });
