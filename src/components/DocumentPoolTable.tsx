@@ -426,6 +426,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       // Build hierarchical structure
       const hierarchicalFolders = [];
+      const processedFolderNames = new Set<string>();
       
       // Process parent folders with their children
       for (const [parentName, parentFolder] of parentFolders) {
@@ -570,13 +571,16 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             documents: transformedParentDocs,
             children: childrenWithDocs
           });
+          
+          // Mark this folder as processed
+          processedFolderNames.add(parentName);
         }
       }
       
-      // Add standalone folders (no parent, no children, and not already processed as parent)
+      // Add standalone folders (no parent, no children, and NOT already processed)
       const standaloneFolders = await Promise.all(
         Array.from(parentFolders.values())
-          .filter(folder => !childFoldersByParent.has(folder.name))
+          .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
           .map(async (folder) => {
             let standaloneDocsQuery = supabase
               .from('knowledge_documents')
