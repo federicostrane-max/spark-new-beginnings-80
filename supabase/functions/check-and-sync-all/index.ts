@@ -53,9 +53,10 @@ serve(async (req) => {
     // ========================================
     // STEP 1: Get all assigned documents from agent_document_links
     // ========================================
-    // Retry logic for transient network errors
+    // Retry logic for transient network errors with exponential backoff
     let assignedLinks = null;
-    let retries = 3;
+    let retries = 5;
+    let backoffMs = 1000;
     
     while (retries > 0) {
       const { data, error: linksError } = await supabase
@@ -77,11 +78,29 @@ serve(async (req) => {
         break;
       }
       
-      retries--;
-      if (retries === 0) throw linksError;
+      // Check for specific database errors
+      const errorCode = (linksError as any)?.code;
+      const errorMsg = (linksError as any)?.message || '';
       
-      console.warn(`[check-and-sync-all] Retry fetching links (${retries} left):`, linksError);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.warn(`[check-and-sync-all] Database error (${retries} retries left):`, {
+        code: errorCode,
+        message: errorMsg
+      });
+      
+      // If it's a schema cache error or connection issue, retry
+      if (errorCode === 'PGRST002' || errorMsg.includes('schema cache') || errorMsg.includes('connection')) {
+        retries--;
+        if (retries === 0) {
+          throw new Error(`Database connection failed after multiple retries: ${errorMsg}`);
+        }
+        
+        console.log(`[check-and-sync-all] Waiting ${backoffMs}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+        backoffMs *= 2; // Exponential backoff
+      } else {
+        // Non-retryable error
+        throw linksError;
+      }
     }
 
     const assignedDocIds = new Set<string>();
@@ -138,29 +157,50 @@ serve(async (req) => {
     if (assignedDocIds.size === 0) {
       console.log(`[check-and-sync-all] No assigned documents, skipping chunk query`);
     } else {
-      // Use aggregate query to count chunks per document instead of fetching all chunks
-      // This is MUCH faster for large datasets
-      const { data: chunkCounts, error: chunksError } = await supabase
-        .from('agent_knowledge')
-        .select('pool_document_id')
-        .eq('is_active', true)
-        .not('pool_document_id', 'is', null)
-        .or(`agent_id.eq.${agentId},agent_id.is.null`)
-        .in('pool_document_id', Array.from(assignedDocIds));
+      // Use aggregate query with retry logic
+      let chunkCounts = null;
+      let chunkRetries = 3;
+      
+      while (chunkRetries > 0) {
+        const { data, error: chunksError } = await supabase
+          .from('agent_knowledge')
+          .select('pool_document_id')
+          .eq('is_active', true)
+          .not('pool_document_id', 'is', null)
+          .or(`agent_id.eq.${agentId},agent_id.is.null`)
+          .in('pool_document_id', Array.from(assignedDocIds));
 
-      if (chunksError) {
-        console.error('[check-and-sync-all] Error fetching chunk counts:', chunksError);
-        // Don't throw - continue with empty chunk map
-        console.warn('[check-and-sync-all] Continuing with empty chunk map due to error');
-      } else {
+        if (!chunksError) {
+          chunkCounts = data;
+          break;
+        }
+        
+        const errorCode = (chunksError as any)?.code;
+        const errorMsg = (chunksError as any)?.message || '';
+        
+        console.warn(`[check-and-sync-all] Chunk query error (${chunkRetries} retries left):`, {
+          code: errorCode,
+          message: errorMsg
+        });
+        
+        chunkRetries--;
+        if (chunkRetries === 0) {
+          console.error('[check-and-sync-all] Chunk query failed after retries, continuing with empty map');
+          break;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      if (chunkCounts) {
         // Count chunks per document
-        chunkCounts?.forEach(chunk => {
+        chunkCounts.forEach(chunk => {
           if (chunk.pool_document_id) {
             const count = agentChunkMap.get(chunk.pool_document_id) || 0;
             agentChunkMap.set(chunk.pool_document_id, count + 1);
           }
         });
-        console.log(`[check-and-sync-all] Found chunks for ${agentChunkMap.size} documents (${chunkCounts?.length || 0} total chunks)`);
+        console.log(`[check-and-sync-all] Found chunks for ${agentChunkMap.size} documents (${chunkCounts.length || 0} total chunks)`);
       }
     }
 
