@@ -172,3 +172,6 @@ verify_jwt = false
 [functions.process-sync-queue]
 verify_jwt = true
 timeout = 900
+
+[functions.delete-github-documents]
+verify_jwt = false
