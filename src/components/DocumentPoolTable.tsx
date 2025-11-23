@@ -333,7 +333,7 @@ export const DocumentPoolTable = () => {
   };
 
   const loadGitHubFolders = async () => {
-    // Load all GitHub documents
+    // Load ALL documents with source_url (GitHub + any other external sources)
     const { data: githubDocs, error } = await supabase
       .from('knowledge_documents')
       .select(`
@@ -343,7 +343,7 @@ export const DocumentPoolTable = () => {
           agents(id, name)
         )
       `)
-      .or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%')
+      .not('source_url', 'is', null)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
