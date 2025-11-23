@@ -556,7 +556,7 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
     console.log('[process-document] ✅ Status updated to ready_for_assignment');
     
     // ========================================
-    // Non-Critical: Update Cache & Notifications
+    // Non-Critical: Update Cache, Queue & Notifications
     // If these fail/timeout, document status is already updated above
     // ========================================
     console.log('[process-document] 📝 Updating processing cache...');
@@ -566,6 +566,17 @@ IMPORTANTE: Rispondi SOLO con JSON valido in questo formato:
         processing_completed_at: new Date().toISOString()
       })
       .eq('document_id', documentId);
+
+    // 🔄 Update document_processing_queue status to completed
+    console.log('[process-document] 📝 Updating processing queue status...');
+    await supabase
+      .from('document_processing_queue')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      })
+      .eq('document_id', documentId)
+      .eq('processing_type', 'extract');
 
     // 📬 Send processing complete notification
     const { data: queueData } = await supabase
