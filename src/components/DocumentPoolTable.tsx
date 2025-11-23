@@ -333,43 +333,28 @@ export const DocumentPoolTable = () => {
   };
 
   const loadGitHubFolders = async () => {
-    // Load ALL documents with source_url (GitHub + any other external sources)
+    // Load ONLY essential fields, no joins (faster)
     const { data: githubDocs, error } = await supabase
       .from('knowledge_documents')
-      .select(`
-        *,
-        agent_document_links(
-          agent_id,
-          agents(id, name)
-        )
-      `)
+      .select('id, file_name, folder, validation_status, processing_status, created_at, ai_summary, text_length, page_count')
       .not('source_url', 'is', null)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    // Helper per trasformare un documento
+    // Helper per trasformare un documento (simplified, no agent data)
     const transformDoc = (doc: any) => {
-      const links = doc.agent_document_links || [];
-      const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
       return {
         id: doc.id,
         file_name: doc.file_name,
         validation_status: doc.validation_status,
-        validation_reason: doc.validation_reason || "",
         processing_status: doc.processing_status,
+        created_at: doc.created_at,
+        folder: doc.folder,
         ai_summary: doc.ai_summary,
         text_length: doc.text_length,
         page_count: doc.page_count,
-        created_at: doc.created_at,
-        agent_names: agentNames,
-        agents_count: agentNames.length,
-        folder: doc.folder,
-        keywords: doc.keywords || [],
-        topics: doc.topics || [],
-        complexity_level: doc.complexity_level || "",
-        agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+        agent_names: [], // No agent info in folder view for performance
       };
     };
 
