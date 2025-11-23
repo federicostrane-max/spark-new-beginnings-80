@@ -176,6 +176,8 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
 
       const docIds = docs.map(d => d.id);
       console.log('🔍 Looking for chunks for', docIds.length, 'documents');
+      console.log('🔍 Agent ID:', agentId);
+      console.log('🔍 Document IDs sample:', docIds.slice(0, 5));
       
       // CRITICAL: Supabase .in() has a limit, so we batch large arrays
       const BATCH_SIZE = 1000;
@@ -183,9 +185,18 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       
       for (let i = 0; i < docIds.length; i += BATCH_SIZE) {
         const batchIds = docIds.slice(i, i + BATCH_SIZE);
-        console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchIds.length} docs)`);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        console.log(`📦 Processing batch ${batchNum} (${batchIds.length} docs)`);
+        console.log(`📦 Batch ${batchNum} IDs sample:`, batchIds.slice(0, 3));
         
         // CRITICAL: Query both agent-specific chunks AND shared pool chunks (agent_id IS NULL)
+        console.log(`🔍 Executing query for batch ${batchNum}:`, {
+          table: 'agent_knowledge',
+          filter: `agent_id.eq.${agentId} OR agent_id.is.null`,
+          is_active: true,
+          pool_document_ids: batchIds.length
+        });
+        
         const { data: batchChunks, error } = await supabase
           .from('agent_knowledge')
           .select('pool_document_id')
@@ -193,46 +204,73 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
           .eq('is_active', true)
           .in('pool_document_id', batchIds);
 
+        console.log(`📥 Batch ${batchNum} raw response:`, {
+          hasError: !!error,
+          dataCount: batchChunks?.length || 0,
+          dataSample: batchChunks?.slice(0, 3)
+        });
+
         if (error) {
-          console.error(`❌ Error in batch ${Math.floor(i / BATCH_SIZE) + 1}:`, error);
+          console.error(`❌ Error in batch ${batchNum}:`, error);
+          console.error(`❌ Error details:`, JSON.stringify(error, null, 2));
           throw error;
         }
 
         if (batchChunks) {
+          console.log(`✅ Batch ${batchNum} returned ${batchChunks.length} chunks`);
           allChunkCounts.push(...batchChunks);
+        } else {
+          console.warn(`⚠️ Batch ${batchNum} returned null/undefined`);
         }
       }
 
       console.log('✅ Found', allChunkCounts.length, 'total chunks across all batches');
+      console.log('📊 All chunks sample:', allChunkCounts.slice(0, 10));
 
       // Count chunks per document
       const chunkCountMap = new Map<string, number>();
       allChunkCounts.forEach(chunk => {
         if (chunk.pool_document_id) {
-          chunkCountMap.set(
-            chunk.pool_document_id,
-            (chunkCountMap.get(chunk.pool_document_id) || 0) + 1
-          );
+          const currentCount = chunkCountMap.get(chunk.pool_document_id) || 0;
+          chunkCountMap.set(chunk.pool_document_id, currentCount + 1);
+        } else {
+          console.warn('⚠️ Found chunk without pool_document_id:', chunk);
         }
       });
 
       console.log('📊 Chunk count map size:', chunkCountMap.size);
+      console.log('📊 Chunk count map entries (first 10):', 
+        Array.from(chunkCountMap.entries()).slice(0, 10));
 
       // Update documents with correct chunk counts
+      console.log('🔄 Starting to update documents...');
       const updatedDocs = docs.map(doc => {
         const chunkCount = chunkCountMap.get(doc.id) || 0;
-        console.log(`  - ${doc.file_name}: ${chunkCount} chunks`);
+        const syncStatus = (chunkCount > 0 ? 'synced' : 'missing') as 'synced' | 'missing';
+        console.log(`  📄 ${doc.file_name}:`, {
+          id: doc.id,
+          chunkCount,
+          syncStatus,
+          inMap: chunkCountMap.has(doc.id)
+        });
         return {
           ...doc,
-          syncStatus: (chunkCount > 0 ? 'synced' : 'missing') as 'synced' | 'missing',
+          syncStatus,
           chunkCount,
           expectedChunks: chunkCount,
         };
       });
 
       console.log('🔄 Calling setDocuments with', updatedDocs.length, 'docs');
+      console.log('📊 Updated docs summary:', {
+        total: updatedDocs.length,
+        synced: updatedDocs.filter(d => d.syncStatus === 'synced').length,
+        missing: updatedDocs.filter(d => d.syncStatus === 'missing').length,
+        totalChunks: updatedDocs.reduce((sum, d) => sum + (d.chunkCount || 0), 0)
+      });
+      
       setDocuments([...updatedDocs]); // Force new array reference
-      console.log('✅ setDocuments called');
+      console.log('✅ setDocuments called - state should update now');
 
       const missingCount = updatedDocs.filter(d => d.syncStatus === 'missing').length;
       console.log(`✅ Final: ${updatedDocs.length - missingCount} synced, ${missingCount} missing`);
