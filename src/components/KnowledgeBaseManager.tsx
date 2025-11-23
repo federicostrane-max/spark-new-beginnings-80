@@ -200,7 +200,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         const { data: batchChunks, error } = await supabase
           .from('agent_knowledge')
           .select('pool_document_id')
-          .or(`agent_id.eq.${agentId},agent_id.is.null()`)
+          .or(`agent_id.eq.${agentId},agent_id.is.null`)
           .eq('is_active', true)
           .in('pool_document_id', batchIds);
 
