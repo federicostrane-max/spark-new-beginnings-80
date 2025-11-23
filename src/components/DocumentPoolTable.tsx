@@ -552,21 +552,24 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
         const allDocs = [...transformedParentDocs, ...allChildDocs];
         
-        // Calculate total files for parent: check parent's own totalFiles first, then sum children
-        const parentOwnTotal = folderTotalsMap.get(parentName) || 0;
-        const childrenTotal = childrenWithDocs.reduce((sum, child) => {
-          return sum + (child.totalFiles || 0);
-        }, 0);
-        const parentTotalFiles = parentOwnTotal + childrenTotal;
-        
-        hierarchicalFolders.push({
-          id: parentFolder.id,
-          name: parentName,
-          documentCount: transformedParentDocs.length + allChildDocs.length,
-          totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
-          documents: transformedParentDocs,
-          children: childrenWithDocs
-        });
+        // ONLY add folder if it has documents of the current sourceType
+        if (allDocs.length > 0) {
+          // Calculate total files for parent: check parent's own totalFiles first, then sum children
+          const parentOwnTotal = folderTotalsMap.get(parentName) || 0;
+          const childrenTotal = childrenWithDocs.reduce((sum, child) => {
+            return sum + (child.totalFiles || 0);
+          }, 0);
+          const parentTotalFiles = parentOwnTotal + childrenTotal;
+          
+          hierarchicalFolders.push({
+            id: parentFolder.id,
+            name: parentName,
+            documentCount: transformedParentDocs.length + allChildDocs.length,
+            totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
+            documents: transformedParentDocs,
+            children: childrenWithDocs
+          });
+        }
       }
       
       // Add standalone folders (no parent, no children, and not already processed as parent)
@@ -626,17 +629,22 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             // Get total files for standalone folder
             const totalFiles = folderTotalsMap.get(folder.name);
             
-            return {
-              id: folder.id,
-              name: folder.name,
-              documentCount: transformedDocs.length,
-              totalFiles: totalFiles,
-              documents: transformedDocs,
-            };
+            // ONLY return folder if it has documents of the current sourceType
+            if (transformedDocs.length > 0) {
+              return {
+                id: folder.id,
+                name: folder.name,
+                documentCount: transformedDocs.length,
+                totalFiles: totalFiles,
+                documents: transformedDocs,
+              };
+            }
+            return null;
           })
       );
       
-      hierarchicalFolders.push(...standaloneFolders);
+      // Filter out null values (folders with no documents)
+      hierarchicalFolders.push(...standaloneFolders.filter(f => f !== null));
 
       // Add "Senza Cartella" folder for documents without a folder
       let noFolderQuery = supabase
