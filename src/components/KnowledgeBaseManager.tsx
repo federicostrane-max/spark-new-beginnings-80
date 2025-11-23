@@ -185,10 +185,11 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         const batchIds = docIds.slice(i, i + BATCH_SIZE);
         console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batchIds.length} docs)`);
         
+        // CRITICAL: Query both agent-specific chunks AND shared pool chunks (agent_id IS NULL)
         const { data: batchChunks, error } = await supabase
           .from('agent_knowledge')
           .select('pool_document_id')
-          .eq('agent_id', agentId)
+          .or(`agent_id.eq.${agentId},agent_id.is.null`)
           .eq('is_active', true)
           .in('pool_document_id', batchIds);
 
