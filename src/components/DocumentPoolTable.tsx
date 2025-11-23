@@ -527,7 +527,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       .from('knowledge_documents')
       .select('folder')
       .not('folder', 'is', null)
-      .or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
+      .is('source_url', null);
 
     if (docsError) throw docsError;
 
