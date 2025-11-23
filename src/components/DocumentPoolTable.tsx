@@ -203,9 +203,16 @@ export const DocumentPoolTable = () => {
       setError(null);
       
       // Load ALL pool documents without filtering by source type
-      const countQuery = supabase
+      // Count total documents in database
+      const { count: totalDbCount, error: countError } = await supabase
         .from("knowledge_documents")
         .select("id", { count: 'exact', head: true });
+
+      if (countError) throw countError;
+      
+      const total = totalDbCount || 0;
+      setTotalCount(total);
+      setTotalPages(Math.ceil(total / pageSize));
 
       const dataQuery = supabase
         .from("knowledge_documents")
@@ -221,13 +228,6 @@ export const DocumentPoolTable = () => {
             agents(id, name)
           )
         `);
-
-      const { count, error: countError } = await countQuery;
-      if (countError) throw countError;
-      
-      const total = count || 0;
-      setTotalCount(total);
-      setTotalPages(Math.ceil(total / pageSize));
 
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -1112,9 +1112,9 @@ export const DocumentPoolTable = () => {
               <FileText className="h-5 w-5" />
               <span className="font-semibold">
                 Documenti ({filteredDocuments.length})
-                {filteredDocuments.length < documents.length && (
+                {filteredDocuments.length < totalCount && (
                   <span className="text-muted-foreground text-sm font-normal ml-2">
-                    di {documents.length} totali
+                    di {totalCount} totali in database
                   </span>
                 )}
               </span>
