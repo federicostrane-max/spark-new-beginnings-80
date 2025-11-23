@@ -191,6 +191,15 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   }, [sourceType]);
 
   useEffect(() => {
+    console.log('[DocumentPoolTable] 📊 foldersData state changed:', {
+      length: foldersData.length,
+      folders: foldersData.map(f => ({ name: f.name, docCount: f.documentCount })),
+      sourceType,
+      viewMode
+    });
+  }, [foldersData, sourceType, viewMode]);
+
+  useEffect(() => {
     console.log('[DocumentPoolTable] Component mounted');
     console.log('[DocumentPoolTable] Documents loaded:', documents.length);
   }, [documents]);
@@ -345,7 +354,8 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
   };
 
   const loadGitHubFolders = async () => {
-    console.log('[DocumentPoolTable] loadGitHubFolders started');
+    console.log('[DocumentPoolTable] 🔍 loadGitHubFolders started');
+    console.log('[DocumentPoolTable] Current foldersData length before:', foldersData.length);
 
     // Load all GitHub documents
     const { data: githubDocs, error } = await supabase
@@ -494,8 +504,12 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     console.log('[DocumentPoolTable] GitHub hierarchical folders built:', hierarchicalFolders.length);
     console.log('[DocumentPoolTable] GitHub folders structure:', hierarchicalFolders.map(f => ({ name: f.name, docCount: f.documentCount, children: f.children?.length })));
 
+    if (hierarchicalFolders.length === 0) {
+      console.warn('[DocumentPoolTable] ⚠️ No GitHub folders created! Check folder data in docs');
+    }
+
     setFoldersData(hierarchicalFolders);
-    console.log('[DocumentPoolTable] setFoldersData called with', hierarchicalFolders.length, 'folders');
+    console.log('[DocumentPoolTable] ✅ setFoldersData called with', hierarchicalFolders.length, 'GitHub folders');
   };
 
   const loadPDFFolders = async () => {
