@@ -658,7 +658,15 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
         });
       }
 
-      setFoldersData(hierarchicalFolders);
+      // Filter out empty folders based on sourceType after applying document filters
+      const nonEmptyFolders = hierarchicalFolders.filter(folder => {
+        // Count total documents including children
+        const totalDocs = folder.documents.length + 
+          (folder.children?.reduce((sum, child) => sum + child.documents.length, 0) || 0);
+        return totalDocs > 0;
+      });
+
+      setFoldersData(nonEmptyFolders);
     } catch (error: any) {
       console.error('[DocumentPoolTable] Error loading folders data:', error);
     }
