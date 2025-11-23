@@ -154,6 +154,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
     documentCount: number;
     documents: KnowledgeDocument[];
   }>>([]);
+  const [isLoadingFolders, setIsLoadingFolders] = useState(false);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -343,127 +344,109 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const loadFolders = async () => {
     try {
+      setIsLoadingFolders(true);
       console.log('[DocumentPoolTable] loadFolders called with sourceType:', sourceType);
-      
-      // Get unique folder names from documents based on sourceType
-      let folderQuery = supabase
-        .from('knowledge_documents')
-        .select('folder')
-        .not('folder', 'is', null);
 
-      // Filter by sourceType - use SAME logic as document queries
       if (sourceType === 'github') {
-        folderQuery = folderQuery.or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%');
-      } else if (sourceType === 'pdf') {
-        // PDF docs: NO source_url OR (has source_url but NOT from github AND search_query doesn't start with GitHub:)
-        folderQuery = folderQuery.or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
+        await loadGitHubFolders();
+      } else {
+        await loadPDFFolders();
       }
+    } catch (error) {
+      console.error('[DocumentPoolTable] Error loading folders:', error);
+      toast.error('Errore nel caricamento delle cartelle');
+    } finally {
+      setIsLoadingFolders(false);
+    }
+  };
 
-      const { data: docsWithFolders, error: docsError } = await folderQuery;
-      if (docsError) throw docsError;
+  const loadGitHubFolders = async () => {
+    console.log('[DocumentPoolTable] loadGitHubFolders started');
 
-      // Extract unique folder names
-      const uniqueFolderNames = new Set<string>();
-      (docsWithFolders || []).forEach(doc => {
-        if (doc.folder) uniqueFolderNames.add(doc.folder);
-      });
+    // Load all GitHub documents
+    const { data: githubDocs, error } = await supabase
+      .from('knowledge_documents')
+      .select(`
+        *,
+        agent_document_links(
+          agent_id,
+          agents(id, name)
+        )
+      `)
+      .or('source_url.ilike.%github.com%,search_query.ilike.GitHub:%')
+      .order('created_at', { ascending: false });
 
-      console.log('[DocumentPoolTable] Unique folders from documents:', Array.from(uniqueFolderNames));
-      console.log('[DocumentPoolTable] Current sourceType:', sourceType);
+    if (error) throw error;
 
-      // Load github import progress data ONLY for GitHub sourceType
-      const folderTotalsMap = new Map();
-      if (sourceType === 'github') {
-        const { data: progressData } = await supabase
-          .from('github_import_progress')
-          .select('folder, total_files, repo')
-          .order('started_at', { ascending: false });
+    console.log('[DocumentPoolTable] GitHub docs loaded:', githubDocs?.length || 0);
 
-        if (progressData) {
-          progressData.forEach(progress => {
-            if (!folderTotalsMap.has(progress.folder)) {
-              folderTotalsMap.set(progress.folder, progress.total_files);
-            }
-          });
-        }
-      }
+    // Extract folders from file_name (path before last /)
+    const folderMap = new Map<string, any[]>();
 
-      // Separate parent and child folders based on what exists in documents
-      const parentFolders = new Map();
-      const childFoldersByParent = new Map();
+    (githubDocs || []).forEach(doc => {
+      const fileName = doc.file_name;
+      const lastSlashIndex = fileName.lastIndexOf('/');
       
-      Array.from(uniqueFolderNames).forEach(folderName => {
-        // Check if this is a child folder (has a parent path)
-        const pathParts = folderName.split('/');
-        if (pathParts.length > 1) {
-          // It's a child folder - find its parent
-          const parentPath = pathParts.slice(0, -1).join('/');
-          if (!childFoldersByParent.has(parentPath)) {
-            childFoldersByParent.set(parentPath, []);
-          }
-          childFoldersByParent.get(parentPath).push({
-            id: `virtual-${folderName}`,
-            name: folderName,
-            parent_folder: parentPath,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            description: null,
-            icon: null,
-            color: null
-          });
-        } else {
-          // It's a parent folder
-          parentFolders.set(folderName, {
-            id: `virtual-${folderName}`,
-            name: folderName,
-            parent_folder: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            description: null,
-            icon: null,
-            color: null
-          });
-        }
-      });
-
-      // Build hierarchical structure
-      const hierarchicalFolders = [];
-      const processedFolderNames = new Set<string>();
-      
-      // Process parent folders with their children
-      for (const [parentName, parentFolder] of parentFolders) {
-        const children = childFoldersByParent.get(parentName) || [];
+      if (lastSlashIndex > 0) {
+        const folderPath = fileName.substring(0, lastSlashIndex);
         
-        // Load documents for parent folder directly (not in subfolders) with sourceType filter
-        let parentDocsQuery = supabase
-          .from('knowledge_documents')
-          .select(`
-            *,
-            agent_document_links(
-              agent_id,
-              agents(id, name)
-            )
-          `)
-          .eq('folder', parentName);
-
-        // Apply sourceType filter
-        if (sourceType === 'github') {
-          parentDocsQuery = parentDocsQuery.not('source_url', 'is', null);
-        } else if (sourceType === 'pdf') {
-          parentDocsQuery = parentDocsQuery.is('source_url', null);
+        if (!folderMap.has(folderPath)) {
+          folderMap.set(folderPath, []);
         }
+        folderMap.get(folderPath)!.push(doc);
+      }
+    });
 
-        const { data: parentDocs, error: parentDocsError } = await parentDocsQuery
-          .order('created_at', { ascending: false });
+    console.log('[DocumentPoolTable] Extracted GitHub folders:', Array.from(folderMap.keys()));
 
-        console.log(`[DocumentPoolTable] Parent folder "${parentName}" - docs found:`, parentDocs?.length || 0);
-        if (parentDocsError) throw parentDocsError;
+    // Build folder hierarchy
+    const folderPaths = Array.from(folderMap.keys()).sort();
+    const rootFolders = new Map<string, any>();
+    const childFoldersByParent = new Map<string, any[]>();
 
-        const transformedParentDocs = (parentDocs || []).map((doc: any) => {
+    // Identify root and child folders
+    folderPaths.forEach(path => {
+      const slashIndex = path.indexOf('/');
+      if (slashIndex === -1) {
+        // Root folder
+        rootFolders.set(path, {
+          id: `github-${path}`,
+          name: path,
+          fullPath: path,
+        });
+      } else {
+        // Child folder - find parent
+        const parentPath = path.substring(0, slashIndex);
+        if (!childFoldersByParent.has(parentPath)) {
+          childFoldersByParent.set(parentPath, []);
+        }
+        childFoldersByParent.get(parentPath)!.push({
+          id: `github-${path}`,
+          name: path.substring(slashIndex + 1),
+          fullPath: path,
+        });
+      }
+    });
+
+    console.log('[DocumentPoolTable] Root folders:', Array.from(rootFolders.keys()));
+    console.log('[DocumentPoolTable] Child folders by parent:', Array.from(childFoldersByParent.entries()));
+
+    const hierarchicalFolders = [];
+
+    // Build hierarchical structure
+    for (const [rootPath, rootFolder] of rootFolders) {
+      const children = childFoldersByParent.get(rootPath) || [];
+
+      // Get documents for this root folder (not in subfolders)
+      const rootDocs = folderMap.get(rootPath) || [];
+
+      // Get documents for all children
+      const childrenWithDocs = children.map(child => {
+        const childDocs = folderMap.get(child.fullPath) || [];
+
+        const transformedDocs = childDocs.map((doc: any) => {
           const links = doc.agent_document_links || [];
-          const agentNames = links
-            .map((link: any) => link.agents?.name)
-            .filter(Boolean);
+          const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
 
           return {
             id: doc.id,
@@ -477,193 +460,116 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             created_at: doc.created_at,
             agent_names: agentNames,
             agents_count: agentNames.length,
-            folder: doc.folder,
+            folder: child.fullPath,
             keywords: doc.keywords || [],
             topics: doc.topics || [],
             complexity_level: doc.complexity_level || "",
             agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
           };
         });
-        
-        // Load documents for children
-        const childrenWithDocs = await Promise.all(
-          children.map(async (child) => {
-            let childDocsQuery = supabase
-              .from('knowledge_documents')
-              .select(`
-                *,
-                agent_document_links(
-                  agent_id,
-                  agents(id, name)
-                )
-              `)
-              .or(`folder.eq.${child.name},folder.like.${child.name}/%`);
 
-            // Apply sourceType filter
-            if (sourceType === 'github') {
-              childDocsQuery = childDocsQuery.not('source_url', 'is', null);
-            } else if (sourceType === 'pdf') {
-              childDocsQuery = childDocsQuery.is('source_url', null);
-            }
+        return {
+          id: child.id,
+          name: child.name,
+          fullName: child.fullPath,
+          documentCount: transformedDocs.length,
+          documents: transformedDocs,
+          isChild: true,
+        };
+      });
 
-            const { data: docs, error: docsError } = await childDocsQuery
-              .order('created_at', { ascending: false });
+      // Transform root docs
+      const transformedRootDocs = rootDocs.map((doc: any) => {
+        const links = doc.agent_document_links || [];
+        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
 
-            if (docsError) throw docsError;
+        return {
+          id: doc.id,
+          file_name: doc.file_name,
+          validation_status: doc.validation_status,
+          validation_reason: doc.validation_reason || "",
+          processing_status: doc.processing_status,
+          ai_summary: doc.ai_summary,
+          text_length: doc.text_length,
+          page_count: doc.page_count,
+          created_at: doc.created_at,
+          agent_names: agentNames,
+          agents_count: agentNames.length,
+          folder: rootPath,
+          keywords: doc.keywords || [],
+          topics: doc.topics || [],
+          complexity_level: doc.complexity_level || "",
+          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+        };
+      });
 
-            const transformedDocs = (docs || []).map((doc: any) => {
-              const links = doc.agent_document_links || [];
-              const agentNames = links
-                .map((link: any) => link.agents?.name)
-                .filter(Boolean);
+      const allChildDocs = childrenWithDocs.flatMap(c => c.documents);
 
-              return {
-                id: doc.id,
-                file_name: doc.file_name,
-                validation_status: doc.validation_status,
-                validation_reason: doc.validation_reason || "",
-                processing_status: doc.processing_status,
-                ai_summary: doc.ai_summary,
-                text_length: doc.text_length,
-                page_count: doc.page_count,
-                created_at: doc.created_at,
-                agent_names: agentNames,
-                agents_count: agentNames.length,
-                folder: doc.folder,
-                keywords: doc.keywords || [],
-                topics: doc.topics || [],
-                complexity_level: doc.complexity_level || "",
-                agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-              };
-            });
+      hierarchicalFolders.push({
+        id: rootFolder.id,
+        name: rootPath,
+        documentCount: transformedRootDocs.length + allChildDocs.length,
+        documents: transformedRootDocs,
+        children: childrenWithDocs,
+      });
+    }
 
-            // Get total files for this child folder using full path
-            const childShortName = child.name.replace(`${parentName}/`, '');
-            const totalFiles = folderTotalsMap.get(child.name);
+    console.log('[DocumentPoolTable] GitHub hierarchical folders built:', hierarchicalFolders.length);
 
-            return {
-              id: child.id,
-              name: childShortName, // Remove parent prefix for display
-              fullName: child.name, // Keep full name for reference
-              documentCount: transformedDocs.length, // Includes all documents recursively from subfolders
-              totalFiles: totalFiles,
-              documents: transformedDocs,
-              isChild: true
-            };
-          })
-        );
-        
-        // Aggregate all documents: parent docs + all children docs
-        const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
-        const allDocs = [...transformedParentDocs, ...allChildDocs];
-        
-        // ONLY add folder if it has documents of the current sourceType
-        if (allDocs.length > 0) {
-          // Calculate total files for parent: check parent's own totalFiles first, then sum children
-          const parentOwnTotal = folderTotalsMap.get(parentName) || 0;
-          const childrenTotal = childrenWithDocs.reduce((sum, child) => {
-            return sum + (child.totalFiles || 0);
-          }, 0);
-          const parentTotalFiles = parentOwnTotal + childrenTotal;
-          
-          hierarchicalFolders.push({
-            id: parentFolder.id,
-            name: parentName,
-            documentCount: transformedParentDocs.length + allChildDocs.length,
-            totalFiles: parentTotalFiles > 0 ? parentTotalFiles : undefined,
-            documents: transformedParentDocs,
-            children: childrenWithDocs
-          });
-          
-          // Mark this folder as processed
-          processedFolderNames.add(parentName);
+    setFoldersData(hierarchicalFolders);
+  };
+
+  const loadPDFFolders = async () => {
+    console.log('[DocumentPoolTable] loadPDFFolders started');
+
+    // Get unique folder names from documents with 'folder' column
+    const { data: docsWithFolders, error: docsError } = await supabase
+      .from('knowledge_documents')
+      .select('folder')
+      .not('folder', 'is', null)
+      .or('source_url.is.null,and(source_url.not.ilike.%github.com%,or(search_query.is.null,search_query.not.ilike.GitHub:%))');
+
+    if (docsError) throw docsError;
+
+    const uniqueFolderNames = new Set<string>();
+    (docsWithFolders || []).forEach(doc => {
+      if (doc.folder) uniqueFolderNames.add(doc.folder);
+    });
+
+    console.log('[DocumentPoolTable] PDF unique folders:', Array.from(uniqueFolderNames));
+
+    // Separate parent and child folders
+    const parentFolders = new Map();
+    const childFoldersByParent = new Map();
+    
+    Array.from(uniqueFolderNames).forEach(folderName => {
+      const pathParts = folderName.split('/');
+      if (pathParts.length > 1) {
+        const parentPath = pathParts.slice(0, -1).join('/');
+        if (!childFoldersByParent.has(parentPath)) {
+          childFoldersByParent.set(parentPath, []);
         }
+        childFoldersByParent.get(parentPath).push({
+          id: `virtual-${folderName}`,
+          name: folderName,
+          parent_folder: parentPath,
+        });
+      } else {
+        parentFolders.set(folderName, {
+          id: `virtual-${folderName}`,
+          name: folderName,
+          parent_folder: null,
+        });
       }
+    });
+
+    const hierarchicalFolders = [];
+    const processedFolderNames = new Set<string>();
+    
+    for (const [parentName, parentFolder] of parentFolders) {
+      const children = childFoldersByParent.get(parentName) || [];
       
-      // Add standalone folders (no parent, no children, and NOT already processed)
-      const standaloneFolders = await Promise.all(
-        Array.from(parentFolders.values())
-          .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
-          .map(async (folder) => {
-            let standaloneDocsQuery = supabase
-              .from('knowledge_documents')
-              .select(`
-                *,
-                agent_document_links(
-                  agent_id,
-                  agents(id, name)
-                )
-              `)
-              .eq('folder', folder.name);
-
-            // Apply sourceType filter
-            if (sourceType === 'github') {
-              standaloneDocsQuery = standaloneDocsQuery.not('source_url', 'is', null);
-            } else if (sourceType === 'pdf') {
-              standaloneDocsQuery = standaloneDocsQuery.is('source_url', null);
-            }
-
-            const { data: docs, error: docsError } = await standaloneDocsQuery
-              .order('created_at', { ascending: false });
-
-            console.log(`[DocumentPoolTable] Standalone folder "${folder.name}" (sourceType=${sourceType}) - docs found:`, docs?.length || 0);
-            if (docsError) throw docsError;
-
-            const transformedDocs = (docs || []).map((doc: any) => {
-              const links = doc.agent_document_links || [];
-              const agentNames = links
-                .map((link: any) => link.agents?.name)
-                .filter(Boolean);
-
-              return {
-                id: doc.id,
-                file_name: doc.file_name,
-                validation_status: doc.validation_status,
-                validation_reason: doc.validation_reason || "",
-                processing_status: doc.processing_status,
-                ai_summary: doc.ai_summary,
-                text_length: doc.text_length,
-                page_count: doc.page_count,
-                created_at: doc.created_at,
-                agent_names: agentNames,
-                agents_count: agentNames.length,
-                folder: doc.folder,
-                keywords: doc.keywords || [],
-                topics: doc.topics || [],
-                complexity_level: doc.complexity_level || "",
-                agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-              };
-            });
-
-            // Get total files for standalone folder
-            const totalFiles = folderTotalsMap.get(folder.name);
-            
-            // ONLY return folder if it has documents of the current sourceType
-            if (transformedDocs.length > 0) {
-              return {
-                id: folder.id,
-                name: folder.name,
-                documentCount: transformedDocs.length,
-                totalFiles: totalFiles,
-                documents: transformedDocs,
-              };
-            }
-            return null;
-          })
-      );
-      
-      // Filter out null values (folders with no documents)
-      const validStandaloneFolders = standaloneFolders.filter(f => f !== null);
-      
-      console.log('[DocumentPoolTable] Hierarchical folders count:', hierarchicalFolders.length);
-      console.log('[DocumentPoolTable] Standalone folders count:', validStandaloneFolders.length);
-      console.log('[DocumentPoolTable] Hierarchical folder names:', hierarchicalFolders.map(f => f.name));
-      console.log('[DocumentPoolTable] Standalone folder names:', validStandaloneFolders.map(f => f.name));
-      
-      hierarchicalFolders.push(...validStandaloneFolders);
-
-      // Add "Senza Cartella" folder for documents without a folder
-      let noFolderQuery = supabase
+      const { data: parentDocs, error: parentDocsError } = await supabase
         .from('knowledge_documents')
         .select(`
           *,
@@ -672,67 +578,215 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             agents(id, name)
           )
         `)
-        .is('folder', null);
-
-      // Apply sourceType filter for no-folder documents
-      if (sourceType === 'github') {
-        noFolderQuery = noFolderQuery.not('source_url', 'is', null);
-      } else if (sourceType === 'pdf') {
-        noFolderQuery = noFolderQuery.is('source_url', null);
-      }
-
-      const { data: noFolderDocs, error: noFolderError } = await noFolderQuery
+        .eq('folder', parentName)
+        .is('source_url', null)
         .order('created_at', { ascending: false });
 
-      if (noFolderError) throw noFolderError;
+      if (parentDocsError) throw parentDocsError;
 
-      if (noFolderDocs && noFolderDocs.length > 0) {
-        const transformedNoFolderDocs = noFolderDocs.map((doc: any) => {
-          const links = doc.agent_document_links || [];
-          const agentNames = links
-            .map((link: any) => link.agents?.name)
-            .filter(Boolean);
+      const transformedParentDocs = (parentDocs || []).map((doc: any) => {
+        const links = doc.agent_document_links || [];
+        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+
+        return {
+          id: doc.id,
+          file_name: doc.file_name,
+          validation_status: doc.validation_status,
+          validation_reason: doc.validation_reason || "",
+          processing_status: doc.processing_status,
+          ai_summary: doc.ai_summary,
+          text_length: doc.text_length,
+          page_count: doc.page_count,
+          created_at: doc.created_at,
+          agent_names: agentNames,
+          agents_count: agentNames.length,
+          folder: doc.folder,
+          keywords: doc.keywords || [],
+          topics: doc.topics || [],
+          complexity_level: doc.complexity_level || "",
+          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+        };
+      });
+      
+      const childrenWithDocs = await Promise.all(
+        children.map(async (child) => {
+          const { data: docs, error: docsError } = await supabase
+            .from('knowledge_documents')
+            .select(`
+              *,
+              agent_document_links(
+                agent_id,
+                agents(id, name)
+              )
+            `)
+            .or(`folder.eq.${child.name},folder.like.${child.name}/%`)
+            .is('source_url', null)
+            .order('created_at', { ascending: false });
+
+          if (docsError) throw docsError;
+
+          const transformedDocs = (docs || []).map((doc: any) => {
+            const links = doc.agent_document_links || [];
+            const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+
+            return {
+              id: doc.id,
+              file_name: doc.file_name,
+              validation_status: doc.validation_status,
+              validation_reason: doc.validation_reason || "",
+              processing_status: doc.processing_status,
+              ai_summary: doc.ai_summary,
+              text_length: doc.text_length,
+              page_count: doc.page_count,
+              created_at: doc.created_at,
+              agent_names: agentNames,
+              agents_count: agentNames.length,
+              folder: doc.folder,
+              keywords: doc.keywords || [],
+              topics: doc.topics || [],
+              complexity_level: doc.complexity_level || "",
+              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+            };
+          });
+
+          const childShortName = child.name.replace(`${parentName}/`, '');
 
           return {
-            id: doc.id,
-            file_name: doc.file_name,
-            validation_status: doc.validation_status,
-            validation_reason: doc.validation_reason || "",
-            processing_status: doc.processing_status,
-            ai_summary: doc.ai_summary,
-            text_length: doc.text_length,
-            page_count: doc.page_count,
-            created_at: doc.created_at,
-            agent_names: agentNames,
-            agents_count: agentNames.length,
-            folder: doc.folder,
-            keywords: doc.keywords || [],
-            topics: doc.topics || [],
-            complexity_level: doc.complexity_level || "",
-            agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+            id: child.id,
+            name: childShortName,
+            fullName: child.name,
+            documentCount: transformedDocs.length,
+            documents: transformedDocs,
+            isChild: true
           };
-        });
-
+        })
+      );
+      
+      const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
+      const allDocs = [...transformedParentDocs, ...allChildDocs];
+      
+      if (allDocs.length > 0) {
         hierarchicalFolders.push({
-          id: 'no-folder',
-          name: 'Senza Cartella',
-          documentCount: transformedNoFolderDocs.length,
-          documents: transformedNoFolderDocs,
+          id: parentFolder.id,
+          name: parentName,
+          documentCount: transformedParentDocs.length + allChildDocs.length,
+          documents: transformedParentDocs,
+          children: childrenWithDocs
         });
+        
+        processedFolderNames.add(parentName);
       }
+    }
+    
+    const standaloneFolders = await Promise.all(
+      Array.from(parentFolders.values())
+        .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
+        .map(async (folder) => {
+          const { data: docs, error: docsError } = await supabase
+            .from('knowledge_documents')
+            .select(`
+              *,
+              agent_document_links(
+                agent_id,
+                agents(id, name)
+              )
+            `)
+            .eq('folder', folder.name)
+            .is('source_url', null)
+            .order('created_at', { ascending: false });
 
-      // Filter out empty folders based on sourceType after applying document filters
-      const nonEmptyFolders = hierarchicalFolders.filter(folder => {
-        // Count total documents including children
-        const totalDocs = folder.documents.length + 
-          (folder.children?.reduce((sum, child) => sum + child.documents.length, 0) || 0);
-        return totalDocs > 0;
+          if (docsError) throw docsError;
+
+          const transformedDocs = (docs || []).map((doc: any) => {
+            const links = doc.agent_document_links || [];
+            const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+
+            return {
+              id: doc.id,
+              file_name: doc.file_name,
+              validation_status: doc.validation_status,
+              validation_reason: doc.validation_reason || "",
+              processing_status: doc.processing_status,
+              ai_summary: doc.ai_summary,
+              text_length: doc.text_length,
+              page_count: doc.page_count,
+              created_at: doc.created_at,
+              agent_names: agentNames,
+              agents_count: agentNames.length,
+              folder: doc.folder,
+              keywords: doc.keywords || [],
+              topics: doc.topics || [],
+              complexity_level: doc.complexity_level || "",
+              agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+            };
+          });
+          
+          if (transformedDocs.length > 0) {
+            return {
+              id: folder.id,
+              name: folder.name,
+              documentCount: transformedDocs.length,
+              documents: transformedDocs,
+            };
+          }
+          return null;
+        })
+    );
+    
+    hierarchicalFolders.push(...standaloneFolders.filter(f => f !== null));
+
+    // Add "Senza Cartella" for PDFs without folder
+    const { data: noFolderDocs, error: noFolderError } = await supabase
+      .from('knowledge_documents')
+      .select(`
+        *,
+        agent_document_links(
+          agent_id,
+          agents(id, name)
+        )
+      `)
+      .is('folder', null)
+      .is('source_url', null)
+      .order('created_at', { ascending: false });
+
+    if (noFolderError) throw noFolderError;
+
+    if (noFolderDocs && noFolderDocs.length > 0) {
+      const transformedNoFolderDocs = noFolderDocs.map((doc: any) => {
+        const links = doc.agent_document_links || [];
+        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
+
+        return {
+          id: doc.id,
+          file_name: doc.file_name,
+          validation_status: doc.validation_status,
+          validation_reason: doc.validation_reason || "",
+          processing_status: doc.processing_status,
+          ai_summary: doc.ai_summary,
+          text_length: doc.text_length,
+          page_count: doc.page_count,
+          created_at: doc.created_at,
+          agent_names: agentNames,
+          agents_count: agentNames.length,
+          folder: null,
+          keywords: doc.keywords || [],
+          topics: doc.topics || [],
+          complexity_level: doc.complexity_level || "",
+          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+        };
       });
 
-      setFoldersData(nonEmptyFolders);
-    } catch (error: any) {
-      console.error('[DocumentPoolTable] Error loading folders data:', error);
+      hierarchicalFolders.push({
+        id: 'no-folder',
+        name: 'Senza Cartella',
+        documentCount: transformedNoFolderDocs.length,
+        documents: transformedNoFolderDocs,
+      });
     }
+
+    console.log('[DocumentPoolTable] PDF folders loaded:', hierarchicalFolders.length);
+
+    setFoldersData(hierarchicalFolders);
   };
 
   const getStatusIcon = (status: string) => {
