@@ -3097,14 +3097,36 @@ Il prompt deve essere pronto all'uso direttamente.`;
             if (isListQuery) {
               console.log('📋 [KNOWLEDGE] User is asking for document list - querying unique documents');
               
-              // Query for distinct documents assigned to this agent
-              const { data: distinctDocs, error: docsError } = await supabase
-                .from('agent_knowledge')
-                .select('document_name, category, summary, pool_document_id')
+              // First, get document IDs assigned to this agent via agent_document_links
+              const { data: assignedDocs, error: linksError } = await supabase
+                .from('agent_document_links')
+                .select('document_id')
                 .eq('agent_id', agent.id)
-                .not('embedding', 'is', null);
+                .eq('sync_status', 'completed');
               
-              if (!docsError && distinctDocs && distinctDocs.length > 0) {
+              console.log(`📎 [KNOWLEDGE] Found ${assignedDocs?.length || 0} assigned documents via agent_document_links`);
+              
+              let distinctDocs: any[] = [];
+              
+              if (!linksError && assignedDocs && assignedDocs.length > 0) {
+                const documentIds = assignedDocs.map(d => d.document_id);
+                
+                // Get chunks from shared pool using the assigned document IDs
+                const { data: poolChunks, error: docsError } = await supabase
+                  .from('agent_knowledge')
+                  .select('document_name, category, summary, pool_document_id')
+                  .is('agent_id', null) // Shared pool chunks have agent_id = NULL
+                  .in('pool_document_id', documentIds)
+                  .eq('is_active', true)
+                  .not('embedding', 'is', null);
+                
+                if (!docsError && poolChunks) {
+                  distinctDocs = poolChunks;
+                  console.log(`📦 [KNOWLEDGE] Retrieved ${poolChunks.length} chunks from shared pool`);
+                }
+              }
+              
+              if (distinctDocs.length > 0) {
                 // Get unique documents by document_name
                 const uniqueDocs = Array.from(
                   new Map(distinctDocs.map(doc => [doc.document_name, doc])).values()
