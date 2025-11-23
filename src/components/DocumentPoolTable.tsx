@@ -369,20 +369,21 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
       console.log('[DocumentPoolTable] Unique folders from documents:', Array.from(uniqueFolderNames));
 
-      // Load github import progress data
-      const { data: progressData } = await supabase
-        .from('github_import_progress')
-        .select('folder, total_files, repo')
-        .order('started_at', { ascending: false });
-
-      // Create a map of folder -> total files (use full path as key)
+      // Load github import progress data ONLY for GitHub sourceType
       const folderTotalsMap = new Map();
-      if (progressData) {
-        progressData.forEach(progress => {
-          if (!folderTotalsMap.has(progress.folder)) {
-            folderTotalsMap.set(progress.folder, progress.total_files);
-          }
-        });
+      if (sourceType === 'github') {
+        const { data: progressData } = await supabase
+          .from('github_import_progress')
+          .select('folder, total_files, repo')
+          .order('started_at', { ascending: false });
+
+        if (progressData) {
+          progressData.forEach(progress => {
+            if (!folderTotalsMap.has(progress.folder)) {
+              folderTotalsMap.set(progress.folder, progress.total_files);
+            }
+          });
+        }
       }
 
       // Separate parent and child folders based on what exists in documents
