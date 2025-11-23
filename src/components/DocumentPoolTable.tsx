@@ -341,11 +341,20 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
 
   const loadFolders = async () => {
     try {
-      // Load folders from database
-      const { data: foldersDbData, error: foldersError } = await supabase
+      // Load folders from database with sourceType filter
+      let foldersQuery = supabase
         .from('folders')
         .select('*')
         .order('name');
+
+      // Apply same filter logic as loadDocuments
+      if (sourceType === 'github') {
+        foldersQuery = foldersQuery.like('name', 'Huggingface_GitHub%');
+      } else if (sourceType === 'pdf') {
+        foldersQuery = foldersQuery.or('name.not.like.Huggingface_GitHub%');
+      }
+
+      const { data: foldersDbData, error: foldersError } = await foldersQuery;
 
       if (foldersError) throw foldersError;
 
@@ -571,7 +580,7 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
       hierarchicalFolders.push(...standaloneFolders);
 
       // Add "Senza Cartella" folder for documents without a folder
-      const { data: noFolderDocs, error: noFolderError } = await supabase
+      let noFolderQuery = supabase
         .from('knowledge_documents')
         .select(`
           *,
@@ -580,7 +589,19 @@ export const DocumentPoolTable = ({ sourceType }: DocumentPoolTableProps = {}) =
             agents(id, name)
           )
         `)
-        .is('folder', null)
+        .is('folder', null);
+
+      // Apply sourceType filter for no-folder documents too
+      if (sourceType === 'github') {
+        // For github, we want documents with folder LIKE 'Huggingface_GitHub%' OR null
+        // Since we already filter is.null, skip github docs without folder
+        noFolderQuery = noFolderQuery.limit(0); // No github docs should be without folder
+      } else if (sourceType === 'pdf') {
+        // For PDF, we want documents with folder IS NULL or NOT LIKE 'Huggingface_GitHub%'
+        // Since we already filter is.null, this is correct - include all null folders for PDF
+      }
+
+      const { data: noFolderDocs, error: noFolderError } = await noFolderQuery
         .order('created_at', { ascending: false });
 
       if (noFolderError) throw noFolderError;
