@@ -3343,23 +3343,52 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               console.log(`🛠️ [REQ-${context.requestId}] Tool called: get_agent_knowledge`);
               
               try {
+                let targetAgentId = context.agent.id; // Default: current agent
+                
+                // If agent_name is provided, find that agent
+                if (toolInput.agent_name) {
+                  const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                  const { data: targetAgent, error: agentError } = await context.supabase
+                    .from('agents')
+                    .select('id, name, slug')
+                    .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                    .eq('active', true)
+                    .single();
+                  
+                  if (agentError || !targetAgent) {
+                    console.error(`❌ Agent "${toolInput.agent_name}" not found:`, agentError);
+                    toolResult = {
+                      error: `Agent "${toolInput.agent_name}" non trovato`,
+                      success: false
+                    };
+                    return { toolResult, responseText: '', newFullResponse };
+                  }
+                  
+                  targetAgentId = targetAgent.id;
+                  console.log(`✅ Target agent found: ${targetAgent.name} (${targetAgentId})`);
+                }
+                
                 const { data: distinctDocs, error: docsError } = await context.supabase.rpc('get_distinct_documents', {
-                  p_agent_id: context.agent.id
+                  p_agent_id: targetAgentId
                 });
                 
-                if (docsError) throw docsError;
+                if (docsError) {
+                  console.error(`❌ Error fetching documents:`, docsError);
+                  throw docsError;
+                }
                 
                 console.log(`✅ Distinct documents found: ${distinctDocs?.length || 0}`);
                 
                 toolResult = {
                   total_documents: distinctDocs?.length || 0,
-                  documents: distinctDocs || []
+                  documents: distinctDocs || [],
+                  success: true
                 };
                 
                 responseText = `📚 **Knowledge Base**: ${distinctDocs?.length || 0} documenti trovati\n`;
                 if (distinctDocs && distinctDocs.length > 0) {
                   responseText += distinctDocs.map((d: any, i: number) => 
-                    `${i + 1}. **${d.document_name}** (${d.chunk_count} chunks)`
+                    `${i + 1}. **${d.document_name}**`
                   ).join('\n');
                 }
                 
@@ -3368,7 +3397,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 
               } catch (error) {
                 console.error('❌ Error in get_agent_knowledge:', error);
-                toolResult = { error: 'Failed to retrieve knowledge base' };
+                toolResult = { error: 'Failed to retrieve knowledge base', success: false };
               }
             }
             
@@ -4145,61 +4174,55 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       
                       try {
                         const toolInput = JSON.parse(toolUseInputJson);
-                        console.log(`   Tool input:`, JSON.stringify(toolInput).substring(0, 200));
                         
-                        // EXAMPLE: Implement ONE tool as proof of concept (get_agent_knowledge)
-                        if (toolUseName === 'get_agent_knowledge') {
-                          const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                          const { data: targetAgent } = await supabase
-                            .from('agents')
-                            .select('id, name, slug')
-                            .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                            .eq('active', true)
-                            .single();
-                          
-                          if (targetAgent) {
-                            const { data: documents } = await supabase.rpc(
-                              'get_distinct_documents',
-                              { p_agent_id: targetAgent.id }
-                            );
-                            
-                            const toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              document_count: documents?.length || 0,
-                              documents: documents || []
-                            };
-                            
-                            // Add to DeepSeek messages
-                            deepseekMessages.push({
-                              role: 'assistant',
-                              content: null,
-                              tool_calls: [{
-                                id: toolUseId || 'tool_' + Date.now(),
-                                type: 'function',
-                                function: { name: toolUseName, arguments: toolUseInputJson }
-                              }]
-                            });
-                            
-                            deepseekMessages.push({
-                              role: 'tool',
-                              tool_call_id: toolUseId || 'tool_' + Date.now(),
-                              content: JSON.stringify(toolResult)
-                            });
-                            
-                            needsToolResultContinuation = true;
-                            console.log(`✅ [DeepSeek] Tool result added to messages, will continue`);
+                        // ✅ EXECUTE TOOL using shared function
+                        const { toolResult, responseText, newFullResponse } = await executeToolCall(
+                          toolUseName,
+                          toolInput,
+                          {
+                            agent,
+                            user,
+                            conversation,
+                            supabase,
+                            sendSSE,
+                            requestId,
+                            fullResponse,
+                            conversationState,
+                            req
                           }
-                        }
+                        );
                         
-                        // Reset for next potential tool call
+                        // Add tool call + result to messages
+                        deepseekMessages.push({
+                          role: 'assistant',
+                          content: null,
+                          tool_calls: [{
+                            id: toolUseId || 'tool_' + Date.now(),
+                            type: 'function',
+                            function: { name: toolUseName, arguments: toolUseInputJson }
+                          }]
+                        });
+                        
+                        deepseekMessages.push({
+                          role: 'tool',
+                          tool_call_id: toolUseId || 'tool_' + Date.now(),
+                          content: JSON.stringify(toolResult)
+                        });
+                        
+                        fullResponse = newFullResponse;
+                        needsToolResultContinuation = true;
+                        toolCallCount++;
+                        
+                        // Reset
                         toolUseName = null;
                         toolUseInputJson = '';
                         toolUseId = null;
-                        toolCallCount++;
+                        
+                        console.log(`✅ [DeepSeek] Tool executed, continuation needed`);
                         
                       } catch (e) {
                         console.error(`❌ [DeepSeek] Tool execution error:`, e);
+                        fullResponse += `\n\n❌ Errore nell'esecuzione del tool.\n\n`;
                       }
                     }
                     
@@ -4377,15 +4400,59 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       }
                     }
                     
-                    // Handle function call
+                    // Handle function call - EXECUTE IMMEDIATELY
                     const functionCall = parsed.candidates?.[0]?.content?.parts?.[0]?.functionCall;
-                    if (functionCall) {
-                      toolUseName = functionCall.name;
+                    if (functionCall && functionCall.name) {
+                      const currentToolName = functionCall.name;
+                      toolUseName = currentToolName;
                       toolUseId = `gemini_${Date.now()}`;
-                      toolUseInputJson = JSON.stringify(functionCall.args);
-                      toolCallCount++;
-                      console.log(`🔧 [Gemini] Function call: ${toolUseName}`);
-                      const needsGeminiContinuation = true; // Flag for continuation
+                      console.log(`🔧 [Gemini] Function call: ${currentToolName}`);
+                      
+                      try {
+                        const toolInput = functionCall.args; // ✅ Gemini passes args directly
+                        
+                        // Execute tool using shared function
+                        const { toolResult, responseText, newFullResponse } = await executeToolCall(
+                          currentToolName,
+                          toolInput,
+                          {
+                            agent,
+                            user,
+                            conversation,
+                            supabase,
+                            sendSSE,
+                            requestId,
+                            fullResponse,
+                            conversationState,
+                            req
+                          }
+                        );
+                        
+                        // Gemini message format
+                        geminiMessages.push({
+                          role: 'model',
+                          parts: [{ functionCall: { name: currentToolName, args: toolInput } }]
+                        });
+                        
+                        geminiMessages.push({
+                          role: 'function',
+                          parts: [{ functionResponse: { name: currentToolName, response: toolResult } }]
+                        });
+                        
+                        fullResponse = newFullResponse;
+                        needsToolResultContinuation = true;
+                        toolCallCount++;
+                        
+                        // Reset
+                        toolUseName = null;
+                        toolUseId = null;
+                        
+                        console.log(`✅ [Gemini] Tool executed, continuation needed`);
+                        
+                      } catch (e) {
+                        console.error(`❌ [Gemini] Tool execution error:`, e);
+                        fullResponse += `\n\n❌ Errore nell'esecuzione del tool.\n\n`;
+                      }
                     }
                     
                     continue;
@@ -4426,12 +4493,12 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   
                   // Handle tool use completion
                   if (parsed.type === 'content_block_stop' && toolUseId && toolUseName) {
-                    console.log('🔧 Tool use complete, input JSON:', toolUseInputJson);
+                    console.log('🔧 [Anthropic] Tool use complete, input JSON:', toolUseInputJson);
                     
                     try {
                       const toolInput = JSON.parse(toolUseInputJson);
                       
-                      // Execute the tool using shared function
+                      // ✅ Execute the tool using shared function
                       const { toolResult, responseText, newFullResponse } = await executeToolCall(
                         toolUseName,
                         toolInput,
@@ -4475,17 +4542,18 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       });
                       
                       needsToolResultContinuation = true;
+                      toolCallCount++;
                       
                       // Reset tool state
                       toolUseName = null;
                       toolUseInputJson = '';
                       toolUseId = null;
                       
-                      // Flag che indica che dobbiamo fare un'altra chiamata API con il tool result
-                      needsToolResultContinuation = true;
+                      console.log(`✅ [Anthropic] Tool executed, continuation needed`);
                       
                     } catch (jsonError) {
-                      console.error('❌ Error parsing tool input JSON:', jsonError, toolUseInputJson);
+                      console.error('❌ [Anthropic] Error parsing tool input JSON:', jsonError, toolUseInputJson);
+                      fullResponse += `\n\n❌ Errore nell'esecuzione del tool.\n\n`;
                     }
                   }
                   
