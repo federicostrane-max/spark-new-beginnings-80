@@ -21,74 +21,22 @@ export const useDocumentSync = (agentId: string) => {
     setError(null);
 
     try {
-      // Step 1: Carica tutti i documenti assegnati all'agente
-      const { data: links, error: linksError } = await supabase
-        .from('agent_document_links')
-        .select(`
-          id,
-          assignment_type,
-          created_at,
-          document_id,
-          knowledge_documents (
-            id,
-            file_name,
-            ai_summary,
-            created_at
-          )
-        `)
-        .eq('agent_id', agentId)
-        .order('created_at', { ascending: false });
+      // Use new RPC to get sync status
+      const { data: syncStatuses, error: rpcError } = await supabase
+        .rpc('get_agent_sync_status', { p_agent_id: agentId });
 
-      if (linksError) throw linksError;
-      if (!links || links.length === 0) {
-        setDocuments([]);
-        return;
-      }
+      if (rpcError) throw rpcError;
 
-      // Step 2: Estrai gli ID dei documenti
-      const documentIds = links
-        .map(link => link.document_id)
-        .filter(Boolean);
-
-      if (documentIds.length === 0) {
-        setDocuments([]);
-        return;
-      }
-
-      // Step 3: Conta i chunks usando RPC function (più efficiente e affidabile)
-      const { data: chunkCountsData, error: chunksError } = await supabase
-        .rpc('get_document_chunks_count', { document_ids: documentIds });
-
-      if (chunksError) {
-        console.error('Error counting chunks:', chunksError);
-        throw chunksError;
-      }
-
-      // Step 4: Crea mappa dei conteggi dai risultati RPC
-      const chunkCounts = new Map<string, number>();
-      chunkCountsData?.forEach(row => {
-        if (row.document_id) {
-          chunkCounts.set(row.document_id, Number(row.chunk_count));
-        }
-      });
-
-      // Step 5: Costruisci l'array dei documenti con stato
-      const docsWithStatus: DocumentSyncStatus[] = links
-        .filter(link => link.knowledge_documents)
-        .map(link => {
-          const doc = link.knowledge_documents as any;
-          const chunkCount = chunkCounts.get(doc.id) || 0;
-          
-          return {
-            id: doc.id,
-            file_name: doc.file_name,
-            ai_summary: doc.ai_summary,
-            created_at: doc.created_at,
-            assignment_type: link.assignment_type,
-            syncStatus: chunkCount > 0 ? 'synced' : 'missing',
-            chunkCount,
-          };
-        });
+      // Transform RPC results to match our interface
+      const docsWithStatus: DocumentSyncStatus[] = (syncStatuses || []).map((status: any) => ({
+        id: status.document_id,
+        file_name: status.file_name,
+        ai_summary: null,
+        created_at: new Date().toISOString(),
+        assignment_type: 'manual',
+        syncStatus: status.chunk_count > 0 ? 'synced' : 'missing',
+        chunkCount: status.chunk_count || 0,
+      }));
 
       setDocuments(docsWithStatus);
     } catch (err) {
@@ -99,60 +47,13 @@ export const useDocumentSync = (agentId: string) => {
     }
   }, [agentId]);
 
-  const syncDocument = useCallback(async (documentId: string) => {
-    try {
-      // Aggiorna lo stato del documento a "checking"
-      setDocuments(prev =>
-        prev.map(doc =>
-          doc.id === documentId
-            ? { ...doc, syncStatus: 'checking' as const }
-            : doc
-        )
-      );
-
-      // Chiama la funzione di sincronizzazione
-      const { error } = await supabase.functions.invoke('sync-pool-document', {
-        body: { documentId, agentId },
-      });
-
-      if (error) throw error;
-
-      // Ricarica i documenti per aggiornare lo stato
-      await loadDocuments();
-    } catch (err) {
-      console.error('Error syncing document:', err);
-      
-      // Ripristina lo stato precedente in caso di errore
-      setDocuments(prev =>
-        prev.map(doc =>
-          doc.id === documentId
-            ? { ...doc, syncStatus: 'missing' as const }
-            : doc
-        )
-      );
-      
-      throw err;
-    }
-  }, [agentId, loadDocuments]);
-
-  const syncAllMissing = useCallback(async () => {
-    const missingDocs = documents.filter(doc => doc.syncStatus === 'missing');
-    
-    for (const doc of missingDocs) {
-      try {
-        await syncDocument(doc.id);
-      } catch (err) {
-        console.error(`Failed to sync ${doc.file_name}:`, err);
-      }
-    }
-  }, [documents, syncDocument]);
+  // Sync functions removed - synchronization now handled by background cron job
+  // Documents are automatically synced via process-document-sync edge function
 
   return {
     documents,
     isLoading,
     error,
     loadDocuments,
-    syncDocument,
-    syncAllMissing,
   };
 };

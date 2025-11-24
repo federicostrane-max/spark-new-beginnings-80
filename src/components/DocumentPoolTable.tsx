@@ -203,23 +203,43 @@ export const DocumentPoolTable = () => {
   }, [searchQuery, statusFilter, agentFilter]);
 
   const loadDocuments = async (page: number = currentPage) => {
+    console.log('[DocumentPoolTable] 📥 Loading documents, page:', page);
+    
     try {
       setLoading(true);
       setError(null);
       
-      // Load ALL pool documents without filtering by source type
-      // Count total documents in database
+      // Step 1: Count with timeout
+      console.log('[DocumentPoolTable] Step 1: Counting documents...');
+      const countController = new AbortController();
+      const countTimeout = setTimeout(() => countController.abort(), 10000);
+      
       const { count: totalDbCount, error: countError } = await supabase
         .from("knowledge_documents")
-        .select("id", { count: 'exact', head: true });
+        .select("id", { count: 'exact', head: true })
+        .abortSignal(countController.signal);
 
-      if (countError) throw countError;
+      clearTimeout(countTimeout);
+      
+      if (countError) {
+        console.error('[DocumentPoolTable] Count error:', countError);
+        throw countError;
+      }
       
       const total = totalDbCount || 0;
+      console.log('[DocumentPoolTable] Total documents in DB:', total);
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      const dataQuery = supabase
+      // Step 2: Load documents with timeout
+      console.log('[DocumentPoolTable] Step 2: Loading document data...');
+      const dataController = new AbortController();
+      const dataTimeout = setTimeout(() => dataController.abort(), 15000);
+      
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
         .from("knowledge_documents")
         .select(`
           *,
@@ -232,16 +252,19 @@ export const DocumentPoolTable = () => {
             agent_id,
             agents(id, name)
           )
-        `);
-
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      const { data, error } = await dataQuery
+        `)
         .order("created_at", { ascending: false })
-        .range(from, to);
+        .range(from, to)
+        .abortSignal(dataController.signal);
 
-      if (error) throw error;
+      clearTimeout(dataTimeout);
+
+      if (error) {
+        console.error('[DocumentPoolTable] Data error:', error);
+        throw error;
+      }
+
+      console.log('[DocumentPoolTable] Loaded', data?.length || 0, 'documents');
 
       const transformedData = (data || []).map((doc: any) => {
         const links = doc.agent_document_links || [];
@@ -271,10 +294,11 @@ export const DocumentPoolTable = () => {
         };
       });
 
+      console.log('[DocumentPoolTable] ✅ Documents loaded successfully');
       setDocuments(transformedData);
       setCurrentPage(page);
     } catch (error: any) {
-      console.error('[DocumentPoolTable] Load error:', error);
+      console.error('[DocumentPoolTable] ❌ Load error:', error);
       setError(error.message || "Errore sconosciuto");
       toast.error("Errore nel caricamento dei documenti");
     } finally {
@@ -316,27 +340,39 @@ export const DocumentPoolTable = () => {
   };
 
   const loadFolders = async () => {
+    console.log('[DocumentPoolTable] 📁 Loading folders...');
+    
     try {
       setIsLoadingFolders(true);
 
-      // Load both GitHub and PDF folders
+      // Load with timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+
       const [githubFolders, pdfFolders] = await Promise.all([
-        loadGitHubFolders(),
-        loadPDFFolders()
+        loadGitHubFolders().catch(err => {
+          console.error('[DocumentPoolTable] GitHub folders error:', err);
+          return [];
+        }),
+        loadPDFFolders().catch(err => {
+          console.error('[DocumentPoolTable] PDF folders error:', err);
+          return [];
+        })
       ]);
 
-      console.log('[DocumentPoolTable] GitHub folders loaded:', githubFolders?.length || 0, githubFolders);
-      console.log('[DocumentPoolTable] PDF folders loaded:', pdfFolders?.length || 0, pdfFolders);
+      clearTimeout(timeout);
 
-      // Combine folders from both sources
+      console.log('[DocumentPoolTable] GitHub folders loaded:', githubFolders?.length || 0);
+      console.log('[DocumentPoolTable] PDF folders loaded:', pdfFolders?.length || 0);
+
       const allFolders = [...(githubFolders || []), ...(pdfFolders || [])];
-      console.log('[DocumentPoolTable] Total folders:', allFolders.length, allFolders);
+      console.log('[DocumentPoolTable] ✅ Total folders:', allFolders.length);
       
       setFoldersData(allFolders);
     } catch (error) {
-      console.error('[DocumentPoolTable] Error loading folders:', error);
+      console.error('[DocumentPoolTable] ❌ Folders load error:', error);
       toast.error('Errore nel caricamento delle cartelle');
-      setFoldersData([]); // Set empty array on error
+      setFoldersData([]);
     } finally {
       setIsLoadingFolders(false);
     }

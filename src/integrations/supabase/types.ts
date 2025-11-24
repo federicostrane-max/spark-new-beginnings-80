@@ -1872,6 +1872,15 @@ export type Database = {
           pool_document_id: string
         }[]
       }
+      get_agent_sync_status: {
+        Args: { p_agent_id: string }
+        Returns: {
+          chunk_count: number
+          document_id: string
+          file_name: string
+          sync_status: string
+        }[]
+      }
       get_distinct_documents: {
         Args: { p_agent_id: string }
         Returns: {
@@ -1881,13 +1890,6 @@ export type Database = {
           id: string
           pool_document_id: string
           summary: string
-        }[]
-      }
-      get_document_chunks_count: {
-        Args: { document_ids: string[] }
-        Returns: {
-          chunk_count: number
-          document_id: string
         }[]
       }
       get_or_create_conversation: {
