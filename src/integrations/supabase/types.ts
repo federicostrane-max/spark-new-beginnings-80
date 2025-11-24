@@ -1879,6 +1879,7 @@ export type Database = {
           created_at: string
           document_name: string
           id: string
+          pool_document_id: string
           summary: string
         }[]
       }
