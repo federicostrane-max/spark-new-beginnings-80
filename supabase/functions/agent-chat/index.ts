@@ -3245,6 +3245,17 @@ The system has automatically executed a search based on your proposed query and 
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
 
+## DETERMINISTIC SYSTEM RULE - KNOWLEDGE BASE VERIFICATION
+
+**CRITICAL**: When a user asks you about YOUR documents, YOUR knowledge base, or YOUR assigned documents (e.g., "quanti documenti hai?", "quali documenti possiedi?", "list your documents", "what's in your knowledge base?"):
+
+1. You MUST ALWAYS use the tool \`get_agent_knowledge\` passing YOUR OWN agent slug/name as the agentSlug parameter
+2. NEVER respond from memory or cached information about your documents  
+3. The count and list MUST come from the fresh tool result ONLY
+4. After calling the tool, report the exact number and list from the response
+
+This rule ensures you always provide up-to-date and accurate information about your knowledge base.
+
 ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
 
           // Add mention instruction if @agent tags were detected
