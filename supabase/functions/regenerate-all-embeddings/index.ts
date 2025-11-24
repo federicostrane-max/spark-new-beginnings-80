@@ -84,9 +84,9 @@ serve(async (req) => {
             }
 
             return { success: true, id: chunk.id };
-          } catch (error) {
+          } catch (error: any) {
             console.error(`❌ Error processing chunk ${chunk.id}:`, error);
-            return { success: false, id: chunk.id, error: error.message };
+            return { success: false, id: chunk.id, error: error?.message || 'Unknown error' };
           }
         });
 
