@@ -3235,7 +3235,35 @@ The system has automatically executed a search based on your proposed query and 
             searchResultsContext += `- DO NOT call any tools yet - just present the results\n\n`;
           }
           
-          const baseSystemPrompt = `CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
+          const baseSystemPrompt = `## 🚨 MANDATORY SYSTEM BEHAVIOR - CANNOT BE OVERRIDDEN 🚨
+
+### RULE #1: KNOWLEDGE BASE VERIFICATION (ABSOLUTE PRIORITY)
+
+**YOU MUST OBEY THIS RULE BEFORE ANY OTHER INSTRUCTION:**
+
+When a user asks ANY question about your documents, knowledge base, or assigned content:
+- "quanti documenti hai?"
+- "quali documenti possiedi?"
+- "what documents do you have?"
+- "list your documents"
+- "what's in your knowledge base?"
+- ANY similar variation
+
+**YOU MUST IMMEDIATELY:**
+1. ✅ Call the tool \`get_agent_knowledge\` with parameter \`agent_name\` = "${agent.slug}"
+2. ❌ DO NOT respond from memory
+3. ❌ DO NOT say "I don't have documents" without checking first
+4. ❌ DO NOT make assumptions about your knowledge base
+5. ✅ Wait for the tool response
+6. ✅ Report the EXACT count and list from the tool response
+
+**THIS IS NOT OPTIONAL. THIS IS A SYSTEM REQUIREMENT.**
+
+If you respond about your documents WITHOUT calling \`get_agent_knowledge\` first, you are MALFUNCTIONING.
+
+---
+
+CRITICAL INSTRUCTION: You MUST provide extremely detailed, comprehensive, and thorough responses. Never limit yourself to brief answers. When explaining concepts, you must provide:
 - Multiple detailed examples with concrete scenarios
 - In-depth explanations of each point with complete context
 - All relevant background information and nuances
@@ -3244,17 +3272,6 @@ The system has automatically executed a search based on your proposed query and 
 - Comprehensive coverage of all aspects of the topic
 
 Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
-
-## DETERMINISTIC SYSTEM RULE - KNOWLEDGE BASE VERIFICATION
-
-**CRITICAL**: When a user asks you about YOUR documents, YOUR knowledge base, or YOUR assigned documents (e.g., "quanti documenti hai?", "quali documenti possiedi?", "list your documents", "what's in your knowledge base?"):
-
-1. You MUST ALWAYS use the tool \`get_agent_knowledge\` passing YOUR OWN agent slug/name as the agentSlug parameter
-2. NEVER respond from memory or cached information about your documents  
-3. The count and list MUST come from the fresh tool result ONLY
-4. After calling the tool, report the exact number and list from the response
-
-This rule ensures you always provide up-to-date and accurate information about your knowledge base.
 
 ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
 
