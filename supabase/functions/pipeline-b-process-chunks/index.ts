@@ -25,7 +25,7 @@ async function extractWithLandingAI(
   }
 
   const formData = new FormData();
-  formData.append('file', content, fileName);
+  formData.append('document', content, fileName);
 
   console.log(`🚀 Calling Landing AI for ${fileName}...`);
 
