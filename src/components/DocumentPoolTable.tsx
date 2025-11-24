@@ -826,23 +826,74 @@ export const DocumentPoolTable = () => {
 
   const handleBulkDelete = async () => {
     const selectedDocs = documents.filter((d) => selectedDocIds.has(d.id));
+    const docIds = selectedDocs.map(d => d.id);
     
-    const results = await Promise.allSettled(
-      selectedDocs.map((doc) => handleDelete(doc))
-    );
-
-    const succeeded = results.filter((r) => r.status === "fulfilled").length;
-    const failed = results.filter((r) => r.status === "rejected").length;
-
-    if (failed > 0) {
-      toast.error(`${succeeded} eliminati, ${failed} errori`);
-    } else {
-      toast.success(`${succeeded} documenti eliminati`);
+    if (docIds.length === 0) return;
+    
+    try {
+      toast.loading(`Eliminazione di ${docIds.length} documenti...`, { id: 'bulk-delete' });
+      
+      // 1. DELETE agent_document_links - BATCH
+      const { error: linksError } = await supabase
+        .from('agent_document_links')
+        .delete()
+        .in('document_id', docIds);
+      
+      if (linksError) throw linksError;
+      
+      // 2. DELETE agent_knowledge (shared pool chunks) - BATCH
+      const { error: chunksError } = await supabase
+        .from('agent_knowledge')
+        .delete()
+        .in('pool_document_id', docIds);
+      
+      if (chunksError) throw chunksError;
+      
+      // 3. DELETE document_processing_cache - BATCH
+      const { error: cacheError } = await supabase
+        .from('document_processing_cache')
+        .delete()
+        .in('document_id', docIds);
+      
+      if (cacheError) {
+        console.warn('Cache deletion warning:', cacheError);
+      }
+      
+      // 4. DELETE storage files - BATCH (max 100 per volta)
+      const filePaths = selectedDocs
+        .map(doc => `${doc.id}/${doc.file_name}`)
+        .filter(Boolean);
+      
+      for (let i = 0; i < filePaths.length; i += 100) {
+        const batch = filePaths.slice(i, i + 100);
+        const { error: storageError } = await supabase.storage
+          .from('knowledge-pdfs')
+          .remove(batch);
+        
+        if (storageError) {
+          console.warn(`Storage batch ${i}-${i+100} warning:`, storageError);
+        }
+      }
+      
+      // 5. DELETE knowledge_documents - BATCH
+      const { error: docsError } = await supabase
+        .from('knowledge_documents')
+        .delete()
+        .in('id', docIds);
+      
+      if (docsError) throw docsError;
+      
+      toast.success(`${docIds.length} documenti eliminati con successo`, { id: 'bulk-delete' });
+      
+      setSelectedDocIds(new Set());
+      setBulkDeleteDialogOpen(false);
+      loadDocuments();
+      loadFolders();
+      
+    } catch (error: any) {
+      console.error('Bulk delete error:', error);
+      toast.error(`Errore eliminazione: ${error.message}`, { id: 'bulk-delete' });
     }
-
-    setSelectedDocIds(new Set());
-    setBulkDeleteDialogOpen(false);
-    loadDocuments();
   };
 
   const handleRetryValidation = async (doc: KnowledgeDocument) => {
