@@ -141,12 +141,18 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           
           console.log(`Uploading "${file.name}" to Pipeline B...`);
           
-          const formData = new FormData();
-          formData.append('file', file);
+          // Convert file to base64 for JSON transport
+          const arrayBuffer = await file.arrayBuffer();
+          const base64 = btoa(
+            new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+          );
           
-          // Use supabase.functions.invoke for proper handling
           const { data, error } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
-            body: formData,
+            body: { 
+              fileName: file.name,
+              fileData: base64,
+              fileSize: file.size
+            },
           });
 
           if (error) {
