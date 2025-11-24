@@ -66,7 +66,7 @@ serve(async (req) => {
     console.log(`Found ${documents?.length || 0} matching documents`);
 
     return new Response(
-      JSON.stringify({ documents: documents || [] }),
+      JSON.stringify(documents || []),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

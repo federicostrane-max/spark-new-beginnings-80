@@ -3536,28 +3536,30 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   }
                 });
                 
+                const results = Array.isArray(searchResults) ? searchResults : searchResults?.documents || [];
+                
                 if (searchError) {
                   console.error(`❌ Semantic search error:`, searchError);
                   toolResult = { error: 'Failed to search knowledge base', success: false };
                   responseText = `❌ Errore nella ricerca: ${searchError.message}\n`;
-                } else if (!searchResults || searchResults.length === 0) {
+                } else if (results.length === 0) {
                   console.log(`⚠️ No results found for query: "${toolInput.query}"`);
                   toolResult = { results: [], count: 0, success: true };
                   responseText = `ℹ️ Nessun risultato trovato per "${toolInput.query}".\n`;
                 } else {
-                  console.log(`✅ Found ${searchResults.length} relevant chunks`);
-                  searchResults.forEach((r: any, i: number) => {
+                  console.log(`✅ Found ${results.length} relevant chunks`);
+                  results.forEach((r: any, i: number) => {
                     console.log(`   ${i + 1}. ${r.document_name} (similarity: ${r.similarity?.toFixed(3)})`);
                   });
                   
                   toolResult = {
-                    results: searchResults.map((r: any) => ({
+                    results: results.map((r: any) => ({
                       document_name: r.document_name,
                       content: r.content,
                       category: r.category,
                       similarity: r.similarity
                     })),
-                    count: searchResults.length,
+                    count: results.length,
                     success: true
                   };
                   
