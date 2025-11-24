@@ -3123,6 +3123,14 @@ The system has automatically executed a search based on your proposed query and 
           // ============================================================================
           let knowledgeContext = '';
           
+          // 📊 Track knowledge context for metadata (declare at function scope)
+          let hasKnowledgeContext = false;
+          let knowledgeStats = {
+            chunks_found: 0,
+            top_similarity: 0,
+            documents_used: 0
+          };
+          
           console.log(`🔍 [AUTO-SEARCH] Executing unconditional semantic search for: "${message}"`);
           
           try {
@@ -3140,6 +3148,14 @@ The system has automatically executed a search based on your proposed query and 
             if (!searchError && searchData) {
               // Handle both array format and wrapped object format
               const documents = Array.isArray(searchData) ? searchData : searchData?.documents || [];
+              
+              // Update metadata tracking
+              hasKnowledgeContext = documents.length > 0;
+              knowledgeStats = {
+                chunks_found: documents.length,
+                top_similarity: documents[0]?.similarity || 0,
+                documents_used: [...new Set(documents.map((d: any) => d.document_name))].length
+              };
               
               if (documents.length > 0) {
                 console.log(`✅ [AUTO-SEARCH] Found ${documents.length} relevant chunks from knowledge base`);
@@ -3189,6 +3205,11 @@ The system has automatically executed a search based on your proposed query and 
             knowledgeContext += `An error occurred while searching your knowledge base. Proceeding without context.\n`;
             knowledgeContext += `Error: ${err instanceof Error ? err.message : 'Unknown error'}\n\n`;
           }
+          
+          // ============================================================================
+          // TRACK TOOLS USED (for metadata)
+          // ============================================================================
+          const toolsUsed: string[] = [];
           
           // ============================================================================
           // BASE SYSTEM PROMPT (NO TOOL INSTRUCTIONS)
@@ -4174,11 +4195,20 @@ ${knowledgeContext}${searchResultsContext}`;
                 clearInterval(keepAliveInterval);
                 // Progressive save every 5k chars during streaming
                 if (fullResponse.length > 0) {
+                  // 📊 Calculate source reliability
+                  const sourceReliability = hasKnowledgeContext ? 'high' : (toolsUsed.length > 0 ? 'medium' : 'low');
+                  
                   await supabase
                     .from('agent_messages')
                     .update({ 
                       content: fullResponse,
-                      llm_provider: llmProvider 
+                      llm_provider: llmProvider,
+                      metadata: {
+                        has_knowledge_context: hasKnowledgeContext,
+                        knowledge_stats: knowledgeStats,
+                        tools_used: toolsUsed,
+                        source_reliability: sourceReliability
+                      }
                     })
                     .eq('id', placeholderMsg.id);
                 }
