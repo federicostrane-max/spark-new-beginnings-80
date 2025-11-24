@@ -8,6 +8,7 @@ const corsHeaders = {
 interface AssignRequest {
   agentId: string;
   documentId: string;
+  pipeline?: 'a' | 'b';
 }
 
 Deno.serve(async (req) => {
@@ -21,39 +22,65 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { agentId, documentId }: AssignRequest = await req.json();
+    const { agentId, documentId, pipeline = 'a' }: AssignRequest = await req.json();
 
-    console.log(`[assign-document-to-agent] Starting assignment: agent=${agentId}, document=${documentId}`);
+    console.log(`[assign-document-to-agent] Starting assignment: agent=${agentId}, document=${documentId}, pipeline=${pipeline}`);
 
-    // 1. Verify document exists and is ready for assignment
-    const { data: document, error: docError } = await supabase
-      .from('knowledge_documents')
-      .select('id, file_name, processing_status, validation_status')
-      .eq('id', documentId)
-      .single();
+    // 1. Verify document exists and is ready for assignment based on pipeline
+    if (pipeline === 'b') {
+      // Pipeline B: Check status='ready' in pipeline_b_documents
+      const { data: document, error: docError } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status')
+        .eq('id', documentId)
+        .single();
 
-    if (docError || !document) {
-      console.error('[assign-document-to-agent] Document not found:', docError);
-      return new Response(
-        JSON.stringify({ error: 'Document not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+      if (docError || !document) {
+        console.error('[assign-document-to-agent] Pipeline B document not found:', docError);
+        return new Response(
+          JSON.stringify({ error: 'Pipeline B document not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
 
-    if (document.processing_status !== 'ready_for_assignment') {
-      console.error('[assign-document-to-agent] Document not ready:', document.processing_status);
-      return new Response(
-        JSON.stringify({ error: `Document not ready (status: ${document.processing_status})` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+      if (document.status !== 'ready') {
+        console.error('[assign-document-to-agent] Pipeline B document not ready:', document.status);
+        return new Response(
+          JSON.stringify({ error: `Pipeline B document not ready (status: ${document.status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } else {
+      // Legacy: Check validation_status and processing_status
+      const { data: document, error: docError } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_name, processing_status, validation_status')
+        .eq('id', documentId)
+        .single();
 
-    if (document.validation_status !== 'validated') {
-      console.error('[assign-document-to-agent] Document not validated:', document.validation_status);
-      return new Response(
-        JSON.stringify({ error: `Document not validated (status: ${document.validation_status})` }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (docError || !document) {
+        console.error('[assign-document-to-agent] Document not found:', docError);
+        return new Response(
+          JSON.stringify({ error: 'Document not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (document.processing_status !== 'ready_for_assignment') {
+        console.error('[assign-document-to-agent] Document not ready:', document.processing_status);
+        return new Response(
+          JSON.stringify({ error: `Document not ready (status: ${document.processing_status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (document.validation_status !== 'validated') {
+        console.error('[assign-document-to-agent] Document not validated:', document.validation_status);
+        return new Response(
+          JSON.stringify({ error: `Document not validated (status: ${document.validation_status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // 2. Check if link already exists

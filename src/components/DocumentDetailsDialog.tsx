@@ -29,6 +29,8 @@ interface KnowledgeDocument {
   keywords?: string[];
   topics?: string[];
   complexity_level?: string;
+  pipeline?: 'a' | 'b';
+  status?: string; // For Pipeline B
 }
 
 interface DocumentDetailsDialogProps {
@@ -53,23 +55,44 @@ export const DocumentDetailsDialog = ({
 
     try {
       setIsProcessing(true);
-      const hasNoSummary = !document.ai_summary || document.ai_summary.trim() === "";
       
-      toast.info(hasNoSummary ? "Elaborazione documento in corso..." : "Rigenerazione summary in corso...");
+      if (document.pipeline === 'b') {
+        // Pipeline B: Reset status to 'ingested' to trigger reprocessing
+        toast.info("Ripristino documento per riprocessamento...");
+        
+        const { error } = await supabase
+          .from('pipeline_b_documents')
+          .update({ 
+            status: 'ingested',
+            error_message: null,
+            processed_at: null
+          })
+          .eq('id', document.id);
 
-      const { error } = await supabase.functions.invoke("process-document", {
-        body: {
-          documentId: document.id,
-          forceRegenerate: !hasNoSummary, // Force regeneration if summary already exists
-        },
-      });
+        if (error) throw error;
 
-      if (error) throw error;
+        toast.success("Documento ripristinato! Verrà riprocessato automaticamente dal CRON.");
+      } else {
+        // Legacy pipeline: Use process-document function
+        const hasNoSummary = !document.ai_summary || document.ai_summary.trim() === "";
+        
+        toast.info(hasNoSummary ? "Elaborazione documento in corso..." : "Rigenerazione summary in corso...");
 
-      toast.success(hasNoSummary ? "Documento elaborato con successo!" : "Summary rigenerato con successo!");
+        const { error } = await supabase.functions.invoke("process-document", {
+          body: {
+            documentId: document.id,
+            forceRegenerate: !hasNoSummary,
+          },
+        });
+
+        if (error) throw error;
+
+        toast.success(hasNoSummary ? "Documento elaborato con successo!" : "Summary rigenerato con successo!");
+      }
+      
       onOpenChange(false);
       
-      // Trigger parent refresh instead of full page reload
+      // Trigger parent refresh
       if (onRefresh) {
         onRefresh();
       }
@@ -128,7 +151,11 @@ export const DocumentDetailsDialog = ({
               disabled={isProcessing}
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${isProcessing ? 'animate-spin' : ''}`} />
-              {(!document.ai_summary || document.ai_summary.trim() === "") ? "Elabora Documento" : "Rigenera Summary"}
+              {document.pipeline === 'b' 
+                ? "Riprocessa" 
+                : (!document.ai_summary || document.ai_summary.trim() === "") 
+                  ? "Elabora Documento" 
+                  : "Rigenera Summary"}
             </Button>
           </div>
         </DialogHeader>

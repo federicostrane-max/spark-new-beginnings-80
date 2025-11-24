@@ -49,20 +49,38 @@ export const useDocumentAssignment = () => {
     }
   };
 
-  const reprocessDocument = async (documentId: string): Promise<boolean> => {
+  const reprocessDocument = async (documentId: string, pipeline: 'a' | 'b' = 'a'): Promise<boolean> => {
     try {
-      const { data, error } = await supabase.functions.invoke('reprocess-pool-document', {
-        body: { documentId }
-      });
+      if (pipeline === 'b') {
+        // Pipeline B: Reset status to 'ingested'
+        const { error } = await supabase
+          .from('pipeline_b_documents')
+          .update({ 
+            status: 'ingested',
+            error_message: null,
+            processed_at: null
+          })
+          .eq('id', documentId);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (data?.success) {
-        toast.success('Document reprocessing started');
+        toast.success('Documento Pipeline B ripristinato per riprocessamento');
         return true;
       } else {
-        toast.error(data?.error || 'Failed to reprocess document');
-        return false;
+        // Legacy: Use reprocess-pool-document function
+        const { data, error } = await supabase.functions.invoke('reprocess-pool-document', {
+          body: { documentId }
+        });
+
+        if (error) throw error;
+
+        if (data?.success) {
+          toast.success('Document reprocessing started');
+          return true;
+        } else {
+          toast.error(data?.error || 'Failed to reprocess document');
+          return false;
+        }
       }
     } catch (error: any) {
       console.error('Error reprocessing document:', error);
