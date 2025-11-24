@@ -93,7 +93,7 @@ export const BulkAssignDocumentDialog = ({
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
-            .eq("status", "ready"),
+            .in("status", ["ready", "failed"]),
           supabase
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
@@ -277,7 +277,7 @@ export const BulkAssignDocumentDialog = ({
             .from("pipeline_b_documents")
             .select("id")
             .in("id", documentIds)
-            .eq("status", "ready")
+            .in("status", ["ready", "failed"])
         ]);
         
         if (legacyDocs.error) throw legacyDocs.error;
