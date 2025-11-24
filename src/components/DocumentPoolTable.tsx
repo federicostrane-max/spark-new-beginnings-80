@@ -725,24 +725,34 @@ export const DocumentPoolTable = () => {
     
     hierarchicalFolders.push(...standaloneFolders);
 
-    // Add "Senza Cartella" for PDFs without folder
-    const { data: noFolderDocs, error: noFolderError } = await supabase
-      .from('knowledge_documents')
-      .select(`
-        *,
-        agent_document_links(
-          agent_id,
-          agents(id, name)
-        )
-      `)
-      .is('folder', null)
-      .is('source_url', null)
-      .order('created_at', { ascending: false });
+    // Add "Senza Cartella" for PDFs without folder - BOTH pipelines
+    const [legacyNoFolder, pipelineBDocs] = await Promise.all([
+      supabase
+        .from('knowledge_documents')
+        .select(`
+          *,
+          agent_document_links(
+            agent_id,
+            agents(id, name)
+          )
+        `)
+        .is('folder', null)
+        .is('source_url', null)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('pipeline_b_documents')
+        .select('*')
+        .order('created_at', { ascending: false })
+    ]);
 
-    if (noFolderError) throw noFolderError;
+    if (legacyNoFolder.error) throw legacyNoFolder.error;
+    if (pipelineBDocs.error) throw pipelineBDocs.error;
 
-    if (noFolderDocs && noFolderDocs.length > 0) {
-      const transformedNoFolderDocs = noFolderDocs.map((doc: any) => {
+    const allNoFolderDocs = [];
+
+    // Transform legacy docs
+    if (legacyNoFolder.data && legacyNoFolder.data.length > 0) {
+      const transformedLegacy = legacyNoFolder.data.map((doc: any) => {
         const links = doc.agent_document_links || [];
         const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
 
@@ -763,14 +773,46 @@ export const DocumentPoolTable = () => {
           topics: doc.topics || [],
           complexity_level: doc.complexity_level || "",
           agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+          pipeline: 'legacy' as const,
         };
       });
+      allNoFolderDocs.push(...transformedLegacy);
+    }
 
+    // Transform Pipeline B docs
+    if (pipelineBDocs.data && pipelineBDocs.data.length > 0) {
+      const transformedPipelineB = pipelineBDocs.data.map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: 'pending' as const,
+        validation_reason: '',
+        processing_status: doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        folder: null,
+        keywords: [],
+        topics: [],
+        complexity_level: '',
+        agent_ids: [],
+        pipeline: 'b' as const,
+        error_message: doc.error_message,
+      }));
+      allNoFolderDocs.push(...transformedPipelineB);
+    }
+
+    // Sort by created_at desc
+    allNoFolderDocs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    if (allNoFolderDocs.length > 0) {
       hierarchicalFolders.push({
         id: 'no-folder',
         name: 'Senza Cartella',
-        documentCount: transformedNoFolderDocs.length,
-        documents: transformedNoFolderDocs,
+        documentCount: allNoFolderDocs.length,
+        documents: allNoFolderDocs,
       });
     }
 
