@@ -108,6 +108,8 @@ interface KnowledgeDocument {
   metadata_verified_source?: string;
   metadata_confidence?: string;
   folder?: string;
+  pipeline?: 'legacy' | 'b';
+  error_message?: string;
 }
 
 interface DocumentPoolTableProps {
@@ -203,70 +205,93 @@ export const DocumentPoolTable = () => {
   }, [searchQuery, statusFilter, agentFilter]);
 
   const loadDocuments = async (page: number = currentPage) => {
-    console.log('[DocumentPoolTable] 📥 Loading documents, page:', page);
+    console.log('[DocumentPoolTable] 📥 Loading documents from BOTH pipelines, page:', page);
     
     try {
       setLoading(true);
       setError(null);
       
-      // Step 1: Count with timeout
-      console.log('[DocumentPoolTable] Step 1: Counting documents...');
+      // Step 1: Count from BOTH tables
+      console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
       const countController = new AbortController();
       const countTimeout = setTimeout(() => countController.abort(), 10000);
       
-      const { count: totalDbCount, error: countError } = await supabase
-        .from("knowledge_documents")
-        .select("id", { count: 'exact', head: true })
-        .abortSignal(countController.signal);
+      const [oldCount, newCount] = await Promise.all([
+        supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .abortSignal(countController.signal),
+        supabase
+          .from("pipeline_b_documents")
+          .select("id", { count: 'exact', head: true })
+          .abortSignal(countController.signal)
+      ]);
 
       clearTimeout(countTimeout);
       
-      if (countError) {
-        console.error('[DocumentPoolTable] Count error:', countError);
-        throw countError;
+      if (oldCount.error) {
+        console.error('[DocumentPoolTable] Old pipeline count error:', oldCount.error);
+        throw oldCount.error;
+      }
+      if (newCount.error) {
+        console.error('[DocumentPoolTable] New pipeline count error:', newCount.error);
+        throw newCount.error;
       }
       
-      const total = totalDbCount || 0;
-      console.log('[DocumentPoolTable] Total documents in DB:', total);
+      const total = (oldCount.count || 0) + (newCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ new:', newCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      // Step 2: Load documents with timeout
-      console.log('[DocumentPoolTable] Step 2: Loading document data...');
+      // Step 2: Load documents from BOTH pipelines
+      console.log('[DocumentPoolTable] Step 2: Loading from both pipelines...');
       const dataController = new AbortController();
       const dataTimeout = setTimeout(() => dataController.abort(), 15000);
       
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const { data, error } = await supabase
-        .from("knowledge_documents")
-        .select(`
-          *,
-          extracted_title,
-          extracted_authors,
-          metadata_verified_online,
-          metadata_verified_source,
-          metadata_confidence,
-          agent_document_links(
-            agent_id,
-            agents(id, name)
-          )
-        `)
-        .order("created_at", { ascending: false })
-        .range(from, to)
-        .abortSignal(dataController.signal);
+      const [oldData, newData] = await Promise.all([
+        supabase
+          .from("knowledge_documents")
+          .select(`
+            *,
+            extracted_title,
+            extracted_authors,
+            metadata_verified_online,
+            metadata_verified_source,
+            metadata_confidence,
+            agent_document_links(
+              agent_id,
+              agents(id, name)
+            )
+          `)
+          .order("created_at", { ascending: false })
+          .range(from, to)
+          .abortSignal(dataController.signal),
+        supabase
+          .from("pipeline_b_documents")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(from, to)
+          .abortSignal(dataController.signal)
+      ]);
 
       clearTimeout(dataTimeout);
 
-      if (error) {
-        console.error('[DocumentPoolTable] Data error:', error);
-        throw error;
+      if (oldData.error) {
+        console.error('[DocumentPoolTable] Old pipeline error:', oldData.error);
+        throw oldData.error;
+      }
+      if (newData.error) {
+        console.error('[DocumentPoolTable] New pipeline error:', newData.error);
+        throw newData.error;
       }
 
-      console.log('[DocumentPoolTable] Loaded', data?.length || 0, 'documents');
+      console.log('[DocumentPoolTable] Loaded', oldData.data?.length || 0, 'old +', newData.data?.length || 0, 'new docs');
 
-      const transformedData = (data || []).map((doc: any) => {
+      // Transform OLD pipeline documents
+      const transformedOld = (oldData.data || []).map((doc: any) => {
         const links = doc.agent_document_links || [];
         const agentNames = links
           .map((link: any) => link.agents?.name)
@@ -291,8 +316,37 @@ export const DocumentPoolTable = () => {
           folder: doc.folder,
           search_query: doc.search_query,
           source_url: doc.source_url,
+          pipeline: 'legacy' as const,
         };
       });
+
+      // Transform NEW Pipeline B documents
+      const transformedNew = (newData.data || []).map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: 'pending' as const,
+        validation_reason: null,
+        processing_status: doc.status, // 'ingested', 'chunked', 'ready', 'failed'
+        ai_summary: null,
+        text_length: null,
+        page_count: null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        keywords: [],
+        topics: [],
+        complexity_level: "",
+        agent_ids: [],
+        folder: null,
+        search_query: null,
+        source_url: null,
+        pipeline: 'b' as const,
+        error_message: doc.error_message,
+      }));
+
+      // Merge and sort by created_at
+      const transformedData = [...transformedOld, ...transformedNew]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       console.log('[DocumentPoolTable] ✅ Documents loaded successfully');
       setDocuments(transformedData);
@@ -1382,6 +1436,11 @@ export const DocumentPoolTable = () => {
                           <div className="font-medium truncate text-sm" title={doc.file_name}>
                             {doc.file_name}
                           </div>
+                          {doc.pipeline === 'b' && (
+                            <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 shrink-0">
+                              Pipeline B
+                            </Badge>
+                          )}
                           {doc.extracted_title && (
                             doc.metadata_verified_online ? (
                               <TooltipProvider>
@@ -1606,6 +1665,11 @@ export const DocumentPoolTable = () => {
                       <div className="flex-1">
                           <div className="font-medium break-words text-sm mb-1">
                             {doc.file_name}
+                            {doc.pipeline === 'b' && (
+                              <Badge variant="secondary" className="text-xs ml-2 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+                                Pipeline B
+                              </Badge>
+                            )}
                           </div>
                           {doc.ai_summary && (
                             <div className="text-xs text-muted-foreground line-clamp-2">
