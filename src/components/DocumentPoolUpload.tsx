@@ -178,9 +178,6 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`✓ ${file.name} caricato - documento ID: ${data.documentId}`);
           toast.success(`${file.name} caricato`);
           
-          console.log(`✓ ${file.name} caricato - documento ID: ${data.documentId}`);
-          toast.success(`${file.name} caricato`);
-          
           successCount++;
           setProgress(Math.min(99, ((successCount + errorCount) / totalFiles) * 100));
 
