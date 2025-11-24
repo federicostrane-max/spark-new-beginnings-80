@@ -52,7 +52,7 @@ serve(async (req) => {
     // Fetch chunks with pending embeddings
     const { data: chunks, error: fetchError } = await supabase
       .from('pipeline_b_chunks_raw')
-      .select('id, content')
+      .select('id, content, document_id')
       .eq('embedding_status', 'pending')
       .limit(BATCH_SIZE);
 
@@ -124,6 +124,35 @@ serve(async (req) => {
 
         results.failed++;
         results.errors.push({ id: chunk.id, error: errorMessage });
+      }
+    }
+
+    // Update document status when all chunks are ready
+    const documentIds = [...new Set(chunks.map(c => c.document_id))];
+    console.log(`\n🔍 Checking status for ${documentIds.length} documents...`);
+
+    for (const docId of documentIds) {
+      const { data: pendingChunks } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('id')
+        .eq('document_id', docId)
+        .neq('embedding_status', 'ready')
+        .limit(1);
+
+      // If no pending chunks remain, mark document as ready
+      if (!pendingChunks || pendingChunks.length === 0) {
+        const { error: updateError } = await supabase
+          .from('pipeline_b_documents')
+          .update({ status: 'ready' })
+          .eq('id', docId);
+
+        if (updateError) {
+          console.error(`❌ Failed to update document ${docId}:`, updateError);
+        } else {
+          console.log(`✅ Document ${docId} marked as ready`);
+        }
+      } else {
+        console.log(`⏳ Document ${docId} still has pending chunks`);
       }
     }
 
