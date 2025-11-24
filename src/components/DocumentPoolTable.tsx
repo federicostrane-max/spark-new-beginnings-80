@@ -833,73 +833,26 @@ export const DocumentPoolTable = () => {
     try {
       toast.loading(`Eliminazione di ${docIds.length} documenti...`, { id: 'bulk-delete' });
       
-      const BATCH_SIZE = 50; // Max 50 documenti per batch per evitare URL troppo lunghi
+      // Call server-side edge function for reliable bulk deletion
+      const { data, error } = await supabase.functions.invoke('delete-all-pool-documents', {
+        body: { documentIds: docIds }
+      });
       
-      // Process in batches
-      for (let i = 0; i < docIds.length; i += BATCH_SIZE) {
-        const batchIds = docIds.slice(i, i + BATCH_SIZE);
+      if (error) throw error;
+      
+      if (data?.success) {
+        toast.success(
+          `${data.deletedDocuments} documenti eliminati (${data.deletedFiles} file)`, 
+          { id: 'bulk-delete' }
+        );
         
-        // 1. DELETE agent_document_links - BATCH
-        const { error: linksError } = await supabase
-          .from('agent_document_links')
-          .delete()
-          .in('document_id', batchIds);
-        
-        if (linksError) throw linksError;
-        
-        // 2. DELETE agent_knowledge (shared pool chunks) - BATCH
-        const { error: chunksError } = await supabase
-          .from('agent_knowledge')
-          .delete()
-          .in('pool_document_id', batchIds);
-        
-        if (chunksError) throw chunksError;
-        
-        // 3. DELETE document_processing_cache - BATCH
-        const { error: cacheError } = await supabase
-          .from('document_processing_cache')
-          .delete()
-          .in('document_id', batchIds);
-        
-        if (cacheError) {
-          console.warn('Cache deletion warning:', cacheError);
-        }
-        
-        // 4. DELETE storage files - BATCH
-        const batchDocs = selectedDocs.slice(i, i + BATCH_SIZE);
-        const filePaths = batchDocs
-          .map(doc => `${doc.id}/${doc.file_name}`)
-          .filter(Boolean);
-        
-        if (filePaths.length > 0) {
-          const { error: storageError } = await supabase.storage
-            .from('knowledge-pdfs')
-            .remove(filePaths);
-          
-          if (storageError) {
-            console.warn(`Storage batch ${i}-${i+BATCH_SIZE} warning:`, storageError);
-          }
-        }
-        
-        // 5. DELETE knowledge_documents - BATCH
-        const { error: docsError } = await supabase
-          .from('knowledge_documents')
-          .delete()
-          .in('id', batchIds);
-        
-        if (docsError) throw docsError;
-        
-        // Update progress
-        const processed = Math.min(i + BATCH_SIZE, docIds.length);
-        toast.loading(`Eliminazione ${processed}/${docIds.length} documenti...`, { id: 'bulk-delete' });
+        setSelectedDocIds(new Set());
+        setBulkDeleteDialogOpen(false);
+        loadDocuments();
+        loadFolders();
+      } else {
+        throw new Error(data?.error || 'Errore sconosciuto');
       }
-      
-      toast.success(`${docIds.length} documenti eliminati con successo`, { id: 'bulk-delete' });
-      
-      setSelectedDocIds(new Set());
-      setBulkDeleteDialogOpen(false);
-      loadDocuments();
-      loadFolders();
       
     } catch (error: any) {
       console.error('Bulk delete error:', error);
