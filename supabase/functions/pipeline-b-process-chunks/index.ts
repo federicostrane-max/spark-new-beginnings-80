@@ -6,20 +6,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface LandingAIChunk {
-  text?: string;
-  content?: string;
-  chunk_type?: string;
-  chunk_id?: string;
-  grounding?: Array<{
-    box?: { l: number; t: number; r: number; b: number };
-    page?: number;
-  }>;
-  chunk_references?: {
-    page?: number;
-    grounding?: Array<{ x: number; y: number; width: number; height: number }>;
-  };
+// ============================================================================
+// INTERFACCE BASATE SU DOCUMENTAZIONE UFFICIALE LANDING AI GITHUB
+// ============================================================================
+
+interface LandingAIGroundingBox {
+  l: number;  // left
+  t: number;  // top
+  r: number;  // right
+  b: number;  // bottom
 }
+
+interface LandingAIGrounding {
+  box: LandingAIGroundingBox;
+  page: number;
+}
+
+interface LandingAIChunk {
+  text: string;              // REQUIRED - mai null nella documentazione ufficiale
+  chunk_type: string;        // REQUIRED
+  chunk_id: string;          // REQUIRED
+  grounding: LandingAIGrounding[];  // REQUIRED
+}
+
+// Formato risposta "wrapped" (nuovo API /v1/ade/parse)
+interface LandingAIResponseWrapped {
+  data: {
+    markdown: string;
+    chunks: LandingAIChunk[];
+    metadata?: any;
+  };
+  errors?: Array<{ message: string; code: string }>;
+  metadata?: any;
+}
+
+// Formato risposta "direct" (legacy API /v1/tools/agentic-document-analysis)
+interface LandingAIResponseDirect {
+  markdown: string;
+  chunks: LandingAIChunk[];
+}
+
+// ============================================================================
+// FUNZIONE RICOSTRUITA: extractWithLandingAI
+// ============================================================================
 
 async function extractWithLandingAI(
   content: Blob,
@@ -30,11 +59,15 @@ async function extractWithLandingAI(
     throw new Error('LANDING_AI_API_KEY not configured');
   }
 
+  // 1️⃣ PREPARAZIONE REQUEST
   const formData = new FormData();
   formData.append('document', content, fileName);
+  
+  console.log(`🚀 [Landing AI] Calling API for: ${fileName}`);
+  console.log(`🚀 [Landing AI] Content size: ${content.size} bytes`);
+  console.log(`🚀 [Landing AI] Content type: ${content.type}`);
 
-  console.log(`🚀 Calling Landing AI for ${fileName}...`);
-
+  // 2️⃣ CHIAMATA API
   const response = await fetch('https://api.va.landing.ai/v1/ade/parse', {
     method: 'POST',
     headers: {
@@ -45,67 +78,111 @@ async function extractWithLandingAI(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Landing AI failed: ${response.status} - ${errorText}`);
+    console.error(`❌ [Landing AI] HTTP Error: ${response.status}`);
+    console.error(`❌ [Landing AI] Error body: ${errorText}`);
+    throw new Error(`Landing AI API failed: ${response.status} - ${errorText}`);
   }
 
-  const result = await response.json();
+  // 3️⃣ PARSING RISPOSTA
+  const rawResult = await response.json();
   
-  // 📊 DETAILED LOGGING - Response Structure
-  console.log('📊 Landing AI Response Structure:', {
-    hasChunks: 'chunks' in result,
-    hasMarkdown: 'markdown' in result,
-    isArray: Array.isArray(result),
-    keys: Object.keys(result),
-    resultType: typeof result,
+  console.log('📊 [Landing AI] Raw Response Structure:', {
+    hasData: 'data' in rawResult,
+    hasChunks: 'chunks' in rawResult,
+    hasMarkdown: 'markdown' in rawResult,
+    hasErrors: 'errors' in rawResult,
+    isArray: Array.isArray(rawResult),
+    topLevelKeys: Object.keys(rawResult),
   });
+
+  // 4️⃣ GESTIONE FORMATO WRAPPED (nuovo API)
+  let chunks: LandingAIChunk[];
   
-  // Determine chunks array from different possible structures
-  let rawChunks: any[];
-  
-  if (Array.isArray(result)) {
-    console.log('✓ Response is direct array');
-    rawChunks = result;
-  } else if (result.chunks && Array.isArray(result.chunks)) {
-    console.log('✓ Response has chunks property');
-    rawChunks = result.chunks;
-  } else {
-    console.error('❌ Unexpected response structure:', JSON.stringify(result, null, 2));
-    throw new Error('Unexpected response structure from Landing AI');
-  }
-  
-  // 📄 DETAILED LOGGING - First 3 Chunks
-  console.log(`📄 Total chunks received: ${rawChunks.length}`);
-  console.log('📄 First 3 chunks detailed structure:', JSON.stringify(rawChunks.slice(0, 3), null, 2));
-  
-  // Map chunks to standardized format, supporting multiple field names
-  const mappedChunks = rawChunks.map((chunk, index) => {
-    const text = chunk.text || chunk.content || '';
-    const chunkType = chunk.chunk_type || 'text';
+  if ('data' in rawResult && rawResult.data) {
+    console.log('✓ [Landing AI] Response format: WRAPPED (new API)');
     
-    // Log any chunks with empty text
-    if (!text || text.trim().length === 0) {
-      console.warn(`⚠️ Chunk ${index} has empty text field:`, {
-        hasText: 'text' in chunk,
-        hasContent: 'content' in chunk,
-        textValue: chunk.text,
-        contentValue: chunk.content,
-        allKeys: Object.keys(chunk),
+    // Controllare errori API
+    if (rawResult.errors && rawResult.errors.length > 0) {
+      console.warn('⚠️ [Landing AI] API returned errors:', rawResult.errors);
+      rawResult.errors.forEach((err: any) => {
+        console.warn(`   - ${err.code}: ${err.message}`);
       });
     }
     
-    return {
-      text,
-      chunk_type: chunkType,
-      chunk_references: {
-        page: chunk.grounding?.[0]?.page || chunk.chunk_references?.page,
-        grounding: chunk.grounding || chunk.chunk_references?.grounding,
-      },
-    };
-  });
+    const wrappedResponse = rawResult as LandingAIResponseWrapped;
+    chunks = wrappedResponse.data.chunks;
+    
+    console.log(`📄 [Landing AI] Markdown length: ${wrappedResponse.data.markdown?.length || 0} chars`);
+    
+  } else if ('chunks' in rawResult && Array.isArray(rawResult.chunks)) {
+    console.log('✓ [Landing AI] Response format: DIRECT (legacy API)');
+    const directResponse = rawResult as LandingAIResponseDirect;
+    chunks = directResponse.chunks;
+    
+  } else {
+    console.error('❌ [Landing AI] Unexpected response structure:', JSON.stringify(rawResult, null, 2));
+    throw new Error('Landing AI returned unexpected response structure');
+  }
+
+  // 5️⃣ LOGGING DETTAGLIATO CHUNKS
+  console.log(`📄 [Landing AI] Total chunks received: ${chunks.length}`);
   
-  console.log(`✓ Mapped ${mappedChunks.length} chunks to standard format`);
-  return mappedChunks;
+  if (chunks.length > 0) {
+    console.log('📄 [Landing AI] First 3 chunks (full structure):');
+    chunks.slice(0, 3).forEach((chunk, i) => {
+      console.log(`\n--- Chunk ${i} ---`);
+      console.log(JSON.stringify(chunk, null, 2));
+    });
+  }
+
+  // 6️⃣ VALIDAZIONE RIGOROSA
+  const validatedChunks: LandingAIChunk[] = [];
+  
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    
+    // Controllo presenza campi REQUIRED
+    if (!chunk.text || typeof chunk.text !== 'string') {
+      console.error(`❌ [Landing AI] Chunk ${i} missing or invalid 'text' field:`, {
+        hasTextField: 'text' in chunk,
+        textType: typeof chunk.text,
+        textValue: chunk.text,
+        allKeys: Object.keys(chunk),
+      });
+      throw new Error(`Landing AI chunk ${i} has null/invalid text field - this violates API schema`);
+    }
+    
+    if (!chunk.chunk_type) {
+      console.error(`❌ [Landing AI] Chunk ${i} missing 'chunk_type':`, chunk);
+      throw new Error(`Landing AI chunk ${i} missing required chunk_type field`);
+    }
+    
+    if (!chunk.chunk_id) {
+      console.error(`❌ [Landing AI] Chunk ${i} missing 'chunk_id':`, chunk);
+      throw new Error(`Landing AI chunk ${i} missing required chunk_id field`);
+    }
+    
+    if (!Array.isArray(chunk.grounding)) {
+      console.error(`❌ [Landing AI] Chunk ${i} missing/invalid 'grounding':`, chunk);
+      throw new Error(`Landing AI chunk ${i} missing required grounding array`);
+    }
+    
+    // Se arriviamo qui, il chunk è valido
+    validatedChunks.push(chunk);
+  }
+  
+  console.log(`✅ [Landing AI] Validated ${validatedChunks.length}/${chunks.length} chunks`);
+  
+  if (validatedChunks.length === 0) {
+    throw new Error('Landing AI returned 0 valid chunks - all chunks failed validation');
+  }
+  
+  return validatedChunks;
 }
+
+// ============================================================================
+// MAIN HANDLER
+// ============================================================================
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -174,29 +251,19 @@ serve(async (req) => {
           throw new Error(`Unsupported source_type: ${doc.source_type}`);
         }
 
-        // Extract chunks with Landing AI
+        // Extract chunks with Landing AI (già validati)
         const landingChunks = await extractWithLandingAI(content, doc.file_name);
-        console.log(`✓ Landing AI returned ${landingChunks.length} chunks`);
+        console.log(`✓ Landing AI returned ${landingChunks.length} validated chunks`);
 
-        if (landingChunks.length === 0) {
-          throw new Error('No chunks returned by Landing AI');
-        }
-
-        // Filter out chunks with null/empty text and insert into pipeline_b_chunks_raw
-        const validChunks = landingChunks.filter(chunk => chunk.text && chunk.text.trim().length > 0);
-        console.log(`✓ Filtered to ${validChunks.length} valid chunks (removed ${landingChunks.length - validChunks.length} empty chunks)`);
-        
-        if (validChunks.length === 0) {
-          throw new Error('No valid chunks after filtering empty content');
-        }
-        
-        const chunksToInsert = validChunks.map((chunk, index) => ({
+        // Non servono più filtri - extractWithLandingAI restituisce SOLO chunks validi
+        const chunksToInsert = landingChunks.map((chunk, index) => ({
           document_id: doc.id,
-          content: chunk.text,
-          chunk_type: chunk.chunk_type || 'text',
+          content: chunk.text,  // Garantito essere stringa non-vuota
+          chunk_type: chunk.chunk_type,
           chunk_index: index,
-          page_number: chunk.chunk_references?.page || null,
-          visual_grounding: chunk.chunk_references?.grounding || null,
+          chunk_id: chunk.chunk_id,  // Nuovo campo da Landing AI
+          page_number: chunk.grounding[0]?.page || null,
+          visual_grounding: chunk.grounding || null,
           embedding_status: 'pending',
         }));
 
@@ -215,7 +282,7 @@ serve(async (req) => {
           })
           .eq('id', doc.id);
 
-        console.log(`✓ Created ${validChunks.length} chunks for ${doc.file_name}`);
+        console.log(`✓ Created ${landingChunks.length} chunks for ${doc.file_name}`);
         results.processed++;
 
       } catch (error) {
