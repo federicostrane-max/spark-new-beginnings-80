@@ -144,33 +144,16 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           const formData = new FormData();
           formData.append('file', file);
           
-          // Use direct fetch with proper CORS and auth headers
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (!session) {
-            throw new Error('Sessione non disponibile. Effettua il login.');
-          }
-          
-          const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pipeline-b-ingest-pdf`,
-            {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`,
-                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-              },
-              body: formData,
-            }
-          );
+          // Use supabase.functions.invoke for proper handling
+          const { data, error } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
+            body: formData,
+          });
 
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`HTTP ${response.status}: ${errorText}`);
-            throw new Error(`Upload fallito (${response.status}): ${errorText}`);
+          if (error) {
+            console.error(`Edge function error:`, error);
+            throw new Error(`Upload fallito: ${error.message}`);
           }
 
-          const data = await response.json();
-          
           if (!data?.success) {
             throw new Error(`Upload fallito: ${data?.error || 'Errore sconosciuto'}`);
           }
