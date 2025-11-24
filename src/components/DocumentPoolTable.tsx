@@ -854,40 +854,97 @@ export const DocumentPoolTable = () => {
 
   const handleDelete = async (doc: KnowledgeDocument) => {
     try {
-      const { error: linksError } = await supabase
-        .from("agent_document_links")
-        .delete()
-        .eq("document_id", doc.id);
+      if (doc.pipeline === 'b') {
+        // Pipeline B deletion
+        console.log(`[DELETE] Pipeline B document: ${doc.id}`);
+        
+        // 1. Get chunk IDs first
+        const { data: chunks } = await supabase
+          .from("pipeline_b_chunks_raw")
+          .select("id")
+          .eq("document_id", doc.id);
 
-      if (linksError) throw linksError;
+        // 2. Delete from pipeline_b_agent_knowledge (agent sync links)
+        if (chunks && chunks.length > 0) {
+          const chunkIds = chunks.map(c => c.id);
+          const { error: agentKnowledgeError } = await supabase
+            .from("pipeline_b_agent_knowledge")
+            .delete()
+            .in("chunk_id", chunkIds);
 
-      const { error: knowledgeError } = await supabase
-        .from("agent_knowledge")
-        .delete()
-        .eq("pool_document_id", doc.id);
+          if (agentKnowledgeError) console.warn("Pipeline B agent knowledge deletion warning:", agentKnowledgeError);
+        }
 
-      if (knowledgeError) throw knowledgeError;
+        // 3. Delete from pipeline_b_chunks_raw
+        const { error: chunksError } = await supabase
+          .from("pipeline_b_chunks_raw")
+          .delete()
+          .eq("document_id", doc.id);
 
-      const { error: cacheError } = await supabase
-        .from("document_processing_cache")
-        .delete()
-        .eq("document_id", doc.id);
+        if (chunksError) throw chunksError;
 
-      if (cacheError) throw cacheError;
+        // 4. Delete from agent_document_links
+        const { error: linksError } = await supabase
+          .from("agent_document_links")
+          .delete()
+          .eq("document_id", doc.id);
 
-      const filePath = `${doc.id}/${doc.file_name}`;
-      const { error: storageError } = await supabase.storage
-        .from("knowledge-pdfs")
-        .remove([filePath]);
+        if (linksError) throw linksError;
 
-      if (storageError) console.warn("Storage deletion warning:", storageError);
+        // 5. Delete storage file (shared-pool-uploads bucket)
+        const filePath = `${doc.id}/${doc.file_name}`;
+        const { error: storageError } = await supabase.storage
+          .from("shared-pool-uploads")
+          .remove([filePath]);
 
-      const { error: docError } = await supabase
-        .from("knowledge_documents")
-        .delete()
-        .eq("id", doc.id);
+        if (storageError) console.warn("Storage deletion warning:", storageError);
 
-      if (docError) throw docError;
+        // 6. Delete from pipeline_b_documents
+        const { error: docError } = await supabase
+          .from("pipeline_b_documents")
+          .delete()
+          .eq("id", doc.id);
+
+        if (docError) throw docError;
+
+        console.log(`[DELETE] ✓ Pipeline B document deleted: ${doc.id}`);
+      } else {
+        // Legacy pipeline deletion
+        const { error: linksError } = await supabase
+          .from("agent_document_links")
+          .delete()
+          .eq("document_id", doc.id);
+
+        if (linksError) throw linksError;
+
+        const { error: knowledgeError } = await supabase
+          .from("agent_knowledge")
+          .delete()
+          .eq("pool_document_id", doc.id);
+
+        if (knowledgeError) throw knowledgeError;
+
+        const { error: cacheError } = await supabase
+          .from("document_processing_cache")
+          .delete()
+          .eq("document_id", doc.id);
+
+        if (cacheError) throw cacheError;
+
+        const filePath = `${doc.id}/${doc.file_name}`;
+        const { error: storageError } = await supabase.storage
+          .from("knowledge-pdfs")
+          .remove([filePath]);
+
+        if (storageError) console.warn("Storage deletion warning:", storageError);
+
+        const { error: docError } = await supabase
+          .from("knowledge_documents")
+          .delete()
+          .eq("id", doc.id);
+
+        if (docError) throw docError;
+      }
 
       toast.success("Documento eliminato con successo");
       loadDocuments();

@@ -28,15 +28,32 @@ Deno.serve(async (req) => {
 
     console.log(`[DELETE] Starting deletion of ${documentIds.length} documents`);
 
+    // Separate document IDs by pipeline
+    const { data: legacyDocs } = await supabase
+      .from('knowledge_documents')
+      .select('id, file_name')
+      .in('id', documentIds);
+
+    const { data: pipelineBDocs } = await supabase
+      .from('pipeline_b_documents')
+      .select('id, file_name')
+      .in('id', documentIds);
+
+    const legacyIds = legacyDocs?.map(d => d.id) || [];
+    const pipelineBIds = pipelineBDocs?.map(d => d.id) || [];
+
+    console.log(`[DELETE] Legacy docs: ${legacyIds.length}, Pipeline B docs: ${pipelineBIds.length}`);
+
     // Use smaller batches (50) to avoid database timeouts on heavy operations
     const BATCH_SIZE = 50;
     let totalDeleted = 0;
-    const allFilePaths: string[] = [];
+    const allFilePaths: Array<{ bucket: string; path: string }> = [];
 
-    for (let i = 0; i < documentIds.length; i += BATCH_SIZE) {
-      const batchIds = documentIds.slice(i, i + BATCH_SIZE);
+    // Process Legacy documents
+    for (let i = 0; i < legacyIds.length; i += BATCH_SIZE) {
+      const batchIds = legacyIds.slice(i, i + BATCH_SIZE);
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      console.log(`[BATCH ${batchNum}] Processing ${batchIds.length} documents`);
+      console.log(`[LEGACY BATCH ${batchNum}] Processing ${batchIds.length} documents`);
 
       // 1. Get file paths BEFORE deleting documents
       const { data: documents, error: fetchError } = await supabase
@@ -45,17 +62,16 @@ Deno.serve(async (req) => {
         .in('id', batchIds);
 
       if (fetchError) {
-        console.error(`[BATCH ${batchNum}] Error fetching documents:`, fetchError);
+        console.error(`[LEGACY BATCH ${batchNum}] Error fetching documents:`, fetchError);
         throw fetchError;
       }
 
       if (documents && documents.length > 0) {
         documents.forEach(doc => {
           if (doc.id && doc.file_name) {
-            allFilePaths.push(`${doc.id}/${doc.file_name}`);
+            allFilePaths.push({ bucket: 'knowledge-pdfs', path: `${doc.id}/${doc.file_name}` });
           }
         });
-        console.log(`[BATCH ${batchNum}] Found ${documents.length} documents with file paths`);
       }
 
       // 2. Delete agent_document_links
@@ -64,24 +80,15 @@ Deno.serve(async (req) => {
         .delete()
         .in('document_id', batchIds);
 
-      if (linksError) {
-        console.error(`[BATCH ${batchNum}] Error deleting links:`, linksError);
-      } else {
-        console.log(`[BATCH ${batchNum}] Deleted agent_document_links`);
-      }
+      if (linksError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting links:`, linksError);
 
-      // 3. Delete agent_knowledge (shared pool chunks) - may timeout if many chunks
+      // 3. Delete agent_knowledge (shared pool chunks)
       const { error: chunksError } = await supabase
         .from('agent_knowledge')
         .delete()
         .in('pool_document_id', batchIds);
 
-      if (chunksError) {
-        console.error(`[BATCH ${batchNum}] Error deleting chunks:`, chunksError);
-        // Don't throw - continue with other deletions
-      } else {
-        console.log(`[BATCH ${batchNum}] Deleted agent_knowledge chunks`);
-      }
+      if (chunksError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting chunks:`, chunksError);
 
       // 4. Delete document_processing_cache
       const { error: cacheError } = await supabase
@@ -89,11 +96,7 @@ Deno.serve(async (req) => {
         .delete()
         .in('document_id', batchIds);
 
-      if (cacheError) {
-        console.error(`[BATCH ${batchNum}] Error deleting cache:`, cacheError);
-      } else {
-        console.log(`[BATCH ${batchNum}] Deleted processing cache`);
-      }
+      if (cacheError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting cache:`, cacheError);
 
       // 5. Delete from knowledge_documents table
       const { error: deleteError } = await supabase
@@ -101,31 +104,109 @@ Deno.serve(async (req) => {
         .delete()
         .in('id', batchIds);
 
-      if (deleteError) {
-        console.error(`[BATCH ${batchNum}] Error deleting documents:`, deleteError);
-        throw deleteError;
-      } else {
-        totalDeleted += batchIds.length;
-        console.log(`[BATCH ${batchNum}] Deleted ${batchIds.length} documents from DB`);
-      }
+      if (deleteError) throw deleteError;
+      
+      totalDeleted += batchIds.length;
+      console.log(`[LEGACY BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
     }
 
-    // Delete storage files in batches of 100 (Supabase storage limit)
+    // Process Pipeline B documents
+    for (let i = 0; i < pipelineBIds.length; i += BATCH_SIZE) {
+      const batchIds = pipelineBIds.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      console.log(`[PIPELINE B BATCH ${batchNum}] Processing ${batchIds.length} documents`);
+
+      // 1. Get file paths BEFORE deleting documents
+      const { data: documents, error: fetchError } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name')
+        .in('id', batchIds);
+
+      if (fetchError) {
+        console.error(`[PIPELINE B BATCH ${batchNum}] Error fetching documents:`, fetchError);
+        throw fetchError;
+      }
+
+      if (documents && documents.length > 0) {
+        documents.forEach(doc => {
+          if (doc.id && doc.file_name) {
+            allFilePaths.push({ bucket: 'shared-pool-uploads', path: `${doc.id}/${doc.file_name}` });
+          }
+        });
+      }
+
+      // 2. Delete agent_document_links
+      const { error: linksError } = await supabase
+        .from('agent_document_links')
+        .delete()
+        .in('document_id', batchIds);
+
+      if (linksError) console.error(`[PIPELINE B BATCH ${batchNum}] Error deleting links:`, linksError);
+
+      // 3. Get chunk IDs first, then delete pipeline_b_agent_knowledge
+      const { data: chunks } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('id')
+        .in('document_id', batchIds);
+
+      if (chunks && chunks.length > 0) {
+        const chunkIds = chunks.map(c => c.id);
+        const { error: agentKnowledgeError } = await supabase
+          .from('pipeline_b_agent_knowledge')
+          .delete()
+          .in('chunk_id', chunkIds);
+
+        if (agentKnowledgeError) console.error(`[PIPELINE B BATCH ${batchNum}] Error deleting agent knowledge:`, agentKnowledgeError);
+      }
+
+      // 4. Delete pipeline_b_chunks_raw
+      const { error: chunksError } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .delete()
+        .in('document_id', batchIds);
+
+      if (chunksError) throw chunksError;
+
+      // 5. Delete from pipeline_b_documents table
+      const { error: deleteError } = await supabase
+        .from('pipeline_b_documents')
+        .delete()
+        .in('id', batchIds);
+
+      if (deleteError) throw deleteError;
+      
+      totalDeleted += batchIds.length;
+      console.log(`[PIPELINE B BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
+    }
+
+    // Delete storage files from both buckets in batches of 100 (Supabase storage limit)
     let deletedFiles = 0;
     console.log(`[STORAGE] Deleting ${allFilePaths.length} files`);
     
-    for (let i = 0; i < allFilePaths.length; i += 100) {
-      const batch = allFilePaths.slice(i, i + 100);
-      const { error: storageError } = await supabase.storage
-        .from('knowledge-pdfs')
-        .remove(batch);
+    // Group by bucket
+    const bucketGroups = new Map<string, string[]>();
+    allFilePaths.forEach(({ bucket, path }) => {
+      if (!bucketGroups.has(bucket)) {
+        bucketGroups.set(bucket, []);
+      }
+      bucketGroups.get(bucket)!.push(path);
+    });
 
-      if (storageError) {
-        console.error(`[STORAGE] Error batch ${i}-${i + 100}:`, storageError);
-        // Don't throw - continue with other batches
-      } else {
-        deletedFiles += batch.length;
-        console.log(`[STORAGE] Deleted batch ${i}-${i + 100} (${batch.length} files)`);
+    for (const [bucket, paths] of bucketGroups.entries()) {
+      console.log(`[STORAGE] Processing ${paths.length} files from bucket: ${bucket}`);
+      
+      for (let i = 0; i < paths.length; i += 100) {
+        const batch = paths.slice(i, i + 100);
+        const { error: storageError } = await supabase.storage
+          .from(bucket)
+          .remove(batch);
+
+        if (storageError) {
+          console.error(`[STORAGE] Error deleting from ${bucket}, batch ${i}-${i + 100}:`, storageError);
+        } else {
+          deletedFiles += batch.length;
+          console.log(`[STORAGE] Deleted batch from ${bucket} ${i}-${i + 100} (${batch.length} files)`);
+        }
       }
     }
 
