@@ -110,6 +110,8 @@ interface KnowledgeDocument {
   folder?: string;
   pipeline?: 'legacy' | 'b';
   error_message?: string;
+  file_path?: string;
+  storage_bucket?: string;
 }
 
 interface DocumentPoolTableProps {
