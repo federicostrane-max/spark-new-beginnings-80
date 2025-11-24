@@ -108,7 +108,7 @@ interface KnowledgeDocument {
   metadata_verified_source?: string;
   metadata_confidence?: string;
   folder?: string;
-  pipeline?: 'legacy' | 'b';
+  pipeline?: 'a' | 'b';
   error_message?: string;
 }
 
@@ -316,7 +316,7 @@ export const DocumentPoolTable = () => {
           folder: doc.folder,
           search_query: doc.search_query,
           source_url: doc.source_url,
-          pipeline: 'legacy' as const,
+          pipeline: 'a' as const,
         };
       });
 
@@ -773,7 +773,7 @@ export const DocumentPoolTable = () => {
           topics: doc.topics || [],
           complexity_level: doc.complexity_level || "",
           agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-          pipeline: 'legacy' as const,
+          pipeline: 'a' as const,
         };
       });
       allNoFolderDocs.push(...transformedLegacy);

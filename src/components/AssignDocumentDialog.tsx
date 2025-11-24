@@ -29,6 +29,7 @@ interface AssignDocumentDialogProps {
     keywords?: string[];
     topics?: string[];
     complexity_level?: string;
+    pipeline?: 'a' | 'b';
   };
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,19 +58,37 @@ export const AssignDocumentDialog = ({
     try {
       setLoading(true);
       
-      // Verify document is ready for assignment
-      const { data: docData, error: docError } = await supabase
-        .from("knowledge_documents")
-        .select("validation_status, processing_status")
-        .eq("id", document.id)
-        .single();
-      
-      if (docError) throw docError;
-      
-      if (docData.validation_status !== 'validated' || docData.processing_status !== 'ready_for_assignment') {
-        toast.error("Questo documento non è pronto per essere assegnato");
-        onOpenChange(false);
-        return;
+      // Verify document is ready for assignment based on pipeline
+      if (document.pipeline === 'b') {
+        // Pipeline B: Check status='ready' in pipeline_b_documents
+        const { data: docData, error: docError } = await supabase
+          .from("pipeline_b_documents")
+          .select("status")
+          .eq("id", document.id)
+          .single();
+        
+        if (docError) throw docError;
+        
+        if (docData.status !== 'ready') {
+          toast.error(`Documento Pipeline B non pronto (status: ${docData.status})`);
+          onOpenChange(false);
+          return;
+        }
+      } else {
+        // Legacy: Check validation_status and processing_status
+        const { data: docData, error: docError } = await supabase
+          .from("knowledge_documents")
+          .select("validation_status, processing_status")
+          .eq("id", document.id)
+          .single();
+        
+        if (docError) throw docError;
+        
+        if (docData.validation_status !== 'validated' || docData.processing_status !== 'ready_for_assignment') {
+          toast.error("Questo documento non è pronto per essere assegnato");
+          onOpenChange(false);
+          return;
+        }
       }
       
       // Load all agents
@@ -225,12 +244,16 @@ export const AssignDocumentDialog = ({
         toAdd.forEach(agentId => initialSyncMap.set(agentId, 'pending'));
         setSyncingAgents(initialSyncMap);
         
-        // Sync documents to agents
+        // Sync documents to agents based on pipeline
+        const syncFunction = document.pipeline === 'b' ? 'pipeline-b-sync-agent' : 'sync-pool-document';
+        
         for (const agentId of toAdd) {
           try {
-            const { error: syncError } = await supabase.functions.invoke('sync-pool-document', {
-              body: { documentId: document.id, agentId }
-            });
+            const body = document.pipeline === 'b' 
+              ? { agentId, documentIds: [document.id] }
+              : { documentId: document.id, agentId };
+            
+            const { error: syncError } = await supabase.functions.invoke(syncFunction, { body });
             
             if (syncError) {
               const errorData = typeof syncError === 'object' ? syncError : { message: String(syncError) };
