@@ -97,7 +97,7 @@ async function pollJobUntilComplete(jobId: string, maxAttempts = 30): Promise<vo
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     console.log(`⏳ [Landing AI] Polling job ${jobId} (attempt ${attempt}/${maxAttempts})...`);
     
-    const response = await fetch(`https://api.va.landing.ai/v1/ade/jobs/${jobId}`, {
+    const response = await fetch(`https://api.va.landing.ai/v1/ade/parse/jobs/${jobId}`, {
       headers: {
         'Authorization': `Bearer ${landingApiKey}`,
       },
@@ -305,10 +305,8 @@ serve(async (req) => {
           content: chunk.markdown,              // ✅ Correct field name
           chunk_type: chunk.type,                // ✅ Correct field name
           chunk_index: index,
-          chunking_metadata: {
-            chunk_id: chunk.id,                  // ✅ Correct field name
-            grounding: chunk.grounding || null,  // ✅ Single object, not array
-          },
+          chunk_id: chunk.id,                    // ✅ Separate column
+          visual_grounding: chunk.grounding || null,  // ✅ Correct column name
           page_number: chunk.grounding?.page || null,  // ✅ Not array
           embedding_status: 'pending',
         }));
