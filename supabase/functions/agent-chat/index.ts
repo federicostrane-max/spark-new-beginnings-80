@@ -3254,25 +3254,16 @@ YOU MUST:
 3. **WAIT for the tool result before responding**
 4. **Base your answer ONLY on the tool's response**
 
-**CRITICAL TOOL USAGE RULES:**
+**CRITICAL: WHICH TOOL TO USE**
 
-📋 **Use get_agent_knowledge when:**
-- User asks "what documents do you have?" or "list your PDFs"
-- User wants to know document TITLES or NAMES
-- User asks "how many documents" you have
-- Returns: List of document names/titles (metadata only)
+📋 get_agent_knowledge = Document TITLES only
+📖 semantic_search = Document CONTENT
 
-📖 **Use semantic_search when:**
-- User asks "what do your documents SAY about X?"
-- User wants CONTENT, INFORMATION, or ANSWERS from documents
-- User asks questions like "cosa dicono i tuoi documenti su prompt engineering?"
-- Returns: Actual text chunks from documents that you can quote
-
-**Example Scenarios:**
-- ❌ "su quali pdf si basa il tuo knowledge base?" → Use semantic_search (they want content/topics)
-- ✅ "quali sono i titoli dei tuoi pdf?" → Use get_agent_knowledge (they want titles)
-- ❌ "cosa dicono i documenti su X?" → Use semantic_search (they want content)
-- ✅ "quanti documenti hai?" → Use get_agent_knowledge (they want count)
+WHEN TO USE EACH:
+• "what documents do you have?" → get_agent_knowledge
+• "su quali pdf si basa?" → semantic_search (they want content)
+• "cosa dicono i documenti su X?" → semantic_search (they want content)
+• "quanti documenti hai?" → get_agent_knowledge
 
 ### RULE #2: RESPONSE LENGTH AND DEPTH
 
