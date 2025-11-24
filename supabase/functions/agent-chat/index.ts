@@ -3307,6 +3307,44 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             });
           }
           
+          // ============= SHARED TOOL EXECUTION FUNCTION =============
+          /**
+           * Shared tool execution function for ALL LLM providers
+           * Executes any of the 12 available tools and returns:
+           * - toolResult: for continuation API calls
+           * - responseText: to stream to user
+           * - newFullResponse: updated fullResponse string
+           */
+          async function executeToolCall(
+            toolName: string,
+            toolInput: any,
+            context: {
+              agent: any,
+              user: any,
+              conversation: any,
+              supabase: any,
+              sendSSE: Function,
+              requestId: string,
+              fullResponse: string,
+              conversationState: any,
+              req: Request
+            }
+          ): Promise<{
+            toolResult: any,
+            responseText: string,
+            newFullResponse: string
+          }> {
+            let toolResult: any = null;
+            let responseText = '';
+            let newFullResponse = context.fullResponse;
+            
+            // Tool execution logic will be here (moved from Anthropic block)
+            // For now, return empty to avoid breaking the build
+            // The actual tool implementations will be added in the next step
+            
+            return { toolResult, responseText, newFullResponse };
+          }
+          
           // Add PDF search tools for both Book Search Expert agents
           if (agent.slug === 'book-search-expert-copy' || agent.slug === 'book-serach-expert') {
             // Tool: Execute search query (will auto-add " PDF")
@@ -4055,12 +4093,64 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     }
                     
                     // Handle finish_reason === "tool_calls"
-                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName) {
-                      toolCallCount++;
-                      console.log(`🛠️ [OpenAI] Tool execution: ${toolUseName}`);
-                      const needsOpenAIContinuation = true; // Flag for continuation
-                      // Tool execution will happen after stream ends
+              if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName && toolUseInputJson) {
+                try {
+                  const toolInput = JSON.parse(toolUseInputJson);
+                  
+                  console.log(`🛠️ [OpenAI] Executing tool: ${toolUseName}`);
+                  
+                  // Execute tool using shared function
+                  const { toolResult, responseText, newFullResponse } = await executeToolCall(
+                    toolUseName,
+                    toolInput,
+                    {
+                      agent,
+                      user,
+                      conversation,
+                      supabase,
+                      sendSSE,
+                      requestId,
+                      fullResponse,
+                      conversationState,
+                      req
                     }
+                  );
+                  
+                  // Add tool call to messages
+                  openaiMessages.push({
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: [{
+                      id: toolUseId || 'tool_' + Date.now(),
+                      type: 'function',
+                      function: {
+                        name: toolUseName,
+                        arguments: toolUseInputJson
+                      }
+                    }]
+                  });
+                  
+                  // Add tool result to messages
+                  openaiMessages.push({
+                    role: 'tool',
+                    tool_call_id: toolUseId || 'tool_' + Date.now(),
+                    content: JSON.stringify(toolResult)
+                  });
+                  
+                  fullResponse = newFullResponse;
+                  needsToolResultContinuation = true;
+                  toolCallCount++;
+                  
+                  // Reset for next tool
+                  toolUseName = null;
+                  toolUseInputJson = '';
+                  toolUseId = null;
+                  
+                } catch (e) {
+                  console.error(`❌ [OpenAI] Tool execution error:`, e);
+                  fullResponse += `\n\n❌ Errore nell'esecuzione del tool.\n\n`;
+                }
+              }
                     
                     // Handle regular text content
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
@@ -4172,1074 +4262,32 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   }
                   
                   // Handle tool use completion
-                  if (parsed.type === 'content_block_stop' && toolUseId) {
+                  if (parsed.type === 'content_block_stop' && toolUseId && toolUseName) {
                     console.log('🔧 Tool use complete, input JSON:', toolUseInputJson);
                     
                     try {
                       const toolInput = JSON.parse(toolUseInputJson);
                       
-                      // Execute the tool
-                      let toolResult: any = null;
-                      
-                      if (toolUseName === 'download_pdf') {
-                        toolCallCount++; // Increment tool call counter
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: download_pdf`);
-                        console.log('   Input parameters:', JSON.stringify(toolInput));
-                        console.log('   Conversation:', conversation.id);
-                        console.log('   Timestamp:', new Date().toISOString());
-                        
-                        const { data: downloadData, error: downloadError } = await supabase.functions.invoke(
-                          'download-pdf-tool',
-                          {
-                            body: {
-                              url: toolInput.url,
-                              search_query: toolInput.search_query || 'User requested'
-                            }
-                          }
-                        );
-                        
-                        if (downloadError) {
-                          console.error('❌ Download error:', downloadError);
-                          toolResult = { success: false, error: downloadError.message };
-                        } else {
-                          console.log('✅ Download successful:', downloadData);
-                          toolResult = downloadData;
+                      // Execute the tool using shared function
+                      const { toolResult, responseText, newFullResponse } = await executeToolCall(
+                        toolUseName,
+                        toolInput,
+                        {
+                          agent,
+                          user,
+                          conversation,
+                          supabase,
+                          sendSSE,
+                          requestId,
+                          fullResponse,
+                          conversationState,
+                          req
                         }
-                      }
+                      );
                       
-                      // Tool: search_pdf_with_query - auto-add " PDF" if needed
-                      if (toolUseName === 'search_pdf_with_query') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: search_pdf_with_query`);
-                        
-                        // ✅ Aggiungi " PDF" automaticamente se non presente
-                        let finalQuery = toolInput.searchQuery;
-                        if (!finalQuery.toLowerCase().includes(' pdf')) {
-                          finalQuery += ' PDF';
-                          console.log(`✅ Auto-added " PDF" to query: "${finalQuery}"`);
-                        }
-                        
-                        console.log('   Search query:', finalQuery);
-                        console.log('   Max results:', toolInput.maxResults || 5);
-                        
-                        try {
-                          const { data: searchResults, error: searchError } = await supabase.functions.invoke(
-                            'search-pdfs-only',
-                            {
-                              body: {
-                                query: finalQuery,  // ✅ Usa la query con " PDF"
-                                maxResults: toolInput.maxResults || 5
-                              }
-                            }
-                          );
-                          
-                          if (searchError) {
-                            console.error('❌ Search error:', searchError);
-                            toolResult = { success: false, error: searchError.message };
-                          } else {
-                            console.log('✅ Search completed:', searchResults);
-                            toolResult = searchResults;
-                          }
-                        } catch (err) {
-                          console.error('❌ Search error:', err);
-                          const errorMessage = err instanceof Error ? err.message : String(err);
-                          toolResult = { success: false, error: errorMessage };
-                        }
-                      }
+                      fullResponse = newFullResponse;
                       
-                      // Modified tool: search_and_acquire_pdfs (now accepts pre-found PDFs)
-                      if (toolUseName === 'search_and_acquire_pdfs') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: search_and_acquire_pdfs`);
-                        console.log('   PDFs to download:', toolInput.pdfsToDownload?.length || 0);
-                        
-                        try {
-                          // Informa l'utente che il download è iniziato
-                          const downloadStartText = `\n\n⏬ **Download avviato in BACKGROUND per ${toolInput.pdfsToDownload.length} PDF**\n\n`;
-                          fullResponse += downloadStartText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: downloadStartText }));
-                          
-                          // Invoca la vecchia funzione ma con la nuova modalità
-                          const { data: acquireData, error: acquireError } = await supabase.functions.invoke(
-                            'search-and-acquire-pdfs',
-                            {
-                              body: {
-                                pdfsToDownload: toolInput.pdfsToDownload
-                              },
-                              headers: {
-                                authorization: req.headers.get('Authorization') || ''
-                              }
-                            }
-                          );
-                          
-                          if (acquireError) {
-                            console.error('❌ Download error:', acquireError);
-                            toolResult = { success: false, error: acquireError.message };
-                            
-                            const errorText = `\n\n❌ Errore durante il download: ${acquireError.message}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else {
-                            console.log('✅ Download in progress:', acquireData);
-                            toolResult = acquireData;
-                            
-                            // Format initial results (immediate feedback)
-                            const topicOrPdfs = toolInput.topic || `${toolInput.pdfsToDownload?.length} PDF selezionati`;
-                            let resultText = `\n\n📦 **Acquisizione PDF avviata**\n\n`;
-                            resultText += `📚 PDF trovati: ${acquireData.pdfs_found}\n`;
-                            resultText += `📥 PDF in coda per download: ${acquireData.pdfs_queued}\n`;
-                            resultText += `♻️ PDF già esistenti nel pool: ${acquireData.pdfs_already_existing}\n`;
-                            if (acquireData.pdfs_failed > 0) {
-                              resultText += `❌ PDF non processabili: ${acquireData.pdfs_failed}\n`;
-                            }
-                            resultText += `\n`;
-
-                            if (acquireData.found_pdfs && acquireData.found_pdfs.length > 0) {
-                              resultText += `**Dettagli PDF:**\n\n`;
-                              acquireData.found_pdfs.forEach((pdf: any, idx: number) => {
-                                const statusEmoji = pdf.status === 'queued' ? '📥' : pdf.status === 'existing' ? '♻️' : '❌';
-                                const statusText = pdf.status === 'queued' ? 'In download' : 
-                                                 pdf.status === 'existing' ? 'Già presente' : 'Fallito';
-                                resultText += `${idx + 1}. ${statusEmoji} **${pdf.title}**\n`;
-                                resultText += `   📍 ${pdf.source}\n`;
-                                resultText += `   📊 Stato: ${statusText}\n\n`;
-                              });
-                            }
-                            
-                            // 🚨 MOSTRA motivi specifici dei fallimenti
-                            if (acquireData.failed_pdfs && acquireData.failed_pdfs.length > 0) {
-                              resultText += `\n⚠️ **PDF non scaricabili:**\n\n`;
-                              acquireData.failed_pdfs.forEach((pdf: any, idx: number) => {
-                                resultText += `${idx + 1}. ❌ **${pdf.title}**\n`;
-                                resultText += `   🔗 ${pdf.url.slice(0, 60)}...\n`;
-                                resultText += `   ⚠️ Motivo: ${pdf.reason}\n\n`;
-                              });
-                            }
-                            
-                            // ⚠️ MOSTRA messaggio "Download in corso" SOLO se ci sono PDF in coda
-                            if (acquireData.pdfs_queued > 0) {
-                              resultText += `\n⏳ **Download e validazione in corso...** Riceverai un aggiornamento quando i PDF saranno validati e aggiunti al pool.\n\n`;
-                            }
-                            
-                            fullResponse += resultText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: resultText }));
-                            
-                            // Save the initial message
-                            await supabase
-                              .from('agent_messages')
-                              .update({ content: fullResponse })
-                              .eq('id', placeholderMsg.id);
-                            
-                            // Complete the stream
-                            await sendSSE(JSON.stringify({ 
-                              type: 'complete', 
-                              conversationId: conversation.id 
-                            }));
-                            await closeStream();
-                            
-                            // ASYNC: Wait for validation and post detailed deterministic results
-                            (async () => {
-                              try {
-                                console.log('⏳ [ASYNC] Waiting 60 seconds for validation to complete...');
-                                await new Promise(resolve => setTimeout(resolve, 60000));
-                                
-                                // Query validation results from pdf_download_queue
-                                const { data: queuedDocs } = await supabase
-                                  .from('pdf_download_queue')
-                                  .select('id, expected_title, expected_author, status, validation_result, error_message, error_category, document_id, download_url')
-                                  .eq('conversation_id', conversationId)
-                                  .order('created_at', { ascending: false })
-                                  .limit(20);
-                                
-                                if (!queuedDocs || queuedDocs.length === 0) {
-                                  console.log('ℹ️ [ASYNC] No queued documents found');
-                                  return;
-                                }
-                                
-                                // Get knowledge documents for detailed info
-                                const documentIds = queuedDocs.filter(d => d.document_id).map(d => d.document_id);
-                                let knowledgeDocs: any[] = [];
-                                
-                                if (documentIds.length > 0) {
-                                  const { data: kDocs } = await supabase
-                                    .from('knowledge_documents')
-                                    .select('id, title, page_count, file_size_mb, complexity_level, validation_status, summary')
-                                    .in('id', documentIds);
-                                  
-                                  if (kDocs) knowledgeDocs = kDocs;
-                                }
-                                
-                                // Format detailed results message
-                                let feedbackMsg = `\n\n---\n\n## 📊 Risultati Validazione Dettagliati\n\n`;
-                                
-                                const validated: any[] = [];
-                                const rejected: any[] = [];
-                                const failed: any[] = [];
-                                const processing: any[] = [];
-                                
-                                // Categorize results with detailed info
-                                for (const doc of queuedDocs) {
-                                  const knowledgeDoc = knowledgeDocs.find(kd => kd.id === doc.document_id);
-                                  
-                                  if (doc.status === 'completed' && knowledgeDoc?.validation_status === 'validated') {
-                                    validated.push({ ...doc, knowledge: knowledgeDoc });
-                                  } else if (doc.status === 'rejected') {
-                                    rejected.push(doc);
-                                  } else if (doc.status === 'failed') {
-                                    failed.push(doc);
-                                  } else {
-                                    processing.push(doc);
-                                  }
-                                }
-                                
-                                // Summary
-                                feedbackMsg += `**Riepilogo:** ${validated.length} validati ✅ | ${rejected.length} rifiutati 🚫 | ${failed.length} falliti ❌ | ${processing.length} in elaborazione ⏳\n\n`;
-                                
-                                // Validated PDFs with details
-                                if (validated.length > 0) {
-                                  feedbackMsg += `### ✅ PDF Validati e Aggiunti alla Pool (${validated.length})\n\n`;
-                                  validated.forEach((doc: any) => {
-                                    const pages = doc.knowledge?.page_count ? ` | ${doc.knowledge.page_count} pagine` : '';
-                                    const size = doc.knowledge?.file_size_mb ? ` | ${doc.knowledge.file_size_mb.toFixed(1)} MB` : '';
-                                    const complexity = doc.knowledge?.complexity_level ? ` | ${doc.knowledge.complexity_level}` : '';
-                                    
-                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}${pages}${size}${complexity}\n`;
-                                    
-                                    if (doc.knowledge?.summary) {
-                                      const shortSummary = doc.knowledge.summary.substring(0, 150);
-                                      feedbackMsg += `  _${shortSummary}${doc.knowledge.summary.length > 150 ? '...' : ''}_\n`;
-                                    }
-                                    feedbackMsg += `\n`;
-                                  });
-                                }
-                                
-                                // Failed PDFs with detailed errors
-                                if (failed.length > 0) {
-                                  feedbackMsg += `### ❌ PDF Falliti (${failed.length})\n\n`;
-                                  failed.forEach((doc: any) => {
-                                    let errorDetail = '';
-                                    
-                                    if (doc.error_message) {
-                                      const errMsg = doc.error_message.toLowerCase();
-                                      
-                                      if (errMsg.includes('timeout') || errMsg.includes('timed out') || errMsg.includes('deadline')) {
-                                        errorDetail = '⏱️ **Timeout** - Il download ha richiesto troppo tempo';
-                                      } else if (errMsg.includes('404') || errMsg.includes('not found')) {
-                                        errorDetail = '🔍 **File non trovato (404)** - Il PDF non esiste più o l\'URL è errato';
-                                      } else if (errMsg.includes('403') || errMsg.includes('forbidden')) {
-                                        errorDetail = '🔒 **Accesso negato (403)** - Il server richiede autenticazione';
-                                      } else if (errMsg.includes('401') || errMsg.includes('unauthorized')) {
-                                        errorDetail = '🔑 **Non autorizzato (401)** - Credenziali richieste';
-                                      } else if (errMsg.includes('too large') || errMsg.includes('size limit') || errMsg.includes('50mb')) {
-                                        errorDetail = '📦 **File troppo grande** - Superati i limiti di dimensione (max 50MB)';
-                                      } else if (errMsg.includes('network') || errMsg.includes('connection') || errMsg.includes('econnrefused')) {
-                                        errorDetail = '🌐 **Errore di rete** - Impossibile raggiungere il server';
-                                      } else if (errMsg.includes('invalid pdf') || errMsg.includes('corrupt')) {
-                                        errorDetail = '📄 **PDF corrotto** - Il file non è un PDF valido';
-                                      } else if (errMsg.includes('extraction') || errMsg.includes('text extraction')) {
-                                        errorDetail = '📝 **Errore estrazione testo** - Impossibile estrarre il contenuto';
-                                      } else if (doc.error_category) {
-                                        errorDetail = `⚠️ **${doc.error_category}**`;
-                                      } else {
-                                        errorDetail = `⚠️ ${doc.error_message.substring(0, 120)}${doc.error_message.length > 120 ? '...' : ''}`;
-                                      }
-                                    } else {
-                                      errorDetail = '❓ **Errore sconosciuto** - Nessun dettaglio disponibile';
-                                    }
-                                    
-                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}\n`;
-                                    feedbackMsg += `  ${errorDetail}\n`;
-                                    if (doc.download_url) {
-                                      feedbackMsg += `  _URL: ${doc.download_url.substring(0, 80)}..._\n`;
-                                    }
-                                    feedbackMsg += `\n`;
-                                  });
-                                }
-                                
-                                // Rejected PDFs (not relevant)
-                                if (rejected.length > 0) {
-                                  feedbackMsg += `### 🚫 PDF Rifiutati (non rilevanti) (${rejected.length})\n\n`;
-                                  rejected.forEach((doc: any) => {
-                                    const validationResult = doc.validation_result || {};
-                                    const motivazione = validationResult.motivazione || doc.error_message || 'Non rilevante per il topic di ricerca';
-                                    feedbackMsg += `**${doc.expected_title}** by ${doc.expected_author}\n`;
-                                    feedbackMsg += `  _Motivo: ${motivazione}_\n\n`;
-                                  });
-                                }
-                                
-                                // Still processing
-                                if (processing.length > 0) {
-                                  feedbackMsg += `### ⏳ In Elaborazione (${processing.length})\n\n`;
-                                  processing.forEach((doc: any) => {
-                                    feedbackMsg += `- **${doc.expected_title}** by ${doc.expected_author} (${doc.status})\n`;
-                                  });
-                                  feedbackMsg += `\n_Questi PDF sono ancora in fase di validazione. Potrebbero richiedere più tempo._\n\n`;
-                                }
-                                
-                                feedbackMsg += `---\n\n`;
-                                
-                                if (validated.length > 0) {
-                                  feedbackMsg += `✨ I **${validated.length} PDF validati** sono ora disponibili nel pool documenti e possono essere assegnati agli agenti.\n\n`;
-                                }
-                                
-                                // Insert detailed feedback message
-                                await supabase
-                                  .from('agent_messages')
-                                  .insert({
-                                    conversation_id: conversation.id,
-                                    role: 'assistant',
-                                    content: feedbackMsg,
-                                    llm_provider: llmProvider
-                                  });
-                                
-                                console.log('✅ [ASYNC] Detailed validation feedback posted to chat');
-                              } catch (asyncError) {
-                                console.error('❌ [ASYNC] Error posting validation feedback:', asyncError);
-                              }
-                            })();
-                            
-                            // Exit early - don't continue with AI generation
-                            return;
-                          }
-                        } catch (error) {
-                          console.error('❌ Search and acquire error:', error);
-                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                          toolResult = { success: false, error: errorMessage };
-                          
-                          const errorText = `\n\n❌ Errore durante la ricerca e acquisizione: ${errorMessage}\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        }
-                      }
-                      
-                      if (toolUseName === 'web_search') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: web_search`);
-                        console.log('   Query:', toolInput.query);
-                        console.log('   Num results:', toolInput.num_results);
-                        console.log('   Scrape results:', toolInput.scrape_results);
-                        
-                        try {
-                          const { data: searchData, error: searchError } = await supabase.functions.invoke(
-                            'web-search',
-                            {
-                              body: {
-                                query: toolInput.query,
-                                numResults: toolInput.num_results || 5,
-                                scrapeResults: toolInput.scrape_results || false
-                              }
-                            }
-                          );
-                          
-                          if (searchError) {
-                            console.error('❌ Search error:', searchError);
-                            toolResult = { success: false, error: searchError.message };
-                            
-                            const errorText = `\n\n❌ Errore durante la ricerca web: ${searchError.message}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else if (!searchData.success) {
-                            console.error('❌ Search failed:', searchData.error);
-                            toolResult = { success: false, error: searchData.error };
-                            
-                            const errorText = `\n\n❌ Errore nella ricerca: ${searchData.error}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else {
-                            const results = searchData.results || [];
-                            console.log(`✅ Found ${results.length} results via ScrapingBee`);
-                            
-                            toolResult = {
-                              success: true,
-                              query: toolInput.query,
-                              results_count: results.length,
-                              total_results: searchData.totalResults,
-                              results: results
-                            };
-                            
-                            // Aggiungi risultati nella risposta
-                            let searchText = `\n\n🔍 **Risultati ricerca per**: "${toolInput.query}" (${searchData.totalResults} totali)\n\n`;
-                            results.forEach((r: any, idx: number) => {
-                              searchText += `**${idx + 1}. ${r.title}**\n`;
-                              searchText += `   ${r.snippet}\n`;
-                              searchText += `   🔗 ${r.url}\n`;
-                              if (r.scrapedContent) {
-                                searchText += `   📄 ${r.scrapedContent.slice(0, 200)}...\n`;
-                              }
-                              searchText += `\n`;
-                            });
-                            fullResponse += searchText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: searchText }));
-                          }
-                        } catch (error) {
-                          console.error('❌ Web search error:', error);
-                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                          toolResult = { success: false, error: errorMessage };
-                          
-                          const errorText = `\n\n❌ Errore durante la ricerca web: ${errorMessage}\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        }
-                      }
-                      
-                      if (toolUseName === 'web_scrape') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: web_scrape`);
-                        console.log('   URL:', toolInput.url);
-                        
-                        try {
-                          const { data: scrapeData, error: scrapeError } = await supabase.functions.invoke(
-                            'web-scrape',
-                            {
-                              body: {
-                                url: toolInput.url,
-                                renderJs: toolInput.render_js !== false,
-                                blockAds: toolInput.block_ads !== false
-                              }
-                            }
-                          );
-                          
-                          if (scrapeError) {
-                            console.error('❌ Scrape error:', scrapeError);
-                            toolResult = { success: false, error: scrapeError.message };
-                            
-                            const errorText = `\n\n❌ Errore durante lo scraping di ${toolInput.url}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else {
-                            console.log(`✅ Successfully scraped ${toolInput.url}`);
-                            toolResult = scrapeData;
-                            
-                            // Aggiungi contenuto estratto nella risposta
-                            const scrapedText = `\n\n📄 **Contenuto estratto da**: ${toolInput.url}\n\n${scrapeData.textContent.slice(0, 1000)}${scrapeData.textContent.length > 1000 ? '...' : ''}\n\n`;
-                            fullResponse += scrapedText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: scrapedText }));
-                          }
-                        } catch (error) {
-                          console.error('❌ Web scrape error:', error);
-                          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                          toolResult = { success: false, error: errorMessage };
-                          
-                          const errorText = `\n\n❌ Errore durante lo scraping: ${errorMessage}\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        }
-                      }
-                      
-                      if (toolUseName === 'list_other_agents') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: list_other_agents`);
-                        
-                        const { data: allAgents, error: agentsError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug, description')
-                          .eq('active', true)
-                          .neq('id', agent.id) // Exclude current agent
-                          .order('name', { ascending: true });
-                        
-                        if (agentsError) {
-                          console.error('❌ Error retrieving agents:', agentsError);
-                          toolResult = { success: false, error: 'Failed to retrieve agents list' };
-                          
-                          const errorText = `\n\n❌ Errore nel recuperare la lista degli agenti.\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          console.log(`✅ Retrieved ${allAgents.length} agents`);
-                          toolResult = {
-                            success: true,
-                            agent_count: allAgents.length,
-                            agents: allAgents
-                          };
-                          
-                          // Aggiungi lista agenti nella risposta
-                          let agentsText = `\n\n✅ **Agenti disponibili nel sistema** (${allAgents.length}):\n\n`;
-                          allAgents.forEach((ag: any, idx: number) => {
-                            agentsText += `${idx + 1}. **${ag.name}** (slug: \`${ag.slug}\`)\n`;
-                            if (ag.description) agentsText += `   - ${ag.description}\n`;
-                            agentsText += `\n`;
-                          });
-                          agentsText += `\nPosso consultare ciascuno di questi agenti per vedere il loro prompt, documenti, o cronologia conversazioni.\n\n`;
-                          fullResponse += agentsText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: agentsText }));
-                        }
-                      }
-                      
-                      if (toolUseName === 'get_agent_prompt') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_prompt`);
-                        console.log('   Agent name:', toolInput.agent_name);
-                        
-                        // Normalize agent name: replace hyphens with spaces for better matching
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        console.log('   Normalized name:', normalizedName);
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug, system_prompt')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          console.error('   Search attempted with normalized name:', normalizedName);
-                          console.error('   Error:', agentError);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          // Aggiungi risposta testuale per l'utente
-                          const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}". Assicurati che il nome sia corretto.\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          console.log('✅ Retrieved prompt for agent:', targetAgent.name);
-                          toolResult = {
-                            success: true,
-                            agent_name: targetAgent.name,
-                            agent_slug: targetAgent.slug,
-                            system_prompt: targetAgent.system_prompt
-                          };
-                          
-                          // Aggiungi il prompt nella risposta per l'utente  
-                          const promptText = `\n\n✅ Ho recuperato il prompt di **${targetAgent.name}**:\n\n---\n\n${targetAgent.system_prompt}\n\n---\n\n`;
-                          fullResponse += promptText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: promptText }));
-                        }
-                      }
-                      
-                      if (toolUseName === 'get_agent_knowledge') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] ========================================`);
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_knowledge`);
-                        console.log(`🛠️ [REQ-${requestId}] ========================================`);
-                        console.log(`🛠️ [REQ-${requestId}] Input agent_name:`, toolInput.agent_name);
-                        console.log(`🛠️ [REQ-${requestId}] Current agent:`, agent.name, `(slug: ${agent.slug})`);
-                        console.log(`🛠️ [REQ-${requestId}] User message that triggered this:`, message.substring(0, 100));
-                        
-                        // Normalize agent name: replace hyphens with spaces for better matching
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        console.log(`🛠️ [REQ-${requestId}] Normalized name:`, normalizedName);
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error(`❌ [REQ-${requestId}] Agent not found:`, toolInput.agent_name);
-                          console.error(`❌ [REQ-${requestId}] Search attempted with normalized name:`, normalizedName);
-                          console.error(`❌ [REQ-${requestId}] Error:`, agentError);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          // Aggiungi risposta testuale per l'utente
-                          const errorText = `\n\n❌ Mi dispiace, non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          console.log(`✅ [REQ-${requestId}] Target agent found:`, targetAgent.name, `(ID: ${targetAgent.id})`);
-                          
-                          // Get distinct documents using aggregation to ensure we get all unique documents
-                          console.log(`🔍 [REQ-${requestId}] Calling get_distinct_documents RPC for agent ID:`, targetAgent.id);
-                          const { data: documents, error: docsError } = await supabase.rpc(
-                            'get_distinct_documents',
-                            { p_agent_id: targetAgent.id }
-                          );
-                          
-                          if (docsError) {
-                            console.error(`❌ [REQ-${requestId}] Error retrieving documents:`, docsError);
-                            toolResult = { success: false, error: 'Failed to retrieve documents' };
-                            
-                            const errorText = `\n\n❌ Errore nel recuperare i documenti di ${targetAgent.name}.\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else {
-                            console.log(`✅ [REQ-${requestId}] RPC returned ${documents?.length || 0} distinct documents`);
-                            
-                            if (documents && documents.length > 0) {
-                              console.log(`📋 [REQ-${requestId}] Document list:`);
-                              documents.forEach((doc: any, idx: number) => {
-                                console.log(`   ${idx + 1}. ${doc.document_name} (pool_document_id: ${doc.pool_document_id})`);
-                              });
-                            } else {
-                              console.log(`⚠️ [REQ-${requestId}] No documents found for agent ${targetAgent.name}`);
-                            }
-                            
-                            toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              agent_slug: targetAgent.slug,
-                              document_count: documents?.length || 0,
-                              documents: documents || []
-                            };
-                            
-                            console.log(`📤 [REQ-${requestId}] Tool result being sent to LLM:`, JSON.stringify(toolResult, null, 2));
-                            
-                            // Aggiungi lista documenti nella risposta
-                            let docsText = `\n\n✅ **${targetAgent.name}** ha accesso a ${documents?.length || 0} documenti:\n\n`;
-                            documents?.forEach((doc: any, idx: number) => {
-                              docsText += `${idx + 1}. **${doc.document_name}**\n`;
-                              if (doc.category) docsText += `   - Categoria: ${doc.category}\n`;
-                              if (doc.summary) docsText += `   - ${doc.summary}\n`;
-                              docsText += `\n`;
-                            });
-                            
-                            console.log(`📝 [REQ-${requestId}] Response text being added to stream:`, docsText.substring(0, 200));
-                            
-                            fullResponse += docsText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: docsText }));
-                            
-                            console.log(`🛠️ [REQ-${requestId}] ========================================`);
-                            console.log(`🛠️ [REQ-${requestId}] get_agent_knowledge execution completed`);
-                            console.log(`🛠️ [REQ-${requestId}] ========================================`);
-                          }
-                        }
-                      }
-                      
-                      if (toolUseName === 'get_agent_chat_history') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_chat_history`);
-                        console.log('   Agent name:', toolInput.agent_name);
-                        
-                        // Normalize agent name: replace hyphens with spaces for better matching
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        console.log('   Normalized name:', normalizedName);
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          console.error('   Search attempted with normalized name:', normalizedName);
-                          console.error('   Error:', agentError);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          // Get conversation for this agent and user
-                          const { data: targetConv, error: convError } = await supabase
-                            .from('agent_conversations')
-                            .select('id')
-                            .eq('agent_id', targetAgent.id)
-                            .eq('user_id', user.id)
-                            .single();
-                          
-                          if (convError || !targetConv) {
-                            console.log('ℹ️ No conversation found for this agent and user');
-                            toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              agent_slug: targetAgent.slug,
-                              message_count: 0,
-                              messages: []
-                            };
-                            
-                            const noHistoryText = `\n\n📭 Non hai ancora conversazioni con **${targetAgent.name}**.\n\n`;
-                            fullResponse += noHistoryText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: noHistoryText }));
-                          } else {
-                            const limit = toolInput.limit || 50;
-                            const { data: messages, error: msgsError } = await supabase
-                              .from('agent_messages')
-                              .select('role, content, created_at')
-                              .eq('conversation_id', targetConv.id)
-                              .order('created_at', { ascending: false })
-                              .limit(limit);
-                            
-                            if (msgsError) {
-                              console.error('❌ Error retrieving messages:', msgsError);
-                              toolResult = { success: false, error: 'Failed to retrieve messages' };
-                              
-                              const errorText = `\n\n❌ Errore nel recuperare la cronologia di ${targetAgent.name}.\n\n`;
-                              fullResponse += errorText;
-                              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                            } else {
-                              console.log(`✅ Retrieved ${messages.length} messages for agent:`, targetAgent.name);
-                              toolResult = {
-                                success: true,
-                                agent_name: targetAgent.name,
-                                agent_slug: targetAgent.slug,
-                                message_count: messages.length,
-                                messages: messages.reverse() // Return in chronological order
-                              };
-                              
-                              // Aggiungi riepilogo cronologia
-                              let historyText = `\n\n💬 **Cronologia conversazione con ${targetAgent.name}** (${messages.length} messaggi):\n\n`;
-                              messages.reverse().slice(-10).forEach((msg: any) => {
-                                const role = msg.role === 'user' ? '👤 Tu' : '🤖 Agente';
-                                const preview = msg.content.slice(0, 100) + (msg.content.length > 100 ? '...' : '');
-                                historyText += `**${role}**: ${preview}\n\n`;
-                              });
-                              fullResponse += historyText;
-                              await sendSSE(JSON.stringify({ type: 'content', text: historyText }));
-                            }
-                          }
-                        }
-                      }
-                      
-                      if (toolUseName === 'consult_agent_full_knowledge') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: consult_agent_full_knowledge`);
-                        console.log('   Agent name:', toolInput.agent_name);
-                        console.log('   Max chunks:', toolInput.max_chunks || 100);
-                        
-                        // Normalize agent name
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        console.log('   Normalized name:', normalizedName);
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          // Get ALL knowledge chunks for this agent (up to max_chunks limit)
-                          const maxChunks = Math.min(toolInput.max_chunks || 100, 500);
-                          
-                          const { data: knowledgeChunks, error: knowledgeError } = await supabase
-                            .from('agent_knowledge')
-                            .select('document_name, category, summary, content')
-                            .eq('agent_id', targetAgent.id)
-                            .not('embedding', 'is', null)
-                            .limit(maxChunks);
-                          
-                          if (knowledgeError) {
-                            console.error('❌ Error retrieving knowledge:', knowledgeError);
-                            toolResult = { success: false, error: 'Failed to retrieve knowledge' };
-                            
-                            const errorText = `\n\n❌ Errore nel recuperare il knowledge di ${targetAgent.name}.\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          } else {
-                            console.log(`✅ Retrieved ${knowledgeChunks?.length || 0} knowledge chunks for agent:`, targetAgent.name);
-                            
-                            // Organize chunks by document
-                            const documentMap = new Map<string, any[]>();
-                            knowledgeChunks?.forEach((chunk: any) => {
-                              if (!documentMap.has(chunk.document_name)) {
-                                documentMap.set(chunk.document_name, []);
-                              }
-                              documentMap.get(chunk.document_name)!.push(chunk);
-                            });
-                            
-                            const documents = Array.from(documentMap.entries()).map(([docName, chunks]) => ({
-                              document_name: docName,
-                              category: chunks[0]?.category,
-                              summary: chunks[0]?.summary,
-                              total_chunks: chunks.length,
-                              content_chunks: chunks.map(c => c.content)
-                            }));
-                            
-                            toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              agent_slug: targetAgent.slug,
-                              total_documents: documents.length,
-                              total_chunks: knowledgeChunks?.length || 0,
-                              documents: documents
-                            };
-                            
-                            // Format full knowledge for display
-                            let knowledgeText = `\n\n📚 **KNOWLEDGE COMPLETO DI ${targetAgent.name.toUpperCase()}**\n\n`;
-                            knowledgeText += `Ho recuperato ${documents.length} documenti (${knowledgeChunks?.length || 0} chunks totali):\n\n`;
-                            
-                            documents.forEach((doc: any, idx: number) => {
-                              knowledgeText += `\n---\n\n### ${idx + 1}. ${doc.document_name}\n`;
-                              if (doc.category) knowledgeText += `**Categoria**: ${doc.category}\n`;
-                              if (doc.summary) knowledgeText += `**Riassunto**: ${doc.summary}\n`;
-                              knowledgeText += `**Chunks**: ${doc.total_chunks}\n\n`;
-                              
-                              // Include first 2 chunks as preview in user-facing message
-                              knowledgeText += `**Contenuto (anteprima primi 2 chunks)**:\n\n`;
-                              doc.content_chunks.slice(0, 2).forEach((content: string, chunkIdx: number) => {
-                                knowledgeText += `\n**Chunk ${chunkIdx + 1}**:\n${content}\n`;
-                              });
-                              
-                              if (doc.total_chunks > 2) {
-                                knowledgeText += `\n*... altri ${doc.total_chunks - 2} chunks disponibili nel knowledge completo ...*\n`;
-                              }
-                            });
-                            
-                            knowledgeText += `\n\n✅ Ho accesso completo a tutto il knowledge di ${targetAgent.name}. Posso ora utilizzare queste informazioni per aiutarti.\n\n`;
-                            
-                            fullResponse += knowledgeText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: knowledgeText }));
-                          }
-                        }
-                      }
-                      
-                      if (toolUseName === 'ask_agent_to_perform_task') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: ask_agent_to_perform_task`);
-                        console.log('   Target agent:', toolInput.agent_name);
-                        console.log('   Task:', toolInput.task_description?.slice(0, 100));
-                        
-                        // Normalize agent name
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug, system_prompt, llm_provider')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          console.log('✅ Found target agent:', targetAgent.name);
-                          
-                          // Send notification to user that consultation is happening
-                          const consultText = `\n\n🤝 **Consultazione con ${targetAgent.name}**\n\nSto chiedendo a ${targetAgent.name} di: ${toolInput.task_description}\n\n⏳ Attendere la risposta...\n\n`;
-                          fullResponse += consultText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: consultText }));
-                          
-                          try {
-                            // Prepare the request message for the target agent
-                            let requestMessage = `${agent.name} mi ha chiesto di aiutarlo con questo compito:\n\n${toolInput.task_description}`;
-                            
-                            if (toolInput.context_information) {
-                              requestMessage += `\n\nContesto aggiuntivo:\n${toolInput.context_information}`;
-                            }
-                            
-                            // Get or create conversation with target agent for this user
-                            let { data: targetConv, error: convError } = await supabase
-                              .from('agent_conversations')
-                              .select('id')
-                              .eq('agent_id', targetAgent.id)
-                              .eq('user_id', user.id)
-                              .single();
-                            
-                            if (convError || !targetConv) {
-                              console.log('Creating new conversation for inter-agent communication');
-                              const { data: newConv, error: createError } = await supabase
-                                .from('agent_conversations')
-                                .insert({
-                                  agent_id: targetAgent.id,
-                                  user_id: user.id,
-                                  title: `Consultazione da ${agent.name}`
-                                })
-                                .select('id')
-                                .single();
-                              
-                              if (createError) {
-                                throw new Error('Failed to create conversation');
-                              }
-                              targetConv = newConv;
-                            }
-                            
-                            // Get conversation history for context
-                            const { data: historyMessages } = await supabase
-                              .from('agent_messages')
-                              .select('role, content')
-                              .eq('conversation_id', targetConv.id)
-                              .order('created_at', { ascending: true })
-                              .limit(10);
-                            
-                            // Build message history
-                            const messages = [
-                              ...(historyMessages || []),
-                              { role: 'user', content: requestMessage }
-                            ];
-                            
-                            // Call the target agent's LLM
-                            const targetLLMProvider = targetAgent.llm_provider || 'anthropic';
-                            let agentResponse = '';
-                            
-                            if (targetLLMProvider === 'anthropic') {
-                              const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-                              if (!anthropicKey) throw new Error('ANTHROPIC_API_KEY not configured');
-                              
-                              const anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
-                                method: 'POST',
-                                headers: {
-                                  'Content-Type': 'application/json',
-                                  'x-api-key': anthropicKey,
-                                  'anthropic-version': '2023-06-01'
-                                },
-                                body: JSON.stringify({
-                                  model: 'claude-sonnet-4-5',
-                                  max_tokens: 64000,
-                                  temperature: 0.7,
-                                  system: targetAgent.system_prompt,
-                                  messages: messages
-                                    .filter(m => m.role !== 'system' && m.content && m.content.trim().length > 0)
-                                    .map(m => ({ role: m.role, content: m.content }))
-                                })
-                              });
-                              
-                              if (!anthropicResponse.ok) {
-                                const errorBody = await anthropicResponse.text();
-                                throw new Error(`Anthropic API error: ${anthropicResponse.status} - ${errorBody}`);
-                              }
-                              
-                              const responseData = await anthropicResponse.json();
-                              agentResponse = responseData.content[0].text;
-                              
-                            } else {
-                              throw new Error(`LLM provider ${targetLLMProvider} not supported for inter-agent communication`);
-                            }
-                            
-                            console.log(`✅ Received response from ${targetAgent.name} (${agentResponse.length} chars)`);
-                            
-                            // Store the inter-agent communication in database
-                            await supabase
-                              .from('inter_agent_messages')
-                              .insert({
-                                requesting_agent_id: agent.id,
-                                consulted_agent_id: targetAgent.id,
-                                question: toolInput.task_description,
-                                answer: agentResponse,
-                                context_conversation_id: conversation.id
-                              });
-                            
-                            // Store messages in target agent's conversation
-                            await supabase
-                              .from('agent_messages')
-                              .insert([
-                                {
-                                  conversation_id: targetConv.id,
-                                  role: 'user',
-                                  content: requestMessage
-                                },
-                                {
-                                  conversation_id: targetConv.id,
-                                  role: 'assistant',
-                                  content: agentResponse,
-                                  llm_provider: targetLLMProvider
-                                }
-                              ]);
-                            
-                            toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              agent_slug: targetAgent.slug,
-                              task_description: toolInput.task_description,
-                              response: agentResponse
-                            };
-                            
-                            // Display the response to user
-                            const responseText = `\n\n✅ **Risposta di ${targetAgent.name}**:\n\n${agentResponse}\n\n`;
-                            fullResponse += responseText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: responseText }));
-                            
-                          } catch (error) {
-                            console.error('❌ Error during inter-agent communication:', error);
-                            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                            toolResult = { success: false, error: errorMessage };
-                            
-                            const errorText = `\n\n❌ Errore durante la consultazione con ${targetAgent.name}: ${errorMessage}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          }
-                        }
-                      }
-                      
-                      if (toolUseName === 'update_agent_system_prompt') {
-                        toolCallCount++;
-                        console.log(`🛠️ [REQ-${requestId}] Tool called: update_agent_system_prompt`);
-                        console.log('   Target agent:', toolInput.agent_name);
-                        console.log('   New prompt length:', toolInput.new_system_prompt?.length);
-                        
-                        // Normalize agent name
-                        const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        
-                        const { data: targetAgent, error: agentError } = await supabase
-                          .from('agents')
-                          .select('id, name, slug, system_prompt, user_id')
-                          .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
-                          .eq('active', true)
-                          .single();
-                        
-                        if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          toolResult = { success: false, error: 'Agent not found' };
-                          
-                          const errorText = `\n\n❌ Non ho trovato l'agente "${toolInput.agent_name}".\n\n`;
-                          fullResponse += errorText;
-                          await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                        } else {
-                          console.log('✅ Found target agent:', targetAgent.name);
-                          
-                          try {
-                            // Save current prompt to history
-                            const { data: versionData } = await supabase
-                              .from('agent_prompt_history')
-                              .select('version_number')
-                              .eq('agent_id', targetAgent.id)
-                              .order('version_number', { ascending: false })
-                              .limit(1)
-                              .single();
-                            
-                            const nextVersion = (versionData?.version_number || 0) + 1;
-                            
-                            await supabase
-                              .from('agent_prompt_history')
-                              .insert({
-                                agent_id: targetAgent.id,
-                                system_prompt: targetAgent.system_prompt,
-                                version_number: nextVersion,
-                                created_by: user.id
-                              });
-                            
-                            // Update the agent's prompt
-                            const { error: updateError } = await supabase
-                              .from('agents')
-                              .update({ system_prompt: toolInput.new_system_prompt })
-                              .eq('id', targetAgent.id);
-                            
-                            if (updateError) {
-                              throw new Error(`Failed to update prompt: ${updateError.message}`);
-                            }
-                            
-                            console.log(`✅ Updated prompt for ${targetAgent.name}, saved version ${nextVersion}`);
-                            
-                            toolResult = {
-                              success: true,
-                              agent_name: targetAgent.name,
-                              agent_slug: targetAgent.slug,
-                              version_saved: nextVersion,
-                              new_prompt_length: toolInput.new_system_prompt.length
-                            };
-                            
-                            const successText = `\n\n✅ **Prompt aggiornato per ${targetAgent.name}**\n\nHo salvato il vecchio prompt nella cronologia (versione ${nextVersion}) e aggiornato il prompt dell'agente.\n\nNuovo prompt (${toolInput.new_system_prompt.length} caratteri):\n\n---\n\n${toolInput.new_system_prompt}\n\n---\n\n`;
-                            fullResponse += successText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: successText }));
-                            
-                          } catch (error) {
-                            console.error('❌ Error updating agent prompt:', error);
-                            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                            toolResult = { success: false, error: errorMessage };
-                            
-                            const errorText = `\n\n❌ Errore durante l'aggiornamento del prompt di ${targetAgent.name}: ${errorMessage}\n\n`;
-                            fullResponse += errorText;
-                            await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
-                          }
-                        }
-                      }
-                      
-                      // Store tool result
+                      // Store tool result for Anthropic continuation
                       anthropicMessages.push({
                         role: 'assistant',
                         content: [
@@ -5263,10 +4311,12 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                         ]
                       });
                       
-                      // Reset tool use tracking
-                      toolUseId = null;
+                      needsToolResultContinuation = true;
+                      
+                      // Reset tool state
                       toolUseName = null;
                       toolUseInputJson = '';
+                      toolUseId = null;
                       
                       // Flag che indica che dobbiamo fare un'altra chiamata API con il tool result
                       needsToolResultContinuation = true;
