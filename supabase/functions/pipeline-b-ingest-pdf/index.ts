@@ -19,35 +19,31 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Parse FormData
-    let formData;
-    try {
-      formData = await req.formData();
-    } catch (e) {
-      console.error('❌ Failed to parse FormData:', e);
-      throw new Error('Invalid FormData');
-    }
+    // Parse JSON body
+    const body = await req.json();
+    const { fileName, fileData, fileSize } = body;
 
-    const file = formData.get('file') as File;
-
-    if (!file) {
-      console.error('❌ No file in FormData');
+    if (!fileName || !fileData) {
+      console.error('❌ Missing fileName or fileData');
       throw new Error('No file provided');
     }
 
-    console.log(`📄 File received: ${file.name} (${file.size} bytes)`);
+    console.log(`📄 File received: ${fileName} (${fileSize} bytes)`);
 
-    // Convert File to ArrayBuffer for storage
-    const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+    // Decode base64 to Uint8Array
+    const binaryString = atob(fileData);
+    const uint8Array = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      uint8Array[i] = binaryString.charCodeAt(i);
+    }
 
     // Upload to storage
-    const fileName = `${Date.now()}_${file.name}`;
-    console.log(`⬆️ Uploading to storage: ${fileName}`);
+    const storagePath = `${Date.now()}_${fileName}`;
+    console.log(`⬆️ Uploading to storage: ${storagePath}`);
     
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('knowledge-pdfs')
-      .upload(fileName, uint8Array, {
+      .upload(storagePath, uint8Array, {
         contentType: 'application/pdf',
         upsert: false
       });
@@ -64,10 +60,10 @@ serve(async (req) => {
       .from('pipeline_b_documents')
       .insert({
         source_type: 'pdf',
-        file_name: file.name,
+        file_name: fileName,
         file_path: uploadData.path,
         storage_bucket: 'knowledge-pdfs',
-        file_size_bytes: file.size,
+        file_size_bytes: fileSize,
         status: 'ingested',
       })
       .select()
@@ -85,7 +81,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         documentId: document.id,
-        fileName: file.name,
+        fileName: fileName,
         status: 'ingested',
         message: 'PDF uploaded successfully. Processing will begin automatically.',
       }),
