@@ -49,7 +49,46 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch chunks with pending embeddings
+    // STEP 1: Reconcile documents with all chunks ready but wrong status
+    console.log('🔄 Reconciling document statuses...');
+    const { data: stuckDocs } = await supabase
+      .from('pipeline_b_documents')
+      .select('id, file_name, status')
+      .in('status', ['ingested', 'chunked', 'processing']);
+
+    if (stuckDocs && stuckDocs.length > 0) {
+      console.log(`📋 Checking ${stuckDocs.length} documents for reconciliation`);
+      
+      for (const doc of stuckDocs) {
+        const { data: pendingChunks } = await supabase
+          .from('pipeline_b_chunks_raw')
+          .select('id')
+          .eq('document_id', doc.id)
+          .neq('embedding_status', 'ready')
+          .limit(1);
+
+        if (!pendingChunks || pendingChunks.length === 0) {
+          // Verify document actually has chunks
+          const { data: anyChunk } = await supabase
+            .from('pipeline_b_chunks_raw')
+            .select('id')
+            .eq('document_id', doc.id)
+            .limit(1);
+          
+          if (anyChunk && anyChunk.length > 0) {
+            // All chunks ready, update document
+            await supabase
+              .from('pipeline_b_documents')
+              .update({ status: 'ready' })
+              .eq('id', doc.id);
+            
+            console.log(`✅ Reconciled ${doc.file_name} → status='ready'`);
+          }
+        }
+      }
+    }
+
+    // STEP 2: Fetch chunks with pending embeddings
     const { data: chunks, error: fetchError } = await supabase
       .from('pipeline_b_chunks_raw')
       .select('id, content, document_id')

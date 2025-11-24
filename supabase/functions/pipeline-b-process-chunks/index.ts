@@ -263,6 +263,25 @@ serve(async (req) => {
       try {
         console.log(`\n📄 Processing: ${doc.file_name}`);
 
+        // Check if document already has chunks (prevent duplicates)
+        const { data: existingChunks } = await supabase
+          .from('pipeline_b_chunks_raw')
+          .select('id')
+          .eq('document_id', doc.id)
+          .limit(1);
+
+        if (existingChunks && existingChunks.length > 0) {
+          console.log(`⏭️  Skipping ${doc.file_name} - already has chunks`);
+          
+          // Update status to 'chunked' if stuck in 'ingested'
+          await supabase
+            .from('pipeline_b_documents')
+            .update({ status: 'chunked' })
+            .eq('id', doc.id);
+          
+          continue; // Skip to next document
+        }
+
         // Mark as processing
         await supabase
           .from('pipeline_b_documents')
