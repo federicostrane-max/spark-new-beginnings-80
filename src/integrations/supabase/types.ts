@@ -1688,6 +1688,7 @@ export type Database = {
       }
       pipeline_b_chunks_raw: {
         Row: {
+          chunk_id: string | null
           chunk_index: number
           chunk_type: string
           content: string
@@ -1702,6 +1703,7 @@ export type Database = {
           visual_grounding: Json | null
         }
         Insert: {
+          chunk_id?: string | null
           chunk_index: number
           chunk_type?: string
           content: string
@@ -1716,6 +1718,7 @@ export type Database = {
           visual_grounding?: Json | null
         }
         Update: {
+          chunk_id?: string | null
           chunk_index?: number
           chunk_type?: string
           content?: string
