@@ -3577,6 +3577,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               console.log(`   Model: ${deepseekModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
+              // ⚠️ CRITICAL: DeepSeek tool calling ONLY works with deepseek-reasoner
+              if (deepseekModel === 'deepseek-chat' && tools && tools.length > 0) {
+                console.warn('⚠️ WARNING: deepseek-chat does NOT support tool calling!');
+                console.warn('⚠️ Tools will be IGNORED. Use deepseek-reasoner for tool calling.');
+                console.warn('⚠️ Available tools being ignored:', tools.map(t => t.name).join(', '));
+              }
+              
               if (!DEEPSEEK_API_KEY) {
                 throw new Error('DEEPSEEK_API_KEY is required but not set');
               }
