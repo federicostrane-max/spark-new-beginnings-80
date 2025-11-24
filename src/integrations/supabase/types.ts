@@ -327,6 +327,7 @@ export type Database = {
           created_at: string | null
           id: string
           llm_provider: string | null
+          metadata: Json | null
           role: string
         }
         Insert: {
@@ -335,6 +336,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           llm_provider?: string | null
+          metadata?: Json | null
           role: string
         }
         Update: {
@@ -343,6 +345,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           llm_provider?: string | null
+          metadata?: Json | null
           role?: string
         }
         Relationships: [

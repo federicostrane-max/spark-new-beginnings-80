@@ -618,10 +618,10 @@ export default function MultiAgentConsultant() {
       setCurrentConversation(conv);
       currentConversationRef.current = conv.id; // ✅ Sync ref
 
-      // Load all messages with full content
+      // Load all messages with full content + metadata
       const { data: msgs, error: msgsError } = await supabase
         .from("agent_messages")
-        .select("*")
+        .select("*, metadata")
         .eq("conversation_id", conversationId)
         .order("created_at");
 
@@ -643,7 +643,8 @@ export default function MultiAgentConsultant() {
           id: m.id, 
           role: m.role as "user" | "assistant", 
           content: m.content || '', // Fallback to empty string
-          llm_provider: m.llm_provider 
+          llm_provider: m.llm_provider,
+          metadata: m.metadata 
         };
       });
       

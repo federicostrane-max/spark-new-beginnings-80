@@ -8,6 +8,17 @@ import { useNavigate } from "react-router-dom";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+interface MessageMetadata {
+  has_knowledge_context?: boolean;
+  knowledge_stats?: {
+    chunks_found: number;
+    top_similarity: number;
+    documents_used: number;
+  };
+  tools_used?: string[];
+  source_reliability?: 'high' | 'medium' | 'low';
+}
+
 interface ChatMessageProps {
   id: string;
   role: "user" | "assistant" | "system";
@@ -20,6 +31,7 @@ interface ChatMessageProps {
   forceExpanded?: boolean;
   agentId?: string;
   llmProvider?: string;
+  metadata?: MessageMetadata;
 }
 
 export const ChatMessage = ({ 
@@ -33,7 +45,8 @@ export const ChatMessage = ({
   onLongPress,
   forceExpanded,
   agentId,
-  llmProvider
+  llmProvider,
+  metadata
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   // null = segui forceExpanded, true/false = override manuale
@@ -47,6 +60,50 @@ export const ChatMessage = ({
   const justEnteredSelectionMode = useRef(false);
   const navigate = useNavigate();
 
+  // Helper function to determine source reliability badge
+  const getSourceBadge = () => {
+    if (role === 'user' || !metadata) return null;
+    
+    const { has_knowledge_context, knowledge_stats, tools_used, source_reliability } = metadata;
+    
+    // Scenario 1: Based on documents (GREEN)
+    if (has_knowledge_context && knowledge_stats) {
+      return {
+        icon: '✓',
+        label: `${knowledge_stats.documents_used} documenti`,
+        color: 'bg-green-500/10 text-green-600 border-green-500/20',
+        tooltip: `Risposta basata su ${knowledge_stats.chunks_found} chunk da ${knowledge_stats.documents_used} documenti. Similarity: ${(knowledge_stats.top_similarity * 100).toFixed(0)}%`,
+        isWarning: false
+      };
+    }
+    
+    // Scenario 2: Used external tools (BLUE)
+    if (tools_used && tools_used.length > 0) {
+      return {
+        icon: '🔍',
+        label: `Tool: ${tools_used[0]}`,
+        color: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+        tooltip: `Tool usati: ${tools_used.join(', ')}`,
+        isWarning: false
+      };
+    }
+    
+    // Scenario 3: NO KNOWLEDGE BASE - ALERT (YELLOW)
+    if (source_reliability === 'low') {
+      return {
+        icon: '⚠️',
+        label: 'Conoscenza generale',
+        color: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
+        tooltip: 'Questa risposta non è basata su documenti nella knowledge base. Potrebbe essere imprecisa o inventata.',
+        isWarning: true
+      };
+    }
+    
+    return null;
+  };
+  
+  const sourceBadge = getSourceBadge();
+  
   // Get LLM provider badge info
   const getLLMBadge = () => {
     if (!llmProvider || role === 'user') return null;
@@ -419,6 +476,29 @@ export const ChatMessage = ({
             <Badge variant="outline" className={cn("text-xs font-medium border", llmBadge.color)}>
               {llmBadge.label}
             </Badge>
+          </div>
+        )}
+
+        {/* Source Reliability Badge - only for assistant messages */}
+        {sourceBadge && !isStreaming && (
+          <div className="flex items-center gap-1 mt-2">
+            <span className="text-sm">{sourceBadge.icon}</span>
+            <Badge 
+              variant="outline" 
+              className={cn(
+                "text-xs font-medium border cursor-help",
+                sourceBadge.color,
+                sourceBadge.isWarning && "animate-pulse"
+              )}
+              title={sourceBadge.tooltip}
+            >
+              {sourceBadge.label}
+            </Badge>
+            {sourceBadge.isWarning && (
+              <span className="text-xs text-yellow-600 ml-1">
+                (verifica accuratezza)
+              </span>
+            )}
           </div>
         )}
 
