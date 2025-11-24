@@ -3340,13 +3340,15 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
             
             // ============= TOOL 1: get_agent_knowledge =============
             if (toolName === 'get_agent_knowledge') {
-              console.log(`🛠️ [REQ-${context.requestId}] Tool called: get_agent_knowledge`);
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: get_agent_knowledge with input:`, JSON.stringify(toolInput));
               
               try {
                 let targetAgentId = context.agent.id; // Default: current agent
+                console.log(`📌 Default target: current agent ${context.agent.name} (${targetAgentId})`);
                 
                 // If agent_name is provided, find that agent
                 if (toolInput.agent_name) {
+                  console.log(`🔍 Searching for agent: "${toolInput.agent_name}"`);
                   const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
                   const { data: targetAgent, error: agentError } = await context.supabase
                     .from('agents')
@@ -3361,13 +3363,17 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       error: `Agent "${toolInput.agent_name}" non trovato`,
                       success: false
                     };
-                    return { toolResult, responseText: '', newFullResponse };
+                    responseText = `❌ Agente "${toolInput.agent_name}" non trovato.\n`;
+                    newFullResponse += responseText;
+                    await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                    return { toolResult, responseText, newFullResponse };
                   }
                   
                   targetAgentId = targetAgent.id;
                   console.log(`✅ Target agent found: ${targetAgent.name} (${targetAgentId})`);
                 }
                 
+                console.log(`📊 Querying documents for agent: ${targetAgentId}`);
                 const { data: distinctDocs, error: docsError } = await context.supabase.rpc('get_distinct_documents', {
                   p_agent_id: targetAgentId
                 });
@@ -3378,6 +3384,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 }
                 
                 console.log(`✅ Distinct documents found: ${distinctDocs?.length || 0}`);
+                console.log(`   Documents:`, distinctDocs?.map((d: any) => d.document_name).join(', ') || 'none');
                 
                 toolResult = {
                   total_documents: distinctDocs?.length || 0,
@@ -3385,19 +3392,26 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   success: true
                 };
                 
-                responseText = `📚 **Knowledge Base**: ${distinctDocs?.length || 0} documenti trovati\n`;
+                responseText = `📚 **Knowledge Base**: ${distinctDocs?.length || 0} documenti trovati\n\n`;
                 if (distinctDocs && distinctDocs.length > 0) {
                   responseText += distinctDocs.map((d: any, i: number) => 
                     `${i + 1}. **${d.document_name}**`
                   ).join('\n');
+                  responseText += '\n';
                 }
                 
+                console.log(`📤 Sending response to user: ${responseText.length} chars`);
                 newFullResponse += responseText;
                 await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
                 
               } catch (error) {
                 console.error('❌ Error in get_agent_knowledge:', error);
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.error('   Stack:', error instanceof Error ? error.stack : 'no stack');
                 toolResult = { error: 'Failed to retrieve knowledge base', success: false };
+                responseText = `❌ Errore nel recupero della knowledge base: ${errorMsg}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
               }
             }
             
