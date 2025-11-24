@@ -3788,7 +3788,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           
           tools.push({
             name: 'get_agent_knowledge',
-            description: 'Retrieves the knowledge base (list of documents) for an agent. **IMPORTANT**: If you want to check YOUR OWN knowledge base, DO NOT pass any agent_name parameter - leave it empty or omit it entirely. Only pass agent_name if you need to check ANOTHER agent\'s knowledge base.',
+            description: '📋 METADATA ONLY - Lists document titles and names. Use ONLY when user asks "what documents do you have?" or "list your PDFs". Does NOT retrieve content. For questions about what documents SAY or contain, use semantic_search instead.',
             input_schema: {
               type: 'object',
               properties: {
@@ -3803,7 +3803,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           
           tools.push({
             name: 'semantic_search',
-            description: 'Search your own knowledge base for relevant information based on semantic similarity. Use this when you need to find specific content from your documents to answer user questions. This retrieves actual document content, not just document names.',
+            description: '📖 CONTENT RETRIEVAL - Searches and returns actual text from documents. Use when user asks "what do your documents say about X?" or any question requiring document content. Returns relevant chunks with actual text you can quote.',
             input_schema: {
               type: 'object',
               properties: {
