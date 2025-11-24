@@ -6,7 +6,6 @@ import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Upload, Loader2, X, AlertTriangle } from "lucide-react";
-import { extractTextFromPDF } from "@/lib/pdfExtraction";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
@@ -137,23 +136,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          // Step 1: Extract text from PDF with timeout
-          setProgress((fileIndex / totalFiles) * 100 + 10);
-          
-          const extractionPromise = extractTextFromPDF(file);
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout estrazione testo (60s)')), 60000)
-          );
-          
-          let text = await Promise.race([extractionPromise, timeoutPromise]) as string;
-          console.log(`✓ Extracted ${text.length} characters from ${file.name}`);
-          
-          if (!text || text.length < 10) {
-            console.warn(`⚠️ Estrazione nativa fallita per ${file.name}, verrà usato OCR`);
-            text = '[REQUIRES_OCR]';
-          }
-
-          // Step 2: Convert PDF to base64 with timeout
+          // Step 2: Convert PDF to base64
           setProgress((fileIndex / totalFiles) * 100 + 20);
           
           const base64Promise = new Promise<string>((resolve, reject) => {
@@ -172,21 +155,21 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
             reader.readAsDataURL(file);
           });
           
-          const base64Data = await base64Promise;
+          const fileBase64 = await base64Promise;
           console.log(`✓ File converted to base64`);
 
-          // Step 3: Upload to pool with increased timeout for large files
+          // Step 3: Upload to pool with Landing AI (increased timeout for large files)
           setProgress((fileIndex / totalFiles) * 100 + 40);
           
-          const uploadTimeout = file.size > 5 * 1024 * 1024 ? 120000 : 60000; // 2min for >5MB, 1min for smaller
-          console.log(`Uploading "${file.name}" (timeout: ${uploadTimeout/1000}s)...`);
+          const uploadTimeout = file.size > 5 * 1024 * 1024 ? 180000 : 120000; // 3min for >5MB, 2min for smaller
+          console.log(`Uploading "${file.name}" with Landing AI (timeout: ${uploadTimeout/1000}s)...`);
           
-          const uploadPromise = supabase.functions.invoke('upload-pdf-to-shared-pool', {
+          const uploadPromise = supabase.functions.invoke('upload-pdf-to-pool', {
             body: {
-              text: text,
+              fileBase64,
               fileName: file.name,
               fileSize: file.size,
-              fileData: base64Data
+              // agentId: undefined (shared pool - no agent assignment)
             }
           });
           
@@ -262,7 +245,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       <CardHeader>
         <CardTitle>Carica Nuovi Documenti</CardTitle>
         <CardDescription>
-          Carica PDF nel pool condiviso. L'AI analizzerà automaticamente i contenuti.
+          Carica PDF nel pool condiviso con Landing AI. Estrazione intelligente di testo, tabelle, grafici e layout.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
