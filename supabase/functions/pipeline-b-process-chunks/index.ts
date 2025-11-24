@@ -47,26 +47,24 @@ interface LandingAIResponseDirect {
 }
 
 // ============================================================================
-// FUNZIONE: getOrCreateJob - Cache job_id to avoid reprocessing
+// FUNZIONE: createLandingAIParseJob - Always creates new Parse Job
 // ============================================================================
 
-async function getOrCreateJob(
+
+/**
+ * Create a new Landing AI Parse Job
+ * Always creates a new job - no caching logic
+ */
+async function createLandingAIParseJob(
   content: Blob,
-  fileName: string,
-  existingJobId: string | null
-): Promise<{ jobId: string; needsPolling: boolean }> {
+  fileName: string
+): Promise<string> {
   const landingApiKey = Deno.env.get('LANDING_AI_API_KEY');
   if (!landingApiKey) {
     throw new Error('LANDING_AI_API_KEY not configured');
   }
 
-  // If job_id exists, return it (no API call needed)
-  if (existingJobId) {
-    console.log(`♻️ [Landing AI] Reusing cached job_id: ${existingJobId}`);
-    return { jobId: existingJobId, needsPolling: false };
-  }
-
-  // Create new job
+  // Create a new Parse Job
   console.log(`🚀 [Landing AI] Creating new Parse Job for: ${fileName}`);
   const formData = new FormData();
   formData.append('document', content, fileName);
@@ -95,7 +93,7 @@ async function getOrCreateJob(
   }
 
   console.log(`✓ [Landing AI] Job created: ${jobId}`);
-  return { jobId, needsPolling: true };
+  return jobId;
 }
 
 // ============================================================================
@@ -317,26 +315,11 @@ serve(async (req) => {
           throw new Error(`Unsupported source_type: ${doc.source_type}`);
         }
 
-        // Get or create job (using cache)
-        const { jobId, needsPolling } = await getOrCreateJob(
-          content,
-          doc.file_name,
-          doc.landing_ai_job_id
-        );
-
-        // Save job_id if new
-        if (!doc.landing_ai_job_id) {
-          await supabase
-            .from('pipeline_b_documents')
-            .update({ landing_ai_job_id: jobId })
-            .eq('id', doc.id);
-          console.log(`✓ Saved job_id: ${jobId}`);
-        }
-
-        // Poll until complete (only for new jobs)
-        if (needsPolling) {
-          await pollJobUntilComplete(jobId);
-        }
+        // Create new Landing AI Parse Job
+        const jobId = await createLandingAIParseJob(content, doc.file_name);
+        
+        // Poll until complete
+        await pollJobUntilComplete(jobId);
 
         // Retrieve chunks from completed job
         const landingChunks = await retrieveJobChunks(jobId);
