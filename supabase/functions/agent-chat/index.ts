@@ -3567,6 +3567,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 ...anthropicMessages
               ];
               
+              // Convert tools to OpenAI format (DeepSeek is OpenAI-compatible)
+              const deepseekTools = tools?.map(tool => ({
+                type: "function",
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.input_schema
+                }
+              }));
+              
               response = await fetch('https://api.deepseek.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -3578,6 +3588,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   messages: deepseekMessages,
                   temperature: 0.7,
                   max_tokens: 4000,
+                  tools: deepseekTools,
+                  tool_choice: "auto",
                   stream: true
                 }),
                 signal: controller.signal
@@ -3588,6 +3600,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               console.log('🚀 ROUTING TO OPENAI');
               console.log(`   Model: gpt-4o`);
               console.log(`   Message count: ${anthropicMessages.length}`);
+              
+              // Convert tools to OpenAI format
+              const openaiTools = tools?.map(tool => ({
+                type: "function",
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.input_schema
+                }
+              }));
               
               response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
@@ -3602,6 +3624,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     ...anthropicMessages
                   ],
                   temperature: 0.7,
+                  tools: openaiTools,
+                  tool_choice: "auto",
                   stream: true
                 }),
                 signal: controller.signal
@@ -3619,6 +3643,19 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 throw new Error('OPENROUTER_API_KEY is required but not set');
               }
               
+              // Convert tools based on model type (Anthropic or OpenAI format)
+              const isAnthropicModel = selectedModel.includes('claude');
+              const routerTools = isAnthropicModel 
+                ? tools  // Keep Anthropic format
+                : tools?.map(tool => ({  // Convert to OpenAI format
+                    type: "function",
+                    function: {
+                      name: tool.name,
+                      description: tool.description,
+                      parameters: tool.input_schema
+                    }
+                  }));
+              
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -3634,10 +3671,60 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     ...anthropicMessages
                   ],
                   temperature: 0.7,
+                  tools: routerTools,
+                  tool_choice: "auto",
                   stream: true
                 }),
                 signal: controller.signal
               });
+              
+            } else if (llmProvider === 'google-gemini') {
+              // Google Gemini implementation
+              console.log('🚀 ROUTING TO GOOGLE GEMINI');
+              console.log(`   Model: gemini-2.0-flash-exp`);
+              console.log(`   Message count: ${anthropicMessages.length}`);
+              
+              const GOOGLE_AI_STUDIO_API_KEY = Deno.env.get('GOOGLE_AI_STUDIO_API_KEY');
+              if (!GOOGLE_AI_STUDIO_API_KEY) {
+                throw new Error('GOOGLE_AI_STUDIO_API_KEY is required but not set');
+              }
+              
+              // Convert tools to Gemini format
+              const geminiTools = tools ? [{
+                function_declarations: tools.map(tool => ({
+                  name: tool.name,
+                  description: tool.description,
+                  parameters: tool.input_schema
+                }))
+              }] : undefined;
+              
+              // Convert messages to Gemini format
+              const geminiMessages = anthropicMessages.map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+              }));
+              
+              response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:streamGenerateContent?key=${GOOGLE_AI_STUDIO_API_KEY}`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    contents: geminiMessages,
+                    tools: geminiTools,
+                    systemInstruction: {
+                      parts: [{ text: enhancedSystemPrompt }]
+                    },
+                    generationConfig: {
+                      temperature: 0.7,
+                      maxOutputTokens: 8192,
+                    }
+                  }),
+                  signal: controller.signal
+                }
+              );
               
             } else {
               // Default: Anthropic
@@ -3801,8 +3888,33 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     console.log(`🔍 [REQ-${requestId}] Anthropic Chunk ${chunkCount}: type=${parsed.type}`);
                   }
                   
-                  // Handle DeepSeek streaming format
+                  // Handle DeepSeek streaming format (OpenAI-compatible)
                   if (llmProvider === 'deepseek') {
+                    // Handle tool calls
+                    if (parsed.choices?.[0]?.delta?.tool_calls) {
+                      const toolCall = parsed.choices[0].delta.tool_calls[0];
+                      
+                      if (toolCall.function?.name) {
+                        toolUseName = toolCall.function.name;
+                        toolUseId = toolCall.id || `call_${Date.now()}`;
+                        toolUseInputJson = '';
+                        console.log(`🔧 [DeepSeek] Tool call started: ${toolUseName}`);
+                      }
+                      
+                      if (toolCall.function?.arguments) {
+                        toolUseInputJson += toolCall.function.arguments;
+                      }
+                    }
+                    
+                    // Handle finish_reason === "tool_calls"
+                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName) {
+                      toolCallCount++;
+                      console.log(`🛠️ [DeepSeek] Tool execution: ${toolUseName}`);
+                      const needsDeepSeekContinuation = true; // Flag for continuation
+                      // Tool execution will happen after stream ends
+                    }
+                    
+                    // Handle regular text content
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
                       fullResponse += newText;
@@ -3838,6 +3950,31 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   
                   // Handle OpenAI streaming format
                   if (llmProvider === 'openai') {
+                    // Handle tool calls
+                    if (parsed.choices?.[0]?.delta?.tool_calls) {
+                      const toolCall = parsed.choices[0].delta.tool_calls[0];
+                      
+                      if (toolCall.function?.name) {
+                        toolUseName = toolCall.function.name;
+                        toolUseId = toolCall.id || `call_${Date.now()}`;
+                        toolUseInputJson = '';
+                        console.log(`🔧 [OpenAI] Tool call started: ${toolUseName}`);
+                      }
+                      
+                      if (toolCall.function?.arguments) {
+                        toolUseInputJson += toolCall.function.arguments;
+                      }
+                    }
+                    
+                    // Handle finish_reason === "tool_calls"
+                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName) {
+                      toolCallCount++;
+                      console.log(`🛠️ [OpenAI] Tool execution: ${toolUseName}`);
+                      const needsOpenAIContinuation = true; // Flag for continuation
+                      // Tool execution will happen after stream ends
+                    }
+                    
+                    // Handle regular text content
                     if (parsed.choices && parsed.choices[0]?.delta?.content) {
                       const newText = parsed.choices[0].delta.content;
                       
@@ -3879,6 +4016,38 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       }
                     }
                     continue; // Skip Anthropic-specific handling
+                  }
+                  
+                  // Handle Google Gemini streaming format
+                  if (llmProvider === 'google-gemini') {
+                    // Gemini uses a different format - not SSE, but newline-delimited JSON
+                    const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                      fullResponse += text;
+                      await sendSSE(JSON.stringify({ type: 'content', text }));
+                      
+                      const now = Date.now();
+                      if (fullResponse.length > 0 && fullResponse.length % 5000 < text.length) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse, llm_provider: llmProvider })
+                          .eq('id', placeholderMsg.id);
+                        console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                      }
+                    }
+                    
+                    // Handle function call
+                    const functionCall = parsed.candidates?.[0]?.content?.parts?.[0]?.functionCall;
+                    if (functionCall) {
+                      toolUseName = functionCall.name;
+                      toolUseId = `gemini_${Date.now()}`;
+                      toolUseInputJson = JSON.stringify(functionCall.args);
+                      toolCallCount++;
+                      console.log(`🔧 [Gemini] Function call: ${toolUseName}`);
+                      const needsGeminiContinuation = true; // Flag for continuation
+                    }
+                    
+                    continue;
                   }
                   
                   // Anthropic-specific handling
@@ -5110,10 +5279,12 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   'anthropic-version': '2023-06-01',
                 },
                 body: JSON.stringify({
-                  model: 'claude-sonnet-4-20250514',
-                  max_tokens: 4000,
+                  model: 'claude-sonnet-4-5',  // Fixed model name
+                  max_tokens: 64000,
+                  temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
+                  tools: tools,  // Pass tools to continuation
                   stream: true,
                 }),
               });
