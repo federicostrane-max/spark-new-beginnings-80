@@ -51,11 +51,19 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Lower threshold to 0.3 for better recall (was 0.5 = 50% similarity)
     const { data: documents, error } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
       filter_agent_id: agentId || null,
-      match_threshold: 0.5,
+      match_threshold: 0.3,  // 30% similarity threshold
       match_count: topK,
+    });
+    
+    console.log('Search params:', { 
+      agentId, 
+      topK, 
+      threshold: 0.3,
+      hasEmbedding: !!queryEmbedding 
     });
 
     if (error) {
