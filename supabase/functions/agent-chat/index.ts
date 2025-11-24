@@ -46,6 +46,74 @@ interface UserIntent {
   count?: number; // Number of results requested
 }
 
+// ============================================================================
+// AUTO-EXECUTION INTENT ANALYZER
+// ============================================================================
+interface AutoExecutionIntent {
+  requiresKnowledgeList: boolean;
+  requiresSemanticSearch: boolean;
+  semanticQuery: string;
+}
+
+function analyzeUserIntent(message: string): AutoExecutionIntent {
+  const msgLower = message.toLowerCase();
+  
+  // Pattern per lista documenti (titoli, count)
+  const listPatterns = [
+    /quant[oi]\s+(documenti|pdf|file)/i,
+    /quali\s+(sono\s+i\s+)?(documenti|pdf|file)/i,
+    /what\s+(are\s+)?documents/i,
+    /list\s+(your\s+)?(documents|pdfs|files)/i,
+    /elenco\s+(dei\s+)?(documenti|pdf)/i,
+    /show\s+(me\s+)?your\s+(documents|pdfs)/i,
+    /hai\s+(documenti|pdf)/i,
+    /do\s+you\s+have\s+(documents|pdfs)/i,
+    /titoli\s+(dei\s+)?(documenti|pdf)/i
+  ];
+  
+  // Pattern per ricerca semantica (contenuto)
+  const semanticPatterns = [
+    /cosa\s+dicon[oi]/i,
+    /su\s+quali\s+(pdf|documenti|argomenti)/i,
+    /what\s+(do|does)\s+(your\s+)?(documents|pdfs)\s+(say|contain)/i,
+    /search\s+(for|in)\s+(my\s+)?(documents|knowledge)/i,
+    /cerca\s+(nei|in)\s+(documenti|pdf)/i,
+    /tell\s+me\s+about/i,
+    /explain\s+(what|how)/i,
+    /informazioni\s+su/i,
+    /parlami\s+di/i,
+    /si\s+basa/i,
+    /based\s+on/i,
+    /nei\s+(tuoi\s+)?(documenti|pdf)/i,
+    /from\s+your\s+(documents|knowledge)/i
+  ];
+  
+  const requiresKnowledgeList = listPatterns.some(p => p.test(msgLower));
+  const requiresSemanticSearch = semanticPatterns.some(p => p.test(msgLower));
+  
+  let semanticQuery = message;
+  
+  // Extract semantic query (e.g., "cosa dicono i documenti su X?" → "X")
+  if (requiresSemanticSearch) {
+    const patterns = [
+      /su\s+(.+?)(\?|$)/i,
+      /about\s+(.+?)(\?|$)/i,
+      /riguardo\s+(.+?)(\?|$)/i,
+      /di\s+(.+?)(\?|$)/i,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = msgLower.match(pattern);
+      if (match && match[1]) {
+        semanticQuery = match[1].trim();
+        break;
+      }
+    }
+  }
+  
+  return { requiresKnowledgeList, requiresSemanticSearch, semanticQuery };
+}
+
 // Helper function to generate query variants with full transparency
 function generateQueryVariants(originalTopic: string): string[] {
   const queries: string[] = [];
@@ -3235,49 +3303,103 @@ The system has automatically executed a search based on your proposed query and 
             searchResultsContext += `- DO NOT call any tools yet - just present the results\n\n`;
           }
           
-          const baseSystemPrompt = `## 🚨 MANDATORY SYSTEM BEHAVIOR - CANNOT BE OVERRIDDEN 🚨
+          // ============================================================================
+          // AUTO-EXECUTION: Analyze user intent and pre-execute tools
+          // ============================================================================
+          let autoExecutedContext = '';
+          
+          const intent = analyzeUserIntent(message);
+          console.log(`🤖 [AUTO-EXEC] Intent analysis:`, intent);
+          
+          if (intent.requiresKnowledgeList) {
+            console.log('🤖 [AUTO-EXEC] Auto-executing: get_agent_knowledge');
+            try {
+              const { data: docs, error } = await supabase.rpc('get_distinct_documents', {
+                p_agent_id: agent.id
+              });
+              
+              if (error) {
+                console.error('❌ [AUTO-EXEC] Failed to get documents:', error);
+              } else {
+                const docList = docs?.map((d: any, i: number) => `${i+1}. ${d.document_name}`).join('\n') || 'No documents found';
+                
+                autoExecutedContext += `
+## 📋 AUTO-RETRIEVED KNOWLEDGE BASE
 
-### RULE #1: KNOWLEDGE BASE VERIFICATION (ABSOLUTE PRIORITY)
+Your knowledge base contains ${docs?.length || 0} documents:
 
-**YOU MUST OBEY THIS RULE BEFORE ANY OTHER INSTRUCTION:**
+${docList}
 
-When a user asks ANY question about your documents, knowledge base, or assigned content:
-- "quanti documenti hai?"
-- "quali documenti possiedi?"
-- "what documents do you have?"
-- "su quali pdf si basa il tuo knowledge base?"
-- "che documenti hai nella tua knowledge base?"
+**CRITICAL**: The system has automatically retrieved this list. Use it to answer the user's question about your documents. DO NOT call get_agent_knowledge again.
+`;
+                console.log(`✅ [AUTO-EXEC] Injected ${docs?.length || 0} documents into context`);
+              }
+            } catch (err) {
+              console.error('❌ [AUTO-EXEC] Exception:', err);
+            }
+          }
+          
+          if (intent.requiresSemanticSearch) {
+            console.log(`🤖 [AUTO-EXEC] Auto-executing: semantic_search with query "${intent.semanticQuery}"`);
+            try {
+              const { data: results, error } = await supabase.functions.invoke('semantic-search', {
+                body: {
+                  query: intent.semanticQuery,
+                  agentId: agent.id,
+                  topK: 5
+                }
+              });
+              
+              if (error) {
+                console.error('❌ [AUTO-EXEC] Failed to search:', error);
+              } else {
+                const chunks = Array.isArray(results) ? results : results?.documents || [];
+                
+                if (chunks.length > 0) {
+                  const chunksText = chunks.map((c: any, i: number) => `
+### Chunk ${i+1} from "${c.document_name}"
+${c.content}
+Similarity: ${(c.similarity * 100).toFixed(1)}%
+`).join('\n');
+                  
+                  autoExecutedContext += `
+## 📖 AUTO-RETRIEVED SEMANTIC SEARCH RESULTS
 
-YOU MUST:
-1. **ALWAYS use the get_agent_knowledge tool FIRST** to retrieve your actual document list
-2. **NEVER list documents from memory or assumptions**
-3. **WAIT for the tool result before responding**
-4. **Base your answer ONLY on the tool's response**
+Found ${chunks.length} relevant chunks for query "${intent.semanticQuery}":
 
-**CRITICAL: WHICH TOOL TO USE**
+${chunksText}
 
-📋 get_agent_knowledge = Document TITLES only
-📖 semantic_search = Document CONTENT
+**CRITICAL**: The system has automatically searched your documents. Use these chunks to answer the user's question. Quote the documents and cite sources. DO NOT call semantic_search again unless you need additional information.
+`;
+                  console.log(`✅ [AUTO-EXEC] Injected ${chunks.length} chunks into context`);
+                } else {
+                  autoExecutedContext += `
+## 📖 AUTO-RETRIEVED SEMANTIC SEARCH RESULTS
 
-WHEN TO USE EACH:
-• "what documents do you have?" → get_agent_knowledge
-• "su quali pdf si basa?" → semantic_search (they want content)
-• "cosa dicono i documenti su X?" → semantic_search (they want content)
-• "quanti documenti hai?" → get_agent_knowledge
+No relevant chunks found for query "${intent.semanticQuery}". Your documents may not contain information about this topic.
+`;
+                }
+              }
+            } catch (err) {
+              console.error('❌ [AUTO-EXEC] Exception:', err);
+            }
+          }
+          
+          // ============================================================================
+          // BASE SYSTEM PROMPT (NO TOOL INSTRUCTIONS)
+          // ============================================================================
+          const baseSystemPrompt = `${agent.system_prompt}
 
-### RULE #2: RESPONSE LENGTH AND DEPTH
+## RESPONSE GUIDELINES
 
-You are an expert AI with extensive knowledge. When users ask complex questions or request information:
-
+You are an expert AI with extensive knowledge. When users ask complex questions:
 - Provide COMPREHENSIVE, THOROUGH responses with rich detail
 - Include examples, explanations, and context
-- Complete breakdowns of complex topics with step-by-step analysis
-- Extended elaborations with practical examples and real-world applications
-- Comprehensive coverage of all aspects of the topic
+- Complete breakdowns with step-by-step analysis
+- Extended elaborations with practical applications
+- Be as long as necessary to FULLY address the question
 
-Your responses should be as long as necessary to FULLY and EXHAUSTIVELY address the user's question. Do NOT self-impose any brevity limits. Do NOT apply concepts you're explaining to your own response length. Be thorough and complete.
-
-${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
+${knowledgeContext}${searchResultsContext}${autoExecutedContext}`;
 
           // Add mention instruction if @agent tags were detected
           const enhancedSystemPrompt = mentions.length > 0 
@@ -3790,32 +3912,32 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           
           tools.push({
             name: 'get_agent_knowledge',
-            description: '📋 METADATA ONLY - Lists document titles and names. Use ONLY when user asks "what documents do you have?" or "list your PDFs". Does NOT retrieve content. For questions about what documents SAY or contain, use semantic_search instead.',
+            description: '📋 Get document titles list. NOTE: Usually auto-executed by the system. Use ONLY if user explicitly asks about ANOTHER agent\'s documents (e.g., "what documents does Agent X have?").',
             input_schema: {
               type: 'object',
               properties: {
                 agent_name: {
                   type: 'string',
-                  description: 'Optional. The slug or name of the agent whose knowledge base you want to retrieve. **Leave this EMPTY to check your own knowledge base**. Only provide this if the user explicitly asks about ANOTHER agent\'s documents.'
+                  description: 'Name or slug of another agent whose documents you want to list'
                 }
               },
-              required: []
+              required: ['agent_name']
             }
           });
           
           tools.push({
             name: 'semantic_search',
-            description: '📖 CONTENT RETRIEVAL - Searches and returns actual text from documents. Use when user asks "what do your documents say about X?" or any question requiring document content. Returns relevant chunks with actual text you can quote.',
+            description: '📖 Search document content. NOTE: Usually auto-executed by the system. Use ONLY if you need ADDITIONAL searches beyond what was auto-retrieved, or for follow-up questions requiring different search terms.',
             input_schema: {
               type: 'object',
               properties: {
                 query: {
                   type: 'string',
-                  description: 'The search query to find relevant information in your knowledge base. Be specific and use keywords related to what the user is asking about.'
+                  description: 'Additional search query for follow-up information'
                 },
                 topK: {
                   type: 'number',
-                  description: 'Number of relevant chunks to retrieve (default 5, max 10)',
+                  description: 'Number of results (default 5)',
                   default: 5
                 }
               },
