@@ -7,31 +7,55 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log('📥 Pipeline B Ingest PDF - Request received');
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const formData = await req.formData();
+    // Parse FormData
+    let formData;
+    try {
+      formData = await req.formData();
+    } catch (e) {
+      console.error('❌ Failed to parse FormData:', e);
+      throw new Error('Invalid FormData');
+    }
+
     const file = formData.get('file') as File;
 
     if (!file) {
+      console.error('❌ No file in FormData');
       throw new Error('No file provided');
     }
 
-    console.log(`📄 Pipeline B Ingest: ${file.name} (${file.size} bytes)`);
+    console.log(`📄 File received: ${file.name} (${file.size} bytes)`);
+
+    // Convert File to ArrayBuffer for storage
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
 
     // Upload to storage
     const fileName = `${Date.now()}_${file.name}`;
+    console.log(`⬆️ Uploading to storage: ${fileName}`);
+    
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('knowledge-pdfs')
-      .upload(fileName, file);
+      .upload(fileName, uint8Array, {
+        contentType: 'application/pdf',
+        upsert: false
+      });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      console.error('❌ Storage upload error:', uploadError);
+      throw uploadError;
+    }
 
     console.log(`✓ Uploaded to storage: ${uploadData.path}`);
 
@@ -49,7 +73,10 @@ serve(async (req) => {
       .select()
       .single();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      console.error('❌ Database insert error:', insertError);
+      throw insertError;
+    }
 
     console.log(`✓ Document record created: ${document.id}`);
     console.log(`⏳ Status: ingested (waiting for background processing)`);
@@ -69,7 +96,10 @@ serve(async (req) => {
     console.error('❌ Pipeline B Ingest PDF error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ 
+        success: false,
+        error: errorMessage 
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
