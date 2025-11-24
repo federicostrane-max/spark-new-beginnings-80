@@ -170,8 +170,11 @@ export const DocumentPoolTable = () => {
     loadAvailableFolders();
     loadFolders();
 
-    // Setup realtime subscription for knowledge_documents
-    // Ricarica SOLO i documenti in realtime, le cartelle vengono caricate solo inizialmente
+    // TEMPORANEAMENTE DISABILITATA la subscription realtime per fermare il loop
+    // Il loop è causato da continui aggiornamenti nel database durante le operazioni di sync
+    // TODO: Implementare un debounce o un update incrementale più intelligente
+    
+    /* 
     const channel = supabase
       .channel('knowledge-documents-changes')
       .on(
@@ -191,6 +194,7 @@ export const DocumentPoolTable = () => {
     return () => {
       supabase.removeChannel(channel);
     };
+    */
   }, []);
 
   // Reset alla pagina 1 quando cambiano i filtri
