@@ -3082,6 +3082,8 @@ Il prompt deve essere pronto all'uso direttamente.`;
               /mostra(?:mi)?\s+.{0,20}(pdf|documenti|libri)/i,
               /cosa\s+(?:c'è|hai)\s+(?:nel|in)\s+.{0,20}(knowledge|base|documenti)/i,
               /possiedi\s+.{0,20}(pdf|documenti|libri)/i,
+              /(?:non\s+)?hai\s+(?:nessun\s+|qualche\s+|dei\s+)?(documento|documenti|pdf|file)(?:\s+salvat[oi])?(?:\s+nel)?(?:\s+(?:tuo|knowledge)\s*base)?/i,
+              /(?:hai|possiedi)\s+.{0,30}(?:documento|documenti|pdf)/i,
               
               // Pattern inglesi migliorati
               /what\s+(pdfs?|documents?|books?|files?)/i,
