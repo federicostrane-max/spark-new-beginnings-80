@@ -7,17 +7,52 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  
-  while (start < text.length) {
-    const end = Math.min(start + chunkSize, text.length);
-    chunks.push(text.slice(start, end));
-    start += chunkSize - overlap;
+interface LandingAIChunk {
+  text: string;
+  chunk_type: 'text' | 'table' | 'chart' | 'list' | 'header' | 'footer' | 'image';
+  chunk_references: {
+    page_number: number;
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  }[];
+}
+
+async function extractWithLandingAI(fileBase64: string, fileName: string): Promise<LandingAIChunk[]> {
+  const landingApiKey = Deno.env.get('LANDING_AI_API_KEY');
+  if (!landingApiKey) {
+    throw new Error('LANDING_AI_API_KEY not configured');
   }
+
+  // Convert base64 to binary
+  const binaryData = Uint8Array.from(atob(fileBase64), c => c.charCodeAt(0));
   
-  return chunks;
+  // Create form data
+  const formData = new FormData();
+  const blob = new Blob([binaryData], { type: 'application/pdf' });
+  formData.append('file', blob, fileName);
+
+  console.log(`[LANDING AI] Sending ${fileName} for extraction...`);
+  
+  const response = await fetch('https://api.landing.ai/v1/agentic-document-extraction/extract', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${landingApiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[LANDING AI ERROR]', response.status, errorText);
+    throw new Error(`Landing AI extraction failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  console.log(`[LANDING AI] ✓ Extracted ${result.chunks?.length || 0} chunks`);
+  
+  return result.chunks || [];
 }
 
 serve(async (req) => {
@@ -26,16 +61,15 @@ serve(async (req) => {
   }
 
   try {
-    const { text, fileName, agentId, fileSize } = await req.json();
+    const { fileBase64, fileName, agentId, fileSize } = await req.json();
     
-    console.log('=== UPLOAD PDF TO POOL ===');
+    console.log('=== UPLOAD PDF TO POOL (Landing AI) ===');
     console.log(`File: ${fileName}`);
-    console.log(`Agent: ${agentId}`);
-    console.log(`Text length: ${text?.length || 0} chars`);
+    console.log(`Agent: ${agentId || 'SHARED POOL (no agent)'}`);
     console.log(`File size: ${fileSize || 0} bytes`);
 
-    if (!text || !fileName || !agentId) {
-      throw new Error('Missing required parameters: text, fileName, or agentId');
+    if (!fileBase64 || !fileName) {
+      throw new Error('Missing required parameters: fileBase64 or fileName');
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -45,6 +79,10 @@ serve(async (req) => {
     // Step 1: Create document in knowledge_documents
     console.log('[STEP 1] Creating document in knowledge_documents...');
     
+    // Extract chunks using Landing AI
+    const chunks = await extractWithLandingAI(fileBase64, fileName);
+    const totalTextLength = chunks.reduce((sum, c) => sum + c.text.length, 0);
+
     const { data: document, error: docError } = await supabase
       .from('knowledge_documents')
       .insert({
@@ -52,7 +90,7 @@ serve(async (req) => {
         file_path: `pool-uploads/${agentId}/${fileName}`,
         validation_status: 'validated',
         processing_status: 'processing',
-        text_length: text.length,
+        text_length: totalTextLength,
         file_size_bytes: fileSize || null,
       })
       .select('id')
@@ -66,36 +104,30 @@ serve(async (req) => {
     const documentId = document.id;
     console.log(`[STEP 1] ✓ Document created (id: ${documentId})`);
 
-    // ⚠️ CRITICAL WORKFLOW NOTE:
-    // This function is for DIRECT UPLOADS by a specific agent.
-    // It creates a 'manual' link to assign the document to the uploading agent.
-    // For documents downloaded via search (download-pdf-tool), they should go to
-    // the SHARED POOL without any agent assignment.
-    // NEVER use 'ai_assigned' - only 'manual' or no link at all for shared pool.
-    
-    // Step 2: Create agent_document_links (manual assignment for direct upload)
-    console.log('[STEP 2] Creating agent_document_links (manual assignment)...');
-    
-    const { error: linkError } = await supabase
-      .from('agent_document_links')
-      .insert({
-        document_id: documentId,
-        agent_id: agentId,
-        assignment_type: 'manual', // ✅ ALWAYS 'manual' for direct uploads
-        confidence_score: 1.0,
-      });
+    // Step 2: Create agent_document_links ONLY if agentId is provided
+    if (agentId) {
+      console.log('[STEP 2] Creating agent_document_links (manual assignment)...');
+      
+      const { error: linkError } = await supabase
+        .from('agent_document_links')
+        .insert({
+          document_id: documentId,
+          agent_id: agentId,
+          assignment_type: 'manual',
+          confidence_score: 1.0,
+        });
 
-    if (linkError) {
-      console.error('[STEP 2 ERROR]', linkError);
-      throw linkError;
+      if (linkError) {
+        console.error('[STEP 2 ERROR]', linkError);
+        throw linkError;
+      }
+
+      console.log('[STEP 2] ✓ Agent link created');
+    } else {
+      console.log('[STEP 2] ⊗ Skipped agent link creation (shared pool upload)');
     }
 
-    console.log('[STEP 2] ✓ Agent link created');
-
-    // Step 3: Chunk the text
-    console.log('[STEP 3] Chunking text...');
-    const chunks = chunkText(text, 1000, 200);
-    console.log(`[STEP 3] ✓ Created ${chunks.length} chunks`);
+    console.log(`[STEP 3] ✓ Landing AI extracted ${chunks.length} chunks`);
 
     // Step 4: Process chunks in batches (generate embeddings and insert)
     console.log('[STEP 4] Processing chunks with embeddings...');
@@ -116,7 +148,7 @@ serve(async (req) => {
       console.log(`[BATCH ${batchNumber}/${totalBatches}] Processing ${batch.length} chunks...`);
 
       // Generate embeddings for batch
-      const embeddingPromises = batch.map(async (chunk) => {
+      const embeddingPromises = batch.map(async (chunk: LandingAIChunk) => {
         const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
           method: 'POST',
           headers: {
@@ -125,7 +157,7 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             model: 'text-embedding-3-small',
-            input: chunk,
+            input: chunk.text,
           }),
         });
 
@@ -135,8 +167,10 @@ serve(async (req) => {
 
         const embeddingData = await embeddingResponse.json();
         return {
-          content: chunk,
+          content: chunk.text,
           embedding: embeddingData.data[0].embedding,
+          chunk_type: chunk.chunk_type,
+          visual_grounding: chunk.chunk_references,
         };
       });
 
@@ -147,13 +181,18 @@ serve(async (req) => {
         .from('agent_knowledge')
         .insert(
           chunksWithEmbeddings.map((chunk) => ({
-            agent_id: agentId,
+            agent_id: null, // Always NULL for shared pool
             document_name: fileName,
             content: chunk.content,
             embedding: chunk.embedding,
+            chunk_type: chunk.chunk_type,
             category: 'General',
             source_type: 'shared_pool',
             pool_document_id: documentId,
+            chunking_metadata: {
+              visual_grounding: chunk.visual_grounding,
+              extraction_method: 'landing_ai',
+            },
           }))
         );
 
@@ -176,11 +215,13 @@ serve(async (req) => {
     // Step 5: Trigger AI analysis (optional - call process-document)
     console.log('[STEP 5] Triggering AI analysis...');
     
+    const fullText = chunks.map(c => c.text).join('\n\n');
+    
     try {
       const { error: processError } = await supabase.functions.invoke('process-document', {
         body: {
           documentId,
-          fullText: text,
+          fullText,
         },
       });
 
@@ -211,14 +252,20 @@ serve(async (req) => {
     console.log('=== UPLOAD COMPLETE ===');
     console.log(`Document ID: ${documentId}`);
     console.log(`Chunks processed: ${processedChunks}`);
-    console.log(`Auto-assigned to agent: ${agentId}`);
+    if (agentId) {
+      console.log(`Auto-assigned to agent: ${agentId}`);
+    } else {
+      console.log(`Added to SHARED POOL (no agent assignment)`);
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
         documentId,
         chunksProcessed: processedChunks,
-        message: `PDF uploaded to pool and assigned to agent`,
+        message: agentId 
+          ? `PDF uploaded to pool and assigned to agent`
+          : `PDF uploaded to shared pool`,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

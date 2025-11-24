@@ -220,6 +220,7 @@ export type Database = {
         Row: {
           agent_id: string | null
           category: string
+          chunk_type: string | null
           chunking_metadata: Json | null
           content: string
           created_at: string | null
@@ -236,6 +237,7 @@ export type Database = {
         Insert: {
           agent_id?: string | null
           category: string
+          chunk_type?: string | null
           chunking_metadata?: Json | null
           content: string
           created_at?: string | null
@@ -252,6 +254,7 @@ export type Database = {
         Update: {
           agent_id?: string | null
           category?: string
+          chunk_type?: string | null
           chunking_metadata?: Json | null
           content?: string
           created_at?: string | null
