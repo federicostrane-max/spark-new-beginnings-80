@@ -3548,12 +3548,31 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
           
+          // Declare provider-specific variables in outer scope for continuation access
+          let deepseekMessages: any[] = [];
+          let deepseekModel = '';
+          let deepseekTools: any[] = [];
+          
+          let openaiMessages: any[] = [];
+          let openaiModel = '';
+          let openaiTools: any[] = [];
+          
+          let openrouterMessages: any[] = [];
+          let openrouterModel = '';
+          let openrouterTools: any[] = [];
+          let OPENROUTER_API_KEY: string | undefined;
+          
+          let geminiMessages: any[] = [];
+          let geminiModel = '';
+          let geminiTools: any[] = [];
+          let GOOGLE_API_KEY: string | undefined; // Will hold GOOGLE_AI_STUDIO_API_KEY
+          
           let response: Response;
           try {
             // Route to appropriate LLM provider
             if (llmProvider === 'deepseek') {
               // DeepSeek with direct streaming
-              const deepseekModel = agent.ai_model || 'deepseek-chat';
+              deepseekModel = agent.ai_model || 'deepseek-chat';
               console.log('🚀 ROUTING TO DEEPSEEK');
               console.log(`   Model: ${deepseekModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
@@ -3562,13 +3581,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 throw new Error('DEEPSEEK_API_KEY is required but not set');
               }
               
-              const deepseekMessages = [
+              deepseekMessages = [
                 { role: 'system', content: enhancedSystemPrompt },
                 ...anthropicMessages
               ];
               
               // Convert tools to OpenAI format (DeepSeek is OpenAI-compatible)
-              const deepseekTools = tools?.map(tool => ({
+              deepseekTools = tools?.map(tool => ({
                 type: "function",
                 function: {
                   name: tool.name,
@@ -3597,12 +3616,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
             } else if (llmProvider === 'openai') {
               // OpenAI implementation (streaming)
+              openaiModel = 'gpt-4o';
               console.log('🚀 ROUTING TO OPENAI');
-              console.log(`   Model: gpt-4o`);
+              console.log(`   Model: ${openaiModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
               // Convert tools to OpenAI format
-              const openaiTools = tools?.map(tool => ({
+              openaiTools = tools?.map(tool => ({
                 type: "function",
                 function: {
                   name: tool.name,
@@ -3611,6 +3631,11 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 }
               }));
               
+              openaiMessages = [
+                { role: 'system', content: enhancedSystemPrompt },
+                ...anthropicMessages
+              ];
+              
               response = await fetch('https://api.openai.com/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -3618,11 +3643,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   'Authorization': `Bearer ${OPENAI_API_KEY}`,
                 },
                 body: JSON.stringify({
-                  model: 'gpt-4o',
-                  messages: [
-                    { role: 'system', content: enhancedSystemPrompt },
-                    ...anthropicMessages
-                  ],
+                  model: openaiModel,
+                  messages: openaiMessages,
                   temperature: 0.7,
                   tools: openaiTools,
                   tool_choice: "auto",
@@ -3633,19 +3655,19 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
             } else if (llmProvider === 'openrouter') {
               // OpenRouter implementation (streaming) - access to 100+ models
-              const selectedModel = aiModel || 'deepseek/deepseek-chat'; // Use agent's model or default
+              openrouterModel = aiModel || 'deepseek/deepseek-chat'; // Use agent's model or default
               console.log('🚀 ROUTING TO OPENROUTER');
-              console.log(`   Model: ${selectedModel}`);
+              console.log(`   Model: ${openrouterModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
-              const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+              OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
               if (!OPENROUTER_API_KEY) {
                 throw new Error('OPENROUTER_API_KEY is required but not set');
               }
               
               // Convert tools based on model type (Anthropic or OpenAI format)
-              const isAnthropicModel = selectedModel.includes('claude');
-              const routerTools = isAnthropicModel 
+              const isAnthropicModel = openrouterModel.includes('claude');
+              openrouterTools = isAnthropicModel 
                 ? tools  // Keep Anthropic format
                 : tools?.map(tool => ({  // Convert to OpenAI format
                     type: "function",
@@ -3656,6 +3678,11 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                     }
                   }));
               
+              openrouterMessages = [
+                { role: 'system', content: enhancedSystemPrompt },
+                ...anthropicMessages
+              ];
+              
               response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -3665,13 +3692,10 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                   'X-Title': 'Multi-Agent Consultant',
                 },
                 body: JSON.stringify({
-                  model: selectedModel,
-                  messages: [
-                    { role: 'system', content: enhancedSystemPrompt },
-                    ...anthropicMessages
-                  ],
+                  model: openrouterModel,
+                  messages: openrouterMessages,
                   temperature: 0.7,
-                  tools: routerTools,
+                  tools: openrouterTools,
                   tool_choice: "auto",
                   stream: true
                 }),
@@ -5264,7 +5288,9 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           console.log('   Needs continuation:', needsToolResultContinuation);
           console.log('================================================================================');
           
-          // ========== TOOL RESULT CONTINUATION FOR ANTHROPIC ==========
+          // ========== TOOL RESULT CONTINUATION FOR ALL PROVIDERS ==========
+          
+          // ===== ANTHROPIC CONTINUATION =====
           if (needsToolResultContinuation && llmProvider === 'anthropic') {
             console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Anthropic...`);
             console.log(`   Current anthropicMessages length: ${anthropicMessages.length}`);
@@ -5358,6 +5384,380 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
             } catch (error) {
               console.error(`❌ [REQ-${requestId}] Error during tool result continuation:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              fullResponse += errorText;
+              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+            }
+          }
+          
+          // ===== DEEPSEEK CONTINUATION =====
+          if (needsToolResultContinuation && llmProvider === 'deepseek') {
+            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for DeepSeek...`);
+            console.log(`   Current deepseekMessages length: ${deepseekMessages.length}`);
+            
+            try {
+              const continueResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: deepseekModel,
+                  messages: deepseekMessages,
+                  temperature: 0.7,
+                  max_tokens: 4000,
+                  tools: deepseekTools,
+                  tool_choice: "auto",
+                  stream: true
+                }),
+              });
+              
+              if (!continueResponse.ok) {
+                const errorText = await continueResponse.text();
+                console.error(`❌ [REQ-${requestId}] DeepSeek continuation error:`, errorText);
+                throw new Error(`DeepSeek API error: ${continueResponse.status}`);
+              }
+              
+              const reader2 = continueResponse.body?.getReader();
+              if (!reader2) throw new Error('No readable stream in continuation');
+              
+              const decoder2 = new TextDecoder();
+              let buffer2 = '';
+              let continuationChunks = 0;
+              
+              console.log(`📡 [REQ-${requestId}] Streaming DeepSeek continuation response...`);
+              
+              while (true) {
+                const { done, value } = await reader2.read();
+                
+                if (done) {
+                  console.log(`✅ [REQ-${requestId}] DeepSeek continuation stream ended. Chunks: ${continuationChunks}`);
+                  break;
+                }
+                
+                buffer2 += decoder2.decode(value, { stream: true });
+                const lines = buffer2.split('\n');
+                buffer2 = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  if (!line.startsWith('data: ')) continue;
+                  
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    continuationChunks++;
+                    
+                    if (parsed.choices?.[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 3000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    
+                    if (parsed.choices?.[0]?.finish_reason === 'stop') {
+                      console.log(`🏁 [REQ-${requestId}] DeepSeek continuation finished`);
+                    }
+                  } catch (e) {
+                    console.error('Parse error in DeepSeek continuation:', e);
+                  }
+                }
+              }
+              
+              console.log(`✅ [REQ-${requestId}] DeepSeek tool result continuation completed`);
+              
+            } catch (error) {
+              console.error(`❌ [REQ-${requestId}] Error during DeepSeek continuation:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              fullResponse += errorText;
+              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+            }
+          }
+          
+          // ===== OPENAI CONTINUATION =====
+          if (needsToolResultContinuation && llmProvider === 'openai') {
+            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for OpenAI...`);
+            console.log(`   Current openaiMessages length: ${openaiMessages.length}`);
+            
+            try {
+              const continueResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${OPENAI_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: openaiModel,
+                  messages: openaiMessages,
+                  max_completion_tokens: 16000,
+                  tools: openaiTools,
+                  tool_choice: "auto",
+                  stream: true
+                }),
+              });
+              
+              if (!continueResponse.ok) {
+                const errorText = await continueResponse.text();
+                console.error(`❌ [REQ-${requestId}] OpenAI continuation error:`, errorText);
+                throw new Error(`OpenAI API error: ${continueResponse.status}`);
+              }
+              
+              const reader2 = continueResponse.body?.getReader();
+              if (!reader2) throw new Error('No readable stream in continuation');
+              
+              const decoder2 = new TextDecoder();
+              let buffer2 = '';
+              let continuationChunks = 0;
+              
+              console.log(`📡 [REQ-${requestId}] Streaming OpenAI continuation response...`);
+              
+              while (true) {
+                const { done, value } = await reader2.read();
+                
+                if (done) {
+                  console.log(`✅ [REQ-${requestId}] OpenAI continuation stream ended. Chunks: ${continuationChunks}`);
+                  break;
+                }
+                
+                buffer2 += decoder2.decode(value, { stream: true });
+                const lines = buffer2.split('\n');
+                buffer2 = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  if (!line.startsWith('data: ')) continue;
+                  
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    continuationChunks++;
+                    
+                    if (parsed.choices?.[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 3000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    
+                    if (parsed.choices?.[0]?.finish_reason === 'stop') {
+                      console.log(`🏁 [REQ-${requestId}] OpenAI continuation finished`);
+                    }
+                  } catch (e) {
+                    console.error('Parse error in OpenAI continuation:', e);
+                  }
+                }
+              }
+              
+              console.log(`✅ [REQ-${requestId}] OpenAI tool result continuation completed`);
+              
+            } catch (error) {
+              console.error(`❌ [REQ-${requestId}] Error during OpenAI continuation:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              fullResponse += errorText;
+              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+            }
+          }
+          
+          // ===== OPENROUTER CONTINUATION =====
+          if (needsToolResultContinuation && llmProvider === 'openrouter') {
+            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for OpenRouter...`);
+            console.log(`   Current openrouterMessages length: ${openrouterMessages.length}`);
+            
+            try {
+              const continueResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: openrouterModel,
+                  messages: openrouterMessages,
+                  tools: openrouterTools,
+                  tool_choice: "auto",
+                  stream: true
+                }),
+              });
+              
+              if (!continueResponse.ok) {
+                const errorText = await continueResponse.text();
+                console.error(`❌ [REQ-${requestId}] OpenRouter continuation error:`, errorText);
+                throw new Error(`OpenRouter API error: ${continueResponse.status}`);
+              }
+              
+              const reader2 = continueResponse.body?.getReader();
+              if (!reader2) throw new Error('No readable stream in continuation');
+              
+              const decoder2 = new TextDecoder();
+              let buffer2 = '';
+              let continuationChunks = 0;
+              
+              console.log(`📡 [REQ-${requestId}] Streaming OpenRouter continuation response...`);
+              
+              while (true) {
+                const { done, value } = await reader2.read();
+                
+                if (done) {
+                  console.log(`✅ [REQ-${requestId}] OpenRouter continuation stream ended. Chunks: ${continuationChunks}`);
+                  break;
+                }
+                
+                buffer2 += decoder2.decode(value, { stream: true });
+                const lines = buffer2.split('\n');
+                buffer2 = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  if (!line.startsWith('data: ')) continue;
+                  
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    continuationChunks++;
+                    
+                    if (parsed.choices?.[0]?.delta?.content) {
+                      const newText = parsed.choices[0].delta.content;
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 3000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    
+                    if (parsed.choices?.[0]?.finish_reason === 'stop') {
+                      console.log(`🏁 [REQ-${requestId}] OpenRouter continuation finished`);
+                    }
+                  } catch (e) {
+                    console.error('Parse error in OpenRouter continuation:', e);
+                  }
+                }
+              }
+              
+              console.log(`✅ [REQ-${requestId}] OpenRouter tool result continuation completed`);
+              
+            } catch (error) {
+              console.error(`❌ [REQ-${requestId}] Error during OpenRouter continuation:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              fullResponse += errorText;
+              await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+            }
+          }
+          
+          // ===== GOOGLE GEMINI CONTINUATION =====
+          if (needsToolResultContinuation && llmProvider === 'google') {
+            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Gemini...`);
+            console.log(`   Current geminiMessages length: ${geminiMessages.length}`);
+            
+            try {
+              const continueResponse = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    contents: geminiMessages,
+                    tools: geminiTools,
+                    generationConfig: {
+                      temperature: 0.7,
+                      maxOutputTokens: 8192,
+                    },
+                  }),
+                }
+              );
+              
+              if (!continueResponse.ok) {
+                const errorText = await continueResponse.text();
+                console.error(`❌ [REQ-${requestId}] Gemini continuation error:`, errorText);
+                throw new Error(`Gemini API error: ${continueResponse.status}`);
+              }
+              
+              const reader2 = continueResponse.body?.getReader();
+              if (!reader2) throw new Error('No readable stream in continuation');
+              
+              const decoder2 = new TextDecoder();
+              let buffer2 = '';
+              let continuationChunks = 0;
+              
+              console.log(`📡 [REQ-${requestId}] Streaming Gemini continuation response...`);
+              
+              while (true) {
+                const { done, value } = await reader2.read();
+                
+                if (done) {
+                  console.log(`✅ [REQ-${requestId}] Gemini continuation stream ended. Chunks: ${continuationChunks}`);
+                  break;
+                }
+                
+                buffer2 += decoder2.decode(value, { stream: true });
+                const lines = buffer2.split('\n');
+                buffer2 = lines.pop() || '';
+                
+                for (const line of lines) {
+                  if (!line.trim()) continue;
+                  
+                  try {
+                    const parsed = JSON.parse(line);
+                    continuationChunks++;
+                    
+                    if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
+                      const newText = parsed.candidates[0].content.parts[0].text;
+                      fullResponse += newText;
+                      await sendSSE(JSON.stringify({ type: 'content', text: newText }));
+                      
+                      const now = Date.now();
+                      if (now - lastUpdateTime > 3000) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse })
+                          .eq('id', placeholderMsg.id);
+                        lastUpdateTime = now;
+                      }
+                    }
+                    
+                    if (parsed.candidates?.[0]?.finishReason === 'STOP') {
+                      console.log(`🏁 [REQ-${requestId}] Gemini continuation finished`);
+                    }
+                  } catch (e) {
+                    console.error('Parse error in Gemini continuation:', e);
+                  }
+                }
+              }
+              
+              console.log(`✅ [REQ-${requestId}] Gemini tool result continuation completed`);
+              
+            } catch (error) {
+              console.error(`❌ [REQ-${requestId}] Error during Gemini continuation:`, error);
               const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
               fullResponse += errorText;
               await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
