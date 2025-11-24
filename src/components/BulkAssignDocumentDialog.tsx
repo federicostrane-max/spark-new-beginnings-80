@@ -55,7 +55,7 @@ export const BulkAssignDocumentDialog = ({
   const countDocuments = async () => {
     try {
       if (folderName) {
-        // Use folder-based query for large selections
+        // Folder-based: count from knowledge_documents only (Pipeline B doesn't use folders)
         const { count: totalCount } = await supabase
           .from("knowledge_documents")
           .select("id", { count: 'exact', head: true })
@@ -72,22 +72,34 @@ export const BulkAssignDocumentDialog = ({
         
         setValidatedCount(validCount || 0);
       } else if (documentIds && documentIds.length > 0) {
-        // Use .in() only for small selections (< 1000)
-        const { count: totalCount } = await supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .in("id", documentIds);
+        // Manual selection: check BOTH pipelines
+        const [legacyTotal, pipelineBTotal, legacyValid, pipelineBValid] = await Promise.all([
+          supabase
+            .from("knowledge_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds),
+          supabase
+            .from("pipeline_b_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds),
+          supabase
+            .from("knowledge_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .eq("processing_status", "ready_for_assignment")
+            .eq("validation_status", "validated"),
+          supabase
+            .from("pipeline_b_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .eq("status", "ready")
+        ]);
         
-        setDocumentCount(totalCount || 0);
-
-        const { count: validCount } = await supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .in("id", documentIds)
-          .eq("processing_status", "ready_for_assignment")
-          .eq("validation_status", "validated");
+        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0);
+        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0);
         
-        setValidatedCount(validCount || 0);
+        setDocumentCount(totalCount);
+        setValidatedCount(validCount);
       }
     } catch (error) {
       console.error("Error counting documents:", error);
@@ -217,35 +229,53 @@ export const BulkAssignDocumentDialog = ({
     try {
       setProgressMessage("Caricamento documenti...");
       
-      // Step 1: Fetch ALL validated documents (using pagination to bypass 1000 row limit)
+      // Step 1: Fetch ALL validated documents from BOTH pipelines
       const allValidatedDocs = [];
-      let from = 0;
-      const pageSize = 1000;
       
-      while (true) {
-        let query = supabase
-          .from("knowledge_documents")
-          .select("id")
-          .eq("processing_status", "ready_for_assignment")
-          .eq("validation_status", "validated")
-          .range(from, from + pageSize - 1);
-
-        if (folderName) {
-          query = query.like("folder", `${folderName}%`);
-        } else if (documentIds) {
-          query = query.in("id", documentIds);
+      if (folderName) {
+        // Folder-based: only legacy pipeline (Pipeline B doesn't use folders)
+        let from = 0;
+        const pageSize = 1000;
+        
+        while (true) {
+          const { data, error } = await supabase
+            .from("knowledge_documents")
+            .select("id")
+            .eq("processing_status", "ready_for_assignment")
+            .eq("validation_status", "validated")
+            .like("folder", `${folderName}%`)
+            .range(from, from + pageSize - 1);
+          
+          if (error) throw error;
+          if (!data || data.length === 0) break;
+          
+          allValidatedDocs.push(...data);
+          console.log(`Fetched ${allValidatedDocs.length} legacy documents so far...`);
+          
+          if (data.length < pageSize) break;
+          from += pageSize;
         }
-
-        const { data, error } = await query;
+      } else if (documentIds) {
+        // Manual selection: fetch from BOTH pipelines
+        const [legacyDocs, pipelineBDocs] = await Promise.all([
+          supabase
+            .from("knowledge_documents")
+            .select("id")
+            .in("id", documentIds)
+            .eq("processing_status", "ready_for_assignment")
+            .eq("validation_status", "validated"),
+          supabase
+            .from("pipeline_b_documents")
+            .select("id")
+            .in("id", documentIds)
+            .eq("status", "ready")
+        ]);
         
-        if (error) throw error;
-        if (!data || data.length === 0) break;
+        if (legacyDocs.error) throw legacyDocs.error;
+        if (pipelineBDocs.error) throw pipelineBDocs.error;
         
-        allValidatedDocs.push(...data);
-        console.log(`Fetched ${allValidatedDocs.length} documents so far...`);
-        
-        if (data.length < pageSize) break; // Last page
-        from += pageSize;
+        allValidatedDocs.push(...(legacyDocs.data || []), ...(pipelineBDocs.data || []));
+        console.log(`Fetched ${legacyDocs.data?.length || 0} legacy + ${pipelineBDocs.data?.length || 0} Pipeline B documents`);
       }
 
       const validatedDocs = allValidatedDocs;
