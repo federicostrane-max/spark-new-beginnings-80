@@ -3415,13 +3415,13 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           
           tools.push({
             name: 'get_agent_knowledge',
-            description: 'Get a list of documents in another agent\'s knowledge base. Use this when the user asks what documents an agent has access to.',
+            description: 'Get a list of documents in an agent\'s knowledge base (including your own). Use this to check what documents you or another agent has access to. If a user asks "quanti documenti hai?" or "what documents do you have?", use this tool with your own agent name.',
             input_schema: {
               type: 'object',
               properties: {
                 agent_name: {
                   type: 'string',
-                  description: 'The name or slug of the agent whose knowledge base you want to view'
+                  description: 'The name or slug of the agent whose knowledge base you want to view (can be your own name to check your documents)'
                 }
               },
               required: ['agent_name']
