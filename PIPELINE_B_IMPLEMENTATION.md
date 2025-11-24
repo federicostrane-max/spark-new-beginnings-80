@@ -1,1181 +1,503 @@
-# Pipeline B Implementation Blueprint
-**Landing AI + Nexla Agentic Chunking**
+# Pipeline B - Complete Document Processing System
 
----
+## Overview
 
-## 📊 Status Dashboard
+Pipeline B is a **completely independent** document processing system, designed from scratch to replace the fragile existing pipeline. It uses a multi-stage asynchronous architecture with Landing AI for chunking and OpenAI for embeddings.
 
-**Current Phase**: 🚧 Milestone 1 - Infrastructure Setup
-**Progress**: 1/38 tasks completed (2.6%)
-**Estimated Total**: ~32-40 hours
-**Started**: 2025-01-18
-**Expected Completion**: 2025-01-30
-⚠️ **Critical requirement added**: Validated dataset integration for ML-driven pipeline selection
-
-**Active Milestone**: Milestone 1: Database + Nexla
-**Last Updated**: 2025-01-18 19:45:00
-**Last Context**: Completed Task 1.1 - Database Migration with auto-save system
-
----
-
-## 🎯 Quick Resume Context
-
-**What I was doing**:
-- ✅ Completed Task 1.1: Database Migration (added chunking_strategy to knowledge_documents, chunking_metadata to agent_knowledge)
-- ✅ Implemented auto-save system in src/lib/pipelineBLogger.ts
-- Migration deployed successfully with new columns and index
-
-**Next Steps**:
-- [ ] Task 1.2: Nexla Microservice - Code Setup (FastAPI app with ai-chunking library)
-- [ ] Task 1.3: Deploy microservice to Railway
-- [ ] Task 1.4: Integrate Nexla endpoint into Supabase edge functions
-
-**Blockers**:
-- None currently
-
-**Recent Decisions**:
-- [2025-01-18 19:45] **CRITICAL**: Sistema di testing automatizzato con dataset validato richiesto per decision-making data-driven Pipeline A vs B
-- [2025-01-18 19:30] Using localStorage for Pipeline B state persistence (frontend)
-- [2025-01-18 19:30] Auto-save functions: pausePipelineB(), resumePipelineB(), completeTask()
-- Using dual-pipeline approach (A: existing, B: Landing AI + Nexla)
-- Implementing in feature branch `feature/pipeline-b`
-- Shadow mode testing before production rollout
-
----
-
-## 🤖 Architettura Multi-Agente: Orchestratore Intelligente
-
-### Introduzione al Concetto
-
-Invece di decidere staticamente quale pipeline utilizzare (A o B), implementiamo un **orchestratore multi-agente** che analizza il documento in arrivo e sceglie dinamicamente la strategia di processing ottimale.
-
-**Obiettivo**: Routing intelligente e data-driven basato su analisi documentale automatica, minimizzando i costi mantenendo la qualità.
-
----
-
-### Pattern Architetturali (da Ricerca Accademica)
-
-#### 1️⃣ Decomposizione Gerarchica (TLTKPDF Pattern)
-
-Il task complesso "processa questo documento" viene scomposto in sotto-task specializzati:
+## Architecture
 
 ```
-Task Complesso: "Processa documento X"
-  ↓
-Sub-Task 1: "Analizza struttura del documento" (header, footer, sezioni, tabelle)
-  ↓
-Sub-Task 2: "Identifica elementi complessi" (grafici, formule, multi-colonne)
-  ↓
-Sub-Task 3: "Classifica complessità" (semplice/media/alta)
-  ↓
-Sub-Task 4: "Decidi pipeline" (A economica vs B sofisticata)
-  ↓
-Sub-Task 5: "Esegui parsing" (con pipeline scelta)
-  ↓
-Sub-Task 6: "Ricombina risultati" (unifica chunk in knowledge base)
+┌─────────────────────────────────────────────────────────────┐
+│                     PIPELINE B FLOW                          │
+└─────────────────────────────────────────────────────────────┘
+
+STAGE 1: INGEST (Immediate, <100ms)
+├── pipeline-b-ingest-pdf
+│   └── Upload PDF → Storage
+│   └── Create record in pipeline_b_documents (status: 'ingested')
+│
+└── pipeline-b-ingest-github
+    └── Fetch files from GitHub
+    └── Store full_text in pipeline_b_documents (status: 'ingested')
+
+                        ↓
+
+STAGE 2: PROCESS CHUNKS (Async, CRON every 10 min)
+└── pipeline-b-process-chunks
+    ├── Fetch 'ingested' documents (max 5 per run)
+    ├── Call Landing AI parse API
+    ├── Store chunks in pipeline_b_chunks_raw
+    │   └── embedding_status: 'pending'
+    └── Update document status: 'chunked'
+
+                        ↓
+
+STAGE 3: GENERATE EMBEDDINGS (Async, CRON every 5 min)
+└── pipeline-b-generate-embeddings
+    ├── Fetch 'pending' chunks (max 50 per run)
+    ├── Generate OpenAI embeddings (batch)
+    ├── Update chunks with embedding vector
+    └── Set embedding_status: 'ready'
+
+                        ↓
+
+STAGE 4: AGENT SYNC (On-Demand)
+└── pipeline-b-sync-agent
+    ├── Fetch 'ready' chunks for specific documents
+    ├── Create links in pipeline_b_agent_knowledge
+    └── Agent now has access to knowledge base
 ```
 
-#### 2️⃣ Common Ground & Argumentation (TLTKPDF Pattern)
+## Database Schema
 
-Gli agenti condividono un **database comune** (`document_analysis_state`) dove registrano:
-- Evidenze strutturali rilevate
-- Score di complessità calcolati
-- Decisioni intermedie
-- Argomentazioni pro/contro per ogni scelta
+### Tables
 
-**Tabella Proposta**: `document_analysis_state`
+#### `pipeline_b_documents`
+Primary documents table. Each row = one uploaded/imported document.
+
 ```sql
-CREATE TABLE document_analysis_state (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  document_id UUID REFERENCES knowledge_documents(id),
-  agent_id VARCHAR(50), -- 'structural_analyzer', 'complexity_classifier', 'router'
-  timestamp TIMESTAMPTZ DEFAULT NOW(),
-  analysis_type VARCHAR(50), -- 'structure', 'complexity', 'decision'
-  findings JSONB, -- Evidenze strutturali, score, reasoning
-  recommendation VARCHAR(20), -- 'pipeline_a', 'pipeline_b', null
-  confidence_score DECIMAL(3,2) -- 0.00 - 1.00
-);
+- id (UUID, PK)
+- source_type ('pdf' | 'github' | 'markdown' | 'text')
+- file_name (TEXT)
+- file_path (TEXT) -- Storage path for PDFs
+- storage_bucket (TEXT) -- 'knowledge-pdfs'
+- full_text (TEXT) -- For GitHub/text files
+- repo_url (TEXT) -- GitHub repo
+- repo_path (TEXT) -- Path in repo
+- file_size_bytes (INT)
+- page_count (INT)
+- status ('ingested' | 'processing' | 'chunked' | 'failed')
+- error_message (TEXT)
+- created_at, updated_at, processed_at (TIMESTAMPTZ)
 ```
 
-**Esempio di "Discussione" tra Agenti**:
+**Status Flow**: `ingested` → `processing` → `chunked` (or `failed`)
+
+#### `pipeline_b_chunks_raw`
+Parsed chunks from Landing AI, before embedding generation.
+
+```sql
+- id (UUID, PK)
+- document_id (UUID, FK → pipeline_b_documents)
+- content (TEXT) -- Actual chunk text
+- chunk_type ('text' | 'table' | 'list' | 'code_block' | 'header')
+- chunk_index (INT) -- Position in document
+- page_number (INT, nullable)
+- visual_grounding (JSONB) -- Bounding boxes from Landing AI
+- embedding (vector(1536)) -- OpenAI embedding
+- embedding_status ('pending' | 'processing' | 'ready' | 'failed')
+- embedding_error (TEXT)
+- created_at, embedded_at (TIMESTAMPTZ)
+```
+
+**Embedding Status Flow**: `pending` → `processing` → `ready` (or `failed`)
+
+#### `pipeline_b_agent_knowledge`
+Links agents to specific chunks they can access.
+
+```sql
+- id (UUID, PK)
+- agent_id (UUID, FK → agents)
+- chunk_id (UUID, FK → pipeline_b_chunks_raw)
+- synced_at (TIMESTAMPTZ)
+- is_active (BOOLEAN)
+- UNIQUE(agent_id, chunk_id)
+```
+
+## Edge Functions
+
+### 1. `pipeline-b-ingest-pdf`
+**Purpose**: Immediate PDF upload  
+**Auth**: Required (`verify_jwt = true`)  
+**Timeout**: Default (10s)
+
+**Input**:
 ```json
-// Agente 1 (Structural Analyzer) scrive:
-{
-  "agent_id": "structural_analyzer",
-  "findings": {
-    "has_tables": true,
-    "table_count": 8,
-    "has_multi_column": true,
-    "has_images": false
-  },
-  "recommendation": null // Non ancora deciso
-}
+FormData: { file: File }
+```
 
-// Agente 2 (Complexity Classifier) legge e aggiunge:
+**Output**:
+```json
 {
-  "agent_id": "complexity_classifier",
-  "findings": {
-    "layout_complexity_score": 78,
-    "reasoning": "8 tabelle + layout multi-colonna → alta complessità"
-  },
-  "recommendation": "pipeline_b",
-  "confidence_score": 0.85
+  "success": true,
+  "documentId": "uuid",
+  "fileName": "document.pdf",
+  "status": "ingested",
+  "message": "PDF uploaded successfully. Processing will begin automatically."
 }
+```
 
-// Agente 3 (Router) legge entrambi e decide:
+**What it does**:
+1. Upload file to `knowledge-pdfs` storage bucket
+2. Create record in `pipeline_b_documents` with `status='ingested'`
+3. Return immediately (no processing)
+
+**Duration**: ~20-50ms
+
+---
+
+### 2. `pipeline-b-ingest-github`
+**Purpose**: Import files from GitHub repository  
+**Auth**: Required (`verify_jwt = true`)  
+**Timeout**: Default (10s)
+
+**Input**:
+```json
 {
-  "agent_id": "router",
-  "findings": {
-    "final_decision": "pipeline_b",
-    "cost_estimate": "$0.15",
-    "reasoning": "Complessità 78/100 supera soglia 70 → necessaria Pipeline B"
+  "repoUrl": "https://github.com/org/repo",
+  "branch": "main",
+  "filePaths": [
+    "README.md",
+    "src/index.ts",
+    "docs/guide.md"
+  ]
+}
+```
+
+**Output**:
+```json
+{
+  "success": true,
+  "documentsIngested": 3,
+  "documentIds": ["uuid1", "uuid2", "uuid3"],
+  "message": "GitHub files ingested successfully. Processing will begin automatically."
+}
+```
+
+**What it does**:
+1. Fetch each file from GitHub raw URL
+2. Store `full_text` in `pipeline_b_documents`
+3. Set `status='ingested'`, `source_type='github'`
+4. Return immediately
+
+**Duration**: ~500ms-2s (depending on file count)
+
+---
+
+### 3. `pipeline-b-process-chunks` ⏰ CRON
+**Purpose**: Parse documents with Landing AI  
+**Auth**: None (`verify_jwt = false`)  
+**Timeout**: 600s  
+**Schedule**: Every 10 minutes (`*/10 * * * *`)
+
+**Input**: None (auto-triggered)
+
+**Output**:
+```json
+{
+  "processed": 3,
+  "failed": 1,
+  "errors": [
+    { "id": "uuid", "error": "Landing AI timeout" }
+  ]
+}
+```
+
+**What it does**:
+1. Fetch up to 5 documents with `status='ingested'`
+2. For each document:
+   - Mark as `processing`
+   - Download file (PDFs) or read `full_text` (GitHub)
+   - Call Landing AI parse API
+   - Store returned chunks in `pipeline_b_chunks_raw`
+   - Mark document as `chunked`
+3. On failure: mark as `failed` with `error_message`
+
+**Duration**: ~30s-5min per document (depends on size)
+
+---
+
+### 4. `pipeline-b-generate-embeddings` ⏰ CRON
+**Purpose**: Generate OpenAI embeddings for chunks  
+**Auth**: None (`verify_jwt = false`)  
+**Timeout**: 600s  
+**Schedule**: Every 5 minutes (`*/5 * * * *`)
+
+**Input**: None (auto-triggered)
+
+**Output**:
+```json
+{
+  "processed": 48,
+  "failed": 2,
+  "errors": [
+    { "id": "chunk-uuid", "error": "OpenAI rate limit" }
+  ]
+}
+```
+
+**What it does**:
+1. Fetch up to 50 chunks with `embedding_status='pending'`
+2. For each chunk:
+   - Mark as `processing`
+   - Call OpenAI `text-embedding-3-small`
+   - Validate embedding (1536 dimensions)
+   - Store in `pipeline_b_chunks_raw.embedding`
+   - Mark as `ready`
+3. Rate limiting: 100ms delay between requests
+4. On failure: mark as `failed` with `embedding_error`
+
+**Duration**: ~5-30s per batch
+
+---
+
+### 5. `pipeline-b-sync-agent`
+**Purpose**: Sync chunks to specific agent  
+**Auth**: Required (`verify_jwt = true`)  
+**Timeout**: Default (10s)
+
+**Input**:
+```json
+{
+  "agentId": "agent-uuid",
+  "documentIds": ["doc-uuid-1", "doc-uuid-2"] // optional
+}
+```
+
+**Output**:
+```json
+{
+  "success": true,
+  "synced": 145,
+  "documentsProcessed": 3,
+  "totalChunks": 145,
+  "agent": {
+    "id": "agent-uuid",
+    "name": "CupidGPT"
   }
 }
 ```
 
-#### 3️⃣ Agenti Specializzati (ai-agents-in-action Pattern)
+**What it does**:
+1. Verify agent exists
+2. Fetch chunks with `embedding_status='ready'`
+3. Filter by `documentIds` if provided
+4. Insert into `pipeline_b_agent_knowledge` (upsert)
+5. Return sync stats
 
-Ogni agente ha un **ruolo specifico** e **expertise limitata**:
-
-| Agente | Responsabilità | Input | Output |
-|--------|---------------|-------|--------|
-| **Structural Analyzer** | Analizza layout PDF | Documento grezzo | Mappa strutturale (tabelle, colonne, header) |
-| **Complexity Classifier** | Calcola score complessità | Mappa strutturale | Score 0-100, categoria (simple/complex) |
-| **Router Decisionale** | Sceglie pipeline | Score + evidenze | Decisione: A o B + confidence |
-| **Parser Semplice (A)** | Parsing leggero | Documento semplice | Chunk testuali basic |
-| **Parser Complesso (B)** | Parsing avanzato | Documento complesso | Chunk semantici + entities |
+**Duration**: ~100ms-2s
 
 ---
 
-### Flusso di Orchestrazione
+## Usage Examples
 
-```
-📄 Documento PDF in arrivo
-   ↓
-🔍 [Agente 1] Analisi Strutturale
-   ├─ Conta tabelle
-   ├─ Rileva layout multi-colonna
-   ├─ Identifica header/footer
-   └─ Scrive evidenze nel Common Ground DB
-   ↓
-📊 [Agente 2] Classificazione Complessità
-   ├─ Legge evidenze strutturali dal DB
-   ├─ Calcola layout_complexity_score
-   ├─ Assegna categoria (simple/medium/complex)
-   └─ Scrive raccomandazione preliminare nel DB
-   ↓
-💬 Argumentation Phase
-   ├─ Agente 2 propone: "Raccomando Pipeline B (confidence 0.85)"
-   ├─ Agente 1 supporta: "8 tabelle rilevate, concorde"
-   └─ Decisione registrata nel Common Ground
-   ↓
-🎯 [Agente 3] Router Decisionale
-   ├─ Legge tutte le evidenze dal DB
-   ├─ Applica regole business (soglie, policy costo)
-   ├─ Decide: Pipeline A (economica) vs B (complessa)
-   └─ Scrive decisione finale nel DB
-   ↓
-⚙️ Esecuzione
-   ├─ Se Pipeline A → [Agente 4] Parser Semplice
-   │  └─ Text extraction + chunking basic
-   ├─ Se Pipeline B → [Agente 5] Parser Complesso
-   │  └─ Landing AI + Nexla agentic chunking
-   ↓
-🔄 Ricombinazione Risultati
-   ├─ Merge dei chunk processati
-   ├─ Inserimento in agent_knowledge
-   └─ Aggiornamento document_analysis_state con outcome
-```
-
----
-
-### Vantaggi Architetturali
-
-✅ **Testabilità**
-- Ogni agente è un'unità isolata testabile indipendentemente
-- Mock del Common Ground DB per testing senza side effects
-
-✅ **Osservabilità**
-- Ogni decisione tracciata in `document_analysis_state`
-- Audit trail completo: perché Pipeline B è stata scelta?
-- Debug facilitato: quale agente ha fallito?
-
-✅ **Evolutività**
-- Aggiungi nuovi agenti (es. "OCR Specialist") senza modificare gli esistenti
-- Sostituisci agenti sottoperformanti mantenendo l'interfaccia
-- Migliora regole di routing senza toccare parser
-
-✅ **Data-Driven Decisions**
-- Niente euristica fissa hardcoded
-- Decisioni basate su evidenze concrete nel DB
-- ML-ready: features dal DB → training set per classificatore automatico
-
-✅ **Cost-Effectiveness**
-- Usa Pipeline A (economica) quando la qualità è sufficiente
-- Riservato Pipeline B (costosa) solo a documenti che lo richiedono
-- ROI misurabile: risparmio costi vs. accuratezza
-
----
-
-### Opzioni di Integrazione
-
-#### Opzione A: Nuovo Edge Function Dedicato
-**File**: `supabase/functions/orchestrate-document-processing/index.ts`
+### Frontend: Upload PDF
 
 ```typescript
-export async function orchestrateProcessing(documentId: string) {
-  // 1. Chiama Structural Analyzer (altro edge function)
-  const structure = await analyzeStructure(documentId);
-  
-  // 2. Chiama Complexity Classifier
-  const complexity = await classifyComplexity(structure);
-  
-  // 3. Chiama Router Decisionale
-  const decision = await routeDocument(complexity);
-  
-  // 4. Esegui pipeline scelta
-  if (decision.pipeline === 'A') {
-    return await executePipelineA(documentId);
-  } else {
-    return await executePipelineB(documentId);
+const formData = new FormData();
+formData.append('file', pdfFile);
+
+const { data } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
+  body: formData,
+});
+
+console.log(data.documentId); // Save for later sync
+```
+
+### Frontend: Import from GitHub
+
+```typescript
+const { data } = await supabase.functions.invoke('pipeline-b-ingest-github', {
+  body: {
+    repoUrl: 'https://github.com/airtop-ai/examples-typescript',
+    branch: 'main',
+    filePaths: [
+      'packages/basic-browser-control/README.md',
+      'packages/basic-browser-control/src/index.ts',
+    ]
   }
-}
+});
+
+console.log(data.documentIds); // Save for agent sync
 ```
 
-**Pro**: Separazione netta, facile testare orchestratore in isolamento  
-**Contro**: Più edge functions = più latenza chiamate inter-function
+### Frontend: Sync to Agent
 
-#### Opzione B: Estensione Multi-Agent Orchestrator Esistente
-**File**: `src/pages/MultiAgentConsultant.tsx` + nuovi agenti specializzati
+```typescript
+const { data } = await supabase.functions.invoke('pipeline-b-sync-agent', {
+  body: {
+    agentId: 'agent-123',
+    documentIds: ['doc-456', 'doc-789'], // optional
+  }
+});
 
-- Aggiunge "Document Processing Agent" con tool `analyze_document`
-- Tool interna chiama i 3 agenti specializzati in sequenza
-- Sfrutta orchestratore conversazionale già presente
+console.log(`Synced ${data.synced} chunks to ${data.agent.name}`);
+```
 
-**Pro**: Riutilizza infrastruttura multi-agente esistente  
-**Contro**: Accoppiamento con logica conversazionale (non ideale per batch processing)
+### Frontend: Monitor Processing Status
 
-**Raccomandazione**: **Opzione A** (edge function dedicato) per separazione concerns e scalabilità.
+```typescript
+// Poll document status
+const { data: doc } = await supabase
+  .from('pipeline_b_documents')
+  .select('id, file_name, status, error_message')
+  .eq('id', documentId)
+  .single();
+
+// Check chunk status
+const { data: chunks } = await supabase
+  .from('pipeline_b_chunks_raw')
+  .select('embedding_status')
+  .eq('document_id', documentId);
+
+const ready = chunks.filter(c => c.embedding_status === 'ready').length;
+const total = chunks.length;
+
+console.log(`${ready}/${total} chunks ready`);
+```
 
 ---
 
-### Roadmap di Sviluppo
+## Monitoring & Observability
 
-#### Phase 1: Validazione Standalone Pipeline A e B (2-3 settimane)
-Prima di costruire l'orchestratore, validare che le due pipeline funzionino correttamente in isolamento:
+### Key Queries
 
-**Task**:
-- [ ] 1.1 Completare Pipeline B (Landing AI + Nexla) secondo Milestone 2
-- [ ] 1.2 Benchmark Pipeline A su dataset semplice (10 documenti)
-- [ ] 1.3 Benchmark Pipeline B su dataset complesso (10 documenti)
-- [ ] 1.4 Misurare: costo/doc, tempo/doc, qualità chunks, recall domande Q&A
-
-**Output**: Tabella comparativa con metriche quantitative
-```
-| Metrica              | Pipeline A | Pipeline B |
-|----------------------|------------|------------|
-| Costo medio/doc      | $0.02      | $0.15      |
-| Tempo medio (sec)    | 8          | 35         |
-| Qualità chunking (%) | 72         | 94         |
-| Recall Q&A (%)       | 68         | 89         |
-```
-
-**Decisione chiave**: Verificare che esista una **non-sovrapposizione** nei casi d'uso ottimali (altrimenti orchestratore inutile).
-
-#### Phase 2: Costruzione Orchestratore (1-2 settimane)
-
-**Task**:
-- [ ] 2.1 Design schema `document_analysis_state` + migration
-- [ ] 2.2 Implementare Agente 1: Structural Analyzer
-  - Input: PDF path
-  - Output: { has_tables, table_count, has_multi_column, has_images }
-  - Edge function: `analyze-document-structure`
-- [ ] 2.3 Implementare Agente 2: Complexity Classifier
-  - Input: Structural findings
-  - Output: { complexity_score, category, recommendation }
-  - Edge function: `classify-document-complexity`
-- [ ] 2.4 Implementare Agente 3: Router Decisionale
-  - Input: Complexity + business rules
-  - Output: { pipeline_choice, confidence, reasoning }
-  - Edge function: `route-document-pipeline`
-- [ ] 2.5 Orchestrator Main Logic
-  - Edge function: `orchestrate-document-processing`
-  - Chiama sequenzialmente Agente 1 → 2 → 3 → esecuzione pipeline
-- [ ] 2.6 Integrazione in sistema multi-agente esistente (se opzione B scelta)
-
-**Output**: Sistema orchestratore funzionante end-to-end
-
-#### Phase 3: Testing Orchestratore (1 settimana)
-
-**Task**:
-- [ ] 3.1 Test su dataset misto (20 doc: 10 semplici, 10 complessi)
-- [ ] 3.2 Validare decisioni orchestratore vs. ground truth
-  - Accuracy: decisioni corrette / totale
-  - Precision: documenti complessi correttamente assegnati a B
-  - Recall: documenti semplici correttamente assegnati ad A
-- [ ] 3.3 Misurare risparmio economico
-  - Costo attuale (100% Pipeline B): $15/100 doc
-  - Costo orchestrato (mix A/B): $X/100 doc
-  - Saving: $(15 - X) / $15 * 100%
-- [ ] 3.4 A/B test qualità output
-  - Pipeline B pura vs. Orchestratore
-  - Delta qualità accettabile? (<5% degradazione)
-
-**Output**: Report decisione GO/NO-GO per produzione
-
----
-
-### Domande Architetturali Aperte
-
-❓ **Granularità del Routing**
-- Routing per-documento (un intero PDF → una pipeline)?
-- Routing per-sezione (Capitolo 1 → A, Capitolo 2 con tabelle → B)?
-- **Decisione iniziale**: Per-documento (più semplice), evolvere a per-sezione se necessario
-
-❓ **Strategia di Fallback**
-- Se Pipeline A fallisce → retry con B?
-- Se Pipeline B fallisce → fallback ad A?
-- Timeout logic?
-- **Decisione iniziale**: Pipeline B come fallback per errori critici di A
-
-❓ **Caching delle Analisi**
-- Documenti simili (stesso hash strutturale) → riutilizzare decisione?
-- Cache `document_analysis_state` per pattern ricorrenti?
-- **Decisione iniziale**: No caching in MVP, aggiungere in Milestone 5 se necessario
-
-❓ **Human-in-the-Loop**
-- Permettere override manuale per casi dubbi?
-- UI per visualizzare reasoning orchestratore?
-- Confidence threshold sotto cui richiedere conferma umana?
-- **Decisione iniziale**: Fully automated in MVP, HITL come feature avanzata
-
-❓ **Integrazione con ML Classifier Future**
-- `document_analysis_state` come training set per modello di classificazione?
-- Sostituire regole euristiche con modello ML quando dataset > 1000 doc?
-- **Decisione iniziale**: Preparare schema DB per essere ML-ready, implementare ML in Milestone 5
-
----
-
-## ⚠️ REQUISITO CRITICO: Sistema di Testing Automatizzato
-
-### Obiettivo
-Creare un sistema di testing automatizzato basato su un **dataset già validato e accessibile via API**, progettato per:
-1. **Valutare oggettivamente** le prestazioni di parsing e chunking delle Pipeline A e B
-2. **Addestrare automaticamente** il sistema a riconoscere i tipi di documenti in ingresso
-3. **Decidere automaticamente** quando usare Pipeline A (economica) vs Pipeline B (sofisticata)
-
-### Dataset di Test
-Il dataset deve essere:
-- **Accessibile via API** (endpoint dedicato per il testing)
-- **Validato da esperti** (ground truth verificata)
-- **Strutturato per categoria**:
-  - 📜 Documenti storici (testo denso, riferimenti bibliografici)
-  - 🔧 Documenti tecnici (procedure, istruzioni operative)
-  - 📊 Documenti con tabelle complesse
-  - 📈 Documenti con grafici e immagini
-- **Completo di**:
-  - Domande di verifica (Q&A pairs)
-  - Risposte corrette attese
-  - Metadata di classificazione (complessità, tipo layout, presenza tabelle)
-  - Output ideali (chunk boundaries, extracted entities)
-
-### Metriche di Valutazione
-Per ogni documento testato:
-- **Qualità del chunking**: Boundaries semantici preservati? Score 0-100
-- **Preservazione semantica**: Le risposte alle domande sono corrette? Accuracy %
-- **Precisione estrazione**: Tabelle, citazioni, entità estratte correttamente? Precision/Recall
-- **Performance**: Tempo di processing, costo per documento
-
-### Sistema di Addestramento
-Il sistema deve apprendere a classificare i documenti in ingresso per scegliere la pipeline ottimale:
-
-**Input Features** (caratteristiche del documento):
-- Presenza di tabelle (booleano + count)
-- Complessità layout (simple/complex, score 0-100)
-- Lunghezza documento (page count, text length)
-- Presenza di immagini/grafici
-- Densità di riferimenti bibliografici
-
-**Output** (raccomandazione):
-- `use_pipeline_a`: Documento semplice, priorità costo/velocità
-- `use_pipeline_b`: Documento complesso, priorità accuratezza
-- Confidence score della raccomandazione
-
-**Decision Factors**:
-```
-IF has_tables > 3 OR layout_complexity > 70:
-  → Raccomanda Pipeline B
-ELSE IF page_count < 10 AND layout_complexity < 40:
-  → Raccomanda Pipeline A
-ELSE:
-  → Valuta cost/benefit based on historical accuracy data
-```
-
-### Fasi di Implementazione
-
-#### Fase 1: Dataset Integration + Automated Testing (Milestone 4)
-- [ ] Integrare API endpoint del dataset di test
-- [ ] Implementare framework di valutazione Q&A
-- [ ] Creare test suites per categoria (storico, tecnico, tabelle, grafici)
-- [ ] Generare report di performance per tipo documento
-- [ ] Baseline metrics per Pipeline A
-- [ ] Comparative metrics Pipeline A vs B
-
-#### Fase 2: Classification Model Training (Milestone 5)
-- [ ] Raccogliere features da documenti processati
-- [ ] Etichettare documenti con pipeline ottimale (based on test results)
-- [ ] Addestrare modello di classificazione (decision tree o logistic regression)
-- [ ] Validare accuratezza predizioni su test set
-- [ ] Deploy modello come edge function `classify-document`
-
-#### Fase 3: Auto-Routing (Post-MVP)
-- [ ] Integrare `classify-document` in upload flow
-- [ ] Override manuale disponibile in UI
-- [ ] Monitoring delle scelte automatiche vs manuali
-- [ ] Retraining periodico basato su feedback
-
-### Benefici Attesi
-- ✅ **Decision-making oggettivo**: Non più "gut feeling", ma dati verificati
-- ✅ **Ottimizzazione costi**: Pipeline A per documenti semplici (90% dei casi?)
-- ✅ **Massima accuratezza**: Pipeline B solo dove serve davvero
-- ✅ **Continuous improvement**: Il sistema impara dai documenti processati
-
----
-
-## 📋 Implementation Roadmap
-
-### Milestone 1: Infrastructure Setup (Database + Nexla)
-**Goal**: Deploy database changes and Nexla microservice
-**Estimated Time**: 6-8 hours
-**Dependencies**: None
-**Deployable**: ✅ Yes (independent of Pipeline A)
-
-#### Task 1.1: Database Migration
-**Time**: 1.5 hours | **Status**: ✅ Completed | **Depends on**: None | **Completed**: 2025-01-18 19:30
-
-- [x] Create migration file `20250118000000_add_pipeline_b_support.sql`
-- [x] Add `chunking_strategy` column to `knowledge_documents`
-  ```sql
-  ALTER TABLE knowledge_documents 
-  ADD COLUMN chunking_strategy TEXT DEFAULT 'sliding_window' 
-  CHECK (chunking_strategy IN ('sliding_window', 'landing_ai_nexla'));
-  ```
-- [x] Add `chunking_metadata` JSONB column to `agent_knowledge`
-  ```sql
-  ALTER TABLE agent_knowledge
-  ADD COLUMN chunking_metadata JSONB DEFAULT '{}'::jsonb;
-  ```
-- [x] Create index `idx_knowledge_documents_chunking_strategy`
-- [x] Test migration on staging (verify no breaking changes)
-- [x] Deploy migration to production
-
-**Implementation Notes**:
-- Migration deployed successfully via supabase--migration tool
-- Added documentation comments to both columns
-- Index created for efficient filtering by chunking_strategy
-- Default value '{}' set for chunking_metadata JSONB column
-- Created auto-save system in `src/lib/pipelineBLogger.ts` with functions:
-  - `pausePipelineB()` - Save state when interrupting
-  - `resumePipelineB()` - Load state when continuing
-  - `completeTask()` - Mark tasks as done
-  - `addBlocker()`, `logDecision()` - Track issues and decisions
-
-**Verification**:
+**Check pipeline health:**
 ```sql
--- Verify columns exist
-SELECT column_name, data_type 
-FROM information_schema.columns 
-WHERE table_name IN ('knowledge_documents', 'agent_knowledge') 
-AND column_name IN ('chunking_strategy', 'chunking_metadata');
+SELECT 
+  status,
+  COUNT(*) as count,
+  AVG(EXTRACT(EPOCH FROM (processed_at - created_at))) as avg_processing_seconds
+FROM pipeline_b_documents
+GROUP BY status;
 ```
 
----
-
-#### Task 1.2: Nexla Microservice - Code Setup
-**Time**: 2 hours | **Status**: ⬜ Not Started | **Depends on**: None
-
-- [ ] Create new directory `microservice/nexla-chunker/`
-- [ ] Create `main.py` with FastAPI app
-  ```python
-  from fastapi import FastAPI, HTTPException
-  from pydantic import BaseModel
-  from ai_chunking import AutoAIChunker
-  
-  app = FastAPI()
-  chunker = AutoAIChunker(
-      llm_provider="openai",
-      chunk_size=800,
-      overlap=150
-  )
-  ```
-- [ ] Create `requirements.txt` (fastapi, uvicorn, ai-chunking, pydantic)
-- [ ] Create `Dockerfile`
-  ```dockerfile
-  FROM python:3.10-slim
-  WORKDIR /app
-  COPY requirements.txt .
-  RUN pip install --no-cache-dir -r requirements.txt
-  COPY . .
-  CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-  ```
-- [ ] Implement `/chunk` POST endpoint
-- [ ] Add error handling and logging
-- [ ] Add health check endpoint `/health`
-
-**Test Locally**:
-```bash
-docker build -t nexla-chunker .
-docker run -p 8000:8000 -e OPENAI_API_KEY=xxx nexla-chunker
-curl -X POST http://localhost:8000/chunk -H "Content-Type: application/json" -d '{"text":"...", "metadata":{}}'
-```
-
----
-
-#### Task 1.3: Nexla Microservice - Railway Deploy
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 1.2
-
-- [ ] Create Railway account (if not exists)
-- [ ] Create new Railway project "nexla-chunker"
-- [ ] Connect GitHub repo with microservice code
-- [ ] Configure environment variables:
-  - [ ] `OPENAI_API_KEY` (from Railway secrets)
-  - [ ] `NEXLA_API_KEY` (generate random secret for auth)
-- [ ] Deploy to Railway
-- [ ] Verify public URL assigned (e.g., `nexla-chunker.railway.app`)
-- [ ] Test endpoint from external network
-- [ ] Configure health check monitoring
-- [ ] Set up auto-deploy on push to `feature/pipeline-b`
-
-**Verification**:
-```bash
-curl -X POST https://nexla-chunker.railway.app/chunk \
-  -H "Authorization: Bearer $NEXLA_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Sample text for chunking test", "metadata":{}}'
-```
-
----
-
-#### Task 1.4: Supabase Secrets Configuration
-**Time**: 0.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 1.3
-
-- [ ] Add `LANDING_AI_API_KEY` to Supabase secrets
-- [ ] Add `NEXLA_MICROSERVICE_URL` to Supabase secrets (Railway URL)
-- [ ] Add `NEXLA_API_KEY` to Supabase secrets (same as Railway)
-- [ ] Verify secrets accessible from edge functions:
-  ```typescript
-  console.log('LANDING_AI_API_KEY exists:', !!Deno.env.get('LANDING_AI_API_KEY'));
-  ```
-
----
-
-#### Task 1.5: Milestone 1 Integration Test
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: Tasks 1.1, 1.2, 1.3, 1.4
-
-- [ ] Create test edge function `test-pipeline-b-infrastructure/index.ts`
-- [ ] Test database schema (insert test document with `chunking_strategy='landing_ai_nexla'`)
-- [ ] Test Nexla microservice call from edge function
-- [ ] Verify response format matches expectations
-- [ ] Clean up test data
-- [ ] Document any issues in "Issues Log" section below
-
-**Success Criteria**:
-- ✅ Database accepts new columns
-- ✅ Nexla microservice responds < 5 seconds
-- ✅ Secrets accessible from edge functions
-
----
-
-### Milestone 2: Pipeline B Edge Function + Landing AI
-**Goal**: Implement full Pipeline B document processing
-**Estimated Time**: 8-10 hours
-**Dependencies**: Milestone 1 completed
-**Deployable**: ✅ Yes (new function, doesn't affect Pipeline A)
-
-#### Task 2.1: Create Shared Embedding Service
-**Time**: 2 hours | **Status**: ⬜ Not Started | **Depends on**: Milestone 1
-
-- [ ] Create `supabase/functions/_shared/embeddingService.ts`
-- [ ] Extract embedding generation logic from existing functions
-- [ ] Implement batch embedding generation (10 chunks at a time)
-- [ ] Add retry logic for OpenAI API failures
-- [ ] Add rate limiting (60 req/min)
-- [ ] Export `generateEmbedding(text: string)` and `generateEmbeddings(texts: string[])`
-
-**Code Structure**:
-```typescript
-export async function generateEmbedding(text: string): Promise<number[]> {
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      input: text,
-      model: 'text-embedding-3-small'
-    })
-  });
-  
-  const data = await response.json();
-  return data.data[0].embedding;
-}
-```
-
----
-
-#### Task 2.2: Landing AI Integration Module
-**Time**: 2.5 hours | **Status**: ⬜ Not Started | **Depends on**: None
-
-- [ ] Create `supabase/functions/_shared/landingAIService.ts`
-- [ ] Implement `parsePDF(pdfBase64: string)` function
-- [ ] Handle Landing AI API authentication
-- [ ] Parse response (text, tables, structural chunks, metadata)
-- [ ] Add error handling for API failures
-- [ ] Add logging for debugging
-- [ ] Test with sample PDF (multi-column, tables, images)
-
-**Expected Response Format**:
-```typescript
-interface LandingAIResponse {
-  text: string;
-  tables: Array<{id: string, content: string}>;
-  chunks: Array<{id: string, text: string, layout: string}>;
-  metadata: {
-    page_count: number;
-    has_tables: boolean;
-    layout_complexity: 'simple' | 'complex';
-  };
-}
-```
-
----
-
-#### Task 2.3: Edge Function - upload-pdf-to-pool-landing-ai
-**Time**: 3 hours | **Status**: ⬜ Not Started | **Depends on**: Tasks 2.1, 2.2
-
-- [ ] Create `supabase/functions/upload-pdf-to-pool-landing-ai/index.ts`
-- [ ] Implement request parsing (pdfBase64, fileName, agentId)
-- [ ] Step 1: Call Landing AI parsing
-- [ ] Step 2: Call Nexla microservice for agentic chunking
-- [ ] Step 3: Create document in `knowledge_documents` with `chunking_strategy='landing_ai_nexla'`
-- [ ] Step 4: Generate embeddings using shared service
-- [ ] Step 5: Insert chunks into `agent_knowledge` with metadata
-- [ ] Step 6: Update document status to 'completed'
-- [ ] Add comprehensive error handling
-- [ ] Add logging with `[Pipeline B]` prefix
-
-**Error Handling Checklist**:
-- [ ] Landing AI API failure → Return 502 with clear message
-- [ ] Nexla microservice timeout → Retry once, then fail gracefully
-- [ ] Embedding generation failure → Retry 3 times per chunk
-- [ ] Database insertion failure → Rollback transaction
-
----
-
-#### Task 2.4: Update config.toml
-**Time**: 0.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 2.3
-
-- [ ] Add `upload-pdf-to-pool-landing-ai` to `supabase/config.toml`
-- [ ] Set `verify_jwt = true` (requires authentication)
-- [ ] Verify no breaking changes to existing functions
-- [ ] Test deploy configuration
-
----
-
-#### Task 2.5: Milestone 2 End-to-End Test
-**Time**: 2 hours | **Status**: ⬜ Not Started | **Depends on**: Tasks 2.1-2.4
-
-- [ ] Prepare 3 test PDFs:
-  - Simple text-only (5 pages)
-  - Complex multi-column with tables (15 pages)
-  - Image-heavy document (10 pages)
-- [ ] Process each PDF through Pipeline B
-- [ ] Verify chunks created in database
-- [ ] Verify `chunking_metadata` populated correctly
-- [ ] Compare chunk count vs Pipeline A (expect 20-40% fewer chunks)
-- [ ] Measure processing time (expect 3-5x slower than Pipeline A)
-- [ ] Document results in "Test Results" section below
-
-**Success Criteria**:
-- ✅ All 3 PDFs processed without errors
-- ✅ Chunks have semantic boundaries preserved
-- ✅ Tables extracted and included in metadata
-- ✅ Processing time < 2 minutes per document
-
----
-
-### Milestone 3: Frontend Strategy Selector
-**Goal**: Allow users to choose Pipeline A or B when uploading
-**Estimated Time**: 4-5 hours
-**Dependencies**: Milestone 2 completed
-**Deployable**: ✅ Yes (UI-only changes)
-
-#### Task 3.1: Update DocumentPoolUpload Component
-**Time**: 2 hours | **Status**: ⬜ Not Started | **Depends on**: Milestone 2
-
-- [ ] Open `src/components/DocumentPoolUpload.tsx`
-- [ ] Add state: `const [chunkingStrategy, setChunkingStrategy] = useState<'sliding_window' | 'landing_ai_nexla'>('sliding_window')`
-- [ ] Add UI selector (RadioGroup or Select) above file input
-  ```tsx
-  <RadioGroup value={chunkingStrategy} onValueChange={setChunkingStrategy}>
-    <RadioGroupItem value="sliding_window">
-      Pipeline A - Sliding Window (veloce, economico) ✅
-    </RadioGroupItem>
-    <RadioGroupItem value="landing_ai_nexla">
-      Pipeline B - Landing AI + Nexla (avanzato, lento) 🚀
-    </RadioGroupItem>
-  </RadioGroup>
-  ```
-- [ ] Update upload handler to call correct edge function based on strategy
-- [ ] Add cost/time estimates in UI ("Est. $0.02, 10 sec" vs "Est. $0.15, 60 sec")
-- [ ] Add tooltip explaining differences
-
----
-
-#### Task 3.2: Auto-Selection Logic (Optional Enhancement)
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 3.1
-
-- [ ] Implement auto-detection of "complex" PDFs:
-  ```typescript
-  function recommendStrategy(file: File): 'sliding_window' | 'landing_ai_nexla' {
-    if (file.size > 5_000_000) return 'landing_ai_nexla'; // > 5MB
-    // TODO: Add table detection heuristic
-    return 'sliding_window';
-  }
-  ```
-- [ ] Show recommendation badge in UI
-- [ ] Allow user to override recommendation
-- [ ] Track auto-selection accuracy for future ML model
-
----
-
-#### Task 3.3: Document Details View Enhancement
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: Task 3.1
-
-- [ ] Update `DocumentDetailsDialog.tsx`
-- [ ] Display `chunking_strategy` badge
-- [ ] Show `chunking_metadata` in expandable section
-- [ ] For Pipeline B documents, show:
-  - Landing AI chunk count
-  - Tables extracted count
-  - Semantic boundaries preserved count
-  - Processing time
-
----
-
-#### Task 3.4: Milestone 3 User Testing
-**Time**: 0.5 hours | **Status**: ⬜ Not Started | **Depends on**: Tasks 3.1-3.3
-
-- [ ] Upload 2 documents using Pipeline A
-- [ ] Upload 2 documents using Pipeline B
-- [ ] Verify correct edge function called
-- [ ] Verify UI displays strategy correctly
-- [ ] Test auto-selection recommendation
-- [ ] Gather feedback on UX clarity
-
----
-
-### Milestone 4: A/B Testing Framework
-**Goal**: Compare Pipeline A vs B performance on same documents
-**Estimated Time**: 6-7 hours
-**Dependencies**: Milestone 3 completed
-**Deployable**: ✅ Yes (analytics/admin feature)
-
-#### Task 4.1: Comparison Metrics Table
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: None
-
-- [ ] Create migration for `pipeline_comparison_metrics` table:
-  ```sql
-  CREATE TABLE pipeline_comparison_metrics (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID REFERENCES knowledge_documents(id),
-    pipeline_a_chunks INT,
-    pipeline_b_chunks INT,
-    pipeline_a_time_ms INT,
-    pipeline_b_time_ms INT,
-    pipeline_a_cost_usd DECIMAL(10,4),
-    pipeline_b_cost_usd DECIMAL(10,4),
-    alignment_score_diff DECIMAL(5,3),
-    winner TEXT CHECK (winner IN ('pipeline_a', 'pipeline_b', 'tie')),
-    tested_at TIMESTAMPTZ DEFAULT now()
-  );
-  ```
-- [ ] Deploy migration
-
----
-
-#### Task 4.2: Edge Function - compare-chunking-strategies
-**Time**: 3 hours | **Status**: ⬜ Not Started | **Depends on**: Task 4.1, Milestone 2
-
-- [ ] Create `supabase/functions/compare-chunking-strategies/index.ts`
-- [ ] Accept `pdfBase64` and `fileName` in request
-- [ ] Process document through Pipeline A (call existing function)
-- [ ] Process document through Pipeline B (call new function)
-- [ ] Compare metrics:
-  - Chunk count
-  - Average chunk size
-  - Boundary violations (for Pipeline A)
-  - Semantic boundaries preserved (for Pipeline B)
-  - Tables extracted (Pipeline B only)
-  - Processing time
-  - Cost estimate
-- [ ] Insert results into `pipeline_comparison_metrics`
-- [ ] Return comparison report JSON
-- [ ] Add logging for debugging
-
-**Comparison Logic**:
-```typescript
-function determineWinner(metricsA, metricsB): 'pipeline_a' | 'pipeline_b' | 'tie' {
-  const scoreA = (metricsA.chunks * 0.3) + (metricsA.time_ms * -0.2) + (metricsA.cost_usd * -0.5);
-  const scoreB = (metricsB.chunks * 0.3) + (metricsB.time_ms * -0.2) + (metricsB.cost_usd * -0.5) + (metricsB.tables_extracted * 0.1);
-  
-  if (Math.abs(scoreA - scoreB) < 0.05) return 'tie';
-  return scoreA > scoreB ? 'pipeline_a' : 'pipeline_b';
-}
-```
-
----
-
-#### Task 4.3: Admin Dashboard - A/B Testing View
-**Time**: 2.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 4.2
-
-- [ ] Create `src/components/PipelineComparisonDashboard.tsx`
-- [ ] Query `pipeline_comparison_metrics` table
-- [ ] Display aggregate statistics:
-  - Total tests run
-  - Pipeline A wins / Pipeline B wins / Ties
-  - Average metrics for each pipeline
-  - Cost difference ($X saved or $Y extra)
-- [ ] Add document-level comparison table
-- [ ] Add "Run New Comparison" button (triggers edge function)
-- [ ] Add filters (date range, document size, has_tables)
-- [ ] Add export to CSV functionality
-
----
-
-#### Task 4.4: Automated Testing with Validated Dataset
-**Time**: 3.5 hours | **Status**: ⬜ Not Started | **Depends on**: Task 4.2
-
-**Subtask 4.4.1: Dataset API Integration**
-- [ ] Create edge function `get-test-dataset` to fetch validated documents
-- [ ] Implement caching for test documents (avoid repeated API calls)
-- [ ] Parse dataset structure (categories, documents, Q&A pairs, metadata)
-- [ ] Validate dataset completeness (all required fields present)
-
-**Subtask 4.4.2: Q&A Evaluation Framework**
-- [ ] Create `evaluateChunkingQuality(chunks, qaData)` function
-- [ ] Implement semantic search over chunks to answer test questions
-- [ ] Calculate accuracy: correct_answers / total_questions
-- [ ] Compare answers vs ground truth (fuzzy matching + semantic similarity)
-- [ ] Generate per-question performance report
-
-**Subtask 4.4.3: Category-Specific Test Suites**
-- [ ] Historical documents test suite (📜 5-7 documents)
-- [ ] Technical documents test suite (🔧 5-7 documents)
-- [ ] Table-heavy documents test suite (📊 5-7 documents)
-- [ ] Graph/image documents test suite (📈 5-7 documents)
-- [ ] Run `compare-chunking-strategies` on each document
-- [ ] Store results in `pipeline_comparison_metrics` with category tag
-
-**Subtask 4.4.4: Performance Report Generation**
-- [ ] Aggregate results by category
-- [ ] Calculate metrics per category:
-  - Chunking quality score (0-100)
-  - Q&A accuracy (%)
-  - Extraction precision/recall (tables, entities)
-  - Processing time (avg, median, p95)
-  - Cost per document (avg)
-- [ ] Generate comparison report (Pipeline A vs B per category)
-- [ ] Identify winning pipeline per document type
-- [ ] Export report as JSON + CSV
-- [ ] Email summary to admin
-
-**Success Criteria**:
-- ✅ All 20-28 test documents processed successfully
-- ✅ Q&A accuracy measured for both pipelines
-- ✅ Clear winner identified per category
-- ✅ Cost/benefit analysis complete
-
----
-
-### Milestone 5: Monitoring, Rollout & Cleanup
-**Goal**: Production readiness and decision-making
-**Estimated Time**: 4-5 hours
-**Dependencies**: Milestone 4 completed
-**Deployable**: ✅ Yes (final production release)
-
-#### Task 5.1: Enhanced Logging & Monitoring
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: None
-
-- [ ] Add structured logging to all Pipeline B functions
-  ```typescript
-  console.log(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    pipeline: 'B',
-    function: 'upload-pdf-to-pool-landing-ai',
-    document_id: docId,
-    status: 'processing',
-    step: 'landing_ai_parsing',
-    duration_ms: 1234
-  }));
-  ```
-- [ ] Create log query shortcuts in `PIPELINE_B_IMPLEMENTATION.md`
-- [ ] Set up alerts for:
-  - Pipeline B error rate > 5%
-  - Nexla microservice downtime
-  - Landing AI rate limiting
-  - Cost exceeding $100/month
-
----
-
-#### Task 5.2: Cost Tracking Dashboard
-**Time**: 1.5 hours | **Status**: ⬜ Not Started | **Depends on**: Milestone 4
-
-- [ ] Create `pipeline_costs` table:
-  ```sql
-  CREATE TABLE pipeline_costs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    date DATE NOT NULL,
-    pipeline TEXT CHECK (pipeline IN ('A', 'B')),
-    documents_processed INT,
-    total_cost_usd DECIMAL(10,2),
-    avg_cost_per_doc DECIMAL(10,4)
-  );
-  ```
-- [ ] Implement daily cost aggregation function
-- [ ] Add cost chart to Admin Dashboard
-- [ ] Add budget alert (>80% of $100/month limit)
-
----
-
-#### Task 5.3: Pipeline Selection ML Training
-**Time**: 2-3 hours | **Status**: ⬜ Not Started | **Depends on**: Milestone 4 completed
-
-**Goal**: Addestrare un modello di classificazione per decidere automaticamente quale pipeline usare in base alle caratteristiche del documento.
-
-**Subtask 5.3.1: Feature Extraction**
-- [ ] Analizzare risultati di Milestone 4 per identificare pattern
-- [ ] Estrarre features da ogni documento testato:
-  - `has_tables` (boolean)
-  - `table_count` (int)
-  - `layout_complexity` (0-100, from Landing AI metadata)
-  - `page_count` (int)
-  - `has_images` (boolean)
-  - `image_count` (int)
-  - `text_density` (chars/page)
-  - `bibliography_references` (count)
-- [ ] Label each document with optimal pipeline (based on accuracy + cost)
-
-**Subtask 5.3.2: Model Training**
-- [ ] Prepare training dataset (80% test docs) and validation set (20%)
-- [ ] Train classification model:
-  - Option 1: Decision Tree (interpretable, fast)
-  - Option 2: Logistic Regression (probability scores)
-  - Option 3: Simple rule-based heuristic (if dataset too small)
-- [ ] Evaluate model accuracy on validation set (target: >85%)
-- [ ] Generate decision rules (human-readable)
-
-**Subtask 5.3.3: Deploy Classification Edge Function**
-- [ ] Create `supabase/functions/classify-document/index.ts`
-- [ ] Input: document metadata (pre-extracted features)
-- [ ] Output: `{ pipeline: 'A' | 'B', confidence: 0-1, reasoning: string }`
-- [ ] Implement model inference (use trained weights/rules)
-- [ ] Add logging for monitoring prediction accuracy
-- [ ] Test on holdout set from Milestone 4
-
-**Decision Logic Example**:
-```typescript
-function classifyDocument(features: DocumentFeatures): PipelineRecommendation {
-  // Rule-based heuristic (can be replaced with trained model)
-  if (features.table_count >= 3 || features.layout_complexity > 70) {
-    return { pipeline: 'B', confidence: 0.9, reasoning: 'Complex layout or multiple tables detected' };
-  }
-  
-  if (features.page_count < 10 && features.layout_complexity < 40) {
-    return { pipeline: 'A', confidence: 0.85, reasoning: 'Simple document, cost optimization' };
-  }
-  
-  // Borderline case - use cost/benefit
-  const costDiff = PIPELINE_B_COST - PIPELINE_A_COST;
-  const expectedAccuracyGain = estimateAccuracyGain(features); // from historical data
-  
-  if (expectedAccuracyGain * VALUE_PER_ACCURACY_POINT > costDiff) {
-    return { pipeline: 'B', confidence: 0.6, reasoning: 'Expected accuracy gain justifies cost' };
-  }
-  
-  return { pipeline: 'A', confidence: 0.7, reasoning: 'Default to cost-efficient pipeline' };
-}
-```
-
-**Success Criteria**:
-- ✅ Classification model achieves >85% accuracy on validation set
-- ✅ Edge function deployed and tested
-- ✅ Prediction reasoning is clear and interpretable
-
----
-
-#### Task 5.4: Rollout Decision Matrix
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: Milestone 4, Task 5.3
-
-- [ ] Analyze A/B testing results from Milestone 4
-- [ ] Calculate ROI:
-  ```
-  ROI = (Alignment_Score_Improvement * Value_Per_Point) / Extra_Cost
-  ```
-- [ ] Decision logic:
-  ```
-  IF alignment_improvement >= +8% AND cost_acceptable:
-    → Rollout Pipeline B to 100%
-  ELSE IF alignment_improvement >= +5% AND has_tables_frequency > 30%:
-    → Hybrid mode (auto-select Pipeline B for complex docs)
-  ELSE:
-    → Keep Pipeline A as default, improve with Boundary-Aware Sliding Window
-  ```
-- [ ] Document decision in "Decision Log" section
-- [ ] Update default `chunking_strategy` if rolling out
-
----
-
-#### Task 5.5: Pipeline A Refactoring (if Pipeline B wins)
-**Time**: 3-4 hours | **Status**: ⬜ Not Started | **Depends on**: Task 5.4 decision
-
-**If Pipeline B becomes default:**
-- [ ] Update all existing upload functions to use Pipeline B
-- [ ] Mark Pipeline A functions as "legacy" in comments
-- [ ] Add deprecation notices in UI
-- [ ] Plan gradual migration of existing documents
-- [ ] Archive old code after 30 days
-
-**If Hybrid mode:**
-- [ ] Implement auto-selection logic in shared module
-- [ ] Update all upload entry points to use auto-selection
-- [ ] Add override option in UI
-
----
-
-#### Task 5.6: Documentation & Knowledge Transfer
-**Time**: 1 hour | **Status**: ⬜ Not Started | **Depends on**: All milestones
-
-- [ ] Update project README with Pipeline B explanation
-- [ ] Create architecture diagram (Mermaid)
-- [ ] Document Nexla microservice maintenance
-- [ ] Document cost monitoring procedures
-- [ ] Create troubleshooting guide
-- [ ] Update API documentation
-- [ ] Add inline code comments for future maintainers
-
----
-
-## 🚨 Issues Log
-
-### Active Issues
-_None currently_
-
-### Resolved Issues
-_None yet_
-
----
-
-## 📝 Decision Log
-
-| Date | Decision | Rationale | Impact |
-|------|----------|-----------|--------|
-| 2025-01-18 | Use dual-pipeline approach | Faster implementation, A/B testing built-in, zero risk to Pipeline A | +2 days dev time, +$41/month infra cost |
-| 2025-01-18 | Deploy Nexla on Railway | Free tier, auto-deploy, monitoring included | Railway vendor lock-in |
-| 2025-01-18 | Feature branch `feature/pipeline-b` | Isolate work, easy context switching for Pipeline A fixes | Requires manual branch switching |
-
----
-
-## 📊 Test Results
-
-### Milestone 2 - End-to-End Testing
-_To be filled after Task 2.5_
-
-| PDF Type | Pipeline A Chunks | Pipeline B Chunks | Difference | Processing Time A | Processing Time B | Winner |
-|----------|-------------------|-------------------|------------|-------------------|-------------------|--------|
-| Simple text | - | - | - | - | - | - |
-| Multi-column + tables | - | - | - | - | - | - |
-| Image-heavy | - | - | - | - | - | - |
-
-### Milestone 4 - A/B Testing Results
-_To be filled after Task 4.4_
-
-**Aggregate Metrics**:
-- Total tests: -
-- Pipeline A wins: -
-- Pipeline B wins: -
-- Ties: -
-- Avg alignment score improvement: -
-- Avg cost difference: $-
-
----
-
-## 🔗 Quick Links
-
-**Edge Functions**:
-- [upload-pdf-to-pool-landing-ai logs](Cloud → Functions → upload-pdf-to-pool-landing-ai → Logs)
-- [compare-chunking-strategies logs](Cloud → Functions → compare-chunking-strategies → Logs)
-
-**External Services**:
-- [Nexla microservice (Railway)](https://railway.app/project/nexla-chunker)
-- [Landing AI dashboard](https://app.landing.ai/)
-
-**Database Queries**:
+**Check embedding backlog:**
 ```sql
--- Check Pipeline B documents
-SELECT id, file_name, chunking_strategy, processing_status, created_at 
-FROM knowledge_documents 
-WHERE chunking_strategy = 'landing_ai_nexla' 
-ORDER BY created_at DESC 
-LIMIT 20;
+SELECT 
+  embedding_status,
+  COUNT(*) as count
+FROM pipeline_b_chunks_raw
+GROUP BY embedding_status;
+```
 
--- Check Pipeline B chunks
-SELECT COUNT(*), AVG(LENGTH(content)) as avg_length
-FROM agent_knowledge 
-WHERE chunking_metadata->>'strategy' = 'landing_ai_nexla';
-
--- Daily cost report
-SELECT date, pipeline, documents_processed, total_cost_usd 
-FROM pipeline_costs 
-WHERE date >= CURRENT_DATE - INTERVAL '7 days' 
-ORDER BY date DESC;
+**Check agent sync status:**
+```sql
+SELECT 
+  a.name,
+  COUNT(DISTINCT pak.chunk_id) as chunk_count,
+  COUNT(DISTINCT c.document_id) as document_count
+FROM agents a
+LEFT JOIN pipeline_b_agent_knowledge pak ON pak.agent_id = a.id
+LEFT JOIN pipeline_b_chunks_raw c ON c.id = pak.chunk_id
+GROUP BY a.id, a.name;
 ```
 
 ---
 
-## 🎯 Next Session Quick Start
+## Troubleshooting
 
-**To resume work after interruption:**
+### Issue: Documents stuck in "ingested"
 
-1. **Check Status Dashboard** (top of file) for current phase
-2. **Read "Quick Resume Context"** for last activity
-3. **Find next unchecked task** in current milestone
-4. **Review dependencies** before starting
-5. **Update context** before switching to Pipeline A work
+**Cause**: `pipeline-b-process-chunks` not running or erroring
 
-**Prompt Template for AI**:
+**Check**:
+```sql
+SELECT * FROM pipeline_b_documents
+WHERE status = 'ingested'
+ORDER BY created_at ASC
+LIMIT 10;
 ```
-Sto lavorando su Pipeline B. Ultimo task completato: [TASK_NUMBER]. 
-Prossimo task: [TASK_NUMBER]. Ho bisogno di [SPECIFIC_HELP].
-```
+
+**Fix**: Manually trigger function or check logs
 
 ---
 
-## 📈 Progress Tracker
+### Issue: Chunks stuck in "pending"
 
-```
-Milestone 1: [▱▱▱▱▱▱] 0/6 tasks (0%)
-Milestone 2: [▱▱▱▱▱▱] 0/6 tasks (0%)
-Milestone 3: [▱▱▱▱▱] 0/5 tasks (0%)
-Milestone 4: [▱▱▱▱▱] 0/5 tasks (0%)
-Milestone 5: [▱▱▱▱▱] 0/5 tasks (0%)
+**Cause**: `pipeline-b-generate-embeddings` failing or rate limited
 
-Overall: [▱▱▱▱▱▱▱▱▱▱] 0/36 tasks (0%)
+**Check**:
+```sql
+SELECT 
+  embedding_status,
+  embedding_error,
+  COUNT(*) 
+FROM pipeline_b_chunks_raw
+WHERE embedding_status IN ('pending', 'failed')
+GROUP BY embedding_status, embedding_error;
 ```
+
+**Fix**: Check OpenAI API key, rate limits, or manually reprocess
 
 ---
 
-**Last Updated**: 2025-01-18
-**Maintained By**: Project Team
-**AI Assistant**: Lovable (context-aware via this file)
+### Issue: Agent sees no knowledge
+
+**Cause**: Documents not synced to agent
+
+**Check**:
+```sql
+SELECT COUNT(*) FROM pipeline_b_agent_knowledge
+WHERE agent_id = 'your-agent-id';
+```
+
+**Fix**: Call `pipeline-b-sync-agent` with correct `agentId`
+
+---
+
+## Migration from Old System
+
+Pipeline B is **completely independent**. No migration needed. You can:
+
+1. **Run both systems in parallel** during testing
+2. **Gradually switch agents** from old to new system
+3. **Test with new agents first** before migrating existing ones
+4. **Delete old tables** once confident in Pipeline B
+
+**No conflicts. No Frankenstein code.**
+
+---
+
+## Performance Characteristics
+
+| Stage | Latency | Throughput | Bottleneck |
+|-------|---------|------------|------------|
+| Ingest PDF | ~50ms | Unlimited | Storage I/O |
+| Ingest GitHub | ~500ms-2s | 10 files/s | GitHub API |
+| Process Chunks | ~1-5min/doc | 5 docs/10min | Landing AI API |
+| Generate Embeddings | ~10s/50chunks | 50 chunks/5min | OpenAI rate limits |
+| Sync Agent | ~100ms | Unlimited | Database I/O |
+
+**Total time** from upload to agent-ready:
+- **Minimum**: ~5 minutes (small document, light load)
+- **Average**: ~15-30 minutes (typical document)
+- **Maximum**: ~2 hours (large document, heavy load)
+
+---
+
+## Security
+
+- All tables have RLS enabled
+- Authenticated users can CRUD their own documents
+- Agents can only access chunks explicitly synced to them
+- Cron functions run with service role (no JWT)
+- User-facing functions require authentication
+
+---
+
+## Cost Estimation
+
+**Per 1000 documents** (average 50 pages each):
+
+- **Landing AI**: ~$50-100 (depends on plan)
+- **OpenAI Embeddings**: ~$20 (1536-dim model)
+- **Supabase Storage**: ~$0.50/GB
+- **Supabase Database**: ~$5/month (included in plan)
+
+**Total**: ~$75-125 per 1000 documents
+
+---
+
+## Next Steps
+
+1. ✅ **Deploy functions** (automatic)
+2. ⏳ **Set up cron jobs** (see config.toml)
+3. 🧪 **Test with small PDF**
+4. 📊 **Monitor processing pipeline**
+5. 🚀 **Sync to first agent**
+6. 🎯 **Scale to production**
+
+---
+
+**Pipeline B is ready. Zero Frankenstein code. 100% clean architecture.**
