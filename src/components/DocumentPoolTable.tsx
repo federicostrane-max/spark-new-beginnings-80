@@ -382,9 +382,28 @@ export const DocumentPoolTable = () => {
     // Costruisci albero gerarchico ricorsivo
     const allFolderPaths = Array.from(docsByFolder.keys()).sort();
     
+    // PRE-PROCESSAMENTO: Aggiungi tutti i path intermedi mancanti
+    // Se abbiamo "A/B/C/D", dobbiamo assicurarci che esistano anche "A", "A/B", "A/B/C"
+    const allPathsWithIntermediates = new Set<string>(allFolderPaths);
+    allFolderPaths.forEach(path => {
+      const parts = path.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const intermediatePath = parts.slice(0, i).join('/');
+        if (!allPathsWithIntermediates.has(intermediatePath)) {
+          allPathsWithIntermediates.add(intermediatePath);
+          // Aggiungi anche alla mappa con array vuoto (nessun documento diretto)
+          if (!docsByFolder.has(intermediatePath)) {
+            docsByFolder.set(intermediatePath, []);
+          }
+        }
+      }
+    });
+    
+    const completePathList = Array.from(allPathsWithIntermediates).sort();
+    
     // Trova tutte le root folders (quelle senza slash o il primo livello)
     const rootPaths = new Set<string>();
-    allFolderPaths.forEach(path => {
+    completePathList.forEach(path => {
       const parts = path.split('/');
       rootPaths.add(parts[0]);
     });
@@ -398,22 +417,17 @@ export const DocumentPoolTable = () => {
       
       console.log(`[buildFolderTree] "${parentPath}" has ${parentDocs.length} direct docs`);
       
-      // Trova TUTTE le sottocartelle che iniziano con parentPath
-      const allChildPaths = allFolderPaths.filter(path => {
-        return path.startsWith(parentPath + '/') && path !== parentPath;
-      });
-      
-      // Raggruppa per primo livello di profondità
-      const directChildren = new Set<string>();
-      allChildPaths.forEach(path => {
+      // Trova tutte le sottocartelle DIRETTE di parentPath (quelle senza ulteriori slash)
+      const childPaths = completePathList.filter(path => {
+        if (!path.startsWith(parentPath + '/')) return false;
+        
+        // Verifica che sia un figlio diretto, non un nipote
         const remainder = path.substring(parentPath.length + 1);
-        const firstSegment = remainder.split('/')[0];
-        const directChildPath = parentPath + '/' + firstSegment;
-        directChildren.add(directChildPath);
+        return !remainder.includes('/');
       });
 
-      // Costruisci ricorsivamente ogni sottocartella diretta
-      Array.from(directChildren).forEach(childPath => {
+      // Costruisci ricorsivamente ogni sottocartella
+      childPaths.forEach(childPath => {
         const childTree = buildFolderTree(childPath, depth + 1);
         if (childTree) {
           const childName = childPath.substring(parentPath.length + 1);
