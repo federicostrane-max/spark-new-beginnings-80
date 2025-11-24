@@ -398,17 +398,22 @@ export const DocumentPoolTable = () => {
       
       console.log(`[buildFolderTree] "${parentPath}" has ${parentDocs.length} direct docs`);
       
-      // Trova tutte le sottocartelle dirette di parentPath
-      const childPaths = allFolderPaths.filter(path => {
-        if (!path.startsWith(parentPath + '/')) return false;
-        
-        // Verifica che sia un figlio diretto, non un nipote
+      // Trova TUTTE le sottocartelle che iniziano con parentPath
+      const allChildPaths = allFolderPaths.filter(path => {
+        return path.startsWith(parentPath + '/') && path !== parentPath;
+      });
+      
+      // Raggruppa per primo livello di profondità
+      const directChildren = new Set<string>();
+      allChildPaths.forEach(path => {
         const remainder = path.substring(parentPath.length + 1);
-        return !remainder.includes('/');
+        const firstSegment = remainder.split('/')[0];
+        const directChildPath = parentPath + '/' + firstSegment;
+        directChildren.add(directChildPath);
       });
 
-      // Costruisci ricorsivamente ogni sottocartella
-      childPaths.forEach(childPath => {
+      // Costruisci ricorsivamente ogni sottocartella diretta
+      Array.from(directChildren).forEach(childPath => {
         const childTree = buildFolderTree(childPath, depth + 1);
         if (childTree) {
           const childName = childPath.substring(parentPath.length + 1);
