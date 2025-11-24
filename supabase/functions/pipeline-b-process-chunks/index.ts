@@ -121,8 +121,15 @@ serve(async (req) => {
           throw new Error('No chunks returned by Landing AI');
         }
 
-        // Insert chunks into pipeline_b_chunks_raw
-        const chunksToInsert = landingChunks.map((chunk, index) => ({
+        // Filter out chunks with null/empty text and insert into pipeline_b_chunks_raw
+        const validChunks = landingChunks.filter(chunk => chunk.text && chunk.text.trim().length > 0);
+        console.log(`✓ Filtered to ${validChunks.length} valid chunks (removed ${landingChunks.length - validChunks.length} empty chunks)`);
+        
+        if (validChunks.length === 0) {
+          throw new Error('No valid chunks after filtering empty content');
+        }
+        
+        const chunksToInsert = validChunks.map((chunk, index) => ({
           document_id: doc.id,
           content: chunk.text,
           chunk_type: chunk.chunk_type || 'text',
@@ -147,7 +154,7 @@ serve(async (req) => {
           })
           .eq('id', doc.id);
 
-        console.log(`✓ Created ${landingChunks.length} chunks for ${doc.file_name}`);
+        console.log(`✓ Created ${validChunks.length} chunks for ${doc.file_name}`);
         results.processed++;
 
       } catch (error) {
