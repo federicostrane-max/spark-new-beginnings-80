@@ -2033,6 +2033,7 @@ export type Database = {
           chunk_count: number
           document_id: string
           file_name: string
+          pipeline_source: string
           sync_status: string
         }[]
       }
