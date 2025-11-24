@@ -7,8 +7,14 @@ const corsHeaders = {
 };
 
 interface LandingAIChunk {
-  text: string;
-  chunk_type: string;
+  text?: string;
+  content?: string;
+  chunk_type?: string;
+  chunk_id?: string;
+  grounding?: Array<{
+    box?: { l: number; t: number; r: number; b: number };
+    page?: number;
+  }>;
   chunk_references?: {
     page?: number;
     grounding?: Array<{ x: number; y: number; width: number; height: number }>;
@@ -43,7 +49,62 @@ async function extractWithLandingAI(
   }
 
   const result = await response.json();
-  return result.chunks || [];
+  
+  // 📊 DETAILED LOGGING - Response Structure
+  console.log('📊 Landing AI Response Structure:', {
+    hasChunks: 'chunks' in result,
+    hasMarkdown: 'markdown' in result,
+    isArray: Array.isArray(result),
+    keys: Object.keys(result),
+    resultType: typeof result,
+  });
+  
+  // Determine chunks array from different possible structures
+  let rawChunks: any[];
+  
+  if (Array.isArray(result)) {
+    console.log('✓ Response is direct array');
+    rawChunks = result;
+  } else if (result.chunks && Array.isArray(result.chunks)) {
+    console.log('✓ Response has chunks property');
+    rawChunks = result.chunks;
+  } else {
+    console.error('❌ Unexpected response structure:', JSON.stringify(result, null, 2));
+    throw new Error('Unexpected response structure from Landing AI');
+  }
+  
+  // 📄 DETAILED LOGGING - First 3 Chunks
+  console.log(`📄 Total chunks received: ${rawChunks.length}`);
+  console.log('📄 First 3 chunks detailed structure:', JSON.stringify(rawChunks.slice(0, 3), null, 2));
+  
+  // Map chunks to standardized format, supporting multiple field names
+  const mappedChunks = rawChunks.map((chunk, index) => {
+    const text = chunk.text || chunk.content || '';
+    const chunkType = chunk.chunk_type || 'text';
+    
+    // Log any chunks with empty text
+    if (!text || text.trim().length === 0) {
+      console.warn(`⚠️ Chunk ${index} has empty text field:`, {
+        hasText: 'text' in chunk,
+        hasContent: 'content' in chunk,
+        textValue: chunk.text,
+        contentValue: chunk.content,
+        allKeys: Object.keys(chunk),
+      });
+    }
+    
+    return {
+      text,
+      chunk_type: chunkType,
+      chunk_references: {
+        page: chunk.grounding?.[0]?.page || chunk.chunk_references?.page,
+        grounding: chunk.grounding || chunk.chunk_references?.grounding,
+      },
+    };
+  });
+  
+  console.log(`✓ Mapped ${mappedChunks.length} chunks to standard format`);
+  return mappedChunks;
 }
 
 serve(async (req) => {
