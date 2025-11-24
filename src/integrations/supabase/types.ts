@@ -1751,6 +1751,7 @@ export type Database = {
           file_size_bytes: number | null
           full_text: string | null
           id: string
+          landing_ai_job_id: string | null
           page_count: number | null
           processed_at: string | null
           repo_path: string | null
@@ -1768,6 +1769,7 @@ export type Database = {
           file_size_bytes?: number | null
           full_text?: string | null
           id?: string
+          landing_ai_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
           repo_path?: string | null
@@ -1785,6 +1787,7 @@ export type Database = {
           file_size_bytes?: number | null
           full_text?: string | null
           id?: string
+          landing_ai_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
           repo_path?: string | null
