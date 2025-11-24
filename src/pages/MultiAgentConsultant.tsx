@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useTTS } from "@/contexts/TTSContext";
-import { useAgentHealth } from "@/hooks/useAgentHealth";
+import { useMultipleAgentsHealth } from "@/hooks/useMultipleAgentsHealth";
 import { toast } from "sonner";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
@@ -98,7 +98,7 @@ export default function MultiAgentConsultant() {
   const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Monitora la salute di tutti gli agenti per mostrare gli alert globali
-  const agentHealth = useAgentHealth(agents.map(a => a.id));
+  const agentHealth = useMultipleAgentsHealth(agents.map(a => a.id));
 
   // 💾 Save current session to sessionStorage
   useEffect(() => {

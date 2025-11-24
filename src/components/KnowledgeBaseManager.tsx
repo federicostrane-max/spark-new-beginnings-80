@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KnowledgeAlignmentDashboard } from "./KnowledgeAlignmentDashboard";
 import { useDocumentSync } from "@/hooks/useDocumentSync";
+import { useDocumentAssignment } from "@/hooks/useDocumentAssignment";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface PoolDocument {
@@ -45,11 +46,12 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     syncAllMissing 
   } = useDocumentSync(agentId);
   
+  const { assignDocument, unassignDocument, reprocessDocument, isAssigning } = useDocumentAssignment();
+  
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [poolDocuments, setPoolDocuments] = useState<PoolDocument[]>([]);
   const [loadingPool, setLoadingPool] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
-  const [assigning, setAssigning] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
@@ -141,65 +143,41 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       return;
     }
 
-    setAssigning(true);
     try {
       const documentIds = Array.from(selectedDocuments);
+      let successCount = 0;
       
-      // Crea i link
-      const links = documentIds.map(docId => ({
-        agent_id: agentId,
-        document_id: docId,
-        assignment_type: 'manual',
-        sync_status: 'pending',
-      }));
-
-      const { error: linkError } = await supabase
-        .from('agent_document_links')
-        .insert(links);
-
-      if (linkError) throw linkError;
-
-      toast.success(`${documentIds.length} documenti assegnati`);
+      // Assign documents one by one using the new function
+      for (const docId of documentIds) {
+        const success = await assignDocument(agentId, docId);
+        if (success) successCount++;
+      }
       
-      // Ricarica i documenti
+      if (successCount > 0) {
+        toast.success(`${successCount} documenti assegnati con successo`);
+      }
+      
+      // Reload documents
       await loadDocuments();
       
-      // Chiudi il dialog e resetta la selezione
+      // Close dialog and reset selection
       setShowAssignDialog(false);
       setSelectedDocuments(new Set());
-      
-      // Sincronizza i nuovi documenti
-      for (const docId of documentIds) {
-        try {
-          await syncDocument(docId);
-        } catch (err) {
-          console.error(`Failed to sync ${docId}:`, err);
-        }
-      }
     } catch (error) {
       console.error('Error assigning documents:', error);
       toast.error('Errore nell\'assegnazione');
-    } finally {
-      setAssigning(false);
     }
   };
 
   const handleUnassignDocument = async (documentId: string) => {
     setRemovingLinkId(documentId);
     try {
-      const { error } = await supabase
-        .from('agent_document_links')
-        .delete()
-        .eq('agent_id', agentId)
-        .eq('document_id', documentId);
-
-      if (error) throw error;
-
-      toast.success('Documento rimosso');
-      await loadDocuments();
+      const success = await unassignDocument(agentId, documentId);
+      if (success) {
+        await loadDocuments();
+      }
     } catch (error) {
       console.error('Error removing document:', error);
-      toast.error('Errore nella rimozione');
     } finally {
       setRemovingLinkId(null);
     }
@@ -489,9 +467,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                 </Button>
                 <Button
                   onClick={handleAssignDocuments}
-                  disabled={selectedDocuments.size === 0 || assigning}
+                  disabled={selectedDocuments.size === 0 || isAssigning}
                 >
-                  {assigning ? (
+                  {isAssigning ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Assegnazione...

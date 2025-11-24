@@ -1,6 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { logger } from '@/lib/logger';
+
+interface DocumentStatus {
+  documentId: string;
+  fileName: string;
+  chunkCount: number;
+  syncStatus: 'pending' | 'completed' | 'failed';
+}
+
+interface AgentHealth {
+  agentId: string;
+  totalDocuments: number;
+  syncedDocuments: number;
+  pendingDocuments: number;
+  failedDocuments: number;
+  hasIssues: boolean;
+  documents: DocumentStatus[];
+  lastChecked: Date;
+  isStale: boolean;
+}
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const POLL_INTERVAL = 30 * 1000; // 30 seconds
+const REQUEST_TIMEOUT = 5000; // 5 seconds
 
 export interface AgentHealthStatus {
   agentId: string;
@@ -12,160 +34,127 @@ export interface AgentHealthStatus {
 }
 
 /**
- * Hook per monitorare lo stato di salute degli agenti
- * Traccia documenti non sincronizzati e problemi recenti
+ * Hook per monitorare lo stato di salute di UN SINGOLO agente
+ * Usa cache locale e polling intelligente per evitare timeout
  */
-export const useAgentHealth = (agentIds: string[]) => {
-  const [healthStatus, setHealthStatus] = useState<Map<string, AgentHealthStatus>>(new Map());
-  const [isLoading, setIsLoading] = useState(true);
+export const useAgentHealth = (agentId?: string) => {
+  const [health, setHealth] = useState<AgentHealth | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const checkAgentHealth = async (agentId: string): Promise<AgentHealthStatus> => {
-    try {
-      // Usa check-and-sync-all con autoFix per sincronizzare automaticamente
-      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
-        body: { agentId, autoFix: true }
-      });
-
-      if (error) {
-        logger.error('agent-operation', `Failed to check health for agent ${agentId}`, error, { agentId });
-        throw error;
+  const checkHealth = useCallback(async (agentIdToCheck: string, useCache: boolean = true): Promise<AgentHealth | null> => {
+    // Check cache first
+    if (useCache && health && health.agentId === agentIdToCheck) {
+      const age = Date.now() - health.lastChecked.getTime();
+      if (age < CACHE_DURATION) {
+        console.log(`[useAgentHealth] Using cached health data (${Math.round(age / 1000)}s old)`);
+        return health;
       }
-
-      // Conta documenti realmente non sincronizzati o parzialmente sincronizzati
-      const statuses = data?.statuses || [];
-      const missingCount = statuses.filter((s: any) => s.status === 'missing').length;
-      const failedCount = statuses.filter((s: any) => s.status === 'failed').length;
-      const orphanedCount = statuses.filter((s: any) => s.status === 'orphaned').length;
-      const syncingCount = statuses.filter((s: any) => s.status === 'syncing').length;
-      
-      const unsyncedCount = missingCount + orphanedCount + failedCount;
-
-      // ✅ Considera "problemi" SOLO se ci sono discrepanze permanenti (non in sync)
-      const hasIssues = unsyncedCount > 0;
-
-      const healthStatus: AgentHealthStatus = {
-        agentId,
-        hasIssues, // ✅ Badge rosso SOLO se ci sono documenti attualmente non sincronizzati
-        unsyncedCount,
-        errorCount: missingCount + failedCount, // Documenti mancanti o falliti
-        warningCount: orphanedCount, // Chunks orfani (non più assigned)
-        lastChecked: new Date()
-      };
-      
-      // Log SOLO se ci sono problemi reali dopo il tentativo di fix
-      if (hasIssues) {
-        logger.warning('agent-operation', `Agent ${agentId} still has sync issues after auto-fix`, {
-          missingCount,
-          failedCount,
-          orphanedCount,
-          unsyncedCount
-        }, { agentId });
-      } else if (syncingCount > 0) {
-        logger.info('agent-operation', `Agent ${agentId} sync in progress`, {
-          syncingCount
-        }, { agentId });
-      }
-
-      return healthStatus;
-    } catch (error) {
-      logger.error('agent-operation', `Error checking agent health for ${agentId}`, error, { agentId });
-      return {
-        agentId,
-        hasIssues: true, // ✅ Flag come problema solo se la check fallisce
-        unsyncedCount: 0,
-        errorCount: 1,
-        warningCount: 0,
-        lastChecked: new Date()
-      };
-    }
-  };
-
-  const refreshHealth = async () => {
-    if (agentIds.length === 0) {
-      setIsLoading(false);
-      return;
     }
 
     setIsLoading(true);
+    setError(null);
+
     try {
-      // ✅ Process agents sequentially to avoid overloading edge functions
-      const newHealthMap = new Map<string, AgentHealthStatus>();
-      
-      for (const agentId of agentIds) {
-        try {
-          const status = await checkAgentHealth(agentId);
-          newHealthMap.set(status.agentId, status);
-          
-          // Add 500ms delay between checks to prevent BOOT_ERROR
-          if (agentId !== agentIds[agentIds.length - 1]) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } catch (error) {
-          logger.error('agent-operation', `Failed to check health for agent ${agentId}`, error, { agentId });
-          // Continue with next agent even if one fails
-          newHealthMap.set(agentId, {
-            agentId,
-            hasIssues: true,
-            unsyncedCount: 0,
-            errorCount: 1,
-            warningCount: 0,
-            lastChecked: new Date()
-          });
-        }
+      // Implement client-side timeout
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), REQUEST_TIMEOUT)
+      );
+
+      const healthCheckPromise = supabase.functions.invoke('check-agent-health', {
+        body: { agentId: agentIdToCheck }
+      });
+
+      const { data, error: invokeError } = await Promise.race([
+        healthCheckPromise,
+        timeoutPromise
+      ]) as any;
+
+      if (invokeError) throw invokeError;
+
+      if (data?.success && data.health) {
+        const newHealth: AgentHealth = {
+          ...data.health,
+          lastChecked: new Date(),
+          isStale: false
+        };
+        setHealth(newHealth);
+        return newHealth;
+      } else {
+        throw new Error(data?.error || 'Failed to fetch health status');
       }
 
-      setHealthStatus(newHealthMap);
-      logger.info('agent-operation', `Health check completed for ${agentIds.length} agents`);
-    } catch (error) {
-      logger.error('agent-operation', 'Failed to refresh agent health', error);
+    } catch (err: any) {
+      console.error('[useAgentHealth] Health check failed:', err);
+      
+      // On timeout or error, mark cached data as stale but keep it
+      if (health && health.agentId === agentIdToCheck) {
+        const staleHealth = { ...health, isStale: true };
+        setHealth(staleHealth);
+        setError('Status unavailable (using cached data)');
+        return staleHealth;
+      }
+      
+      setError(err.message || 'Failed to check health');
+      return null;
+
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [health]);
 
+  // Auto-poll when agentId is provided
   useEffect(() => {
-    refreshHealth();
+    if (!agentId) return;
 
-    // Refresh ogni 2 minuti per maggiore stabilità
-    const interval = setInterval(refreshHealth, 120000);
+    // Initial check
+    checkHealth(agentId, true);
+
+    // Set up polling
+    const interval = setInterval(() => {
+      checkHealth(agentId, true);
+    }, POLL_INTERVAL);
+
     return () => clearInterval(interval);
-  }, [agentIds.join(',')]);
+  }, [agentId, checkHealth]);
 
-  const getAgentStatus = (agentId: string): AgentHealthStatus | undefined => {
-    return healthStatus.get(agentId);
-  };
+  const refresh = useCallback(() => {
+    if (agentId) {
+      return checkHealth(agentId, false); // Force fresh check
+    }
+    return Promise.resolve(null);
+  }, [agentId, checkHealth]);
 
-  const hasAnyIssues = (): boolean => {
-    return Array.from(healthStatus.values()).some(status => status.hasIssues);
-  };
-
-  const getTotalIssueCount = (): number => {
-    return Array.from(healthStatus.values()).reduce(
-      (total, status) => total + (status.hasIssues ? 1 : 0),
-      0
-    );
-  };
-
-  const getDetailedIssues = () => {
-    const problematicAgents = Array.from(healthStatus.values()).filter(status => status.hasIssues);
-    const totalAgentsWithIssues = problematicAgents.length;
-    const totalUnsyncedDocs = problematicAgents.reduce((sum, status) => sum + status.unsyncedCount, 0);
+  // Legacy compatibility methods
+  const getAgentStatus = useCallback((agentIdToGet: string): AgentHealthStatus | undefined => {
+    if (!health || health.agentId !== agentIdToGet) return undefined;
     
     return {
-      totalAgentsWithIssues,
-      totalUnsyncedDocs,
-      problematicAgents
+      agentId: health.agentId,
+      hasIssues: health.hasIssues,
+      unsyncedCount: health.pendingDocuments + health.failedDocuments,
+      errorCount: health.failedDocuments,
+      warningCount: health.pendingDocuments,
+      lastChecked: health.lastChecked
     };
-  };
+  }, [health]);
 
   return {
-    healthStatus: healthStatus,
+    health,
     isLoading,
-    refreshHealth,
+    error,
+    checkHealth,
+    refresh,
+    // Legacy compatibility
+    healthStatus: health ? new Map([[health.agentId, getAgentStatus(health.agentId)!]]) : new Map(),
     getAgentStatus,
-    hasAnyIssues,
-    getTotalIssueCount,
-    getDetailedIssues
+    hasAnyIssues: () => health?.hasIssues || false,
+    getTotalIssueCount: () => health?.hasIssues ? 1 : 0,
+    getDetailedIssues: () => ({
+      totalAgentsWithIssues: health?.hasIssues ? 1 : 0,
+      totalUnsyncedDocs: (health?.pendingDocuments || 0) + (health?.failedDocuments || 0),
+      problematicAgents: health?.hasIssues ? [getAgentStatus(health.agentId)!] : []
+    })
   };
 };
 
@@ -185,10 +174,6 @@ export const usePoolDocumentsHealth = () => {
   const checkPoolHealth = async () => {
     setIsLoading(true);
     try {
-      // Note: Documents with processing_status='validated' are in a normal intermediate state
-      // They will be automatically processed to 'ready_for_assignment'
-      // We don't count them as "stuck" anymore
-
       // Documenti con errori
       const { count: errorDocCount, error: errorCheckError } = await supabase
         .from('knowledge_documents')
@@ -196,7 +181,7 @@ export const usePoolDocumentsHealth = () => {
         .or('processing_status.eq.error,validation_status.eq.rejected');
 
       if (errorCheckError) {
-        logger.error('pool-documents', 'Failed to check document errors', errorCheckError);
+        console.error('[usePoolDocumentsHealth] Failed to check document errors:', errorCheckError);
         throw errorCheckError;
       }
 
@@ -209,32 +194,31 @@ export const usePoolDocumentsHealth = () => {
         .lt('created_at', oneHourAgo);
 
       if (validatingError) {
-        logger.error('pool-documents', 'Failed to check validating documents', validatingError);
+        console.error('[usePoolDocumentsHealth] Failed to check validating documents:', validatingError);
         throw validatingError;
       }
 
       const errors = errorDocCount || 0;
       const validating = validatingDocCount || 0;
       
-      // Only count real errors and documents stuck in validating too long
       const totalIssues = errors + validating;
       
-      setStuckCount(0); // No longer tracking false positive
+      setStuckCount(0);
       setErrorCount(errors);
       setValidatingCount(validating);
-      setOrphanedChunksCount(0); // Set by cleanup function
-      setDocumentsWithoutChunksCount(0); // Set by cleanup function
+      setOrphanedChunksCount(0);
+      setDocumentsWithoutChunksCount(0);
       setIssueCount(totalIssues);
       setHasIssues(totalIssues > 0);
 
       if (totalIssues > 0) {
-        logger.warning('pool-documents', `Pool has ${totalIssues} documents with issues`, {
+        console.log(`[usePoolDocumentsHealth] Pool has ${totalIssues} documents with issues:`, {
           errorCount: errors,
           validatingCount: validating
         });
       }
     } catch (error) {
-      logger.error('pool-documents', 'Error checking pool health', error);
+      console.error('[usePoolDocumentsHealth] Error checking pool health:', error);
       setHasIssues(true);
       setIssueCount(1);
       setStuckCount(0);
@@ -250,7 +234,6 @@ export const usePoolDocumentsHealth = () => {
   useEffect(() => {
     checkPoolHealth();
 
-    // Refresh ogni 2 minuti per maggiore stabilità
     const interval = setInterval(checkPoolHealth, 120000);
     return () => clearInterval(interval);
   }, []);
@@ -267,3 +250,4 @@ export const usePoolDocumentsHealth = () => {
     refresh: checkPoolHealth
   };
 };
+
