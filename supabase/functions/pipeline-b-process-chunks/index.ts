@@ -47,28 +47,31 @@ interface LandingAIResponseDirect {
 }
 
 // ============================================================================
-// FUNZIONE RICOSTRUITA: extractWithLandingAI
+// FUNZIONE: getOrCreateJob - Cache job_id to avoid reprocessing
 // ============================================================================
 
-async function extractWithLandingAI(
+async function getOrCreateJob(
   content: Blob,
-  fileName: string
-): Promise<LandingAIChunk[]> {
+  fileName: string,
+  existingJobId: string | null
+): Promise<{ jobId: string; needsPolling: boolean }> {
   const landingApiKey = Deno.env.get('LANDING_AI_API_KEY');
   if (!landingApiKey) {
     throw new Error('LANDING_AI_API_KEY not configured');
   }
 
-  // 1️⃣ PREPARAZIONE REQUEST
+  // If job_id exists, return it (no API call needed)
+  if (existingJobId) {
+    console.log(`♻️ [Landing AI] Reusing cached job_id: ${existingJobId}`);
+    return { jobId: existingJobId, needsPolling: false };
+  }
+
+  // Create new job
+  console.log(`🚀 [Landing AI] Creating new Parse Job for: ${fileName}`);
   const formData = new FormData();
   formData.append('document', content, fileName);
-  
-  console.log(`🚀 [Landing AI] Calling API for: ${fileName}`);
-  console.log(`🚀 [Landing AI] Content size: ${content.size} bytes`);
-  console.log(`🚀 [Landing AI] Content type: ${content.type}`);
 
-  // 2️⃣ CHIAMATA API
-  const response = await fetch('https://api.va.landing.ai/v1/ade/parse', {
+  const response = await fetch('https://api.va.landing.ai/v1/ade/parse/jobs', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${landingApiKey}`,
@@ -78,54 +81,117 @@ async function extractWithLandingAI(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`❌ [Landing AI] HTTP Error: ${response.status}`);
-    console.error(`❌ [Landing AI] Error body: ${errorText}`);
-    throw new Error(`Landing AI API failed: ${response.status} - ${errorText}`);
+    console.error(`❌ [Landing AI] Job creation failed: ${response.status}`);
+    console.error(`❌ [Landing AI] Error: ${errorText}`);
+    throw new Error(`Landing AI Parse Job creation failed: ${response.status}`);
   }
 
-  // 3️⃣ PARSING RISPOSTA
-  const rawResult = await response.json();
+  const result = await response.json();
+  const jobId = result.job_id;
+
+  if (!jobId) {
+    console.error('❌ [Landing AI] No job_id in response:', result);
+    throw new Error('Landing AI did not return job_id');
+  }
+
+  console.log(`✓ [Landing AI] Job created: ${jobId}`);
+  return { jobId, needsPolling: true };
+}
+
+// ============================================================================
+// FUNZIONE: pollJobUntilComplete - Poll job status until ready
+// ============================================================================
+
+async function pollJobUntilComplete(jobId: string, maxAttempts = 30): Promise<void> {
+  const landingApiKey = Deno.env.get('LANDING_AI_API_KEY')!;
   
-  console.log('📊 [Landing AI] Raw Response Structure:', {
-    hasData: 'data' in rawResult,
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    console.log(`⏳ [Landing AI] Polling job ${jobId} (attempt ${attempt}/${maxAttempts})...`);
+    
+    const response = await fetch(`https://api.va.landing.ai/v1/ade/jobs/${jobId}`, {
+      headers: {
+        'Authorization': `Bearer ${landingApiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Job status check failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    const status = result.status;
+
+    console.log(`📊 [Landing AI] Job status: ${status}`);
+
+    if (status === 'completed') {
+      console.log(`✅ [Landing AI] Job completed successfully`);
+      return;
+    }
+
+    if (status === 'failed') {
+      throw new Error(`Landing AI job failed: ${result.error_message || 'Unknown error'}`);
+    }
+
+    // Wait 2 seconds before next poll
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  throw new Error(`Job polling timeout after ${maxAttempts} attempts`);
+}
+
+// ============================================================================
+// FUNZIONE: retrieveJobChunks - Get chunks from completed job
+// ============================================================================
+
+async function retrieveJobChunks(jobId: string): Promise<LandingAIChunk[]> {
+  const landingApiKey = Deno.env.get('LANDING_AI_API_KEY')!;
+  
+  console.log(`📥 [Landing AI] Retrieving chunks from job: ${jobId}`);
+  
+  const response = await fetch(`https://api.va.landing.ai/v1/ade/jobs/${jobId}`, {
+    headers: {
+      'Authorization': `Bearer ${landingApiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`❌ [Landing AI] Failed to retrieve chunks: ${response.status}`);
+    console.error(`❌ [Landing AI] Error: ${errorText}`);
+    throw new Error(`Failed to retrieve job results: ${response.status}`);
+  }
+
+  const rawResult = await response.json();
+  console.log('📊 [Landing AI] Job Response Structure:', {
+    hasResult: 'result' in rawResult,
     hasChunks: 'chunks' in rawResult,
-    hasMarkdown: 'markdown' in rawResult,
-    hasErrors: 'errors' in rawResult,
-    isArray: Array.isArray(rawResult),
+    hasData: 'data' in rawResult,
+    status: rawResult.status,
     topLevelKeys: Object.keys(rawResult),
   });
 
-  // 4️⃣ GESTIONE FORMATO WRAPPED (nuovo API)
+  // Parse chunks from job result
   let chunks: LandingAIChunk[];
   
-  if ('data' in rawResult && rawResult.data) {
-    console.log('✓ [Landing AI] Response format: WRAPPED (new API)');
-    
-    // Controllare errori API
-    if (rawResult.errors && rawResult.errors.length > 0) {
-      console.warn('⚠️ [Landing AI] API returned errors:', rawResult.errors);
-      rawResult.errors.forEach((err: any) => {
-        console.warn(`   - ${err.code}: ${err.message}`);
-      });
-    }
-    
-    const wrappedResponse = rawResult as LandingAIResponseWrapped;
-    chunks = wrappedResponse.data.chunks;
-    
-    console.log(`📄 [Landing AI] Markdown length: ${wrappedResponse.data.markdown?.length || 0} chars`);
-    
-  } else if ('chunks' in rawResult && Array.isArray(rawResult.chunks)) {
-    console.log('✓ [Landing AI] Response format: DIRECT (legacy API)');
-    const directResponse = rawResult as LandingAIResponseDirect;
-    chunks = directResponse.chunks;
-    
+  if (rawResult.result?.data?.chunks) {
+    console.log('✓ [Landing AI] Chunks found in result.data.chunks');
+    chunks = rawResult.result.data.chunks;
+  } else if (rawResult.result?.chunks) {
+    console.log('✓ [Landing AI] Chunks found in result.chunks');
+    chunks = rawResult.result.chunks;
+  } else if (rawResult.data?.chunks) {
+    console.log('✓ [Landing AI] Chunks found in data.chunks');
+    chunks = rawResult.data.chunks;
+  } else if (rawResult.chunks) {
+    console.log('✓ [Landing AI] Chunks found in top-level chunks');
+    chunks = rawResult.chunks;
   } else {
-    console.error('❌ [Landing AI] Unexpected response structure:', JSON.stringify(rawResult, null, 2));
-    throw new Error('Landing AI returned unexpected response structure');
+    console.error('❌ [Landing AI] No chunks found in response:', JSON.stringify(rawResult, null, 2));
+    throw new Error('Landing AI job result missing chunks');
   }
 
   // 5️⃣ LOGGING DETTAGLIATO CHUNKS
-  console.log(`📄 [Landing AI] Total chunks received: ${chunks.length}`);
+  console.log(`📄 [Landing AI] Total chunks retrieved: ${chunks.length}`);
   
   if (chunks.length > 0) {
     console.log('📄 [Landing AI] First 3 chunks (full structure):');
@@ -251,9 +317,30 @@ serve(async (req) => {
           throw new Error(`Unsupported source_type: ${doc.source_type}`);
         }
 
-        // Extract chunks with Landing AI (già validati)
-        const landingChunks = await extractWithLandingAI(content, doc.file_name);
-        console.log(`✓ Landing AI returned ${landingChunks.length} validated chunks`);
+        // Get or create job (using cache)
+        const { jobId, needsPolling } = await getOrCreateJob(
+          content,
+          doc.file_name,
+          doc.landing_ai_job_id
+        );
+
+        // Save job_id if new
+        if (!doc.landing_ai_job_id) {
+          await supabase
+            .from('pipeline_b_documents')
+            .update({ landing_ai_job_id: jobId })
+            .eq('id', doc.id);
+          console.log(`✓ Saved job_id: ${jobId}`);
+        }
+
+        // Poll until complete (only for new jobs)
+        if (needsPolling) {
+          await pollJobUntilComplete(jobId);
+        }
+
+        // Retrieve chunks from completed job
+        const landingChunks = await retrieveJobChunks(jobId);
+        console.log(`✓ Retrieved ${landingChunks.length} validated chunks from job ${jobId}`);
 
         // Non servono più filtri - extractWithLandingAI restituisce SOLO chunks validi
         const chunksToInsert = landingChunks.map((chunk, index) => ({
