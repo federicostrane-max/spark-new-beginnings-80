@@ -84,15 +84,18 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
       // Check both Pipeline A (legacy) and Pipeline B documents
+      // Exclude failed documents to allow re-upload
       const [legacyResult, pipelineBResult] = await Promise.all([
         supabase
           .from('knowledge_documents')
           .select('file_name')
-          .in('file_name', selectedFiles.map(f => f.name)),
+          .in('file_name', selectedFiles.map(f => f.name))
+          .neq('processing_status', 'failed'),
         supabase
           .from('pipeline_b_documents')
           .select('file_name')
           .in('file_name', selectedFiles.map(f => f.name))
+          .neq('status', 'failed')
       ]);
 
       if (legacyResult.error) {
