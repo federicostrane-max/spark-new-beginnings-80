@@ -47,72 +47,9 @@ interface UserIntent {
 }
 
 // ============================================================================
-// AUTO-EXECUTION INTENT ANALYZER
+// REMOVED: Pattern-based intent analysis is no longer needed
+// Semantic search is now UNCONDITIONAL for every query
 // ============================================================================
-interface AutoExecutionIntent {
-  requiresKnowledgeList: boolean;
-  requiresSemanticSearch: boolean;
-  semanticQuery: string;
-}
-
-function analyzeUserIntent(message: string): AutoExecutionIntent {
-  const msgLower = message.toLowerCase();
-  
-  // Pattern per lista documenti (titoli, count)
-  const listPatterns = [
-    /quant[oi]\s+(documenti|pdf|file)/i,
-    /quali\s+(sono\s+i\s+)?(documenti|pdf|file)/i,
-    /what\s+(are\s+)?documents/i,
-    /list\s+(your\s+)?(documents|pdfs|files)/i,
-    /elenco\s+(dei\s+)?(documenti|pdf)/i,
-    /show\s+(me\s+)?your\s+(documents|pdfs)/i,
-    /hai\s+(documenti|pdf)/i,
-    /do\s+you\s+have\s+(documents|pdfs)/i,
-    /titoli\s+(dei\s+)?(documenti|pdf)/i
-  ];
-  
-  // Pattern per ricerca semantica (contenuto)
-  const semanticPatterns = [
-    /cosa\s+dicon[oi]/i,
-    /su\s+quali\s+(pdf|documenti|argomenti)/i,
-    /what\s+(do|does)\s+(your\s+)?(documents|pdfs)\s+(say|contain)/i,
-    /search\s+(for|in)\s+(my\s+)?(documents|knowledge)/i,
-    /cerca\s+(nei|in)\s+(documenti|pdf)/i,
-    /tell\s+me\s+about/i,
-    /explain\s+(what|how)/i,
-    /informazioni\s+su/i,
-    /parlami\s+di/i,
-    /si\s+basa/i,
-    /based\s+on/i,
-    /nei\s+(tuoi\s+)?(documenti|pdf)/i,
-    /from\s+your\s+(documents|knowledge)/i
-  ];
-  
-  const requiresKnowledgeList = listPatterns.some(p => p.test(msgLower));
-  const requiresSemanticSearch = semanticPatterns.some(p => p.test(msgLower));
-  
-  let semanticQuery = message;
-  
-  // Extract semantic query (e.g., "cosa dicono i documenti su X?" → "X")
-  if (requiresSemanticSearch) {
-    const patterns = [
-      /su\s+(.+?)(\?|$)/i,
-      /about\s+(.+?)(\?|$)/i,
-      /riguardo\s+(.+?)(\?|$)/i,
-      /di\s+(.+?)(\?|$)/i,
-    ];
-    
-    for (const pattern of patterns) {
-      const match = msgLower.match(pattern);
-      if (match && match[1]) {
-        semanticQuery = match[1].trim();
-        break;
-      }
-    }
-  }
-  
-  return { requiresKnowledgeList, requiresSemanticSearch, semanticQuery };
-}
 
 // Helper function to generate query variants with full transparency
 function generateQueryVariants(originalTopic: string): string[] {
@@ -3134,132 +3071,9 @@ Il prompt deve essere pronto all'uso direttamente.`;
           console.log('🤖 [AI] Proceeding with AI tool calling for request processing');
           
           // ========================================
-          // KNOWLEDGE BASE: Retrieve relevant context
+          // REMOVED: Old conditional knowledge base logic
+          // Now replaced by unconditional semantic search below
           // ========================================
-          console.log('🔍 [KNOWLEDGE] Processing user query for knowledge base...');
-          
-          let knowledgeContext = '';
-          try {
-            // Check if user is asking for list of documents
-            const listQueryPatterns = [
-              // Pattern italiani migliorati
-              /qual[ei]\s+(pdf|documenti|libri|file|doc)/i,
-              /hai\s+(?:dei\s+|nel\s+|nel\s+tuo\s+)?(pdf|documenti|libri|file)/i,
-              /elenco\s+(?:dei\s+)?(pdf|documenti|libri)/i,
-              /dimmi\s+(?:quali?|cosa)\s+.{0,30}(pdf|documenti|libri|knowledge\s*base)/i,
-              /mostra(?:mi)?\s+.{0,20}(pdf|documenti|libri)/i,
-              /cosa\s+(?:c'è|hai)\s+(?:nel|in)\s+.{0,20}(knowledge|base|documenti)/i,
-              /possiedi\s+.{0,20}(pdf|documenti|libri)/i,
-              /(?:non\s+)?hai\s+(?:nessun\s+|qualche\s+|dei\s+)?(documento|documenti|pdf|file)(?:\s+salvat[oi])?(?:\s+nel)?(?:\s+(?:tuo|knowledge)\s*base)?/i,
-              /(?:hai|possiedi)\s+.{0,30}(?:documento|documenti|pdf)/i,
-              
-              // Pattern inglesi migliorati
-              /what\s+(pdfs?|documents?|books?|files?)/i,
-              /list\s+(?:of\s+)?(?:all\s+)?(pdfs?|documents?|books?|files?)/i,
-              /show\s+(?:me\s+)?(?:all\s+)?(?:your\s+)?(pdfs?|documents?|books?|files?)/i,
-              /do\s+you\s+have\s+(?:any\s+)?(pdfs?|documents?|books?|files?)/i,
-              /what'?s?\s+in\s+(?:your\s+|the\s+)?(knowledge\s*base|library)/i,
-              /tell\s+me\s+(?:about\s+)?(?:your\s+)?(pdfs?|documents?|books?)/i
-            ];
-            
-            const isListQuery = listQueryPatterns.some(pattern => pattern.test(message));
-            
-            if (isListQuery) {
-              console.log('📋 [KNOWLEDGE] User is asking for document list - querying unique documents');
-              
-              // First, get document IDs assigned to this agent via agent_document_links
-              const { data: assignedDocs, error: linksError } = await supabase
-                .from('agent_document_links')
-                .select('document_id')
-                .eq('agent_id', agent.id)
-                .eq('sync_status', 'completed');
-              
-              console.log(`📎 [KNOWLEDGE] Found ${assignedDocs?.length || 0} assigned documents via agent_document_links`);
-              
-              let distinctDocs: any[] = [];
-              
-              if (!linksError && assignedDocs && assignedDocs.length > 0) {
-                const documentIds = assignedDocs.map(d => d.document_id);
-                
-                // Get chunks from shared pool using the assigned document IDs
-                const { data: poolChunks, error: docsError } = await supabase
-                  .from('agent_knowledge')
-                  .select('document_name, category, summary, pool_document_id')
-                  .is('agent_id', null) // Shared pool chunks have agent_id = NULL
-                  .in('pool_document_id', documentIds)
-                  .eq('is_active', true)
-                  .not('embedding', 'is', null);
-                
-                if (!docsError && poolChunks) {
-                  distinctDocs = poolChunks;
-                  console.log(`📦 [KNOWLEDGE] Retrieved ${poolChunks.length} chunks from shared pool`);
-                }
-              }
-              
-              if (distinctDocs.length > 0) {
-                // Get unique documents by pool_document_id to preserve all files (even with same name in different folders)
-                const uniqueDocs = Array.from(
-                  new Map(distinctDocs.map(doc => [doc.pool_document_id || doc.id, doc])).values()
-                );
-                
-                console.log(`✅ [KNOWLEDGE] Found ${uniqueDocs.length} unique documents in knowledge base`);
-                
-                knowledgeContext = '\n\n## YOUR KNOWLEDGE BASE DOCUMENTS\n\n';
-                knowledgeContext += `You have access to ${uniqueDocs.length} document(s) in your knowledge base:\n\n`;
-                
-                uniqueDocs.forEach((doc: any, index: number) => {
-                  knowledgeContext += `${index + 1}. **${doc.document_name}**\n`;
-                  if (doc.category) knowledgeContext += `   - Category: ${doc.category}\n`;
-                  if (doc.summary) knowledgeContext += `   - Summary: ${doc.summary}\n`;
-                  knowledgeContext += '\n';
-                });
-                
-                knowledgeContext += '\nIMPORTANT: List ALL documents above when the user asks what documents you have. Do not say you only have one document when you actually have multiple.\n';
-              } else {
-                console.log('ℹ️ [KNOWLEDGE] No documents found in knowledge base');
-                knowledgeContext = '\n\n## YOUR KNOWLEDGE BASE\n\nYou currently have no documents in your knowledge base.\n';
-              }
-            } else {
-              // Regular semantic search for content queries
-              console.log('🔍 [SEMANTIC SEARCH] Searching knowledge base for relevant content...');
-              
-              const { data: searchData, error: searchError } = await supabase.functions.invoke(
-                'semantic-search',
-                {
-                  body: {
-                    query: message,
-                    agentId: agent.id,
-                    topK: 5
-                  }
-                }
-              );
-
-              if (!searchError && searchData?.documents && searchData.documents.length > 0) {
-                console.log(`✅ [SEMANTIC SEARCH] Found ${searchData.documents.length} relevant chunks`);
-                
-                knowledgeContext = '\n\n## KNOWLEDGE BASE CONTEXT\n\n';
-                knowledgeContext += 'Here are relevant excerpts from your knowledge base:\n\n';
-                
-                searchData.documents.forEach((doc: any, index: number) => {
-                  knowledgeContext += `### Excerpt ${index + 1} from: ${doc.document_name}\n`;
-                  knowledgeContext += `**Category**: ${doc.category || 'General'}\n`;
-                  if (doc.summary) knowledgeContext += `**Document Summary**: ${doc.summary}\n`;
-                  knowledgeContext += `**Content**:\n${doc.content}\n\n`;
-                  knowledgeContext += `---\n\n`;
-                });
-                
-                knowledgeContext += 'Use the above excerpts to answer the user\'s question accurately.\n';
-              } else {
-                console.log('ℹ️ [SEMANTIC SEARCH] No relevant content found');
-                if (searchError) {
-                  console.error('⚠️ [SEMANTIC SEARCH] Error:', searchError);
-                }
-              }
-            }
-          } catch (err) {
-            console.error('❌ [KNOWLEDGE] Failed:', err);
-            // Continue without knowledge context if query fails
-          }
           
           
           // ========================================
@@ -3304,85 +3118,76 @@ The system has automatically executed a search based on your proposed query and 
           }
           
           // ============================================================================
-          // AUTO-EXECUTION: Analyze user intent and pre-execute tools
+          // UNCONDITIONAL SEMANTIC SEARCH - ALWAYS EXECUTE
+          // Every user message triggers automatic semantic search for knowledge base access
           // ============================================================================
-          let autoExecutedContext = '';
+          let knowledgeContext = '';
           
-          const intent = analyzeUserIntent(message);
-          console.log(`🤖 [AUTO-EXEC] Intent analysis:`, intent);
+          console.log(`🔍 [AUTO-SEARCH] Executing unconditional semantic search for: "${message}"`);
           
-          if (intent.requiresKnowledgeList) {
-            console.log('🤖 [AUTO-EXEC] Auto-executing: get_agent_knowledge');
-            try {
-              const { data: docs, error } = await supabase.rpc('get_distinct_documents', {
-                p_agent_id: agent.id
-              });
-              
-              if (error) {
-                console.error('❌ [AUTO-EXEC] Failed to get documents:', error);
-              } else {
-                const docList = docs?.map((d: any, i: number) => `${i+1}. ${d.document_name}`).join('\n') || 'No documents found';
-                
-                autoExecutedContext += `
-## 📋 AUTO-RETRIEVED KNOWLEDGE BASE
-
-Your knowledge base contains ${docs?.length || 0} documents:
-
-${docList}
-
-**CRITICAL**: The system has automatically retrieved this list. Use it to answer the user's question about your documents. DO NOT call get_agent_knowledge again.
-`;
-                console.log(`✅ [AUTO-EXEC] Injected ${docs?.length || 0} documents into context`);
-              }
-            } catch (err) {
-              console.error('❌ [AUTO-EXEC] Exception:', err);
-            }
-          }
-          
-          if (intent.requiresSemanticSearch) {
-            console.log(`🤖 [AUTO-EXEC] Auto-executing: semantic_search with query "${intent.semanticQuery}"`);
-            try {
-              const { data: results, error } = await supabase.functions.invoke('semantic-search', {
+          try {
+            const { data: searchData, error: searchError } = await supabase.functions.invoke(
+              'semantic-search',
+              {
                 body: {
-                  query: intent.semanticQuery,
+                  query: message,
                   agentId: agent.id,
-                  topK: 5
-                }
-              });
-              
-              if (error) {
-                console.error('❌ [AUTO-EXEC] Failed to search:', error);
-              } else {
-                const chunks = Array.isArray(results) ? results : results?.documents || [];
-                
-                if (chunks.length > 0) {
-                  const chunksText = chunks.map((c: any, i: number) => `
-### Chunk ${i+1} from "${c.document_name}"
-${c.content}
-Similarity: ${(c.similarity * 100).toFixed(1)}%
-`).join('\n');
-                  
-                  autoExecutedContext += `
-## 📖 AUTO-RETRIEVED SEMANTIC SEARCH RESULTS
-
-Found ${chunks.length} relevant chunks for query "${intent.semanticQuery}":
-
-${chunksText}
-
-**CRITICAL**: The system has automatically searched your documents. Use these chunks to answer the user's question. Quote the documents and cite sources. DO NOT call semantic_search again unless you need additional information.
-`;
-                  console.log(`✅ [AUTO-EXEC] Injected ${chunks.length} chunks into context`);
-                } else {
-                  autoExecutedContext += `
-## 📖 AUTO-RETRIEVED SEMANTIC SEARCH RESULTS
-
-No relevant chunks found for query "${intent.semanticQuery}". Your documents may not contain information about this topic.
-`;
+                  topK: 10  // Retrieve top 10 most relevant chunks
                 }
               }
-            } catch (err) {
-              console.error('❌ [AUTO-EXEC] Exception:', err);
+            );
+
+            if (!searchError && searchData) {
+              // Handle both array format and wrapped object format
+              const documents = Array.isArray(searchData) ? searchData : searchData?.documents || [];
+              
+              if (documents.length > 0) {
+                console.log(`✅ [AUTO-SEARCH] Found ${documents.length} relevant chunks from knowledge base`);
+                
+                knowledgeContext = '\n\n## 📚 RELEVANT KNOWLEDGE BASE CONTENT\n\n';
+                knowledgeContext += `The following excerpts from your knowledge base are automatically loaded and relevant to the user's query:\n\n`;
+                
+                documents.forEach((doc: any, index: number) => {
+                  knowledgeContext += `### Excerpt ${index + 1}: ${doc.document_name}\n`;
+                  if (doc.category) knowledgeContext += `**Category**: ${doc.category}\n`;
+                  if (doc.summary) knowledgeContext += `**Summary**: ${doc.summary}\n`;
+                  knowledgeContext += `**Similarity**: ${((doc.similarity || 0) * 100).toFixed(1)}%\n`;
+                  knowledgeContext += `\n**Content**:\n${doc.content}\n\n`;
+                  knowledgeContext += `---\n\n`;
+                });
+                
+                knowledgeContext += `\n**INSTRUCTIONS**:\n`;
+                knowledgeContext += `- Use the excerpts above to answer the user's question\n`;
+                knowledgeContext += `- Cite the source documents when referencing information (e.g., "According to [document_name]...")\n`;
+                knowledgeContext += `- If the excerpts don't contain sufficient information, acknowledge what's missing\n`;
+                knowledgeContext += `- DO NOT call semantic_search tool again - this content was automatically loaded\n`;
+                knowledgeContext += `- The get_agent_knowledge and semantic_search tools are available ONLY for:\n`;
+                knowledgeContext += `  * Querying OTHER agents' knowledge bases\n`;
+                knowledgeContext += `  * Performing additional/follow-up searches beyond this automatic search\n\n`;
+                
+              } else {
+                console.log('ℹ️ [AUTO-SEARCH] No relevant content found in knowledge base');
+                knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE STATUS\n\n';
+                knowledgeContext += `No relevant content was found in your knowledge base for this query.\n`;
+                knowledgeContext += `This could mean:\n`;
+                knowledgeContext += `- Your knowledge base doesn't contain documents on this topic\n`;
+                knowledgeContext += `- The query is too specific or uses different terminology\n\n`;
+              }
+              
+            } else {
+              console.log('⚠️ [AUTO-SEARCH] Search returned no data');
+              if (searchError) {
+                console.error('❌ [AUTO-SEARCH] Error during search:', searchError);
+              }
+              knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE ERROR\n\n';
+              knowledgeContext += `Failed to search knowledge base. Proceeding without automatic context.\n\n`;
             }
+            
+          } catch (err) {
+            console.error('❌ [AUTO-SEARCH] Exception during semantic search:', err);
+            knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE ERROR\n\n';
+            knowledgeContext += `An error occurred while searching your knowledge base. Proceeding without context.\n`;
+            knowledgeContext += `Error: ${err instanceof Error ? err.message : 'Unknown error'}\n\n`;
           }
           
           // ============================================================================
@@ -3399,14 +3204,14 @@ You are an expert AI with extensive knowledge. When users ask complex questions:
 - Extended elaborations with practical applications
 - Be as long as necessary to FULLY address the question
 
-${knowledgeContext}${searchResultsContext}${autoExecutedContext}`;
+${knowledgeContext}${searchResultsContext}`;
 
           // Add mention instruction if @agent tags were detected
           const enhancedSystemPrompt = mentions.length > 0 
             ? baseSystemPrompt + mentionInstruction
             : baseSystemPrompt;
 
-          // Define tools for all agents
+          // Define tools for all agents (simplified - tools are now optional/secondary)
           let toolCallCount = 0; // Track tool calls for validation
           
           const tools = [];
