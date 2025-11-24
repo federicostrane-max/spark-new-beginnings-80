@@ -3704,32 +3704,33 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               
             } else if (llmProvider === 'google-gemini') {
               // Google Gemini implementation
+              geminiModel = 'gemini-2.0-flash-exp';
               console.log('🚀 ROUTING TO GOOGLE GEMINI');
-              console.log(`   Model: gemini-2.0-flash-exp`);
+              console.log(`   Model: ${geminiModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
-              const GOOGLE_AI_STUDIO_API_KEY = Deno.env.get('GOOGLE_AI_STUDIO_API_KEY');
-              if (!GOOGLE_AI_STUDIO_API_KEY) {
+              GOOGLE_API_KEY = Deno.env.get('GOOGLE_AI_STUDIO_API_KEY');
+              if (!GOOGLE_API_KEY) {
                 throw new Error('GOOGLE_AI_STUDIO_API_KEY is required but not set');
               }
               
               // Convert tools to Gemini format
-              const geminiTools = tools ? [{
+              geminiTools = tools ? [{
                 function_declarations: tools.map(tool => ({
                   name: tool.name,
                   description: tool.description,
                   parameters: tool.input_schema
                 }))
-              }] : undefined;
+              }] : [];
               
               // Convert messages to Gemini format
-              const geminiMessages = anthropicMessages.map(msg => ({
+              geminiMessages = anthropicMessages.map(msg => ({
                 role: msg.role === 'assistant' ? 'model' : 'user',
                 parts: [{ text: msg.content }]
               }));
               
               response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:streamGenerateContent?key=${GOOGLE_AI_STUDIO_API_KEY}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}`,
                 {
                   method: 'POST',
                   headers: {
@@ -5673,7 +5674,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           }
           
           // ===== GOOGLE GEMINI CONTINUATION =====
-          if (needsToolResultContinuation && llmProvider === 'google') {
+          if (needsToolResultContinuation && llmProvider === 'google-gemini') {
             console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Gemini...`);
             console.log(`   Current geminiMessages length: ${geminiMessages.length}`);
             
