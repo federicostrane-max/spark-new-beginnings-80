@@ -4452,12 +4452,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       
                       if (toolUseName === 'get_agent_knowledge') {
                         toolCallCount++;
+                        console.log(`🛠️ [REQ-${requestId}] ========================================`);
                         console.log(`🛠️ [REQ-${requestId}] Tool called: get_agent_knowledge`);
-                        console.log('   Agent name:', toolInput.agent_name);
+                        console.log(`🛠️ [REQ-${requestId}] ========================================`);
+                        console.log(`🛠️ [REQ-${requestId}] Input agent_name:`, toolInput.agent_name);
+                        console.log(`🛠️ [REQ-${requestId}] Current agent:`, agent.name, `(slug: ${agent.slug})`);
+                        console.log(`🛠️ [REQ-${requestId}] User message that triggered this:`, message.substring(0, 100));
                         
                         // Normalize agent name: replace hyphens with spaces for better matching
                         const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                        console.log('   Normalized name:', normalizedName);
+                        console.log(`🛠️ [REQ-${requestId}] Normalized name:`, normalizedName);
                         
                         const { data: targetAgent, error: agentError } = await supabase
                           .from('agents')
@@ -4467,9 +4471,9 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                           .single();
                         
                         if (agentError || !targetAgent) {
-                          console.error('❌ Agent not found:', toolInput.agent_name);
-                          console.error('   Search attempted with normalized name:', normalizedName);
-                          console.error('   Error:', agentError);
+                          console.error(`❌ [REQ-${requestId}] Agent not found:`, toolInput.agent_name);
+                          console.error(`❌ [REQ-${requestId}] Search attempted with normalized name:`, normalizedName);
+                          console.error(`❌ [REQ-${requestId}] Error:`, agentError);
                           toolResult = { success: false, error: 'Agent not found' };
                           
                           // Aggiungi risposta testuale per l'utente
@@ -4477,21 +4481,33 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                           fullResponse += errorText;
                           await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                         } else {
+                          console.log(`✅ [REQ-${requestId}] Target agent found:`, targetAgent.name, `(ID: ${targetAgent.id})`);
+                          
                           // Get distinct documents using aggregation to ensure we get all unique documents
+                          console.log(`🔍 [REQ-${requestId}] Calling get_distinct_documents RPC for agent ID:`, targetAgent.id);
                           const { data: documents, error: docsError } = await supabase.rpc(
                             'get_distinct_documents',
                             { p_agent_id: targetAgent.id }
                           );
                           
                           if (docsError) {
-                            console.error('❌ Error retrieving documents:', docsError);
+                            console.error(`❌ [REQ-${requestId}] Error retrieving documents:`, docsError);
                             toolResult = { success: false, error: 'Failed to retrieve documents' };
                             
                             const errorText = `\n\n❌ Errore nel recuperare i documenti di ${targetAgent.name}.\n\n`;
                             fullResponse += errorText;
                             await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
                           } else {
-                            console.log(`✅ Retrieved ${documents?.length || 0} distinct documents for agent:`, targetAgent.name);
+                            console.log(`✅ [REQ-${requestId}] RPC returned ${documents?.length || 0} distinct documents`);
+                            
+                            if (documents && documents.length > 0) {
+                              console.log(`📋 [REQ-${requestId}] Document list:`);
+                              documents.forEach((doc: any, idx: number) => {
+                                console.log(`   ${idx + 1}. ${doc.document_name} (pool_document_id: ${doc.pool_document_id})`);
+                              });
+                            } else {
+                              console.log(`⚠️ [REQ-${requestId}] No documents found for agent ${targetAgent.name}`);
+                            }
                             
                             toolResult = {
                               success: true,
@@ -4501,6 +4517,8 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                               documents: documents || []
                             };
                             
+                            console.log(`📤 [REQ-${requestId}] Tool result being sent to LLM:`, JSON.stringify(toolResult, null, 2));
+                            
                             // Aggiungi lista documenti nella risposta
                             let docsText = `\n\n✅ **${targetAgent.name}** ha accesso a ${documents?.length || 0} documenti:\n\n`;
                             documents?.forEach((doc: any, idx: number) => {
@@ -4509,8 +4527,15 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                               if (doc.summary) docsText += `   - ${doc.summary}\n`;
                               docsText += `\n`;
                             });
+                            
+                            console.log(`📝 [REQ-${requestId}] Response text being added to stream:`, docsText.substring(0, 200));
+                            
                             fullResponse += docsText;
                             await sendSSE(JSON.stringify({ type: 'content', text: docsText }));
+                            
+                            console.log(`🛠️ [REQ-${requestId}] ========================================`);
+                            console.log(`🛠️ [REQ-${requestId}] get_agent_knowledge execution completed`);
+                            console.log(`🛠️ [REQ-${requestId}] ========================================`);
                           }
                         }
                       }
