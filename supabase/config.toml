@@ -187,3 +187,27 @@ verify_jwt = true
 
 [functions.reprocess-pool-document]
 verify_jwt = true
+
+# ===== PIPELINE B: New Document Processing System =====
+# Completely independent from existing pipeline
+
+[functions.pipeline-b-ingest-pdf]
+verify_jwt = true
+
+[functions.pipeline-b-ingest-github]
+verify_jwt = true
+
+[functions.pipeline-b-process-chunks]
+verify_jwt = false
+timeout = 600
+# Cron: every 10 minutes
+# */10 * * * *
+
+[functions.pipeline-b-generate-embeddings]
+verify_jwt = false
+timeout = 600
+# Cron: every 5 minutes
+# */5 * * * *
+
+[functions.pipeline-b-sync-agent]
+verify_jwt = true
