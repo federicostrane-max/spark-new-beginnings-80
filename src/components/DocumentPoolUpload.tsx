@@ -136,48 +136,17 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          // Step 2: Convert PDF to base64
-          setProgress((fileIndex / totalFiles) * 100 + 20);
+          // Step 2: Upload to Pipeline B (instant upload to storage)
+          setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          const base64Promise = new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            const timeout = setTimeout(() => reject(new Error('Timeout conversione file (30s)')), 30000);
-            
-            reader.onloadend = () => {
-              clearTimeout(timeout);
-              const result = reader.result as string;
-              resolve(result.split(',')[1]);
-            };
-            reader.onerror = () => {
-              clearTimeout(timeout);
-              reject(new Error('Errore lettura file'));
-            };
-            reader.readAsDataURL(file);
+          console.log(`Uploading "${file.name}" to Pipeline B...`);
+          
+          const formData = new FormData();
+          formData.append('file', file);
+          
+          const { data, error } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
+            body: formData
           });
-          
-          const fileBase64 = await base64Promise;
-          console.log(`✓ File converted to base64`);
-
-          // Step 3: Upload to pool with Landing AI (increased timeout for large files)
-          setProgress((fileIndex / totalFiles) * 100 + 40);
-          
-          const uploadTimeout = file.size > 5 * 1024 * 1024 ? 180000 : 120000; // 3min for >5MB, 2min for smaller
-          console.log(`Uploading "${file.name}" with Landing AI (timeout: ${uploadTimeout/1000}s)...`);
-          
-          const uploadPromise = supabase.functions.invoke('upload-pdf-to-pool', {
-            body: {
-              fileBase64,
-              fileName: file.name,
-              fileSize: file.size,
-              // agentId: undefined (shared pool - no agent assignment)
-            }
-          });
-          
-          const uploadTimeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Timeout upload (${uploadTimeout/1000}s)`)), uploadTimeout)
-          );
-          
-          const { data, error } = await Promise.race([uploadPromise, uploadTimeoutPromise]) as any;
 
           if (error) {
             throw new Error(`Upload fallito: ${error.message}`);
@@ -245,7 +214,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       <CardHeader>
         <CardTitle>Carica Nuovi Documenti</CardTitle>
         <CardDescription>
-          Carica PDF nel pool condiviso con Landing AI. Estrazione intelligente di testo, tabelle, grafici e layout.
+          Carica PDF nel pool condiviso. L'elaborazione con Landing AI avverrà automaticamente in background.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
