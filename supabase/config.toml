@@ -211,3 +211,6 @@ timeout = 600
 
 [functions.pipeline-b-sync-agent]
 verify_jwt = true
+
+[functions.test-landing-ai-metadata]
+verify_jwt = false
