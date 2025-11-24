@@ -14,7 +14,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Link as LinkIcon, Search } from "lucide-react";
+import { Link as LinkIcon, Search, Clock } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -50,6 +50,7 @@ export const BulkAssignDocumentDialog = ({
   const [agentSearchQuery, setAgentSearchQuery] = useState("");
   const [documentCount, setDocumentCount] = useState(0);
   const [validatedCount, setValidatedCount] = useState(0);
+  const [processingCount, setProcessingCount] = useState(0);
   const [progressMessage, setProgressMessage] = useState<string>("");
 
   const countDocuments = async () => {
@@ -73,7 +74,7 @@ export const BulkAssignDocumentDialog = ({
         setValidatedCount(validCount || 0);
       } else if (documentIds && documentIds.length > 0) {
         // Manual selection: check BOTH pipelines
-        const [legacyTotal, pipelineBTotal, legacyValid, pipelineBValid] = await Promise.all([
+        const [legacyTotal, pipelineBTotal, legacyValid, pipelineBValid, pipelineBProcessing] = await Promise.all([
           supabase
             .from("knowledge_documents")
             .select("id", { count: 'exact', head: true })
@@ -92,19 +93,27 @@ export const BulkAssignDocumentDialog = ({
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
-            .eq("status", "ready")
+            .eq("status", "ready"),
+          supabase
+            .from("pipeline_b_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .in("status", ["ingested", "processing", "embedding"])
         ]);
         
         const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0);
         const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0);
+        const processingCount = pipelineBProcessing.count || 0;
         
         setDocumentCount(totalCount);
         setValidatedCount(validCount);
+        setProcessingCount(processingCount);
       }
     } catch (error) {
       console.error("Error counting documents:", error);
       setDocumentCount(0);
       setValidatedCount(0);
+      setProcessingCount(0);
     }
   };
 
@@ -471,12 +480,22 @@ export const BulkAssignDocumentDialog = ({
             Assegnazione Multipla
           </DialogTitle>
           <DialogDescription>
-            Documenti: {validatedCount}
-            {documentCount > validatedCount && (
-              <span className="text-amber-600 ml-2">
-                ({documentCount - validatedCount} non validati saranno ignorati)
-              </span>
-            )}
+            <div className="space-y-1">
+              <div>
+                Documenti pronti: {validatedCount}
+                {documentCount > validatedCount && (
+                  <span className="text-amber-600 ml-2">
+                    ({documentCount - validatedCount} non pronti)
+                  </span>
+                )}
+              </div>
+              {processingCount > 0 && (
+                <div className="text-blue-600 text-sm flex items-center gap-2">
+                  <Clock className="h-3 w-3 animate-pulse" />
+                  {processingCount} {processingCount === 1 ? 'documento' : 'documenti'} in elaborazione - riprova tra qualche minuto
+                </div>
+              )}
+            </div>
           </DialogDescription>
         </DialogHeader>
 
