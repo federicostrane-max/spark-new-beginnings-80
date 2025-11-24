@@ -344,6 +344,8 @@ export const DocumentPoolTable = () => {
         source_url: null,
         pipeline: 'b' as const,
         error_message: doc.error_message,
+        file_path: doc.file_path,
+        storage_bucket: doc.storage_bucket,
       }));
 
       // Merge and sort by created_at
@@ -802,6 +804,8 @@ export const DocumentPoolTable = () => {
         agent_ids: [],
         pipeline: 'b' as const,
         error_message: doc.error_message,
+        file_path: doc.file_path,
+        storage_bucket: doc.storage_bucket,
       }));
       allNoFolderDocs.push(...transformedPipelineB);
     }
