@@ -3519,7 +3519,67 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               }
             }
             
-            // ============= TOOL 4: web_scrape =============
+            // ============= TOOL 4: semantic_search =============
+            else if (toolName === 'semantic_search') {
+              console.log(`🔍 [REQ-${context.requestId}] Tool called: semantic_search with query: "${toolInput.query}"`);
+              
+              try {
+                const topK = toolInput.topK || 5;
+                console.log(`   TopK: ${topK}`);
+                
+                // Call the semantic-search edge function
+                const { data: searchResults, error: searchError } = await context.supabase.functions.invoke('semantic-search', {
+                  body: {
+                    query: toolInput.query,
+                    agentId: context.agent.id,
+                    topK: Math.min(topK, 10) // Max 10 chunks
+                  }
+                });
+                
+                if (searchError) {
+                  console.error(`❌ Semantic search error:`, searchError);
+                  toolResult = { error: 'Failed to search knowledge base', success: false };
+                  responseText = `❌ Errore nella ricerca: ${searchError.message}\n`;
+                } else if (!searchResults || searchResults.length === 0) {
+                  console.log(`⚠️ No results found for query: "${toolInput.query}"`);
+                  toolResult = { results: [], count: 0, success: true };
+                  responseText = `ℹ️ Nessun risultato trovato per "${toolInput.query}".\n`;
+                } else {
+                  console.log(`✅ Found ${searchResults.length} relevant chunks`);
+                  searchResults.forEach((r: any, i: number) => {
+                    console.log(`   ${i + 1}. ${r.document_name} (similarity: ${r.similarity?.toFixed(3)})`);
+                  });
+                  
+                  toolResult = {
+                    results: searchResults.map((r: any) => ({
+                      document_name: r.document_name,
+                      content: r.content,
+                      category: r.category,
+                      similarity: r.similarity
+                    })),
+                    count: searchResults.length,
+                    success: true
+                  };
+                  
+                  // Empty response - LLM will use toolResult to formulate answer
+                  responseText = '';
+                }
+                
+                newFullResponse += responseText;
+                if (responseText) {
+                  await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                }
+                
+              } catch (error) {
+                console.error('❌ Error in semantic_search:', error);
+                toolResult = { error: 'Failed to search knowledge base', success: false };
+                responseText = `❌ Errore nella ricerca della knowledge base.\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL 5: web_scrape =============
             else if (toolName === 'web_scrape') {
               console.log(`🛠️ [REQ-${context.requestId}] Tool called: web_scrape`);
               
@@ -3541,7 +3601,7 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
               }
             }
             
-            // ============= TOOL 5: airtop_browser_automation =============
+            // ============= TOOL 6: airtop_browser_automation =============
             else if (toolName === 'airtop_browser_automation') {
               console.log(`🛠️ [REQ-${context.requestId}] Tool called: airtop_browser_automation`);
               
@@ -3736,6 +3796,26 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 }
               },
               required: []
+            }
+          });
+          
+          tools.push({
+            name: 'semantic_search',
+            description: 'Search your own knowledge base for relevant information based on semantic similarity. Use this when you need to find specific content from your documents to answer user questions. This retrieves actual document content, not just document names.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'The search query to find relevant information in your knowledge base. Be specific and use keywords related to what the user is asking about.'
+                },
+                topK: {
+                  type: 'number',
+                  description: 'Number of relevant chunks to retrieve (default 5, max 10)',
+                  default: 5
+                }
+              },
+              required: ['query']
             }
           });
           
