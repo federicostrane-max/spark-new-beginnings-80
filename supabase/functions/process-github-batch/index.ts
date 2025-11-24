@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
-import { chunkText, validateChunk, type TextChunk } from "../_shared/chunkingService.ts";
 import { generateEmbeddingsBatch, validateEmbedding } from "../_shared/embeddingService.ts";
 
 const corsHeaders = {
@@ -8,12 +7,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface LandingAIChunk {
+  text: string;
+  chunk_type: string;
+  chunk_references?: {
+    page?: number;
+    grounding?: Array<{ x: number; y: number; width: number; height: number }>;
+  };
+}
+
 interface ProcessingStats {
   totalDocuments: number;
   processed: number;
   failed: number;
   chunksCreated: number;
   errors: Array<{ documentId: string; fileName: string; error: string }>;
+}
+
+async function extractWithLandingAI(fullText: string, fileName: string): Promise<LandingAIChunk[]> {
+  const landingApiKey = Deno.env.get('LANDING_AI_API_KEY');
+  if (!landingApiKey) {
+    throw new Error('LANDING_AI_API_KEY not configured');
+  }
+
+  // Convert full_text to Blob/File for Landing AI
+  const textBlob = new Blob([fullText], { type: 'text/plain' });
+  const formData = new FormData();
+  formData.append('file', textBlob, fileName);
+
+  const response = await fetch('https://api.va.landing.ai/v1/ade/parse', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${landingApiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Landing AI extraction failed: ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json();
+  return result.chunks || [];
 }
 
 serve(async (req) => {
@@ -96,30 +132,18 @@ serve(async (req) => {
             processing_started_at: new Date().toISOString(),
           });
 
-        // Step 1: Create chunks
-        console.log(`📝 Creating chunks for ${doc.file_name}...`);
-        const chunks = chunkText(doc.full_text, 1000, 200);
-        console.log(`✓ Created ${chunks.length} chunks`);
+        // Step 1: Extract chunks with Landing AI
+        console.log(`🚀 Calling Landing AI for ${doc.file_name}...`);
+        const landingChunks = await extractWithLandingAI(doc.full_text, doc.file_name);
+        console.log(`✓ Landing AI returned ${landingChunks.length} chunks`);
 
-        // Validate chunks
-        const validChunks = chunks.filter(chunk => {
-          const validation = validateChunk(chunk);
-          if (!validation.valid) {
-            console.warn(`⚠️ Invalid chunk ${chunk.metadata.chunkIndex}: ${validation.reason}`);
-            return false;
-          }
-          return true;
-        });
-
-        if (validChunks.length === 0) {
-          throw new Error('No valid chunks created');
+        if (landingChunks.length === 0) {
+          throw new Error('No chunks created by Landing AI');
         }
-
-        console.log(`✓ ${validChunks.length} valid chunks`);
 
         // Step 2: Generate embeddings
         console.log(`🧮 Generating embeddings...`);
-        const texts = validChunks.map(c => c.content);
+        const texts = landingChunks.map(c => c.text);
         
         const { successes: embeddings, failures } = await generateEmbeddingsBatch(
           texts,
@@ -147,7 +171,7 @@ serve(async (req) => {
         console.log(`💾 Inserting chunks into database...`);
         
         const chunksToInsert = embeddings.map((emb, index) => {
-          const chunk = validChunks[index];
+          const chunk = landingChunks[index];
           
           // Validate embedding
           const embValidation = validateEmbedding(emb.embedding);
@@ -160,12 +184,17 @@ serve(async (req) => {
             agent_id: null, // Shared pool
             pool_document_id: doc.id,
             document_name: doc.file_name,
-            content: chunk.content,
+            content: chunk.text,
             category: doc.folder || 'GitHub',
             summary: null,
             embedding: JSON.stringify(emb.embedding),
             source_type: 'shared_pool',
-            chunking_metadata: chunk.metadata,
+            chunk_type: chunk.chunk_type,
+            chunking_metadata: {
+              chunk_type: chunk.chunk_type,
+              page: chunk.chunk_references?.page,
+              visual_grounding: chunk.chunk_references?.grounding,
+            },
             is_active: true,
           };
         }).filter(Boolean);
