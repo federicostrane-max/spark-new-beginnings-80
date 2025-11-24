@@ -7,14 +7,15 @@ const corsHeaders = {
 };
 
 // ============================================================================
-// INTERFACCE BASATE SU DOCUMENTAZIONE UFFICIALE LANDING AI GITHUB
+// TypeScript Interfaces - Based on Landing AI Official Documentation
+// GET /v1/ade/parse/jobs/{job_id} Response Format
 // ============================================================================
 
 interface LandingAIGroundingBox {
-  l: number;  // left
-  t: number;  // top
-  r: number;  // right
-  b: number;  // bottom
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 interface LandingAIGrounding {
@@ -23,38 +24,29 @@ interface LandingAIGrounding {
 }
 
 interface LandingAIChunk {
-  text: string;              // REQUIRED - mai null nella documentazione ufficiale
-  chunk_type: string;        // REQUIRED
-  chunk_id: string;          // REQUIRED
-  grounding: LandingAIGrounding[];  // REQUIRED
+  markdown: string;          // REQUIRED - text content of the chunk
+  type: string;              // REQUIRED - chunk type (text, table, list, code_block, header, etc.)
+  id: string;                // REQUIRED - unique chunk identifier
+  grounding?: LandingAIGrounding;  // OPTIONAL - visual location info
 }
 
-// Formato risposta "wrapped" (nuovo API /v1/ade/parse)
-interface LandingAIResponseWrapped {
-  data: {
-    markdown: string;
+interface LandingAIJobResponse {
+  job_id: string;
+  status: string;
+  data?: {
     chunks: LandingAIChunk[];
     metadata?: any;
   };
-  errors?: Array<{ message: string; code: string }>;
-  metadata?: any;
-}
-
-// Formato risposta "direct" (legacy API /v1/tools/agentic-document-analysis)
-interface LandingAIResponseDirect {
-  markdown: string;
-  chunks: LandingAIChunk[];
+  metadata?: {
+    filename: string;
+    page_count: number;
+  };
 }
 
 // ============================================================================
-// FUNZIONE: createLandingAIParseJob - Always creates new Parse Job
+// FUNCTION: createLandingAIParseJob - Create new Parse Job
 // ============================================================================
 
-
-/**
- * Create a new Landing AI Parse Job
- * Always creates a new job - no caching logic
- */
 async function createLandingAIParseJob(
   content: Blob,
   fileName: string
@@ -64,7 +56,6 @@ async function createLandingAIParseJob(
     throw new Error('LANDING_AI_API_KEY not configured');
   }
 
-  // Create a new Parse Job
   console.log(`🚀 [Landing AI] Creating new Parse Job for: ${fileName}`);
   const formData = new FormData();
   formData.append('document', content, fileName);
@@ -97,7 +88,7 @@ async function createLandingAIParseJob(
 }
 
 // ============================================================================
-// FUNZIONE: pollJobUntilComplete - Poll job status until ready
+// FUNCTION: pollJobUntilComplete - Poll job status until ready
 // ============================================================================
 
 async function pollJobUntilComplete(jobId: string, maxAttempts = 30): Promise<void> {
@@ -138,7 +129,7 @@ async function pollJobUntilComplete(jobId: string, maxAttempts = 30): Promise<vo
 }
 
 // ============================================================================
-// FUNZIONE: retrieveJobChunks - Get chunks from completed job
+// FUNCTION: retrieveJobChunks - Get chunks from completed job
 // ============================================================================
 
 async function retrieveJobChunks(jobId: string): Promise<LandingAIChunk[]> {
@@ -146,102 +137,85 @@ async function retrieveJobChunks(jobId: string): Promise<LandingAIChunk[]> {
   
   console.log(`📥 [Landing AI] Retrieving chunks from job: ${jobId}`);
   
-  const response = await fetch(`https://api.va.landing.ai/v1/ade/jobs/${jobId}`, {
-    headers: {
-      'Authorization': `Bearer ${landingApiKey}`,
-    },
-  });
+  // Use official GET /v1/ade/parse/jobs/{job_id} endpoint
+  const response = await fetch(
+    `https://api.va.landing.ai/v1/ade/parse/jobs/${jobId}`,
+    { headers: { 'Authorization': `Bearer ${landingApiKey}` } }
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`❌ [Landing AI] Failed to retrieve chunks: ${response.status}`);
-    console.error(`❌ [Landing AI] Error: ${errorText}`);
-    throw new Error(`Failed to retrieve job results: ${response.status}`);
+    throw new Error(`Failed to retrieve job results: ${response.status} - ${errorText}`);
   }
 
-  const rawResult = await response.json();
-  console.log('📊 [Landing AI] Job Response Structure:', {
-    hasResult: 'result' in rawResult,
-    hasChunks: 'chunks' in rawResult,
-    hasData: 'data' in rawResult,
-    status: rawResult.status,
-    topLevelKeys: Object.keys(rawResult),
-  });
-
-  // Parse chunks from job result
-  let chunks: LandingAIChunk[];
+  const jobResult: LandingAIJobResponse = await response.json();
   
-  if (rawResult.result?.data?.chunks) {
-    console.log('✓ [Landing AI] Chunks found in result.data.chunks');
-    chunks = rawResult.result.data.chunks;
-  } else if (rawResult.result?.chunks) {
-    console.log('✓ [Landing AI] Chunks found in result.chunks');
-    chunks = rawResult.result.chunks;
-  } else if (rawResult.data?.chunks) {
-    console.log('✓ [Landing AI] Chunks found in data.chunks');
-    chunks = rawResult.data.chunks;
-  } else if (rawResult.chunks) {
-    console.log('✓ [Landing AI] Chunks found in top-level chunks');
-    chunks = rawResult.chunks;
-  } else {
-    console.error('❌ [Landing AI] No chunks found in response:', JSON.stringify(rawResult, null, 2));
-    throw new Error('Landing AI job result missing chunks');
+  // Validate job completed successfully
+  if (jobResult.status !== 'completed') {
+    throw new Error(`Job not completed. Status: ${jobResult.status}`);
   }
 
-  // 5️⃣ LOGGING DETTAGLIATO CHUNKS
-  console.log(`📄 [Landing AI] Total chunks retrieved: ${chunks.length}`);
+  // Extract chunks from data.chunks (per official documentation)
+  const chunks = jobResult.data?.chunks;
   
+  if (!chunks || !Array.isArray(chunks)) {
+    console.error('❌ [Landing AI] Invalid response structure:', jobResult);
+    throw new Error('Landing AI response missing data.chunks array');
+  }
+
+  console.log(`📄 [Landing AI] Retrieved ${chunks.length} chunks`);
+  
+  // Log first 3 chunks for debugging
   if (chunks.length > 0) {
-    console.log('📄 [Landing AI] First 3 chunks (full structure):');
+    console.log('📄 [Landing AI] Sample chunks:');
     chunks.slice(0, 3).forEach((chunk, i) => {
-      console.log(`\n--- Chunk ${i} ---`);
-      console.log(JSON.stringify(chunk, null, 2));
+      console.log(`\nChunk ${i}:`, {
+        markdown_length: chunk.markdown?.length || 0,
+        type: chunk.type,
+        id: chunk.id,
+        has_grounding: !!chunk.grounding,
+        grounding_page: chunk.grounding?.page,
+      });
     });
   }
 
-  // 6️⃣ VALIDAZIONE RIGOROSA
-  const validatedChunks: LandingAIChunk[] = [];
+  // Validate chunks have required fields (markdown, type, id)
+  const validChunks: LandingAIChunk[] = [];
   
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     
-    // Controllo presenza campi REQUIRED
-    if (!chunk.text || typeof chunk.text !== 'string') {
-      console.error(`❌ [Landing AI] Chunk ${i} missing or invalid 'text' field:`, {
-        hasTextField: 'text' in chunk,
-        textType: typeof chunk.text,
-        textValue: chunk.text,
-        allKeys: Object.keys(chunk),
-      });
-      throw new Error(`Landing AI chunk ${i} has null/invalid text field - this violates API schema`);
+    // Validate required fields per documentation
+    if (!chunk.markdown || typeof chunk.markdown !== 'string') {
+      console.warn(`⚠️ [Landing AI] Chunk ${i} missing/invalid markdown field, skipping`);
+      continue;
     }
     
-    if (!chunk.chunk_type) {
-      console.error(`❌ [Landing AI] Chunk ${i} missing 'chunk_type':`, chunk);
-      throw new Error(`Landing AI chunk ${i} missing required chunk_type field`);
+    if (!chunk.type || typeof chunk.type !== 'string') {
+      console.warn(`⚠️ [Landing AI] Chunk ${i} missing type field, skipping`);
+      continue;
     }
     
-    if (!chunk.chunk_id) {
-      console.error(`❌ [Landing AI] Chunk ${i} missing 'chunk_id':`, chunk);
-      throw new Error(`Landing AI chunk ${i} missing required chunk_id field`);
+    if (!chunk.id || typeof chunk.id !== 'string') {
+      console.warn(`⚠️ [Landing AI] Chunk ${i} missing id field, skipping`);
+      continue;
     }
     
-    if (!Array.isArray(chunk.grounding)) {
-      console.error(`❌ [Landing AI] Chunk ${i} missing/invalid 'grounding':`, chunk);
-      throw new Error(`Landing AI chunk ${i} missing required grounding array`);
+    // grounding is optional - just log if missing
+    if (!chunk.grounding) {
+      console.log(`ℹ️ [Landing AI] Chunk ${i} has no grounding (optional)`);
     }
     
-    // Se arriviamo qui, il chunk è valido
-    validatedChunks.push(chunk);
+    validChunks.push(chunk);
   }
   
-  console.log(`✅ [Landing AI] Validated ${validatedChunks.length}/${chunks.length} chunks`);
+  console.log(`✅ [Landing AI] Validated ${validChunks.length}/${chunks.length} chunks`);
   
-  if (validatedChunks.length === 0) {
-    throw new Error('Landing AI returned 0 valid chunks - all chunks failed validation');
+  if (validChunks.length === 0) {
+    throw new Error('No valid chunks found after validation');
   }
   
-  return validatedChunks;
+  return validChunks;
 }
 
 // ============================================================================
@@ -325,15 +299,17 @@ serve(async (req) => {
         const landingChunks = await retrieveJobChunks(jobId);
         console.log(`✓ Retrieved ${landingChunks.length} validated chunks from job ${jobId}`);
 
-        // Non servono più filtri - extractWithLandingAI restituisce SOLO chunks validi
+        // Map Landing AI chunks to database format
         const chunksToInsert = landingChunks.map((chunk, index) => ({
           document_id: doc.id,
-          content: chunk.text,  // Garantito essere stringa non-vuota
-          chunk_type: chunk.chunk_type,
+          content: chunk.markdown,              // ✅ Correct field name
+          chunk_type: chunk.type,                // ✅ Correct field name
           chunk_index: index,
-          chunk_id: chunk.chunk_id,  // Nuovo campo da Landing AI
-          page_number: chunk.grounding[0]?.page || null,
-          visual_grounding: chunk.grounding || null,
+          chunking_metadata: {
+            chunk_id: chunk.id,                  // ✅ Correct field name
+            grounding: chunk.grounding || null,  // ✅ Single object, not array
+          },
+          page_number: chunk.grounding?.page || null,  // ✅ Not array
           embedding_status: 'pending',
         }));
 
