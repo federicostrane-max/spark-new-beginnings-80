@@ -3129,9 +3129,9 @@ Il prompt deve essere pronto all'uso direttamente.`;
               }
               
               if (distinctDocs.length > 0) {
-                // Get unique documents by document_name
+                // Get unique documents by pool_document_id to preserve all files (even with same name in different folders)
                 const uniqueDocs = Array.from(
-                  new Map(distinctDocs.map(doc => [doc.document_name, doc])).values()
+                  new Map(distinctDocs.map(doc => [doc.pool_document_id || doc.id, doc])).values()
                 );
                 
                 console.log(`✅ [KNOWLEDGE] Found ${uniqueDocs.length} unique documents in knowledge base`);
