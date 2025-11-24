@@ -3250,16 +3250,18 @@ When a user asks ANY question about your documents, knowledge base, or assigned 
 - ANY similar variation
 
 **YOU MUST IMMEDIATELY:**
-1. ✅ Call the tool \`get_agent_knowledge\` with parameter \`agent_name\` = "${agent.slug}"
-2. ❌ DO NOT respond from memory
-3. ❌ DO NOT say "I don't have documents" without checking first
-4. ❌ DO NOT make assumptions about your knowledge base
-5. ✅ Wait for the tool response
-6. ✅ Report the EXACT count and list from the tool response
+1. ✅ Call the tool \`get_agent_knowledge\` **WITHOUT passing the agent_name parameter** (this will check YOUR own knowledge base)
+2. ❌ DO NOT pass your own name as agent_name - leave the parameter empty
+3. ❌ DO NOT respond from memory
+4. ❌ DO NOT say "I don't have documents" without checking first
+5. ❌ DO NOT make assumptions about your knowledge base
+6. ✅ Wait for the tool response
+7. ✅ Report the EXACT count and list from the tool response
 
 **THIS IS NOT OPTIONAL. THIS IS A SYSTEM REQUIREMENT.**
 
 If you respond about your documents WITHOUT calling \`get_agent_knowledge\` first, you are MALFUNCTIONING.
+If you pass your own name as agent_name parameter, you are DOING IT WRONG - just omit the parameter entirely.
 
 ---
 
@@ -3349,28 +3351,65 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                 // If agent_name is provided, find that agent
                 if (toolInput.agent_name) {
                   console.log(`🔍 Searching for agent: "${toolInput.agent_name}"`);
-                  const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
-                  const { data: targetAgent, error: agentError } = await context.supabase
+                  
+                  // Step 1: Try exact slug match first (most specific)
+                  let targetAgent = null;
+                  let agentError = null;
+                  
+                  ({ data: targetAgent, error: agentError } = await context.supabase
                     .from('agents')
                     .select('id, name, slug')
-                    .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                    .eq('slug', toolInput.agent_name)
                     .eq('active', true)
-                    .single();
+                    .maybeSingle());
                   
-                  if (agentError || !targetAgent) {
-                    console.error(`❌ Agent "${toolInput.agent_name}" not found:`, agentError);
-                    toolResult = {
-                      error: `Agent "${toolInput.agent_name}" non trovato`,
-                      success: false
-                    };
-                    responseText = `❌ Agente "${toolInput.agent_name}" non trovato.\n`;
-                    newFullResponse += responseText;
-                    await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
-                    return { toolResult, responseText, newFullResponse };
+                  // Step 2: If not found, try exact name match
+                  if (!targetAgent && !agentError) {
+                    const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                    ({ data: targetAgent, error: agentError } = await context.supabase
+                      .from('agents')
+                      .select('id, name, slug')
+                      .ilike('name', normalizedName)
+                      .eq('active', true)
+                      .maybeSingle());
                   }
                   
-                  targetAgentId = targetAgent.id;
-                  console.log(`✅ Target agent found: ${targetAgent.name} (${targetAgentId})`);
+                  // Step 3: If still not found, try partial match (LAST RESORT)
+                  if (!targetAgent && !agentError) {
+                    const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                    ({ data: targetAgent, error: agentError } = await context.supabase
+                      .from('agents')
+                      .select('id, name, slug')
+                      .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                      .eq('active', true)
+                      .limit(1)
+                      .maybeSingle());
+                  }
+                  
+                  if (agentError || !targetAgent) {
+                    // Fallback: Check if user is asking about current agent
+                    const currentAgentMatches = 
+                      context.agent.slug === toolInput.agent_name ||
+                      context.agent.name.toLowerCase() === toolInput.agent_name.toLowerCase().replace(/-/g, ' ');
+                    
+                    if (currentAgentMatches) {
+                      console.log(`⚠️ Agent search failed but matches current agent, using fallback`);
+                      targetAgentId = context.agent.id;
+                    } else {
+                      console.error(`❌ Agent "${toolInput.agent_name}" not found:`, agentError);
+                      toolResult = {
+                        error: `Agent "${toolInput.agent_name}" non trovato`,
+                        success: false
+                      };
+                      responseText = `❌ Agente "${toolInput.agent_name}" non trovato.\n`;
+                      newFullResponse += responseText;
+                      await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                      return { toolResult, responseText, newFullResponse };
+                    }
+                  } else {
+                    targetAgentId = targetAgent.id;
+                    console.log(`✅ Target agent found: ${targetAgent.name} (${targetAgentId})`);
+                  }
                 }
                 
                 console.log(`📊 Querying documents for agent: ${targetAgentId}`);
@@ -3687,16 +3726,16 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
           
           tools.push({
             name: 'get_agent_knowledge',
-            description: 'Get a list of documents in an agent\'s knowledge base (including your own). Use this to check what documents you or another agent has access to. If a user asks "quanti documenti hai?" or "what documents do you have?", use this tool with your own agent name.',
+            description: 'Retrieves the knowledge base (list of documents) for an agent. **IMPORTANT**: If you want to check YOUR OWN knowledge base, DO NOT pass any agent_name parameter - leave it empty or omit it entirely. Only pass agent_name if you need to check ANOTHER agent\'s knowledge base.',
             input_schema: {
               type: 'object',
               properties: {
                 agent_name: {
                   type: 'string',
-                  description: 'The name or slug of the agent whose knowledge base you want to view (can be your own name to check your documents)'
+                  description: 'Optional. The slug or name of the agent whose knowledge base you want to retrieve. **Leave this EMPTY to check your own knowledge base**. Only provide this if the user explicitly asks about ANOTHER agent\'s documents.'
                 }
               },
-              required: ['agent_name']
+              required: []
             }
           });
           
