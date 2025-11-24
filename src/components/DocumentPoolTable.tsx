@@ -854,40 +854,74 @@ export const DocumentPoolTable = () => {
 
   const handleDelete = async (doc: KnowledgeDocument) => {
     try {
-      const { error: linksError } = await supabase
-        .from("agent_document_links")
-        .delete()
-        .eq("document_id", doc.id);
+      if (doc.pipeline === 'b') {
+        // Pipeline B deletion
+        const { error: agentKnowledgeError } = await supabase
+          .from("pipeline_b_agent_knowledge")
+          .delete()
+          .eq("chunk_id", doc.id);
 
-      if (linksError) throw linksError;
+        if (agentKnowledgeError) throw agentKnowledgeError;
 
-      const { error: knowledgeError } = await supabase
-        .from("agent_knowledge")
-        .delete()
-        .eq("pool_document_id", doc.id);
+        const { error: chunksError } = await supabase
+          .from("pipeline_b_chunks_raw")
+          .delete()
+          .eq("document_id", doc.id);
 
-      if (knowledgeError) throw knowledgeError;
+        if (chunksError) throw chunksError;
 
-      const { error: cacheError } = await supabase
-        .from("document_processing_cache")
-        .delete()
-        .eq("document_id", doc.id);
+        const filePath = doc.file_path || `pipeline-b/${doc.id}/${doc.file_name}`;
+        const bucketName = doc.storage_bucket || "knowledge-pdfs";
+        
+        const { error: storageError } = await supabase.storage
+          .from(bucketName)
+          .remove([filePath]);
 
-      if (cacheError) throw cacheError;
+        if (storageError) console.warn("Storage deletion warning:", storageError);
 
-      const filePath = `${doc.id}/${doc.file_name}`;
-      const { error: storageError } = await supabase.storage
-        .from("knowledge-pdfs")
-        .remove([filePath]);
+        const { error: docError } = await supabase
+          .from("pipeline_b_documents")
+          .delete()
+          .eq("id", doc.id);
 
-      if (storageError) console.warn("Storage deletion warning:", storageError);
+        if (docError) throw docError;
+      } else {
+        // Legacy pipeline deletion
+        const { error: linksError } = await supabase
+          .from("agent_document_links")
+          .delete()
+          .eq("document_id", doc.id);
 
-      const { error: docError } = await supabase
-        .from("knowledge_documents")
-        .delete()
-        .eq("id", doc.id);
+        if (linksError) throw linksError;
 
-      if (docError) throw docError;
+        const { error: knowledgeError } = await supabase
+          .from("agent_knowledge")
+          .delete()
+          .eq("pool_document_id", doc.id);
+
+        if (knowledgeError) throw knowledgeError;
+
+        const { error: cacheError } = await supabase
+          .from("document_processing_cache")
+          .delete()
+          .eq("document_id", doc.id);
+
+        if (cacheError) throw cacheError;
+
+        const filePath = `${doc.id}/${doc.file_name}`;
+        const { error: storageError } = await supabase.storage
+          .from("knowledge-pdfs")
+          .remove([filePath]);
+
+        if (storageError) console.warn("Storage deletion warning:", storageError);
+
+        const { error: docError } = await supabase
+          .from("knowledge_documents")
+          .delete()
+          .eq("id", doc.id);
+
+        if (docError) throw docError;
+      }
 
       toast.success("Documento eliminato con successo");
       loadDocuments();
