@@ -144,13 +144,25 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           const formData = new FormData();
           formData.append('file', file);
           
-          const { data, error } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
-            body: formData
-          });
+          // Use fetch directly for FormData upload (supabase.functions.invoke doesn't handle FormData correctly)
+          const { data: { session } } = await supabase.auth.getSession();
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/pipeline-b-ingest-pdf`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${session?.access_token}`,
+              },
+              body: formData,
+            }
+          );
 
-          if (error) {
-            throw new Error(`Upload fallito: ${error.message}`);
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Upload fallito: ${errorText}`);
           }
+
+          const data = await response.json();
           
           if (!data?.success) {
             throw new Error(`Upload fallito: ${data?.error || 'Errore sconosciuto'}`);
