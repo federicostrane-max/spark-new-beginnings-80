@@ -8,7 +8,8 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw, Search } from "lucide-react";
-import { useAgentHealth, usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
+import { usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
+import { useMultipleAgentsHealth } from "@/hooks/useMultipleAgentsHealth";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,7 @@ export const AgentsSidebar = ({
   
   // Health monitoring
   const agentIds = agents.map(a => a.id);
-  const { healthStatus, getAgentStatus } = useAgentHealth(agentIds);
+  const { getAgentStatus } = useMultipleAgentsHealth(agentIds);
   const poolHealth = usePoolDocumentsHealth();
 
   // Log agents state changes
