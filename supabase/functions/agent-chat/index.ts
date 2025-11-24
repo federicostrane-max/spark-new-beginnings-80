@@ -3938,12 +3938,68 @@ ${agent.system_prompt}${knowledgeContext}${searchResultsContext}`;
                       }
                     }
                     
-                    // Handle finish_reason === "tool_calls"
-                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName) {
-                      toolCallCount++;
-                      console.log(`🛠️ [DeepSeek] Tool execution: ${toolUseName}`);
-                      const needsDeepSeekContinuation = true; // Flag for continuation
-                      // Tool execution will happen after stream ends
+                    // Handle finish_reason === "tool_calls" - EXECUTE TOOL IMMEDIATELY
+                    if (parsed.choices?.[0]?.finish_reason === 'tool_calls' && toolUseName && toolUseInputJson) {
+                      console.log(`🛠️ [DeepSeek] Executing tool: ${toolUseName}`);
+                      
+                      try {
+                        const toolInput = JSON.parse(toolUseInputJson);
+                        console.log(`   Tool input:`, JSON.stringify(toolInput).substring(0, 200));
+                        
+                        // EXAMPLE: Implement ONE tool as proof of concept (get_agent_knowledge)
+                        if (toolUseName === 'get_agent_knowledge') {
+                          const normalizedName = toolInput.agent_name.replace(/-/g, ' ');
+                          const { data: targetAgent } = await supabase
+                            .from('agents')
+                            .select('id, name, slug')
+                            .or(`name.ilike.%${normalizedName}%,slug.ilike.%${toolInput.agent_name}%`)
+                            .eq('active', true)
+                            .single();
+                          
+                          if (targetAgent) {
+                            const { data: documents } = await supabase.rpc(
+                              'get_distinct_documents',
+                              { p_agent_id: targetAgent.id }
+                            );
+                            
+                            const toolResult = {
+                              success: true,
+                              agent_name: targetAgent.name,
+                              document_count: documents?.length || 0,
+                              documents: documents || []
+                            };
+                            
+                            // Add to DeepSeek messages
+                            deepseekMessages.push({
+                              role: 'assistant',
+                              content: null,
+                              tool_calls: [{
+                                id: toolUseId || 'tool_' + Date.now(),
+                                type: 'function',
+                                function: { name: toolUseName, arguments: toolUseInputJson }
+                              }]
+                            });
+                            
+                            deepseekMessages.push({
+                              role: 'tool',
+                              tool_call_id: toolUseId || 'tool_' + Date.now(),
+                              content: JSON.stringify(toolResult)
+                            });
+                            
+                            needsToolResultContinuation = true;
+                            console.log(`✅ [DeepSeek] Tool result added to messages, will continue`);
+                          }
+                        }
+                        
+                        // Reset for next potential tool call
+                        toolUseName = null;
+                        toolUseInputJson = '';
+                        toolUseId = null;
+                        toolCallCount++;
+                        
+                      } catch (e) {
+                        console.error(`❌ [DeepSeek] Tool execution error:`, e);
+                      }
                     }
                     
                     // Handle regular text content
