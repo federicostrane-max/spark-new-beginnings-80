@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
       // 1. Get file paths BEFORE deleting documents
       const { data: documents, error: fetchError } = await supabase
         .from('pipeline_b_documents')
-        .select('id, file_name')
+        .select('id, file_path, storage_bucket')
         .in('id', batchIds);
 
       if (fetchError) {
@@ -129,8 +129,8 @@ Deno.serve(async (req) => {
 
       if (documents && documents.length > 0) {
         documents.forEach(doc => {
-          if (doc.id && doc.file_name) {
-            allFilePaths.push({ bucket: 'shared-pool-uploads', path: `${doc.id}/${doc.file_name}` });
+          if (doc.file_path && doc.storage_bucket) {
+            allFilePaths.push({ bucket: doc.storage_bucket, path: doc.file_path });
           }
         });
       }
