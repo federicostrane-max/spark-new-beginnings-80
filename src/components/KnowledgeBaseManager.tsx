@@ -41,9 +41,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const { 
     documents, 
     isLoading: loading, 
-    loadDocuments, 
-    syncDocument,
-    syncAllMissing 
+    loadDocuments,
   } = useDocumentSync(agentId);
   
   const { assignDocument, unassignDocument, reprocessDocument, isAssigning } = useDocumentAssignment();
@@ -183,16 +181,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     }
   };
 
-  const handleSyncAllMissing = async () => {
-    try {
-      toast.info('Sincronizzazione in corso...');
-      await syncAllMissing();
-      toast.success('Sincronizzazione completata');
-    } catch (error) {
-      console.error('Error syncing all:', error);
-      toast.error('Errore nella sincronizzazione');
-    }
-  };
+  // Sync function removed - synchronization handled by background cron job
 
   const getSyncStatusBadge = (doc: typeof documents[0]) => {
     switch (doc.syncStatus) {
@@ -276,12 +265,6 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
               <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Ricarica
             </Button>
-            {missingCount > 0 && (
-              <Button onClick={handleSyncAllMissing} variant="secondary" size="sm">
-                <Download className="mr-2 h-4 w-4" />
-                Sincronizza Mancanti ({missingCount})
-              </Button>
-            )}
           </div>
 
           {/* Documents Table */}
@@ -334,29 +317,18 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
                           {formatDistanceToNow(new Date(doc.created_at), { addSuffix: true })}
                         </TableCell>
                         <TableCell className="py-2 text-right">
-                          <div className="flex justify-end gap-2">
-                            {doc.syncStatus === 'missing' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => syncDocument(doc.id)}
-                              >
-                                <RefreshCw className="h-4 w-4" />
-                              </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleUnassignDocument(doc.id)}
+                            disabled={removingLinkId === doc.id}
+                          >
+                            {removingLinkId === doc.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
                             )}
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => handleUnassignDocument(doc.id)}
-                              disabled={removingLinkId === doc.id}
-                            >
-                              {removingLinkId === doc.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </div>
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

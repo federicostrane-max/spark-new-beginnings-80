@@ -30,27 +30,48 @@ export const DocumentPoolHealthIndicators = () => {
 
 
   const loadHealthIndicators = async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    
+    // Initialize with safe defaults
+    let stuckProcessingData = { count: 0, files: [] };
+    let noChunksData = { count: 0, files: [] };
+    let stuckQueueData = { count: 0, files: [] };
+    let pendingValidationData = { count: 0, files: [] };
+    let notProcessedData = { count: 0, files: [] };
+
+    // 1. Stuck processing documents - with timeout
     try {
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
       
-      // 1. Documenti in processing > 10 min - ALL documents
       const { data: stuckDocs, count: stuckCount } = await supabase
         .from('knowledge_documents')
         .select('file_name', { count: 'exact' })
         .eq('processing_status', 'processing')
         .lt('created_at', tenMinutesAgo)
         .order('created_at', { ascending: true })
-        .limit(10);
+        .limit(10)
+        .abortSignal(controller.signal);
 
-      // 2. Documenti senza chunks - usa la funzione RPC per il count
+      clearTimeout(timeout);
+      stuckProcessingData = { count: stuckCount || 0, files: stuckDocs?.map(d => d.file_name) || [] };
+    } catch (error) {
+      console.error('[HealthIndicators] stuckProcessing failed:', error);
+    }
+
+    // 2. Documents without chunks - with timeout
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
       const { data: noChunksTotal, error: rpcError } = await supabase
-        .rpc('count_documents_without_chunks');
+        .rpc('count_documents_without_chunks')
+        .abortSignal(controller.signal);
 
-      if (rpcError) {
-        console.error('[HealthIndicators] RPC Error:', rpcError);
-      }
+      clearTimeout(timeout);
+      
+      if (rpcError) throw rpcError;
 
-      // Solo se ci sono documenti senza chunks, recupera i primi 10 nomi
       let docsWithoutChunks: string[] = [];
       if (noChunksTotal && noChunksTotal > 0) {
         const { data: allDocs } = await supabase
@@ -60,7 +81,6 @@ export const DocumentPoolHealthIndicators = () => {
           .limit(100);
 
         if (allDocs) {
-          // Verifica quali non hanno chunks
           for (const doc of allDocs) {
             const { count } = await supabase
               .from('agent_knowledge')
@@ -74,60 +94,84 @@ export const DocumentPoolHealthIndicators = () => {
           }
         }
       }
-      const noChunksCount = noChunksTotal || 0;
+      noChunksData = { count: noChunksTotal || 0, files: docsWithoutChunks };
+    } catch (error) {
+      console.error('[HealthIndicators] noChunks failed:', error);
+    }
 
-      // 3. Job queue in processing > 10 min - ALL documents
+    // 3. Stuck queue jobs - with timeout
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
       const { data: queueDocs, count: queueStuckCount } = await supabase
         .from('document_processing_queue')
         .select('document_id, knowledge_documents!inner(file_name)', { count: 'exact' })
         .eq('status', 'processing')
         .lt('started_at', tenMinutesAgo)
-        .limit(10);
+        .limit(10)
+        .abortSignal(controller.signal);
 
-      // 4. Documenti pending validation - ALL documents
+      clearTimeout(timeout);
+      stuckQueueData = { 
+        count: queueStuckCount || 0, 
+        files: queueDocs?.map(q => q.knowledge_documents?.file_name).filter(Boolean) || [] 
+      };
+    } catch (error) {
+      console.error('[HealthIndicators] stuckQueue failed:', error);
+    }
+
+    // 4. Pending validation - with timeout
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
       const { data: pendingDocs, count: pendingCount } = await supabase
         .from('knowledge_documents')
         .select('file_name', { count: 'exact' })
         .eq('validation_status', 'pending')
         .order('created_at', { ascending: true })
-        .limit(10);
+        .limit(10)
+        .abortSignal(controller.signal);
 
-      // 5. Documenti non processati (processing_status != ready_for_assignment e validati) - ALL documents
+      clearTimeout(timeout);
+      pendingValidationData = { count: pendingCount || 0, files: pendingDocs?.map(d => d.file_name) || [] };
+    } catch (error) {
+      console.error('[HealthIndicators] pendingValidation failed:', error);
+    }
+
+    // 5. Not processed documents - with timeout
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
       const { data: notProcessedDocs, count: notProcessedCount } = await supabase
         .from('knowledge_documents')
         .select('file_name, processing_status', { count: 'exact' })
         .neq('processing_status', 'ready_for_assignment')
         .eq('validation_status', 'validated')
         .order('updated_at', { ascending: false })
-        .limit(10);
+        .limit(10)
+        .abortSignal(controller.signal);
 
-      setHealthData({
-        stuckProcessing: {
-          count: stuckCount || 0,
-          files: stuckDocs?.map(d => d.file_name) || []
-        },
-        noChunks: {
-          count: noChunksCount || 0,
-          files: docsWithoutChunks
-        },
-        stuckQueue: {
-          count: queueStuckCount || 0,
-          files: queueDocs?.map(q => q.knowledge_documents?.file_name).filter(Boolean) || []
-        },
-        pendingValidation: {
-          count: pendingCount,
-          files: pendingDocs.map(d => d.file_name)
-        },
-        notProcessed: {
-          count: notProcessedCount || 0,
-          files: notProcessedDocs?.map(d => ({ name: d.file_name, status: d.processing_status })) || []
-        },
-        loading: false,
-      });
+      clearTimeout(timeout);
+      notProcessedData = { 
+        count: notProcessedCount || 0, 
+        files: notProcessedDocs?.map(d => ({ name: d.file_name, status: d.processing_status })) || [] 
+      };
     } catch (error) {
-      console.error('[HealthIndicators] Error:', error);
-      setHealthData(prev => ({ ...prev, loading: false }));
+      console.error('[HealthIndicators] notProcessed failed:', error);
     }
+
+    // Set all data at once with safe defaults
+    setHealthData({
+      stuckProcessing: stuckProcessingData,
+      noChunks: noChunksData,
+      stuckQueue: stuckQueueData,
+      pendingValidation: pendingValidationData,
+      notProcessed: notProcessedData,
+      loading: false,
+    });
   };
 
   useEffect(() => {

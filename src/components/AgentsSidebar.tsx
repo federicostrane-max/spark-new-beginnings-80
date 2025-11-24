@@ -227,52 +227,7 @@ export const AgentsSidebar = ({
     }
   };
 
-  const handleSyncAgent = async (agentId: string) => {
-    setSyncingAgents(prev => new Set(prev).add(agentId));
-    
-    try {
-      const session = await supabase.auth.getSession();
-      if (!session.data.session) {
-        throw new Error('Sessione non valida');
-      }
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-and-sync-all`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.data.session.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-          },
-          body: JSON.stringify({ agentId, autoFix: true })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      const syncedCount = data?.statuses?.filter((s: any) => s.status === 'missing').length || 0;
-
-      if (syncedCount > 0) {
-        toast.success(`${syncedCount} ${syncedCount === 1 ? 'documento sincronizzato' : 'documenti sincronizzati'}`);
-        setTimeout(() => window.location.reload(), 1000);
-      } else {
-        toast.info("Tutti i documenti sono già sincronizzati");
-      }
-    } catch (error: any) {
-      console.error("Error syncing agent:", error);
-      toast.error(`Errore: ${error.message}`);
-    } finally {
-      setSyncingAgents(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(agentId);
-        return newSet;
-      });
-    }
-  };
+  // Sync function removed - synchronization now managed via Knowledge Base Manager
 
   return (
     <div className="flex flex-col h-full bg-sidebar">
@@ -378,32 +333,21 @@ export const AgentsSidebar = ({
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {showHealthBadge && (
-                        <>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
-                                {agentHealth.unsyncedCount}
-                              </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent side="right">
-                              <p className="text-xs">
-                                {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}
-                              </p>
-                            </TooltipContent>
-                          </Tooltip>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleSyncAgent(agent.id);
-                            }}
-                            disabled={syncingAgents.has(agent.id)}
-                          >
-                            <RefreshCw className={`h-3 w-3 ${syncingAgents.has(agent.id) ? 'animate-spin' : ''}`} />
-                          </Button>
-                        </>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">
+                              {agentHealth.unsyncedCount}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent side="right">
+                            <p className="text-xs">
+                              {agentHealth.unsyncedCount} {agentHealth.unsyncedCount === 1 ? 'documento non sincronizzato' : 'documenti non sincronizzati'}
+                            </p>
+                            <p className="text-xs opacity-70 mt-1">
+                              Gestisci sincronizzazione da Knowledge Base Manager
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
