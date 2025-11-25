@@ -109,20 +109,63 @@ function estimatePageCount(pdfBuffer: ArrayBuffer): number {
 }
 
 /**
- * Verifica se il testo estratto è corrotto (caratteri Unicode invalidi, encoding errato)
+ * Verifica se il testo estratto è corrotto (caratteri Unicode invalidi, encoding errato, struttura PDF raw)
  */
 function isTextCorrupted(text: string): boolean {
   if (!text || text.length === 0) return true;
   
-  // Conta caratteri non stampabili, control chars, e Unicode corrotto
-  let corruptedChars = 0;
-  let totalChars = 0;
+  // 1. Check per struttura PDF raw (indica parsing sbagliato - CRITICAL)
+  const pdfStructurePatterns = [
+    /endobj/,
+    /\/Type\s*\/Page/,
+    /stream\s*$/m,
+    /<</,
+    /\/FlateDecode/,
+    /\/Filter/,
+    /\/Font/,
+    /\/XObject/
+  ];
+  
+  for (const pattern of pdfStructurePatterns) {
+    if (pattern.test(text)) {
+      console.log('[PDF Extractor] Corruption: PDF structure detected in text');
+      return true;
+    }
+  }
+  
+  // 2. Check per alta concentrazione Latin-1 Supplement (0x80-0xFF) - dove finiscono i dati binari
+  let latin1ExtendedCount = 0;
+  let printableAsciiCount = 0;
   
   for (let i = 0; i < text.length; i++) {
-    totalChars++;
+    const code = text.charCodeAt(i);
+    if (code >= 0x80 && code <= 0xFF) latin1ExtendedCount++;
+    if (code >= 0x20 && code <= 0x7E) printableAsciiCount++;
+  }
+  
+  const latin1Ratio = latin1ExtendedCount / text.length;
+  if (latin1Ratio > 0.15) { // Più del 15% Latin-1 Extended = binario corrotto
+    console.log(`[PDF Extractor] Corruption: ${(latin1Ratio * 100).toFixed(1)}% Latin-1 Extended chars (binary data)`);
+    return true;
+  }
+  
+  // 3. Check per assenza di parole riconoscibili (solo per testi > 500 chars)
+  if (text.length > 500) {
+    const wordPattern = /[a-zA-Z]{3,}/g;
+    const words = text.match(wordPattern) || [];
+    const wordRatio = words.join('').length / text.length;
+    
+    if (wordRatio < 0.1) { // Meno del 10% parole = non è testo leggibile
+      console.log(`[PDF Extractor] Corruption: only ${(wordRatio * 100).toFixed(1)}% readable words`);
+      return true;
+    }
+  }
+  
+  // 4. Original checks per caratteri control e Unicode invalidi
+  let corruptedChars = 0;
+  for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
     
-    // Caratteri corrotti comuni: control chars (eccetto whitespace), replacement char, private use area
     if (
       (code < 32 && code !== 9 && code !== 10 && code !== 13) || // Control chars
       (code >= 0x007F && code <= 0x009F) || // More control chars
@@ -135,18 +178,9 @@ function isTextCorrupted(text: string): boolean {
     }
   }
   
-  const corruptionRatio = corruptedChars / totalChars;
-  
-  // Se più del 30% dei caratteri sono corrotti, considera il testo corrotto
+  const corruptionRatio = corruptedChars / text.length;
   if (corruptionRatio > 0.3) {
-    console.log(`[PDF Extractor] Text corruption detected: ${(corruptionRatio * 100).toFixed(1)}% corrupted chars`);
-    return true;
-  }
-  
-  // Verifica presenza di pattern tipici di encoding errato (sequenze casuali di caratteri Unicode alti)
-  const highUnicodePattern = /[\u{0100}-\u{FFFF}]{10,}/u;
-  if (highUnicodePattern.test(text) && !/[a-zA-Z\s]{20,}/.test(text)) {
-    console.log('[PDF Extractor] Text corruption detected: suspicious Unicode patterns without readable text');
+    console.log(`[PDF Extractor] Corruption: ${(corruptionRatio * 100).toFixed(1)}% invalid Unicode chars`);
     return true;
   }
   
