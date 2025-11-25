@@ -1273,6 +1273,8 @@ export const DocumentPoolTable = () => {
   };
 
   const handleBulkDocumentSelect = (docIds: string[], shouldSelect: boolean, folderName?: string) => {
+    // Questa funzione è usata per selezioni MANUALI con checkbox
+    // NON deve impostare selectedFolderForAssignment - quello è riservato a "Assegna tutta la cartella"
     setSelectedDocIds((prevSelected) => {
       const newSelected = new Set(prevSelected);
       
@@ -1287,12 +1289,8 @@ export const DocumentPoolTable = () => {
       return newSelected;
     });
     
-    // Gestisci il tracking della cartella separatamente
-    if (shouldSelect && folderName) {
-      setSelectedFolderForAssignment(folderName);
-    } else if (!shouldSelect && folderName && selectedFolderForAssignment === folderName) {
-      setSelectedFolderForAssignment(undefined);
-    }
+    // selectedFolderForAssignment è gestito SOLO da handleFolderAssignByName
+    // Non tracciamo la cartella per selezioni manuali
   };
 
   const getFolderInfo = () => {

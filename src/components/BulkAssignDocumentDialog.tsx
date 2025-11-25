@@ -65,22 +65,60 @@ export const BulkAssignDocumentDialog = ({
 
     try {
       if (folderName) {
-        // Folder-based: count from knowledge_documents only (Pipeline B doesn't use folders)
-        const { count: totalCount } = await supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .like("folder", `${folderName}%`);
-        
-        setDocumentCount(totalCount || 0);
+        // Folder-based: query ALL THREE pipelines
+        const [
+          legacyTotal, pipelineBTotal, pipelineCTotal,
+          legacyValid, pipelineBValid, pipelineCValid
+        ] = await Promise.all([
+          // Legacy total (with folder)
+          supabase
+            .from("knowledge_documents")
+            .select("id", { count: 'exact', head: true })
+            .like("folder", `${folderName}%`),
+          // Pipeline B total (folder IS NULL for Pipeline B)
+          supabase
+            .from("pipeline_b_documents")
+            .select("id", { count: 'exact', head: true })
+            .is("folder", null),
+          // Pipeline C total (folder IS NULL for Pipeline C)
+          supabase
+            .from("pipeline_c_documents")
+            .select("id", { count: 'exact', head: true }),
+          // Legacy valid
+          supabase
+            .from("knowledge_documents")
+            .select("id", { count: 'exact', head: true })
+            .like("folder", `${folderName}%`)
+            .eq("processing_status", "ready_for_assignment")
+            .eq("validation_status", "validated"),
+          // Pipeline B valid
+          supabase
+            .from("pipeline_b_documents")
+            .select("id", { count: 'exact', head: true })
+            .is("folder", null)
+            .eq("status", "ready"),
+          // Pipeline C valid
+          supabase
+            .from("pipeline_c_documents")
+            .select("id", { count: 'exact', head: true })
+            .eq("status", "ready")
+        ]);
 
-        const { count: validCount } = await supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .like("folder", `${folderName}%`)
-          .eq("processing_status", "ready_for_assignment")
-          .eq("validation_status", "validated");
+        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         
-        setValidatedCount(validCount || 0);
+        console.log('[BulkAssign] Folder mode counts:', {
+          folderName,
+          legacyTotal: legacyTotal.count,
+          pipelineBTotal: pipelineBTotal.count,
+          pipelineCTotal: pipelineCTotal.count,
+          totalCount,
+          validCount
+        });
+
+        setDocumentCount(totalCount);
+        setValidatedCount(validCount);
+        setProcessingCount(0); // Folder mode doesn't track processing
       } else if (documentIds && documentIds.length > 0) {
         // Manual selection: check ALL THREE pipelines
         const [
@@ -454,10 +492,11 @@ export const BulkAssignDocumentDialog = ({
       const allValidatedDocs: Array<{ id: string; pipeline: string }> = [];
       
       if (folderName) {
-        // Folder-based: only legacy pipeline (Pipeline B/C don't use folders)
+        // Folder-based: fetch from ALL THREE pipelines
         let from = 0;
         const pageSize = 1000;
         
+        // Fetch Legacy documents with folder matching
         while (true) {
           const { data, error } = await supabase
             .from("knowledge_documents")
@@ -476,6 +515,29 @@ export const BulkAssignDocumentDialog = ({
           if (data.length < pageSize) break;
           from += pageSize;
         }
+        
+        // Fetch Pipeline B documents (folder IS NULL)
+        const { data: pipelineBDocs, error: pipelineBError } = await supabase
+          .from("pipeline_b_documents")
+          .select("id")
+          .is("folder", null)
+          .eq("status", "ready");
+        
+        if (pipelineBError) throw pipelineBError;
+        allValidatedDocs.push(...(pipelineBDocs || []).map(d => ({ id: d.id, pipeline: 'pipeline_b' })));
+        console.log(`Added ${pipelineBDocs?.length || 0} Pipeline B documents`);
+        
+        // Fetch Pipeline C documents (folder IS NULL)
+        const { data: pipelineCDocs, error: pipelineCError } = await supabase
+          .from("pipeline_c_documents")
+          .select("id")
+          .eq("status", "ready");
+        
+        if (pipelineCError) throw pipelineCError;
+        allValidatedDocs.push(...(pipelineCDocs || []).map(d => ({ id: d.id, pipeline: 'pipeline_c' })));
+        console.log(`Added ${pipelineCDocs?.length || 0} Pipeline C documents`);
+        
+        console.log(`Total folder documents: ${allValidatedDocs.length}`);
       } else if (documentIds) {
         // Manual selection: fetch from ALL pipelines
         const [legacyDocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
