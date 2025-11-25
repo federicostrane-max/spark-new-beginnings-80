@@ -210,6 +210,65 @@ export class SemanticBoundaryChunker {
   }
   
   /**
+   * Spezza segments troppo grandi in sub-segments più piccoli
+   * Fallback per PDF senza struttura semantica forte
+   */
+  private splitLargeSegment(segment: string): string[] {
+    if (segment.length <= this.config.maxChunkSize) {
+      return [segment];
+    }
+    
+    const subSegments: string[] = [];
+    
+    // Prima prova a spezzare a livello di frasi
+    const sentences = segment.split(/(?<=[.!?])\s+/);
+    let currentSub = '';
+    
+    for (const sentence of sentences) {
+      // Se una singola frase è già troppo grande, spezzala a livello di parole
+      if (sentence.length > this.config.maxChunkSize) {
+        if (currentSub) {
+          subSegments.push(currentSub.trim());
+          currentSub = '';
+        }
+        
+        // Spezza frase troppo grande in parole
+        const words = sentence.split(/\s+/);
+        let wordChunk = '';
+        
+        for (const word of words) {
+          if (wordChunk.length + word.length + 1 > this.config.maxChunkSize) {
+            if (wordChunk) {
+              subSegments.push(wordChunk.trim());
+            }
+            wordChunk = word + ' ';
+          } else {
+            wordChunk += word + ' ';
+          }
+        }
+        
+        if (wordChunk.trim()) {
+          subSegments.push(wordChunk.trim());
+        }
+      } else {
+        // Frase normale, aggiungi a currentSub
+        if (currentSub.length + sentence.length + 1 > this.config.maxChunkSize) {
+          subSegments.push(currentSub.trim());
+          currentSub = sentence + ' ';
+        } else {
+          currentSub += sentence + ' ';
+        }
+      }
+    }
+    
+    if (currentSub.trim()) {
+      subSegments.push(currentSub.trim());
+    }
+    
+    return subSegments.length > 0 ? subSegments : [segment];
+  }
+  
+  /**
    * Crea chunk rispettando boundaries semantici
    */
   private createChunksRespectingBoundaries(text: string, boundaries: number[]): string[] {
@@ -224,17 +283,22 @@ export class SemanticBoundaryChunker {
       
       if (!segment) continue;
       
-      // Se aggiungere questo segment supera maxChunkSize, salva chunk corrente
-      if (currentChunk.length + segment.length > this.config.maxChunkSize && currentChunk.length >= this.config.minChunkSize) {
-        chunks.push(currentChunk.trim());
-        
-        // Overlap: prendi ultime N parole del chunk precedente
-        const words = currentChunk.split(/\s+/);
-        const overlapWords = words.slice(-Math.floor(this.config.overlapSize / 5));
-        currentChunk = overlapWords.join(' ') + ' ';
-      }
+      // Spezza segment se troppo grande (fallback per PDF senza struttura)
+      const processedSegments = this.splitLargeSegment(segment);
       
-      currentChunk += segment + ' ';
+      for (const subSegment of processedSegments) {
+        // Se aggiungere questo sub-segment supera maxChunkSize, salva chunk corrente
+        if (currentChunk.length + subSegment.length > this.config.maxChunkSize && currentChunk.length >= this.config.minChunkSize) {
+          chunks.push(currentChunk.trim());
+          
+          // Overlap: prendi ultime N parole del chunk precedente
+          const words = currentChunk.split(/\s+/);
+          const overlapWords = words.slice(-Math.floor(this.config.overlapSize / 5));
+          currentChunk = overlapWords.join(' ') + ' ';
+        }
+        
+        currentChunk += subSegment + ' ';
+      }
     }
     
     // Aggiungi ultimo chunk
