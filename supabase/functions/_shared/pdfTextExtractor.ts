@@ -109,6 +109,51 @@ function estimatePageCount(pdfBuffer: ArrayBuffer): number {
 }
 
 /**
+ * Verifica se il testo estratto è corrotto (caratteri Unicode invalidi, encoding errato)
+ */
+function isTextCorrupted(text: string): boolean {
+  if (!text || text.length === 0) return true;
+  
+  // Conta caratteri non stampabili, control chars, e Unicode corrotto
+  let corruptedChars = 0;
+  let totalChars = 0;
+  
+  for (let i = 0; i < text.length; i++) {
+    totalChars++;
+    const code = text.charCodeAt(i);
+    
+    // Caratteri corrotti comuni: control chars (eccetto whitespace), replacement char, private use area
+    if (
+      (code < 32 && code !== 9 && code !== 10 && code !== 13) || // Control chars
+      (code >= 0x007F && code <= 0x009F) || // More control chars
+      code === 0xFFFD || // Replacement character
+      (code >= 0xE000 && code <= 0xF8FF) || // Private use area
+      (code >= 0xF0000 && code <= 0xFFFFD) || // Supplementary private use
+      (code >= 0x100000 && code <= 0x10FFFD) // More private use
+    ) {
+      corruptedChars++;
+    }
+  }
+  
+  const corruptionRatio = corruptedChars / totalChars;
+  
+  // Se più del 30% dei caratteri sono corrotti, considera il testo corrotto
+  if (corruptionRatio > 0.3) {
+    console.log(`[PDF Extractor] Text corruption detected: ${(corruptionRatio * 100).toFixed(1)}% corrupted chars`);
+    return true;
+  }
+  
+  // Verifica presenza di pattern tipici di encoding errato (sequenze casuali di caratteri Unicode alti)
+  const highUnicodePattern = /[\u{0100}-\u{FFFF}]{10,}/u;
+  if (highUnicodePattern.test(text) && !/[a-zA-Z\s]{20,}/.test(text)) {
+    console.log('[PDF Extractor] Text corruption detected: suspicious Unicode patterns without readable text');
+    return true;
+  }
+  
+  return false;
+}
+
+/**
  * Estrae testo da PDF usando estrazione nativa + fallback OCR via Lovable AI Gateway
  * 
  * @param pdfBuffer - ArrayBuffer del PDF
@@ -127,9 +172,16 @@ export async function extractTextFromPDF(
     
     let finalText = nativeText;
     
-    // PHASE 2: OCR fallback if native extraction insufficient
-    if (nativeText.length < 100 && ocrOptions) {
-      console.log(`[PDF Extractor] Native extraction insufficient (${nativeText.length} chars), trying OCR fallback...`);
+    // PHASE 2: OCR fallback if native extraction insufficient OR corrupted
+    const isInsufficient = nativeText.length < 100;
+    const isCorrupted = isTextCorrupted(nativeText);
+    
+    if ((isInsufficient || isCorrupted) && ocrOptions) {
+      const reason = isInsufficient 
+        ? `insufficient (${nativeText.length} chars)` 
+        : 'corrupted encoding';
+      
+      console.log(`[PDF Extractor] Native extraction ${reason}, trying OCR fallback...`);
       
       try {
         // Create signed URL for OCR service
