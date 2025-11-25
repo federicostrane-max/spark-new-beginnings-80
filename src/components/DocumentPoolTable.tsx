@@ -167,7 +167,9 @@ export const DocumentPoolTable = () => {
   const [totalPages, setTotalPages] = useState(0);
 
   useEffect(() => {
-    loadDocuments();
+    const abortController = new AbortController();
+    
+    loadDocuments(currentPage, abortController.signal);
     loadAvailableAgents();
     loadAvailableFolders();
     loadFolders();
@@ -197,6 +199,11 @@ export const DocumentPoolTable = () => {
       supabase.removeChannel(channel);
     };
     */
+
+    return () => {
+      abortController.abort();
+      console.log('[DocumentPoolTable] Component unmounted, pending requests aborted');
+    };
   }, []);
 
   // Reset alla pagina 1 quando cambiano i filtri
@@ -204,7 +211,7 @@ export const DocumentPoolTable = () => {
     setCurrentPage(1);
   }, [searchQuery, statusFilter, agentFilter]);
 
-  const loadDocuments = async (page: number = currentPage) => {
+  const loadDocuments = async (page: number = currentPage, signal?: AbortSignal) => {
     console.log('[DocumentPoolTable] 📥 Loading documents from BOTH pipelines, page:', page);
     
     try {
@@ -213,26 +220,22 @@ export const DocumentPoolTable = () => {
       
       // Step 1: Count from BOTH tables
       console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
-      const countController = new AbortController();
-      const countTimeout = setTimeout(() => countController.abort(), 10000);
       
       const [oldCount, newCount, pipelineCCount] = await Promise.all([
         supabase
           .from("knowledge_documents")
           .select("id", { count: 'exact', head: true })
-          .abortSignal(countController.signal),
+          .abortSignal(signal),
         supabase
           .from("pipeline_b_documents")
           .select("id", { count: 'exact', head: true })
-          .abortSignal(countController.signal),
+          .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
           .select("id", { count: 'exact', head: true })
-          .abortSignal(countController.signal)
+          .abortSignal(signal)
       ]);
 
-      clearTimeout(countTimeout);
-      
       if (oldCount.error) {
         console.error('[DocumentPoolTable] Old pipeline count error:', oldCount.error);
         throw oldCount.error;
@@ -253,8 +256,6 @@ export const DocumentPoolTable = () => {
 
       // Step 2: Load documents from BOTH pipelines
       console.log('[DocumentPoolTable] Step 2: Loading from both pipelines...');
-      const dataController = new AbortController();
-      const dataTimeout = setTimeout(() => dataController.abort(), 15000);
       
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -276,22 +277,20 @@ export const DocumentPoolTable = () => {
           `)
           .order("created_at", { ascending: false })
           .range(from, to)
-          .abortSignal(dataController.signal),
+          .abortSignal(signal),
         supabase
           .from("pipeline_b_documents")
           .select("*")
           .order("created_at", { ascending: false })
           .range(from, to)
-          .abortSignal(dataController.signal),
+          .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
           .select("*")
           .order("created_at", { ascending: false })
           .range(from, to)
-          .abortSignal(dataController.signal)
+          .abortSignal(signal)
       ]);
-
-      clearTimeout(dataTimeout);
 
       if (oldData.error) {
         console.error('[DocumentPoolTable] Old pipeline error:', oldData.error);
@@ -394,6 +393,10 @@ export const DocumentPoolTable = () => {
       setDocuments(transformedData);
       setCurrentPage(page);
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('[DocumentPoolTable] Query aborted (component unmounted or cleanup)');
+        return;
+      }
       console.error('[DocumentPoolTable] ❌ Load error:', error);
       setError(error.message || "Errore sconosciuto");
       toast.error("Errore nel caricamento dei documenti");
