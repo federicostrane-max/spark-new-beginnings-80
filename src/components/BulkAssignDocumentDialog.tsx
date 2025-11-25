@@ -57,6 +57,12 @@ export const BulkAssignDocumentDialog = ({
   const [progressMessage, setProgressMessage] = useState<string>("");
 
   const countDocuments = async () => {
+    console.log('[BulkAssign] countDocuments called with:', {
+      documentIds: documentIds?.length,
+      folderName,
+      documentIdsPreview: documentIds?.slice(0, 5)
+    });
+
     try {
       if (folderName) {
         // Folder-based: count from knowledge_documents only (Pipeline B doesn't use folders)
@@ -130,10 +136,27 @@ export const BulkAssignDocumentDialog = ({
             .in("status", ["ingested", "processing", "chunked"])
         ]);
         
+        console.log('[BulkAssign] Query results:', {
+          legacyTotal: legacyTotal.count,
+          pipelineBTotal: pipelineBTotal.count,
+          pipelineCTotal: pipelineCTotal.count,
+          legacyValid: legacyValid.count,
+          pipelineBValid: pipelineBValid.count,
+          pipelineCValid: pipelineCValid.count,
+          pipelineBProcessing: pipelineBProcessing.count,
+          pipelineCProcessing: pipelineCProcessing.count
+        });
+
         const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
         const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         const processingCount = (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
         
+        console.log('[BulkAssign] Calculated counts:', {
+          totalCount,
+          validCount,
+          processingCount
+        });
+
         setDocumentCount(totalCount);
         setValidatedCount(validCount);
         setProcessingCount(processingCount);

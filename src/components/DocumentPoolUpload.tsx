@@ -32,7 +32,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
   const [newFilesList, setNewFilesList] = useState<File[]>([]);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_b');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_c');
   const [inputKey, setInputKey] = useState(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
