@@ -29,12 +29,115 @@ interface AssignDocumentDialogProps {
     keywords?: string[];
     topics?: string[];
     complexity_level?: string;
-    pipeline?: 'a' | 'b';
+    pipeline?: 'a' | 'b' | 'c';
   };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned: () => void;
 }
+
+type PipelineType = 'legacy' | 'pipeline_b' | 'pipeline_c';
+
+// Helper function to get current assignments based on pipeline
+const getCurrentAssignments = async (documentId: string, pipeline: PipelineType) => {
+  if (pipeline === 'pipeline_b') {
+    // Pipeline B: Query pipeline_b_agent_knowledge for distinct agent_ids
+    const { data: chunks } = await supabase
+      .from('pipeline_b_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return [];
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { data } = await supabase
+      .from('pipeline_b_agent_knowledge')
+      .select('agent_id')
+      .in('chunk_id', chunkIds);
+    
+    // Return unique agent_ids
+    const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
+    return uniqueAgents.map(agent_id => ({ agent_id }));
+  } else if (pipeline === 'pipeline_c') {
+    // Pipeline C: Query pipeline_c_agent_knowledge for distinct agent_ids
+    const { data: chunks } = await supabase
+      .from('pipeline_c_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return [];
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { data } = await supabase
+      .from('pipeline_c_agent_knowledge')
+      .select('agent_id')
+      .in('chunk_id', chunkIds);
+    
+    // Return unique agent_ids
+    const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
+    return uniqueAgents.map(agent_id => ({ agent_id }));
+  } else {
+    // Legacy: Query agent_document_links
+    const { data } = await supabase
+      .from('agent_document_links')
+      .select('agent_id')
+      .eq('document_id', documentId);
+    
+    return data || [];
+  }
+};
+
+// Helper function to remove assignments based on pipeline
+const removeAssignments = async (documentId: string, agentIds: string[], pipeline: PipelineType) => {
+  if (pipeline === 'pipeline_b') {
+    // Pipeline B: Delete from pipeline_b_agent_knowledge
+    const { data: chunks } = await supabase
+      .from('pipeline_b_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return null;
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { error } = await supabase
+      .from('pipeline_b_agent_knowledge')
+      .delete()
+      .in('agent_id', agentIds)
+      .in('chunk_id', chunkIds);
+    
+    return error;
+  } else if (pipeline === 'pipeline_c') {
+    // Pipeline C: Delete from pipeline_c_agent_knowledge
+    const { data: chunks } = await supabase
+      .from('pipeline_c_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return null;
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { error } = await supabase
+      .from('pipeline_c_agent_knowledge')
+      .delete()
+      .in('agent_id', agentIds)
+      .in('chunk_id', chunkIds);
+    
+    return error;
+  } else {
+    // Legacy: Delete from agent_document_links
+    const { error } = await supabase
+      .from('agent_document_links')
+      .delete()
+      .eq('document_id', documentId)
+      .in('agent_id', agentIds);
+    
+    return error;
+  }
+};
 
 export const AssignDocumentDialog = ({
   document,
@@ -48,6 +151,13 @@ export const AssignDocumentDialog = ({
   const [assigning, setAssigning] = useState(false);
   const [syncingAgents, setSyncingAgents] = useState<Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>>(new Map());
 
+  // Determine pipeline type
+  const getPipelineType = (): PipelineType => {
+    if (document.pipeline === 'b') return 'pipeline_b';
+    if (document.pipeline === 'c') return 'pipeline_c';
+    return 'legacy';
+  };
+
   useEffect(() => {
     if (open) {
       loadAgents();
@@ -57,10 +167,10 @@ export const AssignDocumentDialog = ({
   const loadAgents = async () => {
     try {
       setLoading(true);
+      const pipelineType = getPipelineType();
       
       // Verify document is ready for assignment based on pipeline
-      if (document.pipeline === 'b') {
-        // Pipeline B: Check status='ready' in pipeline_b_documents
+      if (pipelineType === 'pipeline_b') {
         const { data: docData, error: docError } = await supabase
           .from("pipeline_b_documents")
           .select("status")
@@ -74,8 +184,21 @@ export const AssignDocumentDialog = ({
           onOpenChange(false);
           return;
         }
+      } else if (pipelineType === 'pipeline_c') {
+        const { data: docData, error: docError } = await supabase
+          .from("pipeline_c_documents")
+          .select("status")
+          .eq("id", document.id)
+          .single();
+        
+        if (docError) throw docError;
+        
+        if (docData.status !== 'ready') {
+          toast.error(`Documento Pipeline C non pronto (status: ${docData.status})`);
+          onOpenChange(false);
+          return;
+        }
       } else {
-        // Legacy: Check validation_status and processing_status
         const { data: docData, error: docError } = await supabase
           .from("knowledge_documents")
           .select("validation_status, processing_status")
@@ -99,13 +222,8 @@ export const AssignDocumentDialog = ({
 
       if (agentsError) throw agentsError;
 
-      // Load existing assignments for this document
-      const { data: assignmentsData, error: assignmentsError } = await supabase
-        .from("agent_document_links")
-        .select("agent_id")
-        .eq("document_id", document.id);
-
-      if (assignmentsError) throw assignmentsError;
+      // Load existing assignments (pipeline-aware)
+      const assignmentsData = await getCurrentAssignments(document.id, pipelineType);
 
       setAgents(agentsData || []);
       
@@ -134,64 +252,13 @@ export const AssignDocumentDialog = ({
     });
   };
 
-  const pollSyncStatus = async (documentId: string, agentIds: string[]) => {
-    const maxAttempts = 60; // 60 secondi (1 poll al secondo)
-    let attempts = 0;
-    
-    const checkStatus = async (): Promise<void> => {
-      const { data } = await supabase
-        .from("agent_document_links")
-        .select("agent_id, sync_status")
-        .eq("document_id", documentId)
-        .in("agent_id", agentIds);
-      
-      // Aggiorna lo stato per ogni agente
-      const statusMap = new Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>();
-      data?.forEach(link => {
-        statusMap.set(link.agent_id, link.sync_status as 'pending' | 'syncing' | 'completed' | 'failed');
-      });
-      setSyncingAgents(statusMap);
-      
-      // Controlla se tutti sono completati o falliti
-      const allDone = data?.every(link => 
-        link.sync_status === 'completed' || link.sync_status === 'failed'
-      );
-      
-      if (allDone) {
-        const completedCount = data?.filter(link => link.sync_status === 'completed').length || 0;
-        const failedCount = data?.filter(link => link.sync_status === 'failed').length || 0;
-        
-        if (failedCount > 0) {
-          toast.error(`${completedCount} agenti sincronizzati, ${failedCount} falliti`);
-        } else {
-          toast.success(`Sincronizzazione completata per ${completedCount} agenti`);
-        }
-        return;
-      }
-      
-      if (attempts >= maxAttempts) {
-        toast.error("Timeout: la sincronizzazione sta impiegando troppo tempo");
-        return;
-      }
-      
-      attempts++;
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return checkStatus();
-    };
-    
-    await checkStatus();
-  };
-
   const handleAssign = async () => {
     try {
       setAssigning(true);
+      const pipelineType = getPipelineType();
 
-      // Get current assignments
-      const { data: currentAssignments } = await supabase
-        .from("agent_document_links")
-        .select("agent_id")
-        .eq("document_id", document.id);
-
+      // Get current assignments (pipeline-aware)
+      const currentAssignments = await getCurrentAssignments(document.id, pipelineType);
       const currentAgentIds = new Set(
         currentAssignments?.map((a) => a.agent_id) || []
       );
@@ -204,34 +271,26 @@ export const AssignDocumentDialog = ({
         (id) => !selectedAgents.has(id)
       );
 
-      // Remove unassigned agents (only delete links, not chunks - they're shared)
+      // Remove unassigned agents (pipeline-aware)
       if (toRemove.length > 0) {
-        console.log(`[AssignDialog] Removing ${toRemove.length} agent assignments`);
+        console.log(`[AssignDialog] Removing ${toRemove.length} agent assignments from ${pipelineType}`);
         
-        const { error: deleteError } = await supabase
-          .from("agent_document_links")
-          .delete()
-          .eq("document_id", document.id)
-          .in("agent_id", toRemove);
-
-        if (deleteError) throw deleteError;
+        const error = await removeAssignments(document.id, toRemove, pipelineType);
+        if (error) throw error;
         
-        console.log(`[AssignDialog] ✓ Removed agent_document_links for ${toRemove.length} agents`);
-        console.log(`[AssignDialog] NOTE: Chunks remain in agent_knowledge (shared pool)`);
+        console.log(`[AssignDialog] ✓ Removed ${toRemove.length} assignments`);
       }
 
-      // Add newly assigned agents and sync
+      // Add newly assigned agents
       if (toAdd.length > 0) {
-        console.log(`[AssignDialog] Adding ${toAdd.length} new agent assignments`);
+        console.log(`[AssignDialog] Adding ${toAdd.length} new agent assignments via assign-document-to-agent`);
         
-        // Inizializza lo stato di sincronizzazione
+        // Initialize sync status map
         const initialSyncMap = new Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>();
         toAdd.forEach(agentId => initialSyncMap.set(agentId, 'pending'));
         setSyncingAgents(initialSyncMap);
         
-        // Use assign-document-to-agent edge function for both pipelines
-        console.log(`[AssignDialog] Using assign-document-to-agent for pipeline ${document.pipeline || 'a'}`);
-        
+        // Assign each agent via edge function
         for (const agentId of toAdd) {
           try {
             setSyncingAgents(prev => new Map(prev).set(agentId, 'syncing'));
@@ -248,30 +307,37 @@ export const AssignDocumentDialog = ({
             );
             
             if (assignError) {
-              console.error('Assignment error for agent', agentId, assignError);
+              console.error('[AssignDialog] Assignment error for agent', agentId, assignError);
               setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
               toast.error(`Errore nell'assegnazione all'agente`);
               continue;
             }
 
             if (!data?.success) {
-              console.error('Assignment failed for agent', agentId, data?.error);
+              console.error('[AssignDialog] Assignment failed for agent', agentId, data?.error);
               setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
               toast.error(data?.error || 'Assegnazione fallita');
               continue;
             }
 
             setSyncingAgents(prev => new Map(prev).set(agentId, 'completed'));
-            console.log(`✓ Document assigned to agent ${agentId}`);
+            console.log(`[AssignDialog] ✓ Document assigned to agent ${agentId}`);
             
           } catch (err) {
-            console.error('Failed to assign document to agent', agentId, err);
+            console.error('[AssignDialog] Failed to assign document to agent', agentId, err);
             setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
           }
         }
         
-        // Avvia il polling dello stato
-        await pollSyncStatus(document.id, toAdd);
+        // Show completion toast
+        const completedCount = Array.from(syncingAgents.values()).filter(s => s === 'completed').length;
+        const failedCount = Array.from(syncingAgents.values()).filter(s => s === 'failed').length;
+        
+        if (failedCount > 0) {
+          toast.error(`${completedCount} agenti assegnati, ${failedCount} falliti`);
+        } else {
+          toast.success(`Documento assegnato a ${completedCount} agenti`);
+        }
         
         onAssigned();
         onOpenChange(false);
@@ -281,16 +347,11 @@ export const AssignDocumentDialog = ({
         onOpenChange(false);
       }
     } catch (error: any) {
-      console.error("Error assigning document:", error);
-      
-      // Check for RLS policy violation
-      if (error.message?.includes('prevent_linking_invalid_documents')) {
-        toast.error("Questo documento non può essere assegnato perché non è validato");
-      } else {
-        toast.error("Errore nell'assegnazione del documento");
-      }
+      console.error("[AssignDialog] Error assigning document:", error);
+      toast.error("Errore nell'assegnazione del documento");
     } finally {
       setAssigning(false);
+      setSyncingAgents(new Map());
     }
   };
 
@@ -311,6 +372,11 @@ export const AssignDocumentDialog = ({
             <p className="text-xs md:text-sm text-muted-foreground line-clamp-3">{document.ai_summary}</p>
           )}
           <div className="flex flex-wrap gap-1.5 md:gap-2 mt-2">
+            {document.pipeline && (
+              <Badge variant="secondary" className="text-xs">
+                Pipeline {document.pipeline.toUpperCase()}
+              </Badge>
+            )}
             {document.complexity_level && (
               <Badge variant="secondary" className="text-xs">{document.complexity_level}</Badge>
             )}
