@@ -106,6 +106,13 @@ serve(async (req) => {
         // Extract text from PDF
         console.log(`[Pipeline C Process] Extracting text from ${doc.file_name}`);
         const extractionResult = await extractTextFromPDF(arrayBuffer);
+        
+        const textLength = extractionResult.fullText.length;
+        console.log(`[Pipeline C Process] ✅ Extracted ${textLength} characters from ${doc.file_name} (${extractionResult.metadata.pageCount} pages)`);
+        
+        if (textLength === 0) {
+          throw new Error('PDF text extraction returned 0 characters - file may be corrupted or image-only');
+        }
 
         // Update page count
         await supabase
@@ -125,7 +132,11 @@ serve(async (req) => {
 
         const semanticChunks = chunker.chunk(extractionResult.fullText);
 
-        console.log(`[Pipeline C Process] Created ${semanticChunks.length} semantic chunks`);
+        if (semanticChunks.length === 0) {
+          throw new Error('Semantic chunker returned 0 chunks - document may be too short or text extraction failed');
+        }
+
+        console.log(`[Pipeline C Process] ✅ Created ${semanticChunks.length} semantic chunks`);
 
         // Prepare chunks for database insertion
         const chunksToInsert = semanticChunks.map((chunk, index) => {
