@@ -28,75 +28,74 @@ interface PDFExtractionResult {
 }
 
 /**
- * Estrae testo strutturato da un PDF buffer
- * Usa pdfjs-dist già installato nel progetto
+ * Estrae testo raw da un PDF buffer usando parsing diretto
+ * Compatibile con Deno - non richiede API browser
  * 
  * @param pdfBuffer - ArrayBuffer del PDF
- * @returns Risultato estrazione con pagine, metadata e testo completo
+ * @returns Risultato estrazione con testo completo e metadata base
  */
 export async function extractTextFromPDF(
   pdfBuffer: ArrayBuffer
 ): Promise<PDFExtractionResult> {
-  // Import pdfjs-dist da esm.sh CDN per Deno
-  const pdfjsLib = await import('https://esm.sh/pdfjs-dist@5.4.296');
-  
-  // Configura worker path
-  // @ts-ignore - GlobalWorkerOptions exists at runtime
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
-  
   try {
-    // Carica documento PDF
-    // @ts-ignore - getDocument exists at runtime
-    const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer });
-    const pdf = await loadingTask.promise;
+    // Converti ArrayBuffer a Uint8Array
+    const uint8Array = new Uint8Array(pdfBuffer);
     
-    const pages: PDFPage[] = [];
-    let fullText = '';
+    // Converti a stringa per l'analisi
+    const decoder = new TextDecoder('latin1');
+    const pdfText = decoder.decode(uint8Array);
     
-    // Estrai testo da ogni pagina
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
+    // Estrai testo usando regex per trovare stream di testo PDF
+    const textMatches = pdfText.matchAll(/BT\s+(.*?)\s+ET/gs);
+    const extractedTexts: string[] = [];
+    
+    for (const match of textMatches) {
+      const textBlock = match[1];
       
-      // Estrai items con posizioni
-      const items = textContent.items.map((item: any) => ({
-        str: item.str,
-        x: item.transform[4],
-        y: item.transform[5],
-        width: item.width,
-        height: item.height,
-      }));
-      
-      // Combina testo della pagina
-      const pageText = items
-        .map((item: { str: string }) => item.str)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      
-      pages.push({
-        pageNumber: pageNum,
-        text: pageText,
-        items,
-      });
-      
-      fullText += pageText + '\n\n';
+      // Estrai stringhe tra parentesi (contenuto testuale PDF)
+      const strings = textBlock.matchAll(/\(((?:[^()\\]|\\.)*)\)/g);
+      for (const strMatch of strings) {
+        let text = strMatch[1];
+        
+        // Decodifica escape sequences
+        text = text
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\\(/g, '(')
+          .replace(/\\\)/g, ')')
+          .replace(/\\\\/g, '\\');
+        
+        if (text.trim()) {
+          extractedTexts.push(text.trim());
+        }
+      }
     }
     
-    // Estrai metadata PDF
-    const metadata = await pdf.getMetadata();
-    const info = metadata.info as any; // Type assertion per metadata PDF
+    const fullText = extractedTexts.join(' ').replace(/\s+/g, ' ').trim();
+    
+    // Conta pagine approssimativo
+    const pageMatches = pdfText.match(/\/Type\s*\/Page[^s]/g);
+    const pageCount = pageMatches ? pageMatches.length : 1;
+    
+    // Estrai metadata base
+    const titleMatch = pdfText.match(/\/Title\s*\(([^)]+)\)/);
+    const authorMatch = pdfText.match(/\/Author\s*\(([^)]+)\)/);
+    const subjectMatch = pdfText.match(/\/Subject\s*\(([^)]+)\)/);
     
     return {
-      pages,
+      pages: [{
+        pageNumber: 1,
+        text: fullText,
+        items: []
+      }],
       metadata: {
-        pageCount: pdf.numPages,
-        title: info?.Title,
-        author: info?.Author,
-        subject: info?.Subject,
-        creationDate: info?.CreationDate,
+        pageCount,
+        title: titleMatch?.[1],
+        author: authorMatch?.[1],
+        subject: subjectMatch?.[1],
       },
-      fullText: fullText.trim(),
+      fullText,
     };
   } catch (error) {
     console.error('PDF extraction error:', error);
