@@ -768,7 +768,7 @@ export const DocumentPoolTable = () => {
     hierarchicalFolders.push(...standaloneFolders);
 
     // Add "Senza Cartella" for PDFs without folder - BOTH pipelines
-    const [legacyNoFolder, pipelineBDocs] = await Promise.all([
+    const [legacyNoFolder, pipelineBDocs, pipelineCDocs] = await Promise.all([
       supabase
         .from('knowledge_documents')
         .select(`
@@ -784,11 +784,16 @@ export const DocumentPoolTable = () => {
       supabase
         .from('pipeline_b_documents')
         .select('*')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('pipeline_c_documents')
+        .select('*')
         .order('created_at', { ascending: false })
     ]);
 
     if (legacyNoFolder.error) throw legacyNoFolder.error;
     if (pipelineBDocs.error) throw pipelineBDocs.error;
+    if (pipelineCDocs.error) throw pipelineCDocs.error;
 
     const allNoFolderDocs = [];
 
@@ -844,6 +849,31 @@ export const DocumentPoolTable = () => {
         error_message: doc.error_message,
       }));
       allNoFolderDocs.push(...transformedPipelineB);
+    }
+
+    // Transform Pipeline C docs
+    if (pipelineCDocs.data && pipelineCDocs.data.length > 0) {
+      const transformedPipelineC = pipelineCDocs.data.map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || '',
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count || null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        folder: null,
+        keywords: [],
+        topics: [],
+        complexity_level: '',
+        agent_ids: [],
+        pipeline: 'c' as const,
+        error_message: doc.error_message,
+      }));
+      allNoFolderDocs.push(...transformedPipelineC);
     }
 
     // Sort by created_at desc
