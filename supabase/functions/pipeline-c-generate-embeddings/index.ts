@@ -21,7 +21,7 @@ serve(async (req) => {
     // Status reconciliation: find documents stuck in intermediate states
     const { data: stuckDocs, error: stuckError } = await supabase
       .from('pipeline_c_documents')
-      .select('id')
+      .select('id, status')
       .not('status', 'in', '(ready,failed)');
 
     if (!stuckError && stuckDocs && stuckDocs.length > 0) {
@@ -35,9 +35,23 @@ serve(async (req) => {
           .eq('document_id', doc.id)
           .limit(1);
 
-        // If no chunks exist at all, document needs processing - do NOT mark ready
+        // CRITICAL FIX: If document is in advanced state (chunked/processing) but has NO chunks
+        // This is an inconsistent state - reset to 'ingested' for reprocessing
         if (!allChunks || allChunks.length === 0) {
-          console.log(`[Pipeline C Embeddings] Document ${doc.id} has no chunks, skipping reconciliation`);
+          if (doc.status === 'chunked' || doc.status === 'processing') {
+            console.log(`[Pipeline C Embeddings] ⚠️ Document ${doc.id} in status '${doc.status}' but has 0 chunks - resetting to 'ingested'`);
+            
+            await supabase
+              .from('pipeline_c_documents')
+              .update({ 
+                status: 'ingested', 
+                error_message: null,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', doc.id);
+          } else {
+            console.log(`[Pipeline C Embeddings] Document ${doc.id} in status '${doc.status}' has no chunks yet, skipping reconciliation`);
+          }
           continue;
         }
 
@@ -56,7 +70,7 @@ serve(async (req) => {
             .update({ status: 'ready', processed_at: new Date().toISOString() })
             .eq('id', doc.id);
           
-          console.log(`[Pipeline C Embeddings] Reconciled document ${doc.id} to ready`);
+          console.log(`[Pipeline C Embeddings] ✅ Reconciled document ${doc.id} to ready`);
         }
       }
     }
