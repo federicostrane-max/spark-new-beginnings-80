@@ -3,15 +3,15 @@
 ## Stato Implementazione
 
 ### ✅ Fase 1: Setup (Settimana 1)
-- [ ] Database schema (pipeline_c_documents, pipeline_c_chunks_raw, pipeline_c_agent_knowledge)
-- [ ] Shared library: contentAwareChunker.ts
-- [ ] Shared library: pdfTextExtractor.ts
-- [ ] Shared library: metadataEnricher.ts
-- [ ] Shared library: chunkClassifier.ts
+- [x] Database schema (pipeline_c_documents, pipeline_c_chunks_raw, pipeline_c_agent_knowledge)
+- [x] Shared library: contentAwareChunker.ts
+- [x] Shared library: pdfTextExtractor.ts
+- [x] Shared library: metadataEnricher.ts
+- [x] Shared library: chunkClassifier.ts
 
-### ⏳ Fase 2: Core Functions (Settimana 2)
-- [ ] Edge function: pipeline-c-ingest-pdf
-- [ ] Edge function: pipeline-c-process-chunks (NUOVA IMPLEMENTAZIONE)
+### ✅ Fase 2: Core Functions (Settimana 2)
+- [x] Edge function: pipeline-c-ingest-pdf
+- [x] Edge function: pipeline-c-process-chunks (NUOVA IMPLEMENTAZIONE)
 - [ ] Testing chunking logic
 - [ ] Validation boundary respect
 

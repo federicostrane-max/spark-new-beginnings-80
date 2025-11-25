@@ -209,6 +209,20 @@ schedule = "*/5 * * * *"
 
 [functions.pipeline-b-sync-agent]
 verify_jwt = true
+timeout = 60
+
+# ============================================
+# PIPELINE C FUNCTIONS (Content-Aware Chunking)
+# ============================================
+
+[functions.pipeline-c-ingest-pdf]
+verify_jwt = false
+timeout = 60
+
+[functions.pipeline-c-process-chunks]
+verify_jwt = false
+timeout = 600
+schedule = "*/10 * * * *"
 
 [functions.test-landing-ai-metadata]
 verify_jwt = false
