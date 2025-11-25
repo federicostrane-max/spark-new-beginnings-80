@@ -1819,7 +1819,16 @@ export const DocumentPoolTable = () => {
                               Non Disponibile
                             </Badge>
                           </>
+                        ) : (doc.pipeline === 'b' || doc.pipeline === 'c') ? (
+                          // Pipeline B/C: mostra status basato su processing_status
+                          <>
+                            {getStatusIcon(doc.processing_status)}
+                            <span className="text-sm">
+                              {getStatusLabel(doc.processing_status)}
+                            </span>
+                          </>
                         ) : (!doc.ai_summary || doc.ai_summary.trim() === "") ? (
+                          // Legacy: Non elaborato se manca ai_summary
                           <>
                             <AlertCircle className="h-4 w-4 text-orange-500" />
                             <span className="text-sm text-orange-500 font-medium">
@@ -1827,6 +1836,7 @@ export const DocumentPoolTable = () => {
                             </span>
                           </>
                         ) : (
+                          // Legacy: status normale
                           <>
                             {getStatusIcon(doc.processing_status)}
                             <span className="text-sm">
