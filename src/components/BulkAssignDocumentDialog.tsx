@@ -174,11 +174,13 @@ export const BulkAssignDocumentDialog = ({
           table: 'pipeline_b_documents'
         },
         (payload) => {
-          console.log('[BulkAssignDocumentDialog] 🔄 Pipeline B document updated:', payload);
+          console.log('[BulkAssignDocumentDialog] 🔔 Pipeline B document updated:', payload.new);
           countDocuments();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[BulkAssignDocumentDialog] 📡 Pipeline B channel status:', status);
+      });
 
     // Realtime subscription for Pipeline C documents
     const channelC = supabase
@@ -191,11 +193,13 @@ export const BulkAssignDocumentDialog = ({
           table: 'pipeline_c_documents'
         },
         (payload) => {
-          console.log('[BulkAssignDocumentDialog] 🔄 Pipeline C document updated:', payload);
+          console.log('[BulkAssignDocumentDialog] 🔔 Pipeline C document updated:', payload.new);
           countDocuments();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[BulkAssignDocumentDialog] 📡 Pipeline C channel status:', status);
+      });
 
     return () => {
       if (interval) clearInterval(interval);

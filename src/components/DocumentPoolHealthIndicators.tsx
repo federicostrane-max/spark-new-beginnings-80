@@ -284,11 +284,13 @@ export const DocumentPoolHealthIndicators = () => {
           table: 'pipeline_b_documents'
         },
         (payload) => {
-          console.log('[HealthIndicators] 🔄 Pipeline B document changed:', payload);
+          console.log('[HealthIndicators] 🔔 Pipeline B document changed:', payload.new);
           loadHealthIndicators();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[HealthIndicators] 📡 Pipeline B channel status:', status);
+      });
     
     // Realtime subscription for Pipeline B chunks
     const channelBChunks = supabase
@@ -301,11 +303,13 @@ export const DocumentPoolHealthIndicators = () => {
           table: 'pipeline_b_chunks_raw'
         },
         (payload) => {
-          console.log('[HealthIndicators] 🔄 Pipeline B chunk changed:', payload);
+          console.log('[HealthIndicators] 🔔 Pipeline B chunk changed:', payload.new);
           loadHealthIndicators();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[HealthIndicators] 📡 Pipeline B chunks channel status:', status);
+      });
     
     // Realtime subscription for Pipeline C documents
     const channelC = supabase
@@ -318,11 +322,13 @@ export const DocumentPoolHealthIndicators = () => {
           table: 'pipeline_c_documents'
         },
         (payload) => {
-          console.log('[HealthIndicators] 🔄 Pipeline C document changed:', payload);
+          console.log('[HealthIndicators] 🔔 Pipeline C document changed:', payload.new);
           loadHealthIndicators();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[HealthIndicators] 📡 Pipeline C channel status:', status);
+      });
     
     // Realtime subscription for Pipeline C chunks
     const channelCChunks = supabase
@@ -335,11 +341,13 @@ export const DocumentPoolHealthIndicators = () => {
           table: 'pipeline_c_chunks_raw'
         },
         (payload) => {
-          console.log('[HealthIndicators] 🔄 Pipeline C chunk changed:', payload);
+          console.log('[HealthIndicators] 🔔 Pipeline C chunk changed:', payload.new);
           loadHealthIndicators();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[HealthIndicators] 📡 Pipeline C chunks channel status:', status);
+      });
     
     return () => {
       clearInterval(interval);
