@@ -28,6 +28,20 @@ serve(async (req) => {
       console.log(`[Pipeline C Embeddings] Reconciling ${stuckDocs.length} documents`);
       
       for (const doc of stuckDocs) {
+        // First check if document has ANY chunks
+        const { data: allChunks } = await supabase
+          .from('pipeline_c_chunks_raw')
+          .select('id')
+          .eq('document_id', doc.id)
+          .limit(1);
+
+        // If no chunks exist at all, document needs processing - do NOT mark ready
+        if (!allChunks || allChunks.length === 0) {
+          console.log(`[Pipeline C Embeddings] Document ${doc.id} has no chunks, skipping reconciliation`);
+          continue;
+        }
+
+        // Document has chunks - check if any are pending embedding
         const { data: pendingChunks } = await supabase
           .from('pipeline_c_chunks_raw')
           .select('id')
@@ -35,6 +49,7 @@ serve(async (req) => {
           .neq('embedding_status', 'ready')
           .limit(1);
 
+        // If all chunks are ready (no pending), mark document ready
         if (!pendingChunks || pendingChunks.length === 0) {
           await supabase
             .from('pipeline_c_documents')
