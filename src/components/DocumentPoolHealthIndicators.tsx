@@ -7,176 +7,269 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { AlertCircle, PackageX, Clock, AlertTriangle } from "lucide-react";
+import { Activity, Package, Clock, Link2, XCircle } from "lucide-react";
+
+interface PipelineDocument {
+  id: string;
+  file_name: string;
+  status: string;
+  created_at?: string;
+  error_message?: string;
+}
 
 interface HealthData {
-  stuckProcessing: { count: number; files: string[] };
-  noChunks: { count: number; files: string[] };
-  stuckQueue: { count: number; files: string[] };
-  pendingValidation: { count: number; files: string[] };
-  notProcessed: { count: number; files: Array<{ name: string; status: string }> };
+  // In Elaborazione (Processing + Waiting)
+  processing: {
+    awaitingCron: { count: number; files: PipelineDocument[]; nextCronMin: number };
+    activeProcessing: { count: number; files: PipelineDocument[] };
+    stuck: { count: number; files: PipelineDocument[] };
+  };
+  
+  // Chunks Pronti
+  chunks: {
+    ready: { count: number; byPipeline: { legacy: number; b: number; c: number } };
+    missing: { count: number; files: string[] };
+  };
+  
+  // Coda Automatica (Cron Jobs)
+  cronQueue: {
+    processQueue: { count: number; nextCronMin: number; files: PipelineDocument[] };
+    embeddingQueue: { count: number; nextCronMin: number; files: PipelineDocument[] };
+  };
+  
+  // Embeddings
+  embeddings: {
+    pending: { count: number; nextCronMin: number };
+    stuck: { count: number };
+  };
+  
+  // Falliti
+  failed: {
+    count: number;
+    files: Array<{ name: string; pipeline: string; error: string }>;
+  };
+  
   loading: boolean;
 }
 
+// Helper: calcola minuti al prossimo cron
+const getTimeToNextCron = (intervalMinutes: number): number => {
+  const now = new Date();
+  const minutes = now.getMinutes();
+  return intervalMinutes - (minutes % intervalMinutes);
+};
+
 export const DocumentPoolHealthIndicators = () => {
   const [healthData, setHealthData] = useState<HealthData>({
-    stuckProcessing: { count: 0, files: [] },
-    noChunks: { count: 0, files: [] },
-    stuckQueue: { count: 0, files: [] },
-    pendingValidation: { count: 0, files: [] },
-    notProcessed: { count: 0, files: [] },
+    processing: {
+      awaitingCron: { count: 0, files: [], nextCronMin: 0 },
+      activeProcessing: { count: 0, files: [] },
+      stuck: { count: 0, files: [] }
+    },
+    chunks: {
+      ready: { count: 0, byPipeline: { legacy: 0, b: 0, c: 0 } },
+      missing: { count: 0, files: [] }
+    },
+    cronQueue: {
+      processQueue: { count: 0, nextCronMin: 0, files: [] },
+      embeddingQueue: { count: 0, nextCronMin: 0, files: [] }
+    },
+    embeddings: {
+      pending: { count: 0, nextCronMin: 0 },
+      stuck: { count: 0 }
+    },
+    failed: {
+      count: 0,
+      files: []
+    },
     loading: true
   });
 
-
   const loadHealthIndicators = async () => {
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    
-    // Initialize with safe defaults
-    let stuckProcessingData = { count: 0, files: [] };
-    let noChunksData = { count: 0, files: [] };
-    let stuckQueueData = { count: 0, files: [] };
-    let pendingValidationData = { count: 0, files: [] };
-    let notProcessedData = { count: 0, files: [] };
 
-    // 1. Stuck processing documents - with timeout
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const { data: stuckDocs, count: stuckCount } = await supabase
-        .from('knowledge_documents')
-        .select('file_name', { count: 'exact' })
-        .eq('processing_status', 'processing')
-        .lt('created_at', tenMinutesAgo)
-        .order('created_at', { ascending: true })
-        .limit(10)
-        .abortSignal(controller.signal);
+      // === 1. IN ELABORAZIONE ===
+      // Pipeline B - awaiting cron (ingested < 10 min)
+      const { data: pipelineBAwaitingCron } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'ingested')
+        .gte('created_at', tenMinutesAgo)
+        .limit(10);
 
-      clearTimeout(timeout);
-      stuckProcessingData = { count: stuckCount || 0, files: stuckDocs?.map(d => d.file_name) || [] };
-    } catch (error) {
-      console.error('[HealthIndicators] stuckProcessing failed:', error);
-    }
-
-    // 2. Documents without chunks - with timeout
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const { data: noChunksTotal, error: rpcError } = await supabase
-        .rpc('count_documents_without_chunks')
-        .abortSignal(controller.signal);
-
-      clearTimeout(timeout);
-      
-      if (rpcError) throw rpcError;
-
-      let docsWithoutChunks: string[] = [];
-      if (noChunksTotal && noChunksTotal > 0) {
-        const { data: allDocs } = await supabase
-          .from('knowledge_documents')
-          .select('id, file_name')
-          .eq('processing_status', 'ready_for_assignment')
-          .limit(100);
-
-        if (allDocs) {
-          for (const doc of allDocs) {
-            const { count } = await supabase
-              .from('agent_knowledge')
-              .select('*', { count: 'exact', head: true })
-              .eq('pool_document_id', doc.id);
-            
-            if (!count || count === 0) {
-              docsWithoutChunks.push(doc.file_name);
-              if (docsWithoutChunks.length >= 10) break;
-            }
-          }
-        }
-      }
-      noChunksData = { count: noChunksTotal || 0, files: docsWithoutChunks };
-    } catch (error) {
-      console.error('[HealthIndicators] noChunks failed:', error);
-    }
-
-    // 3. Stuck queue jobs - with timeout
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const { data: queueDocs, count: queueStuckCount } = await supabase
-        .from('document_processing_queue')
-        .select('document_id, knowledge_documents!inner(file_name)', { count: 'exact' })
+      // Pipeline B - active processing
+      const { data: pipelineBProcessing } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status, created_at')
         .eq('status', 'processing')
-        .lt('started_at', tenMinutesAgo)
-        .limit(10)
-        .abortSignal(controller.signal);
+        .limit(10);
 
-      clearTimeout(timeout);
-      stuckQueueData = { 
-        count: queueStuckCount || 0, 
-        files: queueDocs?.map(q => q.knowledge_documents?.file_name).filter(Boolean) || [] 
+      // Pipeline B - stuck (processing > 15 min)
+      const { data: pipelineBStuck } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'processing')
+        .lt('created_at', fifteenMinutesAgo)
+        .limit(10);
+
+      // Pipeline C - same queries
+      const { data: pipelineCAwaitingCron } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'ingested')
+        .gte('created_at', tenMinutesAgo)
+        .limit(10);
+
+      const { data: pipelineCProcessing } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'processing')
+        .limit(10);
+
+      const { data: pipelineCStuck } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'processing')
+        .lt('created_at', fifteenMinutesAgo)
+        .limit(10);
+
+      const processingData = {
+        awaitingCron: {
+          count: (pipelineBAwaitingCron?.length || 0) + (pipelineCAwaitingCron?.length || 0),
+          files: [...(pipelineBAwaitingCron || []), ...(pipelineCAwaitingCron || [])],
+          nextCronMin: getTimeToNextCron(10)
+        },
+        activeProcessing: {
+          count: (pipelineBProcessing?.length || 0) + (pipelineCProcessing?.length || 0),
+          files: [...(pipelineBProcessing || []), ...(pipelineCProcessing || [])]
+        },
+        stuck: {
+          count: (pipelineBStuck?.length || 0) + (pipelineCStuck?.length || 0),
+          files: [...(pipelineBStuck || []), ...(pipelineCStuck || [])]
+        }
       };
-    } catch (error) {
-      console.error('[HealthIndicators] stuckQueue failed:', error);
-    }
 
-    // 4. Pending validation - with timeout
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const { data: pendingDocs, count: pendingCount } = await supabase
+      // === 2. CHUNKS PRONTI ===
+      const { count: legacyChunksCount } = await supabase
         .from('knowledge_documents')
-        .select('file_name', { count: 'exact' })
-        .eq('validation_status', 'pending')
-        .order('created_at', { ascending: true })
-        .limit(10)
-        .abortSignal(controller.signal);
+        .select('*', { count: 'exact', head: true })
+        .eq('processing_status', 'ready_for_assignment');
 
-      clearTimeout(timeout);
-      pendingValidationData = { count: pendingCount || 0, files: pendingDocs?.map(d => d.file_name) || [] };
-    } catch (error) {
-      console.error('[HealthIndicators] pendingValidation failed:', error);
-    }
+      const { count: pipelineBChunksCount } = await supabase
+        .from('pipeline_b_documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'ready');
 
-    // 5. Not processed documents - with timeout
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const { data: notProcessedDocs, count: notProcessedCount } = await supabase
-        .from('knowledge_documents')
-        .select('file_name, processing_status', { count: 'exact' })
-        .neq('processing_status', 'ready_for_assignment')
-        .eq('validation_status', 'validated')
-        .order('updated_at', { ascending: false })
-        .limit(10)
-        .abortSignal(controller.signal);
+      const { count: pipelineCChunksCount } = await supabase
+        .from('pipeline_c_documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'ready');
 
-      clearTimeout(timeout);
-      notProcessedData = { 
-        count: notProcessedCount || 0, 
-        files: notProcessedDocs?.map(d => ({ name: d.file_name, status: d.processing_status })) || [] 
+      const chunksData = {
+        ready: {
+          count: (legacyChunksCount || 0) + (pipelineBChunksCount || 0) + (pipelineCChunksCount || 0),
+          byPipeline: {
+            legacy: legacyChunksCount || 0,
+            b: pipelineBChunksCount || 0,
+            c: pipelineCChunksCount || 0
+          }
+        },
+        missing: { count: 0, files: [] } // Deprecated for new pipelines
       };
-    } catch (error) {
-      console.error('[HealthIndicators] notProcessed failed:', error);
-    }
 
-    // Set all data at once with safe defaults
-    setHealthData({
-      stuckProcessing: stuckProcessingData,
-      noChunks: noChunksData,
-      stuckQueue: stuckQueueData,
-      pendingValidation: pendingValidationData,
-      notProcessed: notProcessedData,
-      loading: false,
-    });
+      // === 3. CODA AUTOMATICA (Cron Jobs) ===
+      const { data: pipelineBChunked } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'chunked')
+        .limit(10);
+
+      const { data: pipelineCChunked } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'chunked')
+        .limit(10);
+
+      const cronQueueData = {
+        processQueue: {
+          count: processingData.awaitingCron.count,
+          nextCronMin: getTimeToNextCron(10),
+          files: processingData.awaitingCron.files
+        },
+        embeddingQueue: {
+          count: (pipelineBChunked?.length || 0) + (pipelineCChunked?.length || 0),
+          nextCronMin: getTimeToNextCron(5),
+          files: [...(pipelineBChunked || []), ...(pipelineCChunked || [])]
+        }
+      };
+
+      // === 4. EMBEDDINGS ===
+      const { count: pipelineBPendingEmbeddings } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('*', { count: 'exact', head: true })
+        .eq('embedding_status', 'pending');
+
+      const { count: pipelineCPendingEmbeddings } = await supabase
+        .from('pipeline_c_chunks_raw')
+        .select('*', { count: 'exact', head: true })
+        .eq('embedding_status', 'pending');
+
+      const embeddingsData = {
+        pending: {
+          count: (pipelineBPendingEmbeddings || 0) + (pipelineCPendingEmbeddings || 0),
+          nextCronMin: getTimeToNextCron(5)
+        },
+        stuck: { count: 0 } // TODO: implement stuck embeddings detection
+      };
+
+      // === 5. FALLITI ===
+      const { data: pipelineBFailed } = await supabase
+        .from('pipeline_b_documents')
+        .select('id, file_name, status, error_message')
+        .eq('status', 'failed')
+        .limit(10);
+
+      const { data: pipelineCFailed } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status, error_message')
+        .eq('status', 'failed')
+        .limit(10);
+
+      const failedData = {
+        count: (pipelineBFailed?.length || 0) + (pipelineCFailed?.length || 0),
+        files: [
+          ...(pipelineBFailed || []).map(d => ({
+            name: d.file_name,
+            pipeline: 'Pipeline B',
+            error: d.error_message || 'Errore sconosciuto'
+          })),
+          ...(pipelineCFailed || []).map(d => ({
+            name: d.file_name,
+            pipeline: 'Pipeline C',
+            error: d.error_message || 'Errore sconosciuto'
+          }))
+        ]
+      };
+
+      setHealthData({
+        processing: processingData,
+        chunks: chunksData,
+        cronQueue: cronQueueData,
+        embeddings: embeddingsData,
+        failed: failedData,
+        loading: false
+      });
+    } catch (error) {
+      console.error('[HealthIndicators] Load failed:', error);
+      setHealthData(prev => ({ ...prev, loading: false }));
+    }
   };
 
   useEffect(() => {
     loadHealthIndicators();
-    const interval = setInterval(loadHealthIndicators, 30000); // ogni 30 sec
+    const interval = setInterval(loadHealthIndicators, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -184,77 +277,67 @@ export const DocumentPoolHealthIndicators = () => {
     return null;
   }
 
+  const totalProcessing = healthData.processing.awaitingCron.count + 
+                         healthData.processing.activeProcessing.count + 
+                         healthData.processing.stuck.count;
+  
+  const hasProcessingIssues = healthData.processing.stuck.count > 0;
+  const isProcessingNormal = !hasProcessingIssues && totalProcessing > 0;
+
   return (
     <div className="flex flex-wrap items-center gap-2 ml-2">
-      {/* Documenti bloccati in processing - SEMPRE VISIBILE */}
+      {/* 1. IN ELABORAZIONE */}
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger>
             <Badge 
-              variant={healthData.stuckProcessing.count === 0 ? "outline" : "destructive"}
-              className={`text-xs cursor-help ${healthData.stuckProcessing.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
-            >
-              <AlertCircle className="h-3 w-3 mr-1" />
-              Bloccati: {healthData.stuckProcessing.count}
-            </Badge>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-sm">
-            {healthData.stuckProcessing.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento bloccato in processing</p>
-            ) : (
-              <div>
-                <p className="font-semibold text-red-600 dark:text-red-400">
-                  ⚠️ {healthData.stuckProcessing.count} documenti bloccati in processing (&gt;10 min)
-                </p>
-                {healthData.stuckProcessing.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.stuckProcessing.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file}</li>
-                    ))}
-                    {healthData.stuckProcessing.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.stuckProcessing.count - 10}</li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      {/* Documenti senza chunks - SEMPRE VISIBILE */}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger>
-            <Badge 
-              variant={healthData.noChunks.count === 0 ? "outline" : "destructive"}
+              variant={hasProcessingIssues ? "destructive" : "outline"}
               className={`text-xs cursor-help ${
-                healthData.noChunks.count === 0 
-                  ? "border-green-500 text-green-700 dark:text-green-500" 
+                !hasProcessingIssues && totalProcessing === 0
+                  ? "border-green-500 text-green-700 dark:text-green-500"
+                  : isProcessingNormal
+                  ? "border-yellow-500 text-yellow-700 dark:text-yellow-500"
                   : ""
               }`}
             >
-              <PackageX className="h-3 w-3 mr-1" />
-              Senza Chunks: {healthData.noChunks.count}
+              <Activity className="h-3 w-3 mr-1" />
+              In Elaborazione: {totalProcessing}
             </Badge>
           </TooltipTrigger>
-          <TooltipContent className="max-w-sm">
-            {healthData.noChunks.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti hanno chunks</p>
+          <TooltipContent className="max-w-md">
+            {totalProcessing === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Nessun documento in elaborazione</p>
             ) : (
-              <div>
-                <p className="font-semibold text-orange-600 dark:text-orange-400">
-                  ⚠️ {healthData.noChunks.count} documenti senza chunks generati
-                </p>
-                {healthData.noChunks.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.noChunks.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file}</li>
+              <div className="space-y-2">
+                {healthData.processing.awaitingCron.count > 0 && (
+                  <div>
+                    <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                      ⏳ {healthData.processing.awaitingCron.count} in attesa prossimo cron (tra ~{healthData.processing.awaitingCron.nextCronMin} min)
+                    </p>
+                    {healthData.processing.awaitingCron.files.slice(0, 5).map((doc, idx) => (
+                      <p key={idx} className="text-xs truncate ml-4">• {doc.file_name}</p>
                     ))}
-                    {healthData.noChunks.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.noChunks.count - 10}</li>
-                    )}
-                  </ul>
+                  </div>
+                )}
+                {healthData.processing.activeProcessing.count > 0 && (
+                  <div>
+                    <p className="font-semibold text-blue-600 dark:text-blue-400">
+                      🔄 {healthData.processing.activeProcessing.count} in chunking attivo
+                    </p>
+                    {healthData.processing.activeProcessing.files.slice(0, 5).map((doc, idx) => (
+                      <p key={idx} className="text-xs truncate ml-4">• {doc.file_name}</p>
+                    ))}
+                  </div>
+                )}
+                {healthData.processing.stuck.count > 0 && (
+                  <div>
+                    <p className="font-semibold text-red-600 dark:text-red-400">
+                      ❌ {healthData.processing.stuck.count} bloccati (&gt;15 min)
+                    </p>
+                    {healthData.processing.stuck.files.slice(0, 5).map((doc, idx) => (
+                      <p key={idx} className="text-xs truncate ml-4">• {doc.file_name}</p>
+                    ))}
+                  </div>
                 )}
               </div>
             )}
@@ -262,78 +345,69 @@ export const DocumentPoolHealthIndicators = () => {
         </Tooltip>
       </TooltipProvider>
 
-      {/* Documenti non processati - SEMPRE VISIBILE */}
+      {/* 2. CHUNKS PRONTI */}
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger>
             <Badge 
-              variant={healthData.notProcessed.count === 0 ? "outline" : "destructive"}
-              className={`text-xs cursor-help ${
-                healthData.notProcessed.count === 0 
-                  ? "border-green-500 text-green-700 dark:text-green-500" 
-                  : ""
-              }`}
+              variant="outline"
+              className="text-xs cursor-help border-green-500 text-green-700 dark:text-green-500"
             >
-              <AlertCircle className="h-3 w-3 mr-1" />
-              Non Processati: {healthData.notProcessed.count}
+              <Package className="h-3 w-3 mr-1" />
+              Chunks: {healthData.chunks.ready.count}
             </Badge>
           </TooltipTrigger>
           <TooltipContent className="max-w-sm">
-            {healthData.notProcessed.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Tutti i documenti validati sono stati processati</p>
-            ) : (
-              <div>
-                <p className="font-semibold text-red-600 dark:text-red-400">
-                  ⚠️ {healthData.notProcessed.count} documenti validati non processati
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Documenti validati ma con errori di processing
-                </p>
-                {healthData.notProcessed.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.notProcessed.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file.name} ({file.status})</li>
-                    ))}
-                    {healthData.notProcessed.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.notProcessed.count - 10}</li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
+            <div>
+              <p className="font-semibold text-green-600 dark:text-green-400">
+                ✅ {healthData.chunks.ready.count} documenti pronti con chunks
+              </p>
+              <ul className="text-xs mt-2 space-y-1">
+                <li>Legacy: {healthData.chunks.ready.byPipeline.legacy}</li>
+                <li>Pipeline B: {healthData.chunks.ready.byPipeline.b}</li>
+                <li>Pipeline C: {healthData.chunks.ready.byPipeline.c}</li>
+              </ul>
+            </div>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
 
-      {/* Job queue bloccati - SEMPRE VISIBILE */}
+      {/* 3. CODA AUTOMATICA */}
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger>
             <Badge 
-              variant={healthData.stuckQueue.count === 0 ? "outline" : "destructive"}
-              className={`text-xs cursor-help ${healthData.stuckQueue.count === 0 ? "border-green-500 text-green-700 dark:text-green-500" : ""}`}
+              variant="outline"
+              className={`text-xs cursor-help ${
+                healthData.cronQueue.processQueue.count === 0 && healthData.cronQueue.embeddingQueue.count === 0
+                  ? "border-green-500 text-green-700 dark:text-green-500"
+                  : "border-yellow-500 text-yellow-700 dark:text-yellow-500"
+              }`}
             >
               <Clock className="h-3 w-3 mr-1" />
-              Queue: {healthData.stuckQueue.count}
+              Coda: {healthData.cronQueue.processQueue.count + healthData.cronQueue.embeddingQueue.count}
             </Badge>
           </TooltipTrigger>
-          <TooltipContent className="max-w-sm">
-            {healthData.stuckQueue.count === 0 ? (
-              <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun job bloccato nella coda</p>
+          <TooltipContent className="max-w-md">
+            {healthData.cronQueue.processQueue.count === 0 && healthData.cronQueue.embeddingQueue.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Nessun documento in coda</p>
             ) : (
-              <div>
-                <p className="font-semibold text-red-600 dark:text-red-400">
-                  ⚠️ {healthData.stuckQueue.count} job bloccati nella coda (&gt;10 min)
-                </p>
-                {healthData.stuckQueue.files.length > 0 && (
-                  <ul className="text-xs mt-2 space-y-1">
-                    {healthData.stuckQueue.files.map((file, idx) => (
-                      <li key={idx} className="truncate">• {file}</li>
-                    ))}
-                    {healthData.stuckQueue.count > 10 && (
-                      <li className="italic text-muted-foreground">... e altri {healthData.stuckQueue.count - 10}</li>
-                    )}
-                  </ul>
+              <div className="space-y-2">
+                {healthData.cronQueue.processQueue.count > 0 && (
+                  <div>
+                    <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                      📋 {healthData.cronQueue.processQueue.count} in attesa chunking
+                    </p>
+                    <p className="text-xs text-muted-foreground">Prossimo cron tra ~{healthData.cronQueue.processQueue.nextCronMin} min (ogni 10 min)</p>
+                  </div>
+                )}
+                {healthData.cronQueue.embeddingQueue.count > 0 && (
+                  <div>
+                    <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                      🔗 {healthData.cronQueue.embeddingQueue.count} in attesa embeddings
+                    </p>
+                    <p className="text-xs text-muted-foreground">Prossimo cron tra ~{healthData.cronQueue.embeddingQueue.nextCronMin} min (ogni 5 min)</p>
+                  </div>
                 )}
               </div>
             )}
@@ -341,47 +415,82 @@ export const DocumentPoolHealthIndicators = () => {
         </Tooltip>
       </TooltipProvider>
 
-      {/* Documenti pending validation */}
-      {(
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger>
-              <Badge 
-                variant={healthData.pendingValidation.count === 0 ? "outline" : "destructive"}
-                className={`text-xs cursor-help ${
-                  healthData.pendingValidation.count === 0 
-                    ? "border-green-500 text-green-700 dark:text-green-500" 
-                    : ""
-                }`}
-              >
-                <AlertTriangle className="h-3 w-3 mr-1" />
-                Pending: {healthData.pendingValidation.count}
-              </Badge>
-            </TooltipTrigger>
-            <TooltipContent className="max-w-sm">
-              {healthData.pendingValidation.count === 0 ? (
-                <p className="text-green-600 dark:text-green-400">✅ Tutto OK - Nessun documento in attesa di validazione</p>
-              ) : (
-                <div>
-                  <p className="font-semibold text-yellow-600 dark:text-yellow-400">
-                    ⚠️ {healthData.pendingValidation.count} documenti in attesa di validazione
-                  </p>
-                  {healthData.pendingValidation.files.length > 0 && (
-                    <ul className="text-xs mt-2 space-y-1">
-                      {healthData.pendingValidation.files.map((file, idx) => (
-                        <li key={idx} className="truncate">• {file}</li>
-                      ))}
-                      {healthData.pendingValidation.count > 10 && (
-                        <li className="italic text-muted-foreground">... e altri {healthData.pendingValidation.count - 10}</li>
+      {/* 4. EMBEDDINGS */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant="outline"
+              className={`text-xs cursor-help ${
+                healthData.embeddings.pending.count === 0
+                  ? "border-green-500 text-green-700 dark:text-green-500"
+                  : "border-yellow-500 text-yellow-700 dark:text-yellow-500"
+              }`}
+            >
+              <Link2 className="h-3 w-3 mr-1" />
+              Embeddings: {healthData.embeddings.pending.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            {healthData.embeddings.pending.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Tutti gli embeddings generati</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-yellow-600 dark:text-yellow-400">
+                  ⏳ {healthData.embeddings.pending.count} chunks in attesa embedding
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Prossimo cron tra ~{healthData.embeddings.pending.nextCronMin} min (ogni 5 min)
+                </p>
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      {/* 5. FALLITI */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            <Badge 
+              variant={healthData.failed.count === 0 ? "outline" : "destructive"}
+              className={`text-xs cursor-help ${
+                healthData.failed.count === 0
+                  ? "border-green-500 text-green-700 dark:text-green-500"
+                  : ""
+              }`}
+            >
+              <XCircle className="h-3 w-3 mr-1" />
+              Falliti: {healthData.failed.count}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-md">
+            {healthData.failed.count === 0 ? (
+              <p className="text-green-600 dark:text-green-400">✅ Nessun documento fallito</p>
+            ) : (
+              <div>
+                <p className="font-semibold text-red-600 dark:text-red-400">
+                  ❌ {healthData.failed.count} documenti falliti
+                </p>
+                <ul className="text-xs mt-2 space-y-2">
+                  {healthData.failed.files.slice(0, 5).map((file, idx) => (
+                    <li key={idx}>
+                      <p className="font-semibold truncate">• {file.name}</p>
+                      <p className="text-muted-foreground ml-4">{file.pipeline}</p>
+                      <p className="text-red-600 dark:text-red-400 ml-4">{file.error}</p>
+                      {file.error.includes('402') && (
+                        <p className="text-xs text-yellow-600 dark:text-yellow-400 ml-4">
+                          💡 Verifica crediti Landing AI e usa "Riprocessa"
+                        </p>
                       )}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
   );
 };
