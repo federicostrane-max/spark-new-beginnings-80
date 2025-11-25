@@ -8,7 +8,7 @@ const corsHeaders = {
 interface AssignRequest {
   agentId: string;
   documentId: string;
-  pipeline?: 'a' | 'b';
+  pipeline?: 'a' | 'b' | 'c';
 }
 
 Deno.serve(async (req) => {
@@ -47,6 +47,29 @@ Deno.serve(async (req) => {
         console.error('[assign-document-to-agent] Pipeline B document not ready:', document.status);
         return new Response(
           JSON.stringify({ error: `Pipeline B document not ready (status: ${document.status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (pipeline === 'c') {
+      // Pipeline C: Check status='ready' in pipeline_c_documents
+      const { data: document, error: docError } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_name, status')
+        .eq('id', documentId)
+        .single();
+
+      if (docError || !document) {
+        console.error('[assign-document-to-agent] Pipeline C document not found:', docError);
+        return new Response(
+          JSON.stringify({ error: 'Pipeline C document not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (document.status !== 'ready') {
+        console.error('[assign-document-to-agent] Pipeline C document not ready:', document.status);
+        return new Response(
+          JSON.stringify({ error: `Pipeline C document not ready (status: ${document.status})` }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -112,6 +135,41 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           success: true,
           message: `Pipeline B document assigned successfully (${syncData?.synced || 0} chunks synced)`,
+          synced: syncData?.synced || 0
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 3. Handle Pipeline C assignment differently (no agent_document_links)
+    if (pipeline === 'c') {
+      console.log('[assign-document-to-agent] Pipeline C: Syncing directly to agent knowledge');
+      
+      // Invoke pipeline-c-sync-agent to sync chunks directly
+      const { data: syncData, error: syncError } = await supabase.functions.invoke(
+        'pipeline-c-sync-agent',
+        {
+          body: {
+            agentId: agentId,
+            documentIds: [documentId]
+          }
+        }
+      );
+
+      if (syncError) {
+        console.error('[assign-document-to-agent] Pipeline C sync error:', syncError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to sync Pipeline C document to agent' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[assign-document-to-agent] ✅ Pipeline C sync completed: ${syncData?.synced || 0} chunks`);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: `Pipeline C document assigned successfully (${syncData?.synced || 0} chunks synced)`,
           synced: syncData?.synced || 0
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
