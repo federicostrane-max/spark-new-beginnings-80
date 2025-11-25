@@ -929,6 +929,19 @@ export const DocumentPoolTable = () => {
 
   const handleDelete = async (doc: KnowledgeDocument) => {
     try {
+      console.log('[DELETE] Starting deletion for document:', {
+        id: doc.id,
+        file_name: doc.file_name,
+        pipeline: doc.pipeline,
+        processing_status: doc.processing_status
+      });
+
+      if (!doc.pipeline) {
+        console.error('[DELETE] ERROR: doc.pipeline is undefined!', doc);
+        toast.error("Errore: pipeline non definita per questo documento");
+        return;
+      }
+
       if (doc.pipeline === 'c') {
         // Pipeline C deletion
         console.log(`[DELETE] Pipeline C document: ${doc.id}`);
@@ -959,18 +972,27 @@ export const DocumentPoolTable = () => {
         if (chunksError) throw chunksError;
 
         // 4. Delete storage file
-        const { data: docData } = await supabase
+        const { data: docData, error: docDataError } = await supabase
           .from("pipeline_c_documents")
           .select("file_path, storage_bucket")
           .eq("id", doc.id)
           .single();
 
-        if (docData && docData.file_path && docData.storage_bucket) {
+        if (docDataError) {
+          console.warn('[DELETE] Could not fetch storage info (document may already be deleted):', docDataError);
+        } else if (docData && docData.file_path && docData.storage_bucket) {
+          console.log(`[DELETE] Deleting file from storage: ${docData.storage_bucket}/${docData.file_path}`);
           const { error: storageError } = await supabase.storage
             .from(docData.storage_bucket)
             .remove([docData.file_path]);
 
-          if (storageError) console.warn("Storage deletion warning:", storageError);
+          if (storageError) {
+            console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
+          } else {
+            console.log('[DELETE] ✓ Storage file deleted successfully');
+          }
+        } else {
+          console.warn('[DELETE] No storage info found for document');
         }
 
         // 5. Delete from pipeline_c_documents
@@ -979,9 +1001,14 @@ export const DocumentPoolTable = () => {
           .delete()
           .eq("id", doc.id);
 
-        if (docError) throw docError;
+        if (docError) {
+          console.error('[DELETE] Error deleting Pipeline C document record:', docError);
+          throw docError;
+        }
 
+        console.log('[DELETE] ✓ Pipeline C document deleted successfully');
         toast.success("Documento Pipeline C eliminato");
+        loadDocuments();
         
       } else if (doc.pipeline === 'b') {
         // Pipeline B deletion
@@ -1022,11 +1049,16 @@ export const DocumentPoolTable = () => {
 
         // 5. Delete storage file (shared-pool-uploads bucket)
         const filePath = `${doc.id}/${doc.file_name}`;
+        console.log(`[DELETE] Deleting file from storage: shared-pool-uploads/${filePath}`);
         const { error: storageError } = await supabase.storage
           .from("shared-pool-uploads")
           .remove([filePath]);
 
-        if (storageError) console.warn("Storage deletion warning:", storageError);
+        if (storageError) {
+          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
+        } else {
+          console.log('[DELETE] ✓ Storage file deleted successfully');
+        }
 
         // 6. Delete from pipeline_b_documents
         const { error: docError } = await supabase
@@ -1034,11 +1066,17 @@ export const DocumentPoolTable = () => {
           .delete()
           .eq("id", doc.id);
 
-        if (docError) throw docError;
+        if (docError) {
+          console.error('[DELETE] Error deleting Pipeline B document record:', docError);
+          throw docError;
+        }
 
-        console.log(`[DELETE] ✓ Pipeline B document deleted: ${doc.id}`);
+        console.log('[DELETE] ✓ Pipeline B document deleted successfully');
+        toast.success("Documento eliminato con successo");
+        loadDocuments();
       } else {
         // Legacy pipeline deletion
+        console.log(`[DELETE] Legacy pipeline document: ${doc.id}`);
         const { error: linksError } = await supabase
           .from("agent_document_links")
           .delete()
@@ -1061,24 +1099,34 @@ export const DocumentPoolTable = () => {
         if (cacheError) throw cacheError;
 
         const filePath = `${doc.id}/${doc.file_name}`;
+        console.log(`[DELETE] Deleting file from storage: knowledge-pdfs/${filePath}`);
         const { error: storageError } = await supabase.storage
           .from("knowledge-pdfs")
           .remove([filePath]);
 
-        if (storageError) console.warn("Storage deletion warning:", storageError);
+        if (storageError) {
+          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
+        } else {
+          console.log('[DELETE] ✓ Storage file deleted successfully');
+        }
 
         const { error: docError } = await supabase
           .from("knowledge_documents")
           .delete()
           .eq("id", doc.id);
 
-        if (docError) throw docError;
+        if (docError) {
+          console.error('[DELETE] Error deleting legacy document record:', docError);
+          throw docError;
+        }
+
+        console.log('[DELETE] ✓ Legacy document deleted successfully');
+        toast.success("Documento eliminato con successo");
+        loadDocuments();
       }
 
-      toast.success("Documento eliminato con successo");
-      loadDocuments();
     } catch (error: any) {
-      console.error("Error deleting document:", error);
+      console.error('[DELETE] ❌ Deletion failed:', error);
       toast.error("Errore nell'eliminazione del documento");
     } finally {
       setDeleteDialogOpen(false);
