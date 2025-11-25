@@ -37,12 +37,12 @@ interface PDFExtractionResult {
 export async function extractTextFromPDF(
   pdfBuffer: ArrayBuffer
 ): Promise<PDFExtractionResult> {
-  // Import pdfjs-dist locale (già installato via npm)
-  const pdfjsLib = await import('pdfjs-dist');
+  // Import pdfjs-dist da esm.sh CDN per Deno
+  const pdfjsLib = await import('https://esm.sh/pdfjs-dist@5.4.296');
   
   // Configura worker path
   // @ts-ignore - GlobalWorkerOptions exists at runtime
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
   
   try {
     // Carica documento PDF
