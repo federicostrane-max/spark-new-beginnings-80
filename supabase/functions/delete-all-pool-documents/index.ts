@@ -39,10 +39,16 @@ Deno.serve(async (req) => {
       .select('id, file_name')
       .in('id', documentIds);
 
+    const { data: pipelineCDocs } = await supabase
+      .from('pipeline_c_documents')
+      .select('id, file_name')
+      .in('id', documentIds);
+
     const legacyIds = legacyDocs?.map(d => d.id) || [];
     const pipelineBIds = pipelineBDocs?.map(d => d.id) || [];
+    const pipelineCIds = pipelineCDocs?.map(d => d.id) || [];
 
-    console.log(`[DELETE] Legacy docs: ${legacyIds.length}, Pipeline B docs: ${pipelineBIds.length}`);
+    console.log(`[DELETE] Legacy docs: ${legacyIds.length}, Pipeline B docs: ${pipelineBIds.length}, Pipeline C docs: ${pipelineCIds.length}`);
 
     // Use smaller batches (50) to avoid database timeouts on heavy operations
     const BATCH_SIZE = 50;
@@ -177,6 +183,67 @@ Deno.serve(async (req) => {
       
       totalDeleted += batchIds.length;
       console.log(`[PIPELINE B BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
+    }
+
+    // Process Pipeline C documents
+    for (let i = 0; i < pipelineCIds.length; i += BATCH_SIZE) {
+      const batchIds = pipelineCIds.slice(i, i + BATCH_SIZE);
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      console.log(`[PIPELINE C BATCH ${batchNum}] Processing ${batchIds.length} documents`);
+
+      // 1. Get file paths BEFORE deleting documents
+      const { data: documents, error: fetchError } = await supabase
+        .from('pipeline_c_documents')
+        .select('id, file_path, storage_bucket')
+        .in('id', batchIds);
+
+      if (fetchError) {
+        console.error(`[PIPELINE C BATCH ${batchNum}] Error fetching documents:`, fetchError);
+        throw fetchError;
+      }
+
+      if (documents && documents.length > 0) {
+        documents.forEach(doc => {
+          if (doc.file_path && doc.storage_bucket) {
+            allFilePaths.push({ bucket: doc.storage_bucket, path: doc.file_path });
+          }
+        });
+      }
+
+      // 2. Get chunk IDs first, then delete pipeline_c_agent_knowledge
+      const { data: chunks } = await supabase
+        .from('pipeline_c_chunks_raw')
+        .select('id')
+        .in('document_id', batchIds);
+
+      if (chunks && chunks.length > 0) {
+        const chunkIds = chunks.map(c => c.id);
+        const { error: agentKnowledgeError } = await supabase
+          .from('pipeline_c_agent_knowledge')
+          .delete()
+          .in('chunk_id', chunkIds);
+
+        if (agentKnowledgeError) console.error(`[PIPELINE C BATCH ${batchNum}] Error deleting agent knowledge:`, agentKnowledgeError);
+      }
+
+      // 3. Delete pipeline_c_chunks_raw
+      const { error: chunksError } = await supabase
+        .from('pipeline_c_chunks_raw')
+        .delete()
+        .in('document_id', batchIds);
+
+      if (chunksError) throw chunksError;
+
+      // 4. Delete from pipeline_c_documents table
+      const { error: deleteError } = await supabase
+        .from('pipeline_c_documents')
+        .delete()
+        .in('id', batchIds);
+
+      if (deleteError) throw deleteError;
+      
+      totalDeleted += batchIds.length;
+      console.log(`[PIPELINE C BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
     }
 
     // Delete storage files from both buckets in batches of 100 (Supabase storage limit)
