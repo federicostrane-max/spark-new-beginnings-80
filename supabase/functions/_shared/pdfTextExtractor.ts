@@ -1,8 +1,7 @@
 /**
- * PDF Text Extraction for Pipeline C using Landing AI
- * Uses Landing AI for robust PDF text extraction, then applies custom chunking
- * This hybrid approach leverages Landing AI's strength (PDF parsing) while 
- * maintaining Pipeline C's custom semantic chunking
+ * PDF Text Extraction for Pipeline C - INDEPENDENT SYSTEM
+ * Uses native regex extraction with OCR fallback via Lovable AI Gateway
+ * NO DEPENDENCIES on Landing AI or external parsing services
  */
 
 interface PDFExtractionResult {
@@ -21,134 +20,168 @@ interface PDFExtractionResult {
   fullText: string;
 }
 
+interface OCRFallbackOptions {
+  supabase: any;
+  bucket: string;
+  path: string;
+}
+
 /**
- * Estrae testo da PDF usando Landing AI, ritorna fullText per chunking custom
+ * Extract text from PDF using native regex extraction
+ * This works for PDFs with embedded text (not scanned images)
+ */
+async function extractTextNatively(pdfBuffer: ArrayBuffer): Promise<string> {
+  try {
+    console.log('[PDF Extractor] Attempting native text extraction...');
+    
+    // Convert ArrayBuffer to string to look for text content
+    const uint8Array = new Uint8Array(pdfBuffer);
+    const decoder = new TextDecoder('latin1'); // PDFs use latin1 encoding
+    const pdfString = decoder.decode(uint8Array);
+    
+    // Extract text between stream objects (simple PDF text extraction)
+    const textMatches = pdfString.match(/\(([^)]+)\)/g) || [];
+    
+    let extractedText = '';
+    for (const match of textMatches) {
+      // Remove parentheses and clean up
+      const text = match.slice(1, -1)
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\\\/g, '\\')
+        .replace(/\\([()])/g, '$1');
+      
+      // Filter out control characters and keep meaningful text
+      if (text.length > 2 && !/^[\x00-\x1F]+$/.test(text)) {
+        extractedText += text + ' ';
+      }
+    }
+    
+    // Also try to extract text from BT/ET blocks (more sophisticated)
+    const btEtPattern = /BT\s*(.*?)\s*ET/gs;
+    const btEtMatches = pdfString.match(btEtPattern) || [];
+    
+    for (const block of btEtMatches) {
+      const tjMatches = block.match(/\[(.*?)\]\s*TJ/g) || [];
+      for (const tj of tjMatches) {
+        const content = tj.match(/\(([^)]+)\)/g) || [];
+        for (const c of content) {
+          const cleaned = c.slice(1, -1);
+          if (cleaned.length > 1) {
+            extractedText += cleaned + ' ';
+          }
+        }
+      }
+    }
+    
+    const finalText = extractedText.trim();
+    console.log(`[PDF Extractor] Native extraction: ${finalText.length} characters`);
+    
+    return finalText;
+  } catch (error) {
+    console.error('[PDF Extractor] Native extraction failed:', error);
+    return '';
+  }
+}
+
+/**
+ * Estimate page count from PDF buffer
+ */
+function estimatePageCount(pdfBuffer: ArrayBuffer): number {
+  try {
+    const uint8Array = new Uint8Array(pdfBuffer);
+    const decoder = new TextDecoder('latin1');
+    const pdfString = decoder.decode(uint8Array);
+    
+    // Look for /Count entry in Pages object
+    const countMatch = pdfString.match(/\/Type\s*\/Pages.*?\/Count\s+(\d+)/s);
+    if (countMatch) {
+      return parseInt(countMatch[1], 10);
+    }
+    
+    // Fallback: count /Page entries
+    const pageMatches = pdfString.match(/\/Type\s*\/Page[^s]/g);
+    return pageMatches ? pageMatches.length : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * Estrae testo da PDF usando estrazione nativa + fallback OCR via Lovable AI Gateway
  * 
  * @param pdfBuffer - ArrayBuffer del PDF
- * @returns Risultato con fullText estratto da Landing AI
+ * @param ocrOptions - Opzioni per OCR fallback (supabase, bucket, path)
+ * @returns Risultato con fullText estratto
  */
 export async function extractTextFromPDF(
-  pdfBuffer: ArrayBuffer
+  pdfBuffer: ArrayBuffer,
+  ocrOptions?: OCRFallbackOptions
 ): Promise<PDFExtractionResult> {
-  const landingApiKey = Deno.env.get('LANDING_AI_API_KEY');
-  
-  if (!landingApiKey) {
-    throw new Error('LANDING_AI_API_KEY not configured');
-  }
-
   try {
-    // 1. Invia PDF a Landing AI per parsing
-    console.log(`[PDF Extractor] Sending PDF to Landing AI for text extraction`);
+    // PHASE 1: Try native extraction first
+    console.log('[PDF Extractor] PHASE 1: Native extraction...');
+    const nativeText = await extractTextNatively(pdfBuffer);
+    const pageCount = estimatePageCount(pdfBuffer);
     
-    const formData = new FormData();
-    const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
-    formData.append('file', blob, 'document.pdf');
+    let finalText = nativeText;
+    
+    // PHASE 2: OCR fallback if native extraction insufficient
+    if (nativeText.length < 100 && ocrOptions) {
+      console.log(`[PDF Extractor] Native extraction insufficient (${nativeText.length} chars), trying OCR fallback...`);
+      
+      try {
+        // Create signed URL for OCR service
+        const { data: signedUrlData, error: signedUrlError } = await ocrOptions.supabase
+          .storage
+          .from(ocrOptions.bucket)
+          .createSignedUrl(ocrOptions.path, 300); // 5 minutes
 
-    const parseResponse = await fetch('https://api.landing.ai/v1/ade/parse', {
-      method: 'POST',
-      headers: {
-        'apikey': landingApiKey,
+        if (signedUrlError || !signedUrlData?.signedUrl) {
+          console.warn('[PDF Extractor] Failed to create signed URL for OCR:', signedUrlError);
+        } else {
+          console.log('[PDF Extractor] PHASE 2: Calling ocr-image for OCR fallback...');
+          
+          const { data: ocrData, error: ocrError } = await ocrOptions.supabase.functions.invoke('ocr-image', {
+            body: {
+              imageUrl: signedUrlData.signedUrl,
+              fileName: ocrOptions.path.split('/').pop() || 'document.pdf',
+              maxPages: Math.min(pageCount, 5) // Max 5 pages for OCR
+            }
+          });
+
+          if (ocrError) {
+            console.warn('[PDF Extractor] OCR fallback failed:', ocrError);
+          } else {
+            finalText = ocrData?.extractedText || nativeText;
+            console.log(`[PDF Extractor] ✅ OCR extraction: ${finalText.length} characters`);
+          }
+        }
+      } catch (ocrErr) {
+        console.warn('[PDF Extractor] OCR fallback error:', ocrErr);
+        // Continue with native text
+      }
+    }
+
+    console.log(`[PDF Extractor] ✅ Final extraction: ${finalText.length} characters (${pageCount} pages)`);
+
+    return {
+      pages: [{
+        pageNumber: 1,
+        text: finalText,
+        items: []
+      }],
+      metadata: {
+        pageCount,
       },
-      body: formData,
-    });
-
-    if (!parseResponse.ok) {
-      const errorText = await parseResponse.text();
-      throw new Error(`Landing AI parse failed (${parseResponse.status}): ${errorText}`);
-    }
-
-    const parseResult = await parseResponse.json();
-    const jobId = parseResult.job_id;
-
-    if (!jobId) {
-      throw new Error('Landing AI did not return job_id');
-    }
-
-    console.log(`[PDF Extractor] Landing AI job created: ${jobId}`);
-
-    // 2. Poll per completion
-    let attempts = 0;
-    const maxAttempts = 60; // 5 min max
-    
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // 5s delay
-      attempts++;
-
-      const statusResponse = await fetch(
-        `https://api.landing.ai/v1/ade/parse/jobs/${jobId}`,
-        {
-          headers: { 'apikey': landingApiKey },
-        }
-      );
-
-      if (!statusResponse.ok) {
-        console.warn(`[PDF Extractor] Poll attempt ${attempts} failed`);
-        continue;
-      }
-
-      const jobData = await statusResponse.json();
-      const status = jobData.status;
-
-      console.log(`[PDF Extractor] Job status: ${status} (attempt ${attempts}/${maxAttempts})`);
-
-      if (status === 'completed') {
-        // 3. Estrai chunks da Landing AI
-        const chunks = jobData.chunks || [];
-        
-        if (chunks.length === 0) {
-          throw new Error('Landing AI returned 0 chunks - PDF may be image-only or empty');
-        }
-
-        // 4. Combina tutto il testo dei chunks in fullText
-        const fullText = chunks
-          .map((chunk: any) => chunk.markdown || chunk.text || '')
-          .filter((text: string) => text.trim().length > 0)
-          .join('\n\n');
-
-        console.log(`[PDF Extractor] ✅ Extracted ${fullText.length} chars from Landing AI (${chunks.length} raw chunks)`);
-
-        // 5. Estrai metadata
-        const pageCount = Math.max(...chunks.map((c: any) => c.grounding?.page || 1).filter(Boolean));
-
-        return {
-          pages: [{
-            pageNumber: 1,
-            text: fullText,
-            items: []
-          }],
-          metadata: {
-            pageCount: pageCount || 1,
-          },
-          fullText,
-        };
-      } else if (status === 'failed') {
-        throw new Error(`Landing AI job failed: ${jobData.error_message || 'Unknown error'}`);
-      }
-    }
-
-    throw new Error('Landing AI job timeout after 5 minutes');
+      fullText: finalText,
+    };
 
   } catch (error) {
     console.error('[PDF Extractor] Extraction failed:', error);
     throw new Error(`Failed to extract text from PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-}
-
-/**
- * Estrae testo da una pagina specifica
- */
-export async function extractPageText(
-  pdfBuffer: ArrayBuffer,
-  pageNumber: number
-): Promise<string> {
-  const result = await extractTextFromPDF(pdfBuffer);
-  const page = result.pages.find(p => p.pageNumber === pageNumber);
-  
-  if (!page) {
-    throw new Error(`Page ${pageNumber} not found in PDF`);
-  }
-  
-  return page.text;
 }
 
 /**
