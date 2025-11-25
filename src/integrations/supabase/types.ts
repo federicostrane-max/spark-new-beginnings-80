@@ -1796,6 +1796,155 @@ export type Database = {
         }
         Relationships: []
       }
+      pipeline_c_agent_knowledge: {
+        Row: {
+          agent_id: string
+          chunk_id: string
+          id: string
+          is_active: boolean | null
+          synced_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          chunk_id: string
+          id?: string
+          is_active?: boolean | null
+          synced_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          chunk_id?: string
+          id?: string
+          is_active?: boolean | null
+          synced_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_c_agent_knowledge_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pipeline_c_agent_knowledge_chunk_id_fkey"
+            columns: ["chunk_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_c_chunks_raw"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_c_chunks_raw: {
+        Row: {
+          chunk_index: number
+          chunk_type: string
+          content: string
+          created_at: string | null
+          document_id: string
+          document_section: string | null
+          embedded_at: string | null
+          embedding: string | null
+          embedding_error: string | null
+          embedding_status: string | null
+          headings: Json | null
+          id: string
+          keywords: string[] | null
+          page_number: number | null
+          position: string | null
+          semantic_weight: number | null
+          visual_grounding: Json | null
+        }
+        Insert: {
+          chunk_index: number
+          chunk_type: string
+          content: string
+          created_at?: string | null
+          document_id: string
+          document_section?: string | null
+          embedded_at?: string | null
+          embedding?: string | null
+          embedding_error?: string | null
+          embedding_status?: string | null
+          headings?: Json | null
+          id?: string
+          keywords?: string[] | null
+          page_number?: number | null
+          position?: string | null
+          semantic_weight?: number | null
+          visual_grounding?: Json | null
+        }
+        Update: {
+          chunk_index?: number
+          chunk_type?: string
+          content?: string
+          created_at?: string | null
+          document_id?: string
+          document_section?: string | null
+          embedded_at?: string | null
+          embedding?: string | null
+          embedding_error?: string | null
+          embedding_status?: string | null
+          headings?: Json | null
+          id?: string
+          keywords?: string[] | null
+          page_number?: number | null
+          position?: string | null
+          semantic_weight?: number | null
+          visual_grounding?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_c_chunks_raw_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_c_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_c_documents: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes: number | null
+          id: string
+          page_count: number | null
+          processed_at: string | null
+          status: string
+          storage_bucket: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          file_name: string
+          file_path: string
+          file_size_bytes?: number | null
+          id?: string
+          page_count?: number | null
+          processed_at?: string | null
+          status?: string
+          storage_bucket?: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          file_name?: string
+          file_path?: string
+          file_size_bytes?: number | null
+          id?: string
+          page_count?: number | null
+          processed_at?: string | null
+          status?: string
+          storage_bucket?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       prerequisite_checks: {
         Row: {
           agent_id: string | null
