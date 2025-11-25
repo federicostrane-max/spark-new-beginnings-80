@@ -224,5 +224,14 @@ verify_jwt = false
 timeout = 600
 schedule = "*/10 * * * *"
 
+[functions.pipeline-c-generate-embeddings]
+verify_jwt = false
+timeout = 600
+schedule = "*/5 * * * *"
+
+[functions.pipeline-c-sync-agent]
+verify_jwt = true
+timeout = 60
+
 [functions.test-landing-ai-metadata]
 verify_jwt = false
