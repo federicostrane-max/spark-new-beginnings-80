@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 
+// Declare EdgeRuntime global for background task execution
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<any>): void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -234,14 +239,37 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch up to 5 documents with status 'ingested'
-    const { data: documents, error: fetchError } = await supabase
-      .from('pipeline_b_documents')
-      .select('*')
-      .eq('status', 'ingested')
-      .limit(5);
+    // Parse body to check for event-driven mode (single documentId)
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const targetDocumentId = body.documentId;
 
-    if (fetchError) throw fetchError;
+    let documents;
+    
+    if (targetDocumentId) {
+      // 🎯 EVENT-DRIVEN MODE: Process single document
+      console.log(`🎯 Event-driven mode: processing single document ${targetDocumentId}`);
+      const { data, error: fetchError } = await supabase
+        .from('pipeline_b_documents')
+        .select('*')
+        .eq('id', targetDocumentId)
+        .eq('status', 'ingested')
+        .single();
+
+      if (fetchError) throw fetchError;
+      documents = data ? [data] : [];
+      
+    } else {
+      // 📦 CRON/FALLBACK MODE: Process batch
+      console.log(`📦 Cron mode: processing batch of documents`);
+      const { data, error: fetchError } = await supabase
+        .from('pipeline_b_documents')
+        .select('*')
+        .eq('status', 'ingested')
+        .limit(5);
+
+      if (fetchError) throw fetchError;
+      documents = data || [];
+    }
 
     if (!documents || documents.length === 0) {
       console.log('✓ No documents to process');
@@ -347,6 +375,26 @@ serve(async (req) => {
 
         console.log(`✓ Created ${landingChunks.length} chunks for ${doc.file_name}`);
         results.processed++;
+
+        // 🚀 EVENT-DRIVEN: Invoke generate-embeddings immediately (only in event-driven mode)
+        if (targetDocumentId) {
+          console.log(`🚀 Triggering immediate embedding generation for document: ${doc.id}`);
+          EdgeRuntime.waitUntil(
+            supabase.functions.invoke('pipeline-b-generate-embeddings', {
+              body: { documentId: doc.id }
+            })
+            .then(response => {
+              if (response.error) {
+                console.error(`❌ Background generate-embeddings failed:`, response.error);
+              } else {
+                console.log(`✅ Background generate-embeddings completed for ${doc.id}`);
+              }
+            })
+            .catch(err => {
+              console.error(`❌ Background generate-embeddings error:`, err);
+            })
+          );
+        }
 
       } catch (error) {
         console.error(`❌ Failed to process ${doc.file_name}:`, error);

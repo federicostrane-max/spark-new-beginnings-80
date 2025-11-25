@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 
+// Declare EdgeRuntime global for background task execution
+declare const EdgeRuntime: {
+  waitUntil(promise: Promise<any>): void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -76,6 +81,24 @@ serve(async (req) => {
 
     console.log(`✓ Document record created: ${document.id}`);
     console.log(`⏳ Status: ingested (waiting for background processing)`);
+
+    // 🚀 EVENT-DRIVEN: Invoke process-chunks immediately in background
+    console.log(`🚀 Triggering immediate processing for document: ${document.id}`);
+    EdgeRuntime.waitUntil(
+      supabase.functions.invoke('pipeline-b-process-chunks', {
+        body: { documentId: document.id }
+      })
+      .then(response => {
+        if (response.error) {
+          console.error(`❌ Background process-chunks failed:`, response.error);
+        } else {
+          console.log(`✅ Background process-chunks completed for ${document.id}`);
+        }
+      })
+      .catch(err => {
+        console.error(`❌ Background process-chunks error:`, err);
+      })
+    );
 
     return new Response(
       JSON.stringify({

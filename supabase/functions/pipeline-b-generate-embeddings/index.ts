@@ -49,6 +49,10 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Parse body to check for event-driven mode (single documentId)
+    const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+    const targetDocumentId = body.documentId;
+
     // STEP 1: Reconcile documents with all chunks ready but wrong status
     console.log('🔄 Reconciling document statuses...');
     const { data: stuckDocs } = await supabase
@@ -89,13 +93,32 @@ serve(async (req) => {
     }
 
     // STEP 2: Fetch chunks with pending embeddings
-    const { data: chunks, error: fetchError } = await supabase
-      .from('pipeline_b_chunks_raw')
-      .select('id, content, document_id')
-      .eq('embedding_status', 'pending')
-      .limit(BATCH_SIZE);
+    let chunks;
+    
+    if (targetDocumentId) {
+      // 🎯 EVENT-DRIVEN MODE: Process all chunks for single document (no limit)
+      console.log(`🎯 Event-driven mode: processing all chunks for document ${targetDocumentId}`);
+      const { data, error: fetchError } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('id, content, document_id')
+        .eq('document_id', targetDocumentId)
+        .eq('embedding_status', 'pending');
 
-    if (fetchError) throw fetchError;
+      if (fetchError) throw fetchError;
+      chunks = data || [];
+      
+    } else {
+      // 📦 CRON/FALLBACK MODE: Process batch of chunks
+      console.log(`📦 Cron mode: processing batch of ${BATCH_SIZE} chunks`);
+      const { data, error: fetchError } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('id, content, document_id')
+        .eq('embedding_status', 'pending')
+        .limit(BATCH_SIZE);
+
+      if (fetchError) throw fetchError;
+      chunks = data || [];
+    }
 
     if (!chunks || chunks.length === 0) {
       console.log('✓ No chunks pending embedding');
