@@ -393,10 +393,17 @@ export const DocumentPoolTable = () => {
       setDocuments(transformedData);
       setCurrentPage(page);
     } catch (error: any) {
-      if (error.name === 'AbortError') {
+      // Check for AbortError - both native JavaScript and Supabase variants
+      const isAbortError = 
+        error.name === 'AbortError' || 
+        error.message?.includes('AbortError') ||
+        error.code === '20'; // Supabase abort code
+      
+      if (isAbortError) {
         console.log('[DocumentPoolTable] Query aborted (component unmounted or cleanup)');
-        return;
+        return; // Exit silently without setting error state
       }
+      
       console.error('[DocumentPoolTable] ❌ Load error:', error);
       setError(error.message || "Errore sconosciuto");
       toast.error("Errore nel caricamento dei documenti");
@@ -450,11 +457,31 @@ export const DocumentPoolTable = () => {
 
       const [githubFolders, pdfFolders] = await Promise.all([
         loadGitHubFolders().catch(err => {
-          console.error('[DocumentPoolTable] GitHub folders error:', err);
+          // Check for AbortError - don't log as error if it's just cleanup
+          const isAbortError = 
+            err.name === 'AbortError' || 
+            err.message?.includes('AbortError') ||
+            err.code === '20';
+          
+          if (isAbortError) {
+            console.log('[DocumentPoolTable] GitHub folders query aborted (cleanup)');
+          } else {
+            console.error('[DocumentPoolTable] GitHub folders error:', err);
+          }
           return [];
         }),
         loadPDFFolders().catch(err => {
-          console.error('[DocumentPoolTable] PDF folders error:', err);
+          // Check for AbortError - don't log as error if it's just cleanup
+          const isAbortError = 
+            err.name === 'AbortError' || 
+            err.message?.includes('AbortError') ||
+            err.code === '20';
+          
+          if (isAbortError) {
+            console.log('[DocumentPoolTable] PDF folders query aborted (cleanup)');
+          } else {
+            console.error('[DocumentPoolTable] PDF folders error:', err);
+          }
           return [];
         })
       ]);
@@ -468,7 +495,18 @@ export const DocumentPoolTable = () => {
       console.log('[DocumentPoolTable] ✅ Total folders:', allFolders.length);
       
       setFoldersData(allFolders);
-    } catch (error) {
+    } catch (error: any) {
+      // Check for AbortError - both native JavaScript and Supabase variants
+      const isAbortError = 
+        error.name === 'AbortError' || 
+        error.message?.includes('AbortError') ||
+        error.code === '20';
+      
+      if (isAbortError) {
+        console.log('[DocumentPoolTable] Folders query aborted (component unmounted or cleanup)');
+        return; // Exit silently without setting error state
+      }
+      
       console.error('[DocumentPoolTable] ❌ Folders load error:', error);
       toast.error('Errore nel caricamento delle cartelle');
       setFoldersData([]);
