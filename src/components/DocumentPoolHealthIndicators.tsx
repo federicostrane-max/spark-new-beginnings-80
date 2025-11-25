@@ -269,8 +269,85 @@ export const DocumentPoolHealthIndicators = () => {
 
   useEffect(() => {
     loadHealthIndicators();
+    
+    // Polling every 30 seconds as fallback
     const interval = setInterval(loadHealthIndicators, 30000);
-    return () => clearInterval(interval);
+    
+    // Realtime subscription for Pipeline B documents
+    const channelB = supabase
+      .channel('pipeline-b-documents-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_b_documents'
+        },
+        (payload) => {
+          console.log('[HealthIndicators] 🔄 Pipeline B document changed:', payload);
+          loadHealthIndicators();
+        }
+      )
+      .subscribe();
+    
+    // Realtime subscription for Pipeline B chunks
+    const channelBChunks = supabase
+      .channel('pipeline-b-chunks-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_b_chunks_raw'
+        },
+        (payload) => {
+          console.log('[HealthIndicators] 🔄 Pipeline B chunk changed:', payload);
+          loadHealthIndicators();
+        }
+      )
+      .subscribe();
+    
+    // Realtime subscription for Pipeline C documents
+    const channelC = supabase
+      .channel('pipeline-c-documents-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_c_documents'
+        },
+        (payload) => {
+          console.log('[HealthIndicators] 🔄 Pipeline C document changed:', payload);
+          loadHealthIndicators();
+        }
+      )
+      .subscribe();
+    
+    // Realtime subscription for Pipeline C chunks
+    const channelCChunks = supabase
+      .channel('pipeline-c-chunks-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_c_chunks_raw'
+        },
+        (payload) => {
+          console.log('[HealthIndicators] 🔄 Pipeline C chunk changed:', payload);
+          loadHealthIndicators();
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channelB);
+      supabase.removeChannel(channelBChunks);
+      supabase.removeChannel(channelC);
+      supabase.removeChannel(channelCChunks);
+    };
   }, []);
 
   if (healthData.loading) {
