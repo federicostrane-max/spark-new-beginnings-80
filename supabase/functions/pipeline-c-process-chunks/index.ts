@@ -12,6 +12,25 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10; // Process max 10 documents per cron execution
 
+/**
+ * Sanitize text content to remove invalid Unicode sequences and control characters
+ * that would cause PostgreSQL insertion errors
+ */
+function sanitizeContent(text: string): string {
+  return text
+    // Remove null bytes
+    .replace(/\u0000/g, '')
+    // Remove other control characters except newline, carriage return, and tab
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    // Remove invalid Unicode sequences (unpaired surrogates)
+    .replace(/[\uD800-\uDFFF]/g, '')
+    // Normalize Unicode to composed form (NFC)
+    .normalize('NFC')
+    // Trim excessive whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -158,7 +177,7 @@ serve(async (req) => {
           return {
             document_id: doc.id,
             chunk_index: index,
-            content: chunk.content,
+            content: sanitizeContent(chunk.content),
             chunk_type: enrichedMetadata.chunk_type,
             semantic_weight: enrichedMetadata.semantic_weight,
             position: enrichedMetadata.position,
