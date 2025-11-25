@@ -29,8 +29,8 @@ interface KnowledgeDocument {
   keywords?: string[];
   topics?: string[];
   complexity_level?: string;
-  pipeline?: 'a' | 'b';
-  status?: string; // For Pipeline B
+  pipeline?: 'a' | 'b' | 'c';
+  status?: string; // For Pipeline B and C
 }
 
 interface DocumentDetailsDialogProps {
@@ -56,7 +56,23 @@ export const DocumentDetailsDialog = ({
     try {
       setIsProcessing(true);
       
-      if (document.pipeline === 'b') {
+      if (document.pipeline === 'c') {
+        // Pipeline C: Reset status to 'ingested' to trigger reprocessing
+        toast.info("Ripristino documento per riprocessamento...");
+        
+        const { error } = await supabase
+          .from('pipeline_c_documents')
+          .update({ 
+            status: 'ingested',
+            error_message: null,
+            processed_at: null
+          })
+          .eq('id', document.id);
+
+        if (error) throw error;
+
+        toast.success("Documento ripristinato! Verrà riprocessato automaticamente dal CRON.");
+      } else if (document.pipeline === 'b') {
         // Pipeline B: Reset status to 'ingested' to trigger reprocessing
         toast.info("Ripristino documento per riprocessamento...");
         
@@ -151,11 +167,13 @@ export const DocumentDetailsDialog = ({
               disabled={isProcessing}
             >
               <RefreshCw className={`h-4 w-4 mr-2 ${isProcessing ? 'animate-spin' : ''}`} />
-              {document.pipeline === 'b' 
-                ? "Riprocessa" 
-                : (!document.ai_summary || document.ai_summary.trim() === "") 
-                  ? "Elabora Documento" 
-                  : "Rigenera Summary"}
+              {document.pipeline === 'c' 
+                ? "Riprocessa"
+                : document.pipeline === 'b' 
+                  ? "Riprocessa" 
+                  : (!document.ai_summary || document.ai_summary.trim() === "") 
+                    ? "Elabora Documento" 
+                    : "Rigenera Summary"}
             </Button>
           </div>
         </DialogHeader>

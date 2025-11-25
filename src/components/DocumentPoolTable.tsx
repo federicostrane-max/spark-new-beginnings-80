@@ -108,7 +108,7 @@ interface KnowledgeDocument {
   metadata_verified_source?: string;
   metadata_confidence?: string;
   folder?: string;
-  pipeline?: 'a' | 'b';
+  pipeline?: 'a' | 'b' | 'c';
   error_message?: string;
 }
 
@@ -216,13 +216,17 @@ export const DocumentPoolTable = () => {
       const countController = new AbortController();
       const countTimeout = setTimeout(() => countController.abort(), 10000);
       
-      const [oldCount, newCount] = await Promise.all([
+      const [oldCount, newCount, pipelineCCount] = await Promise.all([
         supabase
           .from("knowledge_documents")
           .select("id", { count: 'exact', head: true })
           .abortSignal(countController.signal),
         supabase
           .from("pipeline_b_documents")
+          .select("id", { count: 'exact', head: true })
+          .abortSignal(countController.signal),
+        supabase
+          .from("pipeline_c_documents")
           .select("id", { count: 'exact', head: true })
           .abortSignal(countController.signal)
       ]);
@@ -237,9 +241,13 @@ export const DocumentPoolTable = () => {
         console.error('[DocumentPoolTable] New pipeline count error:', newCount.error);
         throw newCount.error;
       }
+      if (pipelineCCount.error) {
+        console.error('[DocumentPoolTable] Pipeline C count error:', pipelineCCount.error);
+        throw pipelineCCount.error;
+      }
       
-      const total = (oldCount.count || 0) + (newCount.count || 0);
-      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ new:', newCount.count, ')');
+      const total = (oldCount.count || 0) + (newCount.count || 0) + (pipelineCCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ Pipeline B:', newCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
@@ -251,7 +259,7 @@ export const DocumentPoolTable = () => {
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const [oldData, newData] = await Promise.all([
+      const [oldData, newData, pipelineCData] = await Promise.all([
         supabase
           .from("knowledge_documents")
           .select(`
@@ -274,6 +282,12 @@ export const DocumentPoolTable = () => {
           .select("*")
           .order("created_at", { ascending: false })
           .range(from, to)
+          .abortSignal(dataController.signal),
+        supabase
+          .from("pipeline_c_documents")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(from, to)
           .abortSignal(dataController.signal)
       ]);
 
@@ -287,8 +301,12 @@ export const DocumentPoolTable = () => {
         console.error('[DocumentPoolTable] New pipeline error:', newData.error);
         throw newData.error;
       }
+      if (pipelineCData.error) {
+        console.error('[DocumentPoolTable] Pipeline C error:', pipelineCData.error);
+        throw pipelineCData.error;
+      }
 
-      console.log('[DocumentPoolTable] Loaded', oldData.data?.length || 0, 'old +', newData.data?.length || 0, 'new docs');
+      console.log('[DocumentPoolTable] Loaded', oldData.data?.length || 0, 'old +', newData.data?.length || 0, 'Pipeline B +', pipelineCData.data?.length || 0, 'Pipeline C docs');
 
       // Transform OLD pipeline documents
       const transformedOld = (oldData.data || []).map((doc: any) => {
@@ -344,8 +362,32 @@ export const DocumentPoolTable = () => {
         error_message: doc.error_message,
       }));
 
+      // Transform Pipeline C documents
+      const transformedPipelineC = (pipelineCData.data || []).map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || null,
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count || null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        keywords: [],
+        topics: [],
+        complexity_level: "",
+        agent_ids: [],
+        folder: null,
+        search_query: null,
+        source_url: null,
+        pipeline: 'c' as const,
+        error_message: doc.error_message,
+      }));
+
       // Merge and sort by created_at
-      const transformedData = [...transformedOld, ...transformedNew]
+      const transformedData = [...transformedOld, ...transformedNew, ...transformedPipelineC]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       console.log('[DocumentPoolTable] ✅ Documents loaded successfully');
@@ -854,7 +896,61 @@ export const DocumentPoolTable = () => {
 
   const handleDelete = async (doc: KnowledgeDocument) => {
     try {
-      if (doc.pipeline === 'b') {
+      if (doc.pipeline === 'c') {
+        // Pipeline C deletion
+        console.log(`[DELETE] Pipeline C document: ${doc.id}`);
+        
+        // 1. Get chunk IDs first
+        const { data: chunks } = await supabase
+          .from("pipeline_c_chunks_raw")
+          .select("id")
+          .eq("document_id", doc.id);
+
+        // 2. Delete from pipeline_c_agent_knowledge (agent sync links)
+        if (chunks && chunks.length > 0) {
+          const chunkIds = chunks.map(c => c.id);
+          const { error: agentKnowledgeError } = await supabase
+            .from("pipeline_c_agent_knowledge")
+            .delete()
+            .in("chunk_id", chunkIds);
+
+          if (agentKnowledgeError) console.warn("Pipeline C agent knowledge deletion warning:", agentKnowledgeError);
+        }
+
+        // 3. Delete from pipeline_c_chunks_raw
+        const { error: chunksError } = await supabase
+          .from("pipeline_c_chunks_raw")
+          .delete()
+          .eq("document_id", doc.id);
+
+        if (chunksError) throw chunksError;
+
+        // 4. Delete storage file
+        const { data: docData } = await supabase
+          .from("pipeline_c_documents")
+          .select("file_path, storage_bucket")
+          .eq("id", doc.id)
+          .single();
+
+        if (docData && docData.file_path && docData.storage_bucket) {
+          const { error: storageError } = await supabase.storage
+            .from(docData.storage_bucket)
+            .remove([docData.file_path]);
+
+          if (storageError) console.warn("Storage deletion warning:", storageError);
+        }
+
+        // 5. Delete from pipeline_c_documents
+        const { error: docError } = await supabase
+          .from("pipeline_c_documents")
+          .delete()
+          .eq("id", doc.id);
+
+        if (docError) throw docError;
+
+        toast.success("Documento Pipeline C eliminato");
+        
+      } else if (doc.pipeline === 'b') {
         // Pipeline B deletion
         console.log(`[DELETE] Pipeline B document: ${doc.id}`);
         
@@ -1540,6 +1636,11 @@ export const DocumentPoolTable = () => {
                               Pipeline B
                             </Badge>
                           )}
+                          {doc.pipeline === 'c' && (
+                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shrink-0">
+                              Pipeline C
+                            </Badge>
+                          )}
                           {doc.extracted_title && (
                             doc.metadata_verified_online ? (
                               <TooltipProvider>
@@ -1767,6 +1868,11 @@ export const DocumentPoolTable = () => {
                             {doc.pipeline === 'b' && (
                               <Badge variant="secondary" className="text-xs ml-2 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
                                 Pipeline B
+                              </Badge>
+                            )}
+                            {doc.pipeline === 'c' && (
+                              <Badge variant="secondary" className="text-xs ml-2 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                Pipeline C
                               </Badge>
                             )}
                           </div>
