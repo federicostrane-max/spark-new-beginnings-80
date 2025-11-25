@@ -246,6 +246,7 @@ export const AssignDocumentDialog = ({
         
         // Sync documents to agents based on pipeline
         const syncFunction = document.pipeline === 'b' ? 'pipeline-b-sync-agent' : 'sync-pool-document';
+        console.log(`[AssignDialog] Using sync function: ${syncFunction} for pipeline ${document.pipeline || 'a'}`);
         
         for (const agentId of toAdd) {
           try {
