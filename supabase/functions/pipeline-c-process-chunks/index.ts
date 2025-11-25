@@ -103,9 +103,13 @@ serve(async (req) => {
         // Convert Blob to ArrayBuffer
         const arrayBuffer = await fileData.arrayBuffer();
 
-        // Extract text from PDF
+        // Extract text from PDF with OCR fallback support
         console.log(`[Pipeline C Process] Extracting text from ${doc.file_name}`);
-        const extractionResult = await extractTextFromPDF(arrayBuffer);
+        const extractionResult = await extractTextFromPDF(arrayBuffer, {
+          supabase,
+          bucket: doc.storage_bucket,
+          path: doc.file_path,
+        });
         
         const textLength = extractionResult.fullText.length;
         console.log(`[Pipeline C Process] ✅ Extracted ${textLength} characters from ${doc.file_name} (${extractionResult.metadata.pageCount} pages)`);
