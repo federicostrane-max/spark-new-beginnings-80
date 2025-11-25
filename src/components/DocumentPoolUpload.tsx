@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Upload, Loader2, X, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,6 +32,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
   const [newFilesList, setNewFilesList] = useState<File[]>([]);
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_b');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -83,9 +85,9 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       toast.info("Verifica duplicati in corso...", { duration: 2000 });
       console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
-      // Check both Pipeline A (legacy) and Pipeline B documents
+      // Check both Pipeline A (legacy), Pipeline B, and Pipeline C documents
       // Exclude failed documents to allow re-upload
-      const [legacyResult, pipelineBResult] = await Promise.all([
+      const [legacyResult, pipelineBResult, pipelineCResult] = await Promise.all([
         supabase
           .from('knowledge_documents')
           .select('file_name')
@@ -93,6 +95,11 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           .neq('processing_status', 'failed'),
         supabase
           .from('pipeline_b_documents')
+          .select('file_name')
+          .in('file_name', selectedFiles.map(f => f.name))
+          .neq('status', 'failed'),
+        supabase
+          .from('pipeline_c_documents')
           .select('file_name')
           .in('file_name', selectedFiles.map(f => f.name))
           .neq('status', 'failed')
@@ -104,10 +111,14 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       if (pipelineBResult.error) {
         throw new Error(`Errore verifica duplicati (Pipeline B): ${pipelineBResult.error.message}`);
       }
+      if (pipelineCResult.error) {
+        throw new Error(`Errore verifica duplicati (Pipeline C): ${pipelineCResult.error.message}`);
+      }
 
       const existingFileNames = new Set([
         ...(legacyResult.data?.map(d => d.file_name) || []),
-        ...(pipelineBResult.data?.map(d => d.file_name) || [])
+        ...(pipelineBResult.data?.map(d => d.file_name) || []),
+        ...(pipelineCResult.data?.map(d => d.file_name) || [])
       ]);
       const duplicates = selectedFiles.filter(f => existingFileNames.has(f.name));
       const newFiles = selectedFiles.filter(f => !existingFileNames.has(f.name));
@@ -152,10 +163,13 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          // Step 2: Upload to Pipeline B (instant upload to storage)
+          // Step 2: Upload to selected pipeline (instant upload to storage)
           setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          console.log(`Uploading "${file.name}" to Pipeline B...`);
+          const pipelineName = selectedPipeline === 'pipeline_b' ? 'Pipeline B' : 'Pipeline C';
+          const edgeFunctionName = selectedPipeline === 'pipeline_b' ? 'pipeline-b-ingest-pdf' : 'pipeline-c-ingest-pdf';
+          
+          console.log(`Uploading "${file.name}" to ${pipelineName}...`);
           
           // Convert file to base64 for JSON transport
           const arrayBuffer = await file.arrayBuffer();
@@ -163,7 +177,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
             new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
           );
           
-          const { data, error } = await supabase.functions.invoke('pipeline-b-ingest-pdf', {
+          const { data, error } = await supabase.functions.invoke(edgeFunctionName, {
             body: { 
               fileName: file.name,
               fileData: base64,
@@ -238,10 +252,38 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       <CardHeader>
         <CardTitle>Carica Nuovi Documenti</CardTitle>
         <CardDescription>
-          Carica PDF nel pool condiviso. L'elaborazione con Landing AI avverrà automaticamente in background.
+          Carica PDF nel pool condiviso. Scegli quale pipeline utilizzare per l'elaborazione.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
+          <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_b' | 'pipeline_c')} disabled={uploading}>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_b" id="pipeline-b" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="pipeline-b" className="cursor-pointer font-semibold">
+                  Pipeline B (Landing AI)
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Parsing avanzato con API Landing AI. Chunk semantici con visual grounding. Ideale per documenti complessi.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_c" id="pipeline-c" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="pipeline-c" className="cursor-pointer font-semibold">
+                  Pipeline C (Content-Aware Custom) 🆕
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Chunking content-aware personalizzato. Rispetta boundaries semantici, adaptive sizing, metadata arricchiti. Nessun costo esterno.
+                </p>
+              </div>
+            </div>
+          </RadioGroup>
+        </div>
+        
         <div>
           <Label htmlFor="pdf-file">Seleziona PDF (multipli, max 50MB)</Label>
           <div className="mt-2">
