@@ -152,20 +152,22 @@ export const DocumentPoolHealthIndicators = () => {
       };
 
       // === 2. CHUNKS PRONTI ===
+      // Count actual chunks, not documents
       const { count: legacyChunksCount } = await supabase
-        .from('knowledge_documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('processing_status', 'ready_for_assignment');
+        .from('agent_knowledge')
+        .select('id', { count: 'exact', head: true })
+        .is('agent_id', null)
+        .eq('is_active', true);
 
       const { count: pipelineBChunksCount } = await supabase
-        .from('pipeline_b_documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'ready');
+        .from('pipeline_b_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('embedding_status', 'ready');
 
       const { count: pipelineCChunksCount } = await supabase
-        .from('pipeline_c_documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'ready');
+        .from('pipeline_c_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('embedding_status', 'ready');
 
       const chunksData = {
         ready: {
