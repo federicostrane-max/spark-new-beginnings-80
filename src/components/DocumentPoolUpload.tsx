@@ -33,6 +33,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
   const [newFilesList, setNewFilesList] = useState<File[]>([]);
   const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_b');
+  const [inputKey, setInputKey] = useState(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -68,6 +69,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     setSelectedFiles([]);
     setDuplicatesList([]);
     setNewFilesList([]);
+    setInputKey(prev => prev + 1);
   };
 
   const handleUpload = async () => {
@@ -144,6 +146,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
     // No duplicates, proceed with upload
     await performUpload(selectedFiles);
     setSelectedFiles([]);
+    setInputKey(prev => prev + 1);
   };
 
   const performUpload = async (filesToUpload: File[]) => {
@@ -231,6 +234,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       setSelectedFiles([]);
       setCurrentFile("");
       setProgress(0);
+      setInputKey(prev => prev + 1);
       
       // Reload documents
       setTimeout(() => {
@@ -288,6 +292,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           <Label htmlFor="pdf-file">Seleziona PDF (multipli, max 50MB)</Label>
           <div className="mt-2">
             <Input
+              key={inputKey}
               id="pdf-file"
               type="file"
               accept=".pdf"
