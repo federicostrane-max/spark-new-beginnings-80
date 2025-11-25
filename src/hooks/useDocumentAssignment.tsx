@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 export const useDocumentAssignment = () => {
   const [isAssigning, setIsAssigning] = useState(false);
 
-  const assignDocument = async (agentId: string, documentId: string, pipeline: 'a' | 'b' = 'a'): Promise<boolean> => {
+  const assignDocument = async (agentId: string, documentId: string, pipeline: 'a' | 'b' | 'c' = 'a'): Promise<boolean> => {
     setIsAssigning(true);
     try {
       const { data, error } = await supabase.functions.invoke('assign-document-to-agent', {
