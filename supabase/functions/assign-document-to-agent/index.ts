@@ -83,7 +83,42 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2. Check if link already exists
+    // 2. Handle Pipeline B assignment differently (no agent_document_links)
+    if (pipeline === 'b') {
+      console.log('[assign-document-to-agent] Pipeline B: Syncing directly to agent knowledge');
+      
+      // Invoke pipeline-b-sync-agent to sync chunks directly
+      const { data: syncData, error: syncError } = await supabase.functions.invoke(
+        'pipeline-b-sync-agent',
+        {
+          body: {
+            agentId: agentId,
+            documentIds: [documentId]
+          }
+        }
+      );
+
+      if (syncError) {
+        console.error('[assign-document-to-agent] Pipeline B sync error:', syncError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to sync Pipeline B document to agent' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[assign-document-to-agent] ✅ Pipeline B sync completed: ${syncData?.synced || 0} chunks`);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: `Pipeline B document assigned successfully (${syncData?.synced || 0} chunks synced)`,
+          synced: syncData?.synced || 0
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 3. Legacy pipeline: Check if link already exists
     const { data: existingLink } = await supabase
       .from('agent_document_links')
       .select('id, sync_status')
@@ -104,7 +139,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Create the link with 'pending' status
+    // 4. Create the link with 'pending' status (legacy only)
     const { data: newLink, error: linkError } = await supabase
       .from('agent_document_links')
       .insert({
