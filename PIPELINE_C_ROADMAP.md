@@ -15,11 +15,11 @@
 - [ ] Testing chunking logic
 - [ ] Validation boundary respect
 
-### ⏳ Fase 3: Embedding & Sync (Settimana 3)
-- [ ] Edge function: pipeline-c-generate-embeddings
-- [ ] Edge function: pipeline-c-sync-agent
-- [ ] Cron job activation
-- [ ] Status reconciliation logic
+### ✅ Fase 3: Embedding & Sync (Settimana 3)
+- [x] Edge function: pipeline-c-generate-embeddings
+- [x] Edge function: pipeline-c-sync-agent
+- [x] Cron job activation
+- [x] Status reconciliation logic
 
 ### ⏳ Fase 4: Validation (Settimana 4)
 - [ ] A/B testing vs Pipeline B
