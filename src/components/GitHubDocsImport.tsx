@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Github, Loader2, FolderGit2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 interface GitHubDocsImportProps {
   onImportComplete: () => void;
@@ -27,6 +28,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [orgImporting, setOrgImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress[]>([]);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_b');
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -92,7 +94,8 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
           path: "",
           maxFiles: 999999,
           filePattern: "*.md",
-          importAllOrgRepos: true
+          importAllOrgRepos: true,
+          pipeline: selectedPipeline
         }
       });
 
@@ -187,6 +190,34 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
+          <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_b' | 'pipeline_c')} disabled={orgImporting}>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_b" id="gh-pipeline-b" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="gh-pipeline-b" className="cursor-pointer font-semibold">
+                  Pipeline B (Landing AI)
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Parsing avanzato con API Landing AI. Chunk semantici con visual grounding.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_c" id="gh-pipeline-c" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="gh-pipeline-c" className="cursor-pointer font-semibold">
+                  Pipeline C (Content-Aware Custom) 🆕
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Chunking content-aware personalizzato. Nessun costo esterno.
+                </p>
+              </div>
+            </div>
+          </RadioGroup>
+        </div>
+        
         <div className="space-y-3">
           <Label htmlFor="orgName" className="text-base font-semibold">
             🏢 Importa Tutti i Repository di un'Organizzazione
