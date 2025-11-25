@@ -200,14 +200,12 @@ verify_jwt = true
 [functions.pipeline-b-process-chunks]
 verify_jwt = false
 timeout = 600
-# Cron: every 10 minutes
-# */10 * * * *
+schedule = "*/10 * * * *"
 
 [functions.pipeline-b-generate-embeddings]
 verify_jwt = false
 timeout = 600
-# Cron: every 5 minutes
-# */5 * * * *
+schedule = "*/5 * * * *"
 
 [functions.pipeline-b-sync-agent]
 verify_jwt = true
