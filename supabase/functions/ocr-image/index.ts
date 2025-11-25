@@ -54,48 +54,101 @@ serve(async (req) => {
     
     // Determine if it's a PDF or image
     const isPDF = fileName?.toLowerCase().endsWith('.pdf') || false;
-    const prompt = isPDF 
-      ? `Extract ALL visible text from the first ${pagesToExtract} pages of this PDF document. Focus especially on: title, authors, publication info, chapter headings, and any bibliographic metadata. Return the text exactly as it appears, preserving formatting, line breaks, and structure. Do not add commentary.`
-      : "Extract all text from this image. Return only the extracted text, nothing else.";
-    
     console.log(`[ocr-image] Processing as: ${isPDF ? 'PDF' : 'Image'} (${pagesToExtract} pages)`);
 
-    // Call Lovable AI Gateway with Gemini 2.5 Flash - Using URL instead of base64 for PDFs
-    console.log('[ocr-image] Calling Lovable AI (Gemini 2.5 Flash) for OCR...');
-    const response = await fetch(
-      'https://ai.gateway.lovable.dev/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${lovableApiKey}`
-        },
-        body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: imageUrl  // Use direct URL instead of base64
-                }
-              }
-            ]
-          }]
-        })
+    let extractedText = '';
+
+    if (isPDF) {
+      // Use Google Cloud Vision for PDF OCR
+      console.log('[ocr-image] Using Google Cloud Vision for PDF OCR...');
+      const visionApiKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
+      if (!visionApiKey) {
+        throw new Error('GOOGLE_CLOUD_VISION_API_KEY not configured');
       }
-    );
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Lovable AI Gateway error:', error);
-      throw new Error(`Lovable AI Gateway error: ${error}`);
+      const base64PDF = arrayBufferToBase64(imageBuffer);
+
+      const response = await fetch(
+        `https://vision.googleapis.com/v1/files:annotate?key=${visionApiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requests: [{
+              inputConfig: {
+                content: base64PDF,
+                mimeType: 'application/pdf'
+              },
+              features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+              pages: Array.from({ length: pagesToExtract }, (_, i) => i + 1)
+            }]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('Google Cloud Vision error:', error);
+        throw new Error(`Google Cloud Vision error: ${error}`);
+      }
+
+      const result = await response.json();
+      console.log('[ocr-image] Cloud Vision response received');
+
+      // Extract text from all pages
+      const responses = result.responses?.[0]?.responses || [];
+      const pageTexts: string[] = [];
+      
+      for (const pageResponse of responses) {
+        const pageText = pageResponse.fullTextAnnotation?.text || '';
+        if (pageText) {
+          pageTexts.push(pageText);
+        }
+      }
+
+      extractedText = pageTexts.join('\n\n');
+      console.log(`[ocr-image] Extracted ${extractedText.length} characters from ${pageTexts.length} pages`);
+
+    } else {
+      // Use Lovable AI Gateway for image OCR
+      console.log('[ocr-image] Using Lovable AI Gateway (Gemini 2.5 Flash) for image OCR...');
+      const prompt = "Extract all text from this image. Return only the extracted text, nothing else.";
+
+      const response = await fetch(
+        'https://ai.gateway.lovable.dev/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${lovableApiKey}`
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: imageUrl  // Use direct URL for images
+                  }
+                }
+              ]
+            }]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('Lovable AI Gateway error:', error);
+        throw new Error(`Lovable AI Gateway error: ${error}`);
+      }
+
+      const result = await response.json();
+      extractedText = result.choices?.[0]?.message?.content || '';
     }
-
-    const result = await response.json();
-    const extractedText = result.choices?.[0]?.message?.content || '';
 
     console.log('OCR completed, extracted:', extractedText.substring(0, 100));
 
