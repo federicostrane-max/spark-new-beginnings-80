@@ -39,7 +39,12 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const googleCloudVisionApiKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    if (!googleCloudVisionApiKey) {
+      throw new Error('GOOGLE_CLOUD_VISION_API_KEY not configured');
+    }
 
     console.log('[Pipeline C Process] Starting cron execution');
 
@@ -122,12 +127,10 @@ serve(async (req) => {
         // Convert Blob to ArrayBuffer
         const arrayBuffer = await fileData.arrayBuffer();
 
-        // Extract text from PDF with OCR fallback support
-        console.log(`[Pipeline C Process] Extracting text from ${doc.file_name}`);
+        // Extract text from PDF using Google Cloud Vision
+        console.log(`[Pipeline C Process] Extracting text from ${doc.file_name} using Google Cloud Vision`);
         const extractionResult = await extractTextFromPDF(arrayBuffer, {
-          supabase,
-          bucket: doc.storage_bucket,
-          path: doc.file_path,
+          googleCloudVisionApiKey,
         });
         
         const textLength = extractionResult.fullText.length;
