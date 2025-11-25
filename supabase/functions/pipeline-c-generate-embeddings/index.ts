@@ -16,6 +16,16 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Check if this is an event-driven invocation (specific documentId)
+    const body = await req.json().catch(() => ({}));
+    const targetDocumentId = body?.documentId;
+
+    if (targetDocumentId) {
+      console.log(`[Pipeline C Embeddings] Event-driven mode: processing document ${targetDocumentId}`);
+    } else {
+      console.log('[Pipeline C Embeddings] Cron mode: processing batch');
+    }
+
     console.log('[Pipeline C Embeddings] Starting embedding generation cycle');
 
     // Status reconciliation: find documents stuck in intermediate states
@@ -75,12 +85,21 @@ serve(async (req) => {
       }
     }
 
-    // Get chunks pending embedding (batch 50)
-    const { data: chunks, error: chunksError } = await supabase
+    // Get chunks pending embedding
+    let chunksQuery = supabase
       .from('pipeline_c_chunks_raw')
       .select('id, content, document_id')
-      .eq('embedding_status', 'pending')
-      .limit(50);
+      .eq('embedding_status', 'pending');
+
+    if (targetDocumentId) {
+      // Event-driven: process only chunks for the specified document
+      chunksQuery = chunksQuery.eq('document_id', targetDocumentId);
+    } else {
+      // Cron mode: process batch (max 50)
+      chunksQuery = chunksQuery.limit(50);
+    }
+
+    const { data: chunks, error: chunksError } = await chunksQuery;
 
     if (chunksError) {
       console.error('[Pipeline C Embeddings] Error fetching chunks:', chunksError);

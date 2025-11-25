@@ -222,7 +222,7 @@ timeout = 60
 [functions.pipeline-c-process-chunks]
 verify_jwt = false
 timeout = 600
-schedule = "*/10 * * * *"
+schedule = "*/5 * * * *"
 
 [functions.pipeline-c-generate-embeddings]
 verify_jwt = false

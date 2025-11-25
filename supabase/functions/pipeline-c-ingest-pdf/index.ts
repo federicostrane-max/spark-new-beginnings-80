@@ -83,13 +83,29 @@ serve(async (req) => {
 
     console.log(`[Pipeline C Ingest] ✅ Document ingested successfully: ${document.id}`);
 
+    // Trigger processing immediately using EdgeRuntime.waitUntil()
+    const processPromise = supabase.functions.invoke('pipeline-c-process-chunks', {
+      body: { documentId: document.id }
+    }).then(response => {
+      if (response.error) {
+        console.error(`[Pipeline C Ingest] Background processing failed for ${document.id}:`, response.error);
+      } else {
+        console.log(`[Pipeline C Ingest] Background processing triggered for ${document.id}`);
+      }
+    }).catch(error => {
+      console.error(`[Pipeline C Ingest] Background processing invocation failed:`, error);
+    });
+
+    // Use EdgeRuntime.waitUntil to execute processing in background
+    (globalThis as any).EdgeRuntime?.waitUntil(processPromise);
+
     return new Response(
       JSON.stringify({
         success: true,
         documentId: document.id,
         fileName: document.file_name,
         status: document.status,
-        message: 'Document ingested successfully. Processing will begin shortly via cron.',
+        message: 'Document ingested successfully. Processing started in background.',
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
