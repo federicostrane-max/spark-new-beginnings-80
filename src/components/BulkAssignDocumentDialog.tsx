@@ -153,16 +153,55 @@ export const BulkAssignDocumentDialog = ({
     }
   }, [open, documentIds, folderName]);
 
-  // Auto-refresh when documents are processing
+  // Auto-refresh when documents are processing + Realtime updates
   useEffect(() => {
-    if (!open || processingCount === 0) return;
+    if (!open) return;
 
-    const interval = setInterval(() => {
+    // Polling as fallback
+    const interval = processingCount > 0 ? setInterval(() => {
       console.log('[BulkAssignDocumentDialog] 🔄 Auto-refresh: checking for ready documents...');
       countDocuments();
-    }, 5000); // Check every 5 seconds
+    }, 5000) : null;
 
-    return () => clearInterval(interval);
+    // Realtime subscription for Pipeline B documents
+    const channelB = supabase
+      .channel('bulk-assign-pipeline-b-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pipeline_b_documents'
+        },
+        (payload) => {
+          console.log('[BulkAssignDocumentDialog] 🔄 Pipeline B document updated:', payload);
+          countDocuments();
+        }
+      )
+      .subscribe();
+
+    // Realtime subscription for Pipeline C documents
+    const channelC = supabase
+      .channel('bulk-assign-pipeline-c-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pipeline_c_documents'
+        },
+        (payload) => {
+          console.log('[BulkAssignDocumentDialog] 🔄 Pipeline C document updated:', payload);
+          countDocuments();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (interval) clearInterval(interval);
+      supabase.removeChannel(channelB);
+      supabase.removeChannel(channelC);
+    };
   }, [open, processingCount, documentIds, folderName]);
 
   const loadAgents = async () => {
