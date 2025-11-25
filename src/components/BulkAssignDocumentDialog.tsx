@@ -153,6 +153,18 @@ export const BulkAssignDocumentDialog = ({
     }
   }, [open, documentIds, folderName]);
 
+  // Auto-refresh when documents are processing
+  useEffect(() => {
+    if (!open || processingCount === 0) return;
+
+    const interval = setInterval(() => {
+      console.log('[BulkAssignDocumentDialog] 🔄 Auto-refresh: checking for ready documents...');
+      countDocuments();
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [open, processingCount, documentIds, folderName]);
+
   const loadAgents = async () => {
     try {
       setLoadingAgents(true);
