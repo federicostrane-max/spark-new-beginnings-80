@@ -46,15 +46,32 @@ serve(async (req) => {
       throw new Error('GOOGLE_CLOUD_VISION_API_KEY not configured');
     }
 
-    console.log('[Pipeline C Process] Starting cron execution');
+    // Check if this is an event-driven invocation (specific documentId)
+    const body = await req.json().catch(() => ({}));
+    const targetDocumentId = body?.documentId;
 
-    // Fetch documents with status='ingested' (max BATCH_SIZE)
-    const { data: documents, error: fetchError } = await supabase
+    if (targetDocumentId) {
+      console.log(`[Pipeline C Process] Event-driven mode: processing document ${targetDocumentId}`);
+    } else {
+      console.log('[Pipeline C Process] Cron mode: processing batch');
+    }
+
+    // Fetch documents with status='ingested'
+    let query = supabase
       .from('pipeline_c_documents')
       .select('*')
       .eq('status', 'ingested')
-      .order('created_at', { ascending: true })
-      .limit(BATCH_SIZE);
+      .order('created_at', { ascending: true });
+
+    if (targetDocumentId) {
+      // Event-driven: process only the specified document
+      query = query.eq('id', targetDocumentId).limit(1);
+    } else {
+      // Cron mode: process batch
+      query = query.limit(BATCH_SIZE);
+    }
+
+    const { data: documents, error: fetchError } = await query;
 
     if (fetchError) {
       console.error('[Pipeline C Process] Fetch error:', fetchError);
@@ -220,6 +237,24 @@ serve(async (req) => {
           .eq('id', doc.id);
 
         results.processed++;
+
+        // Trigger embedding generation immediately (event-driven)
+        const embedPromise = supabase.functions.invoke('pipeline-c-generate-embeddings', {
+          body: { documentId: doc.id }
+        }).then(response => {
+          if (response.error) {
+            console.error(`[Pipeline C Process] Embedding generation failed for ${doc.id}:`, response.error);
+          } else {
+            console.log(`[Pipeline C Process] Embedding generation triggered for ${doc.id}`);
+          }
+        }).catch(error => {
+          console.error(`[Pipeline C Process] Embedding invocation failed:`, error);
+        });
+
+        // Use EdgeRuntime.waitUntil if available (event-driven only)
+        if (targetDocumentId) {
+          (globalThis as any).EdgeRuntime?.waitUntil(embedPromise);
+        }
 
       } catch (error) {
         console.error(`[Pipeline C Process] ❌ Error processing document ${doc.id}:`, error);
