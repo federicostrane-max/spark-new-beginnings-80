@@ -76,37 +76,63 @@ export const BulkAssignDocumentDialog = ({
         
         setValidatedCount(validCount || 0);
       } else if (documentIds && documentIds.length > 0) {
-        // Manual selection: check BOTH pipelines
-        const [legacyTotal, pipelineBTotal, legacyValid, pipelineBValid, pipelineBProcessing] = await Promise.all([
+        // Manual selection: check ALL THREE pipelines
+        const [
+          legacyTotal, pipelineBTotal, pipelineCTotal,
+          legacyValid, pipelineBValid, pipelineCValid,
+          pipelineBProcessing, pipelineCProcessing
+        ] = await Promise.all([
+          // Legacy total
           supabase
             .from("knowledge_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds),
+          // Pipeline B total
           supabase
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds),
+          // Pipeline C total
+          supabase
+            .from("pipeline_c_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds),
+          // Legacy valid
           supabase
             .from("knowledge_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
             .eq("processing_status", "ready_for_assignment")
             .eq("validation_status", "validated"),
+          // Pipeline B valid
           supabase
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
             .eq("status", "ready"),
+          // Pipeline C valid
+          supabase
+            .from("pipeline_c_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .eq("status", "ready"),
+          // Pipeline B processing
           supabase
             .from("pipeline_b_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
-            .in("status", ["ingested", "processing", "embedding"])
+            .in("status", ["ingested", "processing", "chunked"]),
+          // Pipeline C processing
+          supabase
+            .from("pipeline_c_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .in("status", ["ingested", "processing", "chunked"])
         ]);
         
-        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0);
-        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0);
-        const processingCount = pipelineBProcessing.count || 0;
+        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const processingCount = (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
         
         setDocumentCount(totalCount);
         setValidatedCount(validCount);
