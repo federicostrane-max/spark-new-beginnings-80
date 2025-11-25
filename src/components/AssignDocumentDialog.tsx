@@ -224,58 +224,49 @@ export const AssignDocumentDialog = ({
       if (toAdd.length > 0) {
         console.log(`[AssignDialog] Adding ${toAdd.length} new agent assignments`);
         
-        const { error: insertError } = await supabase
-          .from("agent_document_links")
-          .insert(
-            toAdd.map((agentId) => ({
-              document_id: document.id,
-              agent_id: agentId,
-              assignment_type: "manual",
-              confidence_score: 1.0,
-            }))
-          );
-
-        if (insertError) throw insertError;
-
-        console.log(`[AssignDialog] ✓ Created agent_document_links for ${toAdd.length} agents`);
-        
         // Inizializza lo stato di sincronizzazione
         const initialSyncMap = new Map<string, 'pending' | 'syncing' | 'completed' | 'failed'>();
         toAdd.forEach(agentId => initialSyncMap.set(agentId, 'pending'));
         setSyncingAgents(initialSyncMap);
         
-        // Sync documents to agents based on pipeline
-        const syncFunction = document.pipeline === 'b' ? 'pipeline-b-sync-agent' : 'sync-pool-document';
-        console.log(`[AssignDialog] Using sync function: ${syncFunction} for pipeline ${document.pipeline || 'a'}`);
+        // Use assign-document-to-agent edge function for both pipelines
+        console.log(`[AssignDialog] Using assign-document-to-agent for pipeline ${document.pipeline || 'a'}`);
         
         for (const agentId of toAdd) {
           try {
-            const body = document.pipeline === 'b' 
-              ? { agentId, documentIds: [document.id] }
-              : { documentId: document.id, agentId };
+            setSyncingAgents(prev => new Map(prev).set(agentId, 'syncing'));
             
-            const { error: syncError } = await supabase.functions.invoke(syncFunction, { body });
-            
-            if (syncError) {
-              const errorData = typeof syncError === 'object' ? syncError : { message: String(syncError) };
-              
-              // Handle structured errors
-              if (errorData.error === 'DOCUMENT_NOT_READY') {
-                toast.error(`Documento non pronto: ${errorData.message}`);
-              } else if (errorData.error === 'DOCUMENT_VALIDATION_FAILED') {
-                toast.error(`Documento non valido. Eliminalo e ricaricalo.`);
-                // Auto-remove the failed link
-                await supabase
-                  .from("agent_document_links")
-                  .delete()
-                  .eq("document_id", document.id)
-                  .eq("agent_id", agentId);
-              } else {
-                console.error('Sync error for agent', agentId, errorData);
+            const { data, error: assignError } = await supabase.functions.invoke(
+              'assign-document-to-agent',
+              { 
+                body: { 
+                  agentId, 
+                  documentId: document.id,
+                  pipeline: document.pipeline || 'a'
+                } 
               }
+            );
+            
+            if (assignError) {
+              console.error('Assignment error for agent', agentId, assignError);
+              setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
+              toast.error(`Errore nell'assegnazione all'agente`);
+              continue;
             }
-          } catch (syncErr) {
-            console.error('Failed to sync document to agent', agentId, syncErr);
+
+            if (!data?.success) {
+              console.error('Assignment failed for agent', agentId, data?.error);
+              setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
+              toast.error(data?.error || 'Assegnazione fallita');
+              continue;
+            }
+
+            setSyncingAgents(prev => new Map(prev).set(agentId, 'completed'));
+            console.log(`✓ Document assigned to agent ${agentId}`);
+            
+          } catch (err) {
+            console.error('Failed to assign document to agent', agentId, err);
+            setSyncingAgents(prev => new Map(prev).set(agentId, 'failed'));
           }
         }
         
