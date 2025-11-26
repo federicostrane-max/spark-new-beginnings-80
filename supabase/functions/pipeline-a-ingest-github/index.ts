@@ -20,9 +20,11 @@ const TEXT_EXTENSIONS = [
   '.php', '.html', '.css', '.scss', '.sass', '.vue', '.svelte',
 ];
 
-const BINARY_EXTENSIONS = [
-  '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-];
+// PDF files that will be processed by LlamaParse
+const PDF_EXTENSIONS = ['.pdf'];
+
+// Image files that should be SKIPPED (not supported)
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'];
 
 interface GitHubTreeItem {
   path: string;
@@ -37,9 +39,21 @@ function isTextFile(fileName: string): boolean {
   return TEXT_EXTENSIONS.some(ext => lowerName.endsWith(ext));
 }
 
-function isBinaryFile(fileName: string): boolean {
+function isPdfFile(fileName: string): boolean {
   const lowerName = fileName.toLowerCase();
-  return BINARY_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+  return PDF_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+}
+
+function isImageFile(fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  return IMAGE_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+}
+
+// Sanitize text content to avoid database errors
+function sanitizeTextContent(content: string): string {
+  return content
+    .replace(/\0/g, '')  // Remove null bytes
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ''); // Remove control characters
 }
 
 serve(async (req) => {
@@ -176,8 +190,8 @@ serve(async (req) => {
         return false;
       }
 
-      // Include text files and PDFs
-      return isTextFile(fileName) || isBinaryFile(fileName);
+      // Include text files and PDFs only (exclude images)
+      return isTextFile(fileName) || isPdfFile(fileName);
     });
 
     console.log(`[Pipeline A GitHub] Filtered to ${relevantFiles.length} relevant files`);
@@ -197,6 +211,25 @@ serve(async (req) => {
 
           console.log(`[Pipeline A GitHub] Processing: ${file.path}`);
 
+          // Skip images entirely
+          if (isImageFile(fileName)) {
+            console.log(`[Pipeline A GitHub] ⏭️ Skipping image file: ${fileName}`);
+            continue;
+          }
+
+          // Check for duplicates before processing
+          const { data: existingDoc } = await supabase
+            .from('pipeline_a_documents')
+            .select('id')
+            .eq('repo_url', repoUrl)
+            .eq('repo_path', file.path)
+            .maybeSingle();
+
+          if (existingDoc) {
+            console.log(`[Pipeline A GitHub] ⏭️ Duplicate skipped: ${file.path}`);
+            continue;
+          }
+
           // AMPHIBIOUS LOGIC: Text vs Binary
           if (isTextFile(fileName)) {
             // TEXT FILE: Fetch as text, store in full_text
@@ -209,6 +242,7 @@ serve(async (req) => {
             }
 
             const textContent = await contentResponse.text();
+            const sanitizedContent = sanitizeTextContent(textContent);
 
             // Insert into pipeline_a_documents with full_text
             const { data: doc, error: insertError } = await supabase
@@ -216,12 +250,12 @@ serve(async (req) => {
               .insert({
                 file_name: fileName,
                 file_path: file.path,
-                full_text: textContent,
+                full_text: sanitizedContent,
                 source_type: 'github',
                 repo_url: repoUrl,
                 repo_path: file.path,
                 status: 'ingested',
-                file_size_bytes: textContent.length,
+                file_size_bytes: sanitizedContent.length,
                 storage_bucket: null,
               })
               .select('id')
@@ -241,8 +275,8 @@ serve(async (req) => {
             );
 
             filesIngested++;
-          } else if (isBinaryFile(fileName)) {
-            // BINARY FILE (PDF): Download, upload to storage, store file_path
+          } else if (isPdfFile(fileName)) {
+            // PDF FILE: Download, upload to storage, process with LlamaParse
             const binaryResponse = await fetch(rawUrl, {
               headers: { 'Authorization': `token ${githubToken}` },
             });
