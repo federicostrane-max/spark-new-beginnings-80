@@ -36,12 +36,28 @@ interface AssignDocumentDialogProps {
   onAssigned: () => void;
 }
 
-type PipelineType = 'legacy' | 'pipeline_b' | 'pipeline_c';
+type PipelineType = 'pipeline_a' | 'pipeline_b' | 'pipeline_c';
 
 // Helper function to get current assignments based on pipeline
 const getCurrentAssignments = async (documentId: string, pipeline: PipelineType) => {
-  if (pipeline === 'pipeline_b') {
-    // Pipeline B: Query pipeline_b_agent_knowledge for distinct agent_ids
+  if (pipeline === 'pipeline_a') {
+    const { data: chunks } = await supabase
+      .from('pipeline_a_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return [];
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { data } = await supabase
+      .from('pipeline_a_agent_knowledge')
+      .select('agent_id')
+      .in('chunk_id', chunkIds);
+    
+    const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
+    return uniqueAgents.map(agent_id => ({ agent_id }));
+  } else if (pipeline === 'pipeline_b') {
     const { data: chunks } = await supabase
       .from('pipeline_b_chunks_raw')
       .select('id')
@@ -56,11 +72,9 @@ const getCurrentAssignments = async (documentId: string, pipeline: PipelineType)
       .select('agent_id')
       .in('chunk_id', chunkIds);
     
-    // Return unique agent_ids
     const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
     return uniqueAgents.map(agent_id => ({ agent_id }));
-  } else if (pipeline === 'pipeline_c') {
-    // Pipeline C: Query pipeline_c_agent_knowledge for distinct agent_ids
+  } else {
     const { data: chunks } = await supabase
       .from('pipeline_c_chunks_raw')
       .select('id')
@@ -75,24 +89,31 @@ const getCurrentAssignments = async (documentId: string, pipeline: PipelineType)
       .select('agent_id')
       .in('chunk_id', chunkIds);
     
-    // Return unique agent_ids
     const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
     return uniqueAgents.map(agent_id => ({ agent_id }));
-  } else {
-    // Legacy: Query agent_document_links
-    const { data } = await supabase
-      .from('agent_document_links')
-      .select('agent_id')
-      .eq('document_id', documentId);
-    
-    return data || [];
   }
 };
 
 // Helper function to remove assignments based on pipeline
 const removeAssignments = async (documentId: string, agentIds: string[], pipeline: PipelineType) => {
-  if (pipeline === 'pipeline_b') {
-    // Pipeline B: Delete from pipeline_b_agent_knowledge
+  if (pipeline === 'pipeline_a') {
+    const { data: chunks } = await supabase
+      .from('pipeline_a_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return null;
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { error } = await supabase
+      .from('pipeline_a_agent_knowledge')
+      .delete()
+      .in('agent_id', agentIds)
+      .in('chunk_id', chunkIds);
+    
+    return error;
+  } else if (pipeline === 'pipeline_b') {
     const { data: chunks } = await supabase
       .from('pipeline_b_chunks_raw')
       .select('id')
@@ -109,8 +130,7 @@ const removeAssignments = async (documentId: string, agentIds: string[], pipelin
       .in('chunk_id', chunkIds);
     
     return error;
-  } else if (pipeline === 'pipeline_c') {
-    // Pipeline C: Delete from pipeline_c_agent_knowledge
+  } else {
     const { data: chunks } = await supabase
       .from('pipeline_c_chunks_raw')
       .select('id')
@@ -125,15 +145,6 @@ const removeAssignments = async (documentId: string, agentIds: string[], pipelin
       .delete()
       .in('agent_id', agentIds)
       .in('chunk_id', chunkIds);
-    
-    return error;
-  } else {
-    // Legacy: Delete from agent_document_links
-    const { error } = await supabase
-      .from('agent_document_links')
-      .delete()
-      .eq('document_id', documentId)
-      .in('agent_id', agentIds);
     
     return error;
   }
@@ -153,9 +164,9 @@ export const AssignDocumentDialog = ({
 
   // Determine pipeline type
   const getPipelineType = (): PipelineType => {
+    if (document.pipeline === 'a') return 'pipeline_a';
     if (document.pipeline === 'b') return 'pipeline_b';
-    if (document.pipeline === 'c') return 'pipeline_c';
-    return 'legacy';
+    return 'pipeline_c';
   };
 
   useEffect(() => {
@@ -170,48 +181,21 @@ export const AssignDocumentDialog = ({
       const pipelineType = getPipelineType();
       
       // Verify document is ready for assignment based on pipeline
-      if (pipelineType === 'pipeline_b') {
-        const { data: docData, error: docError } = await supabase
-          .from("pipeline_b_documents")
-          .select("status")
-          .eq("id", document.id)
-          .single();
-        
-        if (docError) throw docError;
-        
-        if (docData.status !== 'ready') {
-          toast.error(`Documento Pipeline B non pronto (status: ${docData.status})`);
-          onOpenChange(false);
-          return;
-        }
-      } else if (pipelineType === 'pipeline_c') {
-        const { data: docData, error: docError } = await supabase
-          .from("pipeline_c_documents")
-          .select("status")
-          .eq("id", document.id)
-          .single();
-        
-        if (docError) throw docError;
-        
-        if (docData.status !== 'ready') {
-          toast.error(`Documento Pipeline C non pronto (status: ${docData.status})`);
-          onOpenChange(false);
-          return;
-        }
-      } else {
-        const { data: docData, error: docError } = await supabase
-          .from("knowledge_documents")
-          .select("validation_status, processing_status")
-          .eq("id", document.id)
-          .single();
-        
-        if (docError) throw docError;
-        
-        if (docData.validation_status !== 'validated' || docData.processing_status !== 'ready_for_assignment') {
-          toast.error("Questo documento non è pronto per essere assegnato");
-          onOpenChange(false);
-          return;
-        }
+      const tableName = pipelineType === 'pipeline_a' ? 'pipeline_a_documents' :
+                        pipelineType === 'pipeline_b' ? 'pipeline_b_documents' : 'pipeline_c_documents';
+      
+      const { data: docData, error: docError } = await supabase
+        .from(tableName)
+        .select("status")
+        .eq("id", document.id)
+        .single();
+      
+      if (docError) throw docError;
+      
+      if (docData.status !== 'ready') {
+        toast.error(`Documento non pronto (status: ${docData.status})`);
+        onOpenChange(false);
+        return;
       }
       
       // Load all agents
