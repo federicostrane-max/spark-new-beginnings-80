@@ -32,18 +32,55 @@ export const useDocumentAssignment = () => {
 
   const unassignDocument = async (agentId: string, documentId: string): Promise<boolean> => {
     try {
-      // Unassign from all pipeline knowledge tables
-      await Promise.all([
-        supabase.from('pipeline_a_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId),
-        supabase.from('pipeline_b_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId),
-        supabase.from('pipeline_c_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId)
+      // Step 1: Find all chunk_ids for this document across all pipelines
+      const [pipelineAChunks, pipelineBChunks, pipelineCChunks] = await Promise.all([
+        supabase.from('pipeline_a_chunks_raw').select('id').eq('document_id', documentId),
+        supabase.from('pipeline_b_chunks_raw').select('id').eq('document_id', documentId),
+        supabase.from('pipeline_c_chunks_raw').select('id').eq('document_id', documentId)
       ]);
 
-      toast.success('Document unassigned successfully');
+      // Step 2: Delete from agent_knowledge tables using the chunk IDs
+      const deletions = [];
+      
+      if (pipelineAChunks.data && pipelineAChunks.data.length > 0) {
+        const chunkIds = pipelineAChunks.data.map(c => c.id);
+        deletions.push(
+          supabase.from('pipeline_a_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', chunkIds)
+        );
+      }
+      
+      if (pipelineBChunks.data && pipelineBChunks.data.length > 0) {
+        const chunkIds = pipelineBChunks.data.map(c => c.id);
+        deletions.push(
+          supabase.from('pipeline_b_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', chunkIds)
+        );
+      }
+      
+      if (pipelineCChunks.data && pipelineCChunks.data.length > 0) {
+        const chunkIds = pipelineCChunks.data.map(c => c.id);
+        deletions.push(
+          supabase.from('pipeline_c_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', chunkIds)
+        );
+      }
+
+      if (deletions.length > 0) {
+        await Promise.all(deletions);
+      }
+
+      toast.success('Documento rimosso con successo');
       return true;
     } catch (error: any) {
       console.error('Error unassigning document:', error);
-      toast.error('Failed to unassign document');
+      toast.error('Errore nella rimozione del documento');
       return false;
     }
   };
