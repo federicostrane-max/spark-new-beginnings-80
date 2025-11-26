@@ -56,6 +56,11 @@ COMPITO: Analizza rapidamente questo video per capire:
 
 2. ELEMENTI VISIVI CRITICI: Quali dettagli visivi sono essenziali per la comprensione?
    - Se ci sono grafici: quali metriche/indicatori mostrano?
+   - **Per grafici di TRADING/FINANZIARI: ESTRARRE SEMPRE:**
+     * Punti di intersezione/tocco tra prezzo e medie mobili (SMA, EMA, bande di Bollinger)
+     * Specificare timestamp ESATTO [MM:SS] e livello di PREZZO ESATTO di ogni tocco
+     * Indicare se il tocco è avvenuto dall'alto (price touching from above) o dal basso (price touching from below)
+     * Segnalare rotture (breakout) o rimbalzi sulle medie mobili
    - Se c'è codice: quale linguaggio/framework?
    - Se ci sono tabelle: cosa rappresentano i dati?
    - Se ci sono dimostrazioni fisiche: quali movimenti/posture sono importanti?
@@ -63,6 +68,8 @@ COMPITO: Analizza rapidamente questo video per capire:
 3. CALIBRAZIONE VERBOSITÀ:
    - Se identifichi un video TECNICO (es. trading, coding, analisi dati): 
      sii ESTREMAMENTE pedante sui dettagli (valori numerici esatti, sintassi precisa, timestamp di ogni variazione)
+     **Per VIDEO DI TRADING: estrai OGNI SINGOLO punto in cui il prezzo tocca/incrocia indicatori tecnici**
+     **(SMA, EMA, bande di Bollinger, supporti, resistenze) con timestamp [MM:SS] e prezzo esatto**
    - Se identifichi un video DISCORSIVO/VLOG (es. interviste, presentazioni, tutorial generici):
      focalizzati sui concetti chiave e salta i dettagli minori
 
