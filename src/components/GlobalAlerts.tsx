@@ -123,32 +123,9 @@ export const GlobalAlerts = ({ hasAgentIssues = false }: GlobalAlertsProps) => {
         
         console.log(`Sincronizzando ${agent.name} (${index + 1}/${agents.length})...`);
         
-        const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout - operazione troppo lenta')), TIMEOUT_MS)
-        );
-        
-        const session = await supabase.auth.getSession();
-        if (!session.data.session) throw new Error('Sessione non valida');
-
-        const syncPromise = fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-and-sync-all`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.data.session.access_token}`,
-              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-            },
-            body: JSON.stringify({ agentId: agent.id, autoFix: true })
-          }
-        ).then(async (res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          console.log(`✓ ${agent.name} sincronizzato:`, data);
-          return { data, error: null };
-        });
-        
-        return Promise.race([syncPromise, timeoutPromise]);
+        // Legacy function removed - check-and-sync-all no longer exists
+        console.log(`[GlobalAlerts] Auto-fix skipped for ${agent.name}: legacy sync function removed`);
+        return { data: null, error: null };
       };
 
       // Sync all agents in parallel
