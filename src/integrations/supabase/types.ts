@@ -2015,6 +2015,7 @@ export type Database = {
       get_agent_sync_status: {
         Args: { p_agent_id: string }
         Returns: {
+          chunk_count: number
           document_id: string
           document_name: string
           pipeline_source: string
