@@ -70,21 +70,44 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const loadPoolDocuments = useCallback(async () => {
     setLoadingPool(true);
     try {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name, ai_summary, created_at, processing_status, validation_status')
-        .eq('processing_status', 'ready_for_assignment')
-        .eq('validation_status', 'validated')
-        .order('created_at', { ascending: false })
-        .limit(100);
+      // Load documents from all pipelines (A, B, C) that are ready for assignment
+      const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+        supabase
+          .from('pipeline_a_documents')
+          .select('id, file_name, created_at, status')
+          .eq('status', 'ready')
+          .order('created_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('pipeline_b_documents')
+          .select('id, file_name, created_at, status')
+          .eq('status', 'ready')
+          .order('created_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('pipeline_c_documents')
+          .select('id, file_name, created_at, status')
+          .eq('status', 'ready')
+          .order('created_at', { ascending: false })
+          .limit(100)
+      ]);
 
-      if (error) throw error;
+      if (pipelineADocs.error) throw pipelineADocs.error;
+      if (pipelineBDocs.error) throw pipelineBDocs.error;
+      if (pipelineCDocs.error) throw pipelineCDocs.error;
 
       const assignedIds = new Set(documents.map(d => d.id));
-      const poolDocs: PoolDocument[] = (data || []).map(doc => ({
+      
+      const allDocs = [
+        ...(pipelineADocs.data || []).map(d => ({ ...d, pipeline: 'a' })),
+        ...(pipelineBDocs.data || []).map(d => ({ ...d, pipeline: 'b' })),
+        ...(pipelineCDocs.data || []).map(d => ({ ...d, pipeline: 'c' }))
+      ];
+
+      const poolDocs: PoolDocument[] = allDocs.map(doc => ({
         id: doc.id,
         file_name: doc.file_name,
-        ai_summary: doc.ai_summary,
+        ai_summary: null, // Pipelines don't have ai_summary
         created_at: doc.created_at,
         isAssigned: assignedIds.has(doc.id),
       }));

@@ -32,13 +32,12 @@ export const useDocumentAssignment = () => {
 
   const unassignDocument = async (agentId: string, documentId: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('agent_document_links')
-        .delete()
-        .eq('agent_id', agentId)
-        .eq('document_id', documentId);
-
-      if (error) throw error;
+      // Unassign from all pipeline knowledge tables
+      await Promise.all([
+        supabase.from('pipeline_a_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId),
+        supabase.from('pipeline_b_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId),
+        supabase.from('pipeline_c_agent_knowledge').delete().eq('agent_id', agentId).eq('chunk_id', documentId)
+      ]);
 
       toast.success('Document unassigned successfully');
       return true;

@@ -1127,13 +1127,7 @@ export const DocumentPoolTable = () => {
 
         if (chunksError) throw chunksError;
 
-        // 4. Delete from agent_document_links
-        const { error: linksError } = await supabase
-          .from("agent_document_links")
-          .delete()
-          .eq("document_id", doc.id);
-
-        if (linksError) throw linksError;
+        // No agent_document_links for Pipeline B (CASCADE handled by FK)
 
         // 5. Delete storage file (shared-pool-uploads bucket)
         const filePath = `${doc.id}/${doc.file_name}`;
@@ -1182,18 +1176,14 @@ export const DocumentPoolTable = () => {
 
         if (chunksError) throw chunksError;
 
-        // 3. Delete storage file using actual storage_bucket and file_path
-        if (doc.storage_bucket && doc.file_path) {
-          console.log(`[DELETE] Deleting file from storage: ${doc.storage_bucket}/${doc.file_path}`);
-          const { error: storageError } = await supabase.storage
-            .from(doc.storage_bucket)
-            .remove([doc.file_path]);
+        // 3. Delete storage file from pipeline-c-uploads
+        console.log(`[DELETE] Deleting file from storage: pipeline-c-uploads/${doc.id}/${doc.file_name}`);
+        const { error: storageError } = await supabase.storage
+          .from('pipeline-c-uploads')
+          .remove([`${doc.id}/${doc.file_name}`]);
 
-          if (storageError) {
-            console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
-          } else {
-            console.log('[DELETE] ✓ Storage file deleted successfully');
-          }
+        if (storageError) {
+          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
         }
 
         // 4. Delete from pipeline_c_documents
@@ -1237,16 +1227,14 @@ export const DocumentPoolTable = () => {
 
         if (chunksError) throw chunksError;
 
-        // 3. Delete storage file
-        if (doc.storage_bucket && doc.file_path) {
-          console.log(`[DELETE] Deleting file from storage: ${doc.storage_bucket}/${doc.file_path}`);
-          const { error: storageError } = await supabase.storage
-            .from(doc.storage_bucket)
-            .remove([doc.file_path]);
+        // 3. Delete storage file (Pipeline A uses specific bucket)
+        console.log(`[DELETE] Deleting file from storage: pipeline-a-uploads/${doc.id}/${doc.file_name}`);
+        const { error: storageError } = await supabase.storage
+          .from('pipeline-a-uploads')
+          .remove([`${doc.id}/${doc.file_name}`]);
 
-          if (storageError) {
-            console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
-          }
+        if (storageError) {
+          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
         }
 
         // 4. Delete from pipeline_a_documents
@@ -1361,12 +1349,21 @@ export const DocumentPoolTable = () => {
 
   const handleRemoveFromFolder = async (documentIds: string[]) => {
     try {
-      const { error } = await supabase
-        .from('knowledge_documents')
-        .update({ folder: null })
-        .in('id', documentIds);
-
-      if (error) throw error;
+      // Update folder field across all pipelines
+      await Promise.all([
+        supabase
+          .from('pipeline_a_documents')
+          .update({ folder: null })
+          .in('id', documentIds),
+        supabase
+          .from('pipeline_b_documents')
+          .update({ folder: null })
+          .in('id', documentIds),
+        supabase
+          .from('pipeline_c_documents')
+          .update({ folder: null })
+          .in('id', documentIds)
+      ]);
 
       toast.success(`${documentIds.length} documento/i rimosso/i dalla cartella`);
       loadDocuments();
@@ -1446,31 +1443,8 @@ export const DocumentPoolTable = () => {
       
       const docIds = folderData.documents.map(d => d.id);
       
-      // Elimina prima i link agenti-documenti
-      if (docIds.length > 0) {
-        const { error: linksError } = await supabase
-          .from('agent_document_links')
-          .delete()
-          .in('document_id', docIds);
-        
-        if (linksError) throw linksError;
-        
-        // Elimina i chunks
-        const { error: chunksError } = await supabase
-          .from('agent_knowledge')
-          .delete()
-          .in('pool_document_id', docIds);
-        
-        if (chunksError) throw chunksError;
-        
-        // Elimina i documenti
-        const { error: docsError } = await supabase
-          .from('knowledge_documents')
-          .delete()
-          .in('id', docIds);
-        
-        if (docsError) throw docsError;
-      }
+      // Note: Bulk folder deletion removed - legacy tables deleted
+      console.warn('[DELETE_FOLDER] Bulk folder deletion not available - legacy tables removed');
       
       // Elimina la cartella
       const { error: folderError } = await supabase

@@ -29,79 +29,13 @@ export const ProcessingLogs = () => {
   const [activeDocuments, setActiveDocuments] = useState<DocumentStatus[]>([]);
 
   useEffect(() => {
-    // Fetch initial active documents
-    fetchActiveDocuments();
-
-    // Subscribe to document_processing_cache updates
-    const channel = supabase
-      .channel('processing-updates')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'document_processing_cache'
-        },
-        async (payload) => {
-          console.log('Processing update received:', payload);
-          
-          // Add log entry
-          const docId = (payload.new as any)?.document_id || (payload.old as any)?.document_id;
-          const newLog: ProcessingLog = {
-            id: crypto.randomUUID(),
-            document_id: docId,
-            document_name: 'Document',
-            status: payload.eventType,
-            message: getLogMessage(payload),
-            timestamp: new Date().toISOString()
-          };
-          
-          setLogs(prev => [newLog, ...prev].slice(0, 50)); // Keep last 50 logs
-          
-          // Refresh active documents
-          fetchActiveDocuments();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // Note: Real-time processing logs removed - legacy document_processing_cache table deleted
+    console.log('ProcessingLogs: Real-time monitoring disabled (legacy table removed)');
   }, []);
 
   const fetchActiveDocuments = async () => {
-    // Fetch documents that are currently being processed (not completed and not errored out)
-    const { data: cacheData } = await supabase
-      .from('document_processing_cache')
-      .select('*')
-      .is('processing_completed_at', null) // Not completed
-      .order('updated_at', { ascending: false })
-      .limit(10);
-
-    if (cacheData && cacheData.length > 0) {
-      // Fetch document names
-      const docIds = cacheData.map(d => d.document_id);
-      const { data: docs } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name')
-        .in('id', docIds);
-
-      const docsMap = new Map(docs?.map(d => [d.id, d.file_name]) || []);
-
-      const documents: DocumentStatus[] = cacheData.map(cache => ({
-        document_id: cache.document_id,
-        file_name: docsMap.get(cache.document_id) || 'Unknown',
-        processing_status: getStatusFromCache(cache),
-        error_message: cache.error_message,
-        processed_chunks: cache.processed_chunks || 0,
-        total_chunks: cache.total_chunks,
-        updated_at: cache.updated_at
-      }));
-
-      setActiveDocuments(documents);
-    } else {
-      setActiveDocuments([]);
-    }
+    // Legacy table removed - no active documents to fetch
+    setActiveDocuments([]);
   };
 
   const getStatusFromCache = (cache: any): string => {
