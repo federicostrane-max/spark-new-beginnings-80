@@ -2348,3 +2348,5 @@ export const DocumentPoolTable = () => {
     </div>
   );
 };
+
+export default DocumentPoolTable;
