@@ -233,5 +233,24 @@ schedule = "*/5 * * * *"
 verify_jwt = true
 timeout = 60
 
+# ===== PIPELINE A: LlamaParse + Recursive Retrieval =====
+[functions.pipeline-a-ingest-pdf]
+verify_jwt = false
+timeout = 120
+
+[functions.pipeline-a-process-chunks]
+verify_jwt = false
+timeout = 600
+schedule = "*/10 * * * *"
+
+[functions.pipeline-a-generate-embeddings]
+verify_jwt = false
+timeout = 600
+schedule = "*/5 * * * *"
+
+[functions.pipeline-a-sync-agent]
+verify_jwt = true
+timeout = 60
+
 [functions.test-landing-ai-metadata]
 verify_jwt = false

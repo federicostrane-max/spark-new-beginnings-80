@@ -941,6 +941,33 @@ GROUP BY pad.id, pad.file_name;
 
 ---
 
+## ⚙️ Configurazione Config.toml
+
+Tutte le edge functions di Pipeline A devono essere configurate in `supabase/config.toml`:
+
+```toml
+# ===== PIPELINE A: LlamaParse + Recursive Retrieval =====
+[functions.pipeline-a-ingest-pdf]
+verify_jwt = false
+timeout = 120  # LlamaParse può richiedere più tempo
+
+[functions.pipeline-a-process-chunks]
+verify_jwt = false
+timeout = 600  # Processing con LlamaParse e LLM summarization
+schedule = "*/10 * * * *"  # Ogni 10 minuti
+
+[functions.pipeline-a-generate-embeddings]
+verify_jwt = false
+timeout = 600
+schedule = "*/5 * * * *"  # Ogni 5 minuti
+
+[functions.pipeline-a-sync-agent]
+verify_jwt = true  # Richiede autenticazione
+timeout = 60
+```
+
+---
+
 ## 🎨 Integrazione UI
 
 ### 1. `DocumentPoolUpload.tsx`
