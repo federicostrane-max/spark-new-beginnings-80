@@ -12,6 +12,49 @@ const corsHeaders = {
 
 const BATCH_SIZE = 5;
 
+// Text file extensions that bypass LlamaParse
+const TEXT_EXTENSIONS = [
+  '.md', '.mdx', '.txt', '.rst', '.adoc',
+  '.json', '.yaml', '.yml', '.toml', '.xml', '.ini', '.env',
+  '.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.java', '.rb', '.rs',
+  '.cpp', '.c', '.h', '.cs', '.swift', '.kt', '.sh', '.bash', '.sql',
+  '.php', '.html', '.css', '.scss', '.sass', '.vue', '.svelte',
+];
+
+function isTextFile(fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  return TEXT_EXTENSIONS.some(ext => lowerName.endsWith(ext));
+}
+
+function wrapCodeAsMarkdown(content: string, fileName: string): string {
+  const extension = fileName.split('.').pop()?.toLowerCase() || '';
+  const langMap: Record<string, string> = {
+    'ts': 'typescript', 'tsx': 'tsx', 'js': 'javascript', 'jsx': 'jsx',
+    'py': 'python', 'json': 'json', 'yaml': 'yaml', 'yml': 'yaml',
+    'toml': 'toml', 'xml': 'xml', 'ini': 'ini',
+    'go': 'go', 'java': 'java', 'rb': 'ruby', 'rs': 'rust',
+    'cpp': 'cpp', 'c': 'c', 'h': 'c', 'cs': 'csharp', 'swift': 'swift',
+    'kt': 'kotlin', 'sh': 'bash', 'bash': 'bash', 'sql': 'sql',
+    'php': 'php', 'html': 'html', 'css': 'css', 'scss': 'scss',
+    'sass': 'sass', 'vue': 'vue', 'svelte': 'svelte',
+  };
+  const lang = langMap[extension] || extension;
+  
+  return `# ${fileName}\n\n\`\`\`${lang}\n${content}\n\`\`\``;
+}
+
+function prepareMarkdownForParsing(content: string, fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  
+  // Markdown files: pass through directly
+  if (['md', 'mdx', 'txt', 'rst', 'adoc'].includes(ext)) {
+    return content;
+  }
+  
+  // Code/Config files: wrap in Markdown code block
+  return wrapCodeAsMarkdown(content, fileName);
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -106,28 +149,47 @@ serve(async (req) => {
           .update({ status: 'processing' })
           .eq('id', doc.id);
 
-        // Download PDF from storage
-        const { data: fileData, error: downloadError } = await supabase.storage
-          .from(doc.storage_bucket || 'pipeline-a-uploads')
-          .download(doc.file_path);
+        let markdown: string;
+        let jobId: string | null = null;
 
-        if (downloadError || !fileData) {
-          throw new Error(`Failed to download file: ${downloadError?.message || 'Unknown error'}`);
+        // ⭐ AMPHIBIOUS BYPASS LOGIC
+        if (doc.source_type === 'github' && doc.full_text) {
+          // 🚀 BYPASS: GitHub text file - no LlamaParse needed!
+          console.log(`[Pipeline A Process] BYPASS mode (GitHub text): ${doc.file_name}`);
+          markdown = prepareMarkdownForParsing(doc.full_text, doc.file_name);
+        } else if (isTextFile(doc.file_name) && doc.full_text) {
+          // 🚀 BYPASS: Text file with content already available
+          console.log(`[Pipeline A Process] BYPASS mode (text file): ${doc.file_name}`);
+          markdown = prepareMarkdownForParsing(doc.full_text, doc.file_name);
+        } else {
+          // 📄 PDF: Standard LlamaParse processing
+          console.log(`[Pipeline A Process] LlamaParse mode: ${doc.file_name}`);
+          
+          // Download PDF from storage
+          const { data: fileData, error: downloadError } = await supabase.storage
+            .from(doc.storage_bucket || 'pipeline-a-uploads')
+            .download(doc.file_path);
+
+          if (downloadError || !fileData) {
+            throw new Error(`Failed to download file: ${downloadError?.message || 'Unknown error'}`);
+          }
+
+          const arrayBuffer = await fileData.arrayBuffer();
+          const pdfBuffer = new Uint8Array(arrayBuffer);
+
+          console.log(`[Pipeline A Process] Processing ${doc.file_name} (${pdfBuffer.length} bytes)`);
+
+          // CORE PIPELINE A: Extract Markdown with LlamaParse
+          const result = await extractMarkdownFromPDF(
+            pdfBuffer,
+            doc.file_name,
+            llamaApiKey
+          );
+          markdown = result.markdown;
+          jobId = result.jobId;
+
+          console.log(`[Pipeline A Process] LlamaParse complete: ${markdown.length} characters`);
         }
-
-        const arrayBuffer = await fileData.arrayBuffer();
-        const pdfBuffer = new Uint8Array(arrayBuffer);
-
-        console.log(`[Pipeline A Process] Processing ${doc.file_name} (${pdfBuffer.length} bytes)`);
-
-        // CORE PIPELINE A: Extract Markdown with LlamaParse
-        const { markdown, jobId } = await extractMarkdownFromPDF(
-          pdfBuffer,
-          doc.file_name,
-          llamaApiKey
-        );
-
-        console.log(`[Pipeline A Process] LlamaParse complete: ${markdown.length} characters`);
 
         // Parse structured elements with LLM summarization
         const { baseNodes } = await parseMarkdownElements(markdown, lovableApiKey);

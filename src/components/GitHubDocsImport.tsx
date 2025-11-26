@@ -28,7 +28,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [orgImporting, setOrgImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress[]>([]);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_b');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b' | 'pipeline_c'>('pipeline_a');
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -88,15 +88,24 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       
       toast.loading(`Importazione di tutti i repository da ${orgName}...`, { id: 'org-github-import' });
 
-      const { data, error } = await supabase.functions.invoke('import-github-markdown', {
-        body: {
-          repo: orgName,
-          path: "",
-          maxFiles: 999999,
-          filePattern: "*.md",
-          importAllOrgRepos: true,
-          pipeline: selectedPipeline
-        }
+      // Pipeline A uses dedicated GitHub ingest function
+      const functionName = selectedPipeline === 'pipeline_a' 
+        ? 'pipeline-a-ingest-github' 
+        : 'import-github-markdown';
+
+      const requestBody = selectedPipeline === 'pipeline_a'
+        ? { repoUrl: orgName, importAllOrgRepos: true }
+        : {
+            repo: orgName,
+            path: "",
+            maxFiles: 999999,
+            filePattern: "*.md",
+            importAllOrgRepos: true,
+            pipeline: selectedPipeline
+          };
+
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body: requestBody
       });
 
       if (error) {
@@ -192,7 +201,18 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       <CardContent className="space-y-6">
         <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
           <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
-          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_b' | 'pipeline_c')} disabled={orgImporting}>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b' | 'pipeline_c')} disabled={orgImporting}>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors">
+              <RadioGroupItem value="pipeline_a" id="gh-pipeline-a" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="gh-pipeline-a" className="cursor-pointer font-semibold flex items-center gap-2">
+                  Pipeline A (LlamaParse + Small-to-Big) ⭐ Raccomandato
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Parsing intelligente con bypass per file di testo. Code blocks trattati come elementi atomici con summarization AI. Zero costi per file di codice/config.
+                </p>
+              </div>
+            </div>
             <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
               <RadioGroupItem value="pipeline_b" id="gh-pipeline-b" className="mt-1" />
               <div className="flex-1 space-y-1">

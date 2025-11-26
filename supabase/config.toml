@@ -235,6 +235,10 @@ timeout = 60
 verify_jwt = false
 timeout = 120
 
+[functions.pipeline-a-ingest-github]
+verify_jwt = true
+timeout = 300
+
 [functions.pipeline-a-process-chunks]
 verify_jwt = false
 timeout = 600
