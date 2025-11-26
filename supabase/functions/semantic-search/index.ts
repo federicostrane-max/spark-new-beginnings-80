@@ -54,7 +54,7 @@ serve(async (req) => {
     // Lower threshold to 0.3 for better recall (was 0.5 = 50% similarity)
     const { data: documents, error } = await supabase.rpc('match_documents', {
       query_embedding: queryEmbedding,
-      filter_agent_id: agentId || null,
+      p_agent_id: agentId || null,
       match_threshold: 0.3,  // 30% similarity threshold
       match_count: topK,
     });
