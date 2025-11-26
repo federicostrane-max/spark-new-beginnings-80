@@ -159,63 +159,6 @@ export type Database = {
           },
         ]
       }
-      agent_document_links: {
-        Row: {
-          agent_id: string
-          assigned_by: string | null
-          assignment_type: string
-          confidence_score: number | null
-          created_at: string | null
-          document_id: string
-          id: string
-          sync_completed_at: string | null
-          sync_error: string | null
-          sync_started_at: string | null
-          sync_status: string | null
-        }
-        Insert: {
-          agent_id: string
-          assigned_by?: string | null
-          assignment_type: string
-          confidence_score?: number | null
-          created_at?: string | null
-          document_id: string
-          id?: string
-          sync_completed_at?: string | null
-          sync_error?: string | null
-          sync_started_at?: string | null
-          sync_status?: string | null
-        }
-        Update: {
-          agent_id?: string
-          assigned_by?: string | null
-          assignment_type?: string
-          confidence_score?: number | null
-          created_at?: string | null
-          document_id?: string
-          id?: string
-          sync_completed_at?: string | null
-          sync_error?: string | null
-          sync_started_at?: string | null
-          sync_status?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "agent_document_links_agent_id_fkey"
-            columns: ["agent_id"]
-            isOneToOne: false
-            referencedRelation: "agents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "agent_document_links_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       agent_knowledge: {
         Row: {
           agent_id: string | null
@@ -231,7 +174,6 @@ export type Database = {
           pool_document_id: string | null
           removal_reason: string | null
           removed_at: string | null
-          source_type: string | null
           summary: string | null
         }
         Insert: {
@@ -248,7 +190,6 @@ export type Database = {
           pool_document_id?: string | null
           removal_reason?: string | null
           removed_at?: string | null
-          source_type?: string | null
           summary?: string | null
         }
         Update: {
@@ -265,7 +206,6 @@ export type Database = {
           pool_document_id?: string | null
           removal_reason?: string | null
           removed_at?: string | null
-          source_type?: string | null
           summary?: string | null
         }
         Relationships: [
@@ -274,13 +214,6 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "agent_knowledge_pool_document_id_fkey"
-            columns: ["pool_document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
             referencedColumns: ["id"]
           },
         ]
@@ -767,151 +700,6 @@ export type Database = {
           },
         ]
       }
-      document_assignment_backups: {
-        Row: {
-          assignments: Json
-          assignments_count: number
-          backup_description: string | null
-          backup_name: string
-          created_at: string | null
-          created_by: string | null
-          documents_count: number
-          files_found: number
-          files_missing: number
-          id: string
-          restored_at: string | null
-          restored_by: string | null
-        }
-        Insert: {
-          assignments: Json
-          assignments_count: number
-          backup_description?: string | null
-          backup_name: string
-          created_at?: string | null
-          created_by?: string | null
-          documents_count: number
-          files_found?: number
-          files_missing?: number
-          id?: string
-          restored_at?: string | null
-          restored_by?: string | null
-        }
-        Update: {
-          assignments?: Json
-          assignments_count?: number
-          backup_description?: string | null
-          backup_name?: string
-          created_at?: string | null
-          created_by?: string | null
-          documents_count?: number
-          files_found?: number
-          files_missing?: number
-          id?: string
-          restored_at?: string | null
-          restored_by?: string | null
-        }
-        Relationships: []
-      }
-      document_processing_cache: {
-        Row: {
-          created_at: string | null
-          document_id: string
-          error_message: string | null
-          id: string
-          processed_chunks: number | null
-          processing_completed_at: string | null
-          processing_started_at: string | null
-          retry_count: number | null
-          total_chunks: number | null
-          updated_at: string | null
-          validation_completed_at: string | null
-          validation_started_at: string | null
-        }
-        Insert: {
-          created_at?: string | null
-          document_id: string
-          error_message?: string | null
-          id?: string
-          processed_chunks?: number | null
-          processing_completed_at?: string | null
-          processing_started_at?: string | null
-          retry_count?: number | null
-          total_chunks?: number | null
-          updated_at?: string | null
-          validation_completed_at?: string | null
-          validation_started_at?: string | null
-        }
-        Update: {
-          created_at?: string | null
-          document_id?: string
-          error_message?: string | null
-          id?: string
-          processed_chunks?: number | null
-          processing_completed_at?: string | null
-          processing_started_at?: string | null
-          retry_count?: number | null
-          total_chunks?: number | null
-          updated_at?: string | null
-          validation_completed_at?: string | null
-          validation_started_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "document_processing_cache_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      document_processing_queue: {
-        Row: {
-          attempts: number
-          completed_at: string | null
-          created_at: string
-          document_id: string
-          error_message: string | null
-          id: string
-          max_attempts: number
-          processing_type: string
-          started_at: string | null
-          status: string
-        }
-        Insert: {
-          attempts?: number
-          completed_at?: string | null
-          created_at?: string
-          document_id: string
-          error_message?: string | null
-          id?: string
-          max_attempts?: number
-          processing_type: string
-          started_at?: string | null
-          status?: string
-        }
-        Update: {
-          attempts?: number
-          completed_at?: string | null
-          created_at?: string
-          document_id?: string
-          error_message?: string | null
-          id?: string
-          max_attempts?: number
-          processing_type?: string
-          started_at?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "document_processing_queue_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       edge_function_execution_logs: {
         Row: {
           agent_id: string | null
@@ -1193,102 +981,6 @@ export type Database = {
           },
         ]
       }
-      knowledge_documents: {
-        Row: {
-          ai_summary: string | null
-          chunking_strategy: string | null
-          complexity_level: string | null
-          created_at: string | null
-          extracted_authors: string[] | null
-          extracted_title: string | null
-          file_name: string
-          file_path: string
-          file_size_bytes: number | null
-          folder: string | null
-          full_text: string | null
-          id: string
-          keywords: string[] | null
-          metadata_confidence: string | null
-          metadata_extracted_at: string | null
-          metadata_extraction_method: string | null
-          metadata_verified_online: boolean | null
-          metadata_verified_source: string | null
-          page_count: number | null
-          processed_at: string | null
-          processing_status: string
-          search_query: string | null
-          source_url: string | null
-          text_length: number | null
-          topics: string[] | null
-          updated_at: string | null
-          validation_date: string | null
-          validation_reason: string | null
-          validation_status: string
-        }
-        Insert: {
-          ai_summary?: string | null
-          chunking_strategy?: string | null
-          complexity_level?: string | null
-          created_at?: string | null
-          extracted_authors?: string[] | null
-          extracted_title?: string | null
-          file_name: string
-          file_path: string
-          file_size_bytes?: number | null
-          folder?: string | null
-          full_text?: string | null
-          id?: string
-          keywords?: string[] | null
-          metadata_confidence?: string | null
-          metadata_extracted_at?: string | null
-          metadata_extraction_method?: string | null
-          metadata_verified_online?: boolean | null
-          metadata_verified_source?: string | null
-          page_count?: number | null
-          processed_at?: string | null
-          processing_status?: string
-          search_query?: string | null
-          source_url?: string | null
-          text_length?: number | null
-          topics?: string[] | null
-          updated_at?: string | null
-          validation_date?: string | null
-          validation_reason?: string | null
-          validation_status?: string
-        }
-        Update: {
-          ai_summary?: string | null
-          chunking_strategy?: string | null
-          complexity_level?: string | null
-          created_at?: string | null
-          extracted_authors?: string[] | null
-          extracted_title?: string | null
-          file_name?: string
-          file_path?: string
-          file_size_bytes?: number | null
-          folder?: string | null
-          full_text?: string | null
-          id?: string
-          keywords?: string[] | null
-          metadata_confidence?: string | null
-          metadata_extracted_at?: string | null
-          metadata_extraction_method?: string | null
-          metadata_verified_online?: boolean | null
-          metadata_verified_source?: string | null
-          page_count?: number | null
-          processed_at?: string | null
-          processing_status?: string
-          search_query?: string | null
-          source_url?: string | null
-          text_length?: number | null
-          topics?: string[] | null
-          updated_at?: string | null
-          validation_date?: string | null
-          validation_reason?: string | null
-          validation_status?: string
-        }
-        Relationships: []
-      }
       knowledge_relevance_scores: {
         Row: {
           agent_id: string | null
@@ -1426,13 +1118,6 @@ export type Database = {
             columns: ["agent_id"]
             isOneToOne: false
             referencedRelation: "agents"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "knowledge_removal_history_pool_document_id_fkey"
-            columns: ["pool_document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
             referencedColumns: ["id"]
           },
         ]
@@ -1600,13 +1285,6 @@ export type Database = {
             columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "agent_conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "pdf_download_queue_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "knowledge_documents"
             referencedColumns: ["id"]
           },
         ]
@@ -2328,7 +2006,6 @@ export type Database = {
       get_agent_sync_status: {
         Args: { p_agent_id: string }
         Returns: {
-          created_at: string
           document_id: string
           document_name: string
           pipeline_source: string
@@ -2384,19 +2061,19 @@ export type Database = {
       }
       match_documents: {
         Args: {
-          filter_agent_id?: string
           match_count?: number
           match_threshold?: number
+          p_agent_id: string
           query_embedding: string
         }
         Returns: {
           category: string
+          chunk_type: string
           content: string
           document_name: string
           id: string
-          pool_document_id: string
+          pipeline_source: string
           similarity: number
-          summary: string
         }[]
       }
       recategorize_github_documents: { Args: never; Returns: number }
