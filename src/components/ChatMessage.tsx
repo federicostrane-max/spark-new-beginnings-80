@@ -45,6 +45,7 @@ interface ChatMessageProps {
   agentId?: string;
   llmProvider?: string;
   metadata?: MessageMetadata;
+  videoDocumentsForAgent?: VideoDocumentInfo[];
 }
 
 export const ChatMessage = ({ 
@@ -59,7 +60,8 @@ export const ChatMessage = ({
   forceExpanded,
   agentId,
   llmProvider,
-  metadata
+  metadata,
+  videoDocumentsForAgent
 }: ChatMessageProps) => {
   const [copied, setCopied] = useState(false);
   // null = segui forceExpanded, true/false = override manuale
@@ -443,9 +445,29 @@ export const ChatMessage = ({
         )}
       >
         {isUser ? (
-          <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere select-text">
-            {displayContent}
-          </div>
+          <>
+            <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere select-text">
+              {displayContent}
+            </div>
+            
+            {/* Deep Dive Button for User Messages */}
+            {videoDocumentsForAgent && videoDocumentsForAgent.length > 0 && (
+              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-primary-foreground/20">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowDeepDiveDialog(true);
+                  }}
+                  className="h-7 gap-1 text-xs border-primary-foreground/30 bg-primary-foreground/10 hover:bg-primary-foreground/20"
+                >
+                  <Video className="h-3 w-3" />
+                  Cerca nel Video
+                </Button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="break-words overflow-wrap-anywhere select-text [&_*]:break-words [&_p]:my-2 [&_p]:leading-7 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:my-4 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-lg [&_h3]:font-bold [&_h3]:my-2 [&_strong]:font-bold [&_em]:italic [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:my-2 [&_li]:my-1 [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:break-words [&_code]:whitespace-pre-wrap [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:rounded [&_pre]:overflow-visible [&_pre]:max-h-none [&_pre]:whitespace-pre-wrap [&_pre]:my-2 [&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_table]:w-full [&_table]:my-4 [&_table]:border-collapse [&_table]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_thead]:bg-muted/50 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:text-sm [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:text-sm [&_td]:align-top [&_tr]:border-b [&_tr]:border-border">
             <ReactMarkdown 
@@ -516,21 +538,6 @@ export const ChatMessage = ({
               )}
             </div>
             
-            {/* Deep Dive Button - always show when video documents available */}
-            {metadata?.video_documents_available && metadata.video_documents_available.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDeepDiveDialog(true);
-                }}
-                className="h-7 gap-1 text-xs border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10"
-              >
-                <Video className="h-3 w-3" />
-                Cerca nel Video
-              </Button>
-            )}
           </div>
         )}
 
@@ -663,11 +670,11 @@ export const ChatMessage = ({
       </div>
       
       {/* Deep Dive Video Dialog */}
-      {showDeepDiveDialog && metadata?.video_documents_available && (
+      {showDeepDiveDialog && videoDocumentsForAgent && (
         <DeepDiveVideoDialog
           isOpen={showDeepDiveDialog}
           onClose={() => setShowDeepDiveDialog(false)}
-          videoDocuments={metadata.video_documents_available}
+          videoDocuments={videoDocumentsForAgent}
           suggestedQuery={content}
           agentId={agentId}
         />
