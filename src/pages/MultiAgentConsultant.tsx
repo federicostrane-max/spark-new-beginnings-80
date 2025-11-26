@@ -419,13 +419,8 @@ export default function MultiAgentConsultant() {
     const checkUnsynced = async () => {
       if (!currentAgent?.id) return;
       
-      const { data: links } = await supabase
-        .from('agent_document_links')
-        .select('document_id')
-        .eq('agent_id', currentAgent.id)
-        .eq('sync_status', 'pending');
-      
-      setUnsyncedDocsCount(links?.length || 0);
+      // Legacy unsynced check removed - Pipeline A/B/C have no sync_status
+      setUnsyncedDocsCount(0);
     };
     
     checkUnsynced();

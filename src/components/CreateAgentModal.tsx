@@ -344,32 +344,8 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         system_prompt_length: clonedAgent.system_prompt?.length
       });
 
-      // Clone knowledge base (direct uploads and any non-pool documents)
-      console.log('📚 [CLONE] Fetching all knowledge (direct uploads + NULL source_type)...');
-      
-      // First, check ALL knowledge items for debugging
-      const { data: allKnowledge, error: allKnowledgeError } = await supabase
-        .from("agent_knowledge")
-        .select("id, document_name, source_type, pool_document_id")
-        .eq("agent_id", editingAgent.id);
-      
-      if (allKnowledge) {
-        console.log(`🔍 [CLONE DEBUG] Total knowledge items in original agent: ${allKnowledge.length}`);
-        console.log('🔍 [CLONE DEBUG] Source types breakdown:', 
-          allKnowledge.reduce((acc, item) => {
-            const type = item.source_type || 'NULL';
-            acc[type] = (acc[type] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>)
-        );
-      }
-      
-      // Fetch non-pool documents (direct_upload or NULL)
-      const { data: knowledgeItems, error: knowledgeError } = await supabase
-        .from("agent_knowledge")
-        .select("*")
-        .eq("agent_id", editingAgent.id)
-        .or("source_type.eq.direct_upload,source_type.is.null");
+      // Knowledge cloning removed - legacy tables deleted
+      console.log('⚠️ [CLONE] Knowledge cloning not available');
 
       if (knowledgeError) {
         console.error('❌ [CLONE] Error fetching knowledge:', knowledgeError);

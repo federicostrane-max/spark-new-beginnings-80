@@ -174,38 +174,34 @@ export const usePoolDocumentsHealth = () => {
   const checkPoolHealth = async () => {
     setIsLoading(true);
     try {
-      // Documenti con errori
-      const { count: errorDocCount, error: errorCheckError } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .or('processing_status.eq.error,validation_status.eq.rejected');
+      // Check for failed documents across all pipelines
+      const [errorsA, errorsB, errorsC] = await Promise.all([
+        supabase
+          .from('pipeline_a_documents')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'failed'),
+        supabase
+          .from('pipeline_b_documents')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'failed'),
+        supabase
+          .from('pipeline_c_documents')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'failed')
+      ]);
 
-      if (errorCheckError) {
-        console.error('[usePoolDocumentsHealth] Failed to check document errors:', errorCheckError);
-        throw errorCheckError;
+      if (errorsA.error || errorsB.error || errorsC.error) {
+        console.error('[usePoolDocumentsHealth] Failed to check document errors');
+        throw new Error('Failed to check document errors');
       }
 
-      // Documenti bloccati in validazione (più di 1 ora)
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const { count: validatingDocCount, error: validatingError } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validating')
-        .lt('created_at', oneHourAgo);
-
-      if (validatingError) {
-        console.error('[usePoolDocumentsHealth] Failed to check validating documents:', validatingError);
-        throw validatingError;
-      }
-
-      const errors = errorDocCount || 0;
-      const validating = validatingDocCount || 0;
+      const errors = (errorsA.count || 0) + (errorsB.count || 0) + (errorsC.count || 0);
       
-      const totalIssues = errors + validating;
+      const totalIssues = errors;
       
       setStuckCount(0);
       setErrorCount(errors);
-      setValidatingCount(validating);
+      setValidatingCount(0);
       setOrphanedChunksCount(0);
       setDocumentsWithoutChunksCount(0);
       setIssueCount(totalIssues);
@@ -213,8 +209,7 @@ export const usePoolDocumentsHealth = () => {
 
       if (totalIssues > 0) {
         console.log(`[usePoolDocumentsHealth] Pool has ${totalIssues} documents with issues:`, {
-          errorCount: errors,
-          validatingCount: validating
+          errorCount: errors
         });
       }
     } catch (error) {
