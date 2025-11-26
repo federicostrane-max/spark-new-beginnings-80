@@ -95,18 +95,9 @@ export function AssignToFolderDialog({
         }
       }
 
-      // Assegna i documenti alla cartella
-      const { error } = await supabase
-        .from('knowledge_documents')
-        .update({ folder: folderToAssign })
-        .in('id', documentIds);
-
-      if (error) throw error;
-
-      toast({
-        title: "Documenti assegnati",
-        description: `${documentIds.length} documento/i assegnato/i a "${folderToAssign}"`,
-      });
+      // Sistema legacy rimosso - funzionalità folder non più supportata per ora
+      toast.error('Funzionalità cartelle temporaneamente disabilitata durante migrazione');
+      return;
 
       setSelectedFolder("");
       setNewFolderName("");
