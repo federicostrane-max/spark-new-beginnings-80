@@ -71,7 +71,7 @@ Deno.serve(async (req) => {
       hasIssues,
       documents: documents.map((d: any) => ({
         documentId: d.document_id,
-        fileName: d.file_name || 'unknown',
+        fileName: d.document_name || 'unknown',
         chunkCount: Number(d.chunk_count || 0),
         syncStatus: d.sync_status
       }))
