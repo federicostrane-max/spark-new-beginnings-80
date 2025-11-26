@@ -682,7 +682,7 @@ export const BulkAssignDocumentDialog = ({
         
         // Group deletions by pipeline
         const deletesByPipeline: Record<string, typeof toDelete> = {
-          legacy: [],
+          pipeline_a: [],
           pipeline_b: [],
           pipeline_c: []
         };
@@ -691,7 +691,7 @@ export const BulkAssignDocumentDialog = ({
           const doc = validatedDocs.find(d => d.id === del.document_id);
           if (!doc) return;
           
-          const key = doc.pipeline === 'b' ? 'pipeline_b' : doc.pipeline === 'c' ? 'pipeline_c' : 'legacy';
+          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
           deletesByPipeline[key].push(del);
         });
         
@@ -713,7 +713,7 @@ export const BulkAssignDocumentDialog = ({
         
         // Group insertions by pipeline
         const insertsByPipeline: Record<string, typeof toInsert> = {
-          legacy: [],
+          pipeline_a: [],
           pipeline_b: [],
           pipeline_c: []
         };
