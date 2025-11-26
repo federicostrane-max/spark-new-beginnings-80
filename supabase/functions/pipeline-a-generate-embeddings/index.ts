@@ -9,6 +9,28 @@ const corsHeaders = {
 const BATCH_SIZE = 20;
 const RATE_LIMIT_DELAY = 100;
 
+/**
+ * Retry with exponential backoff for API calls
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 500,
+  context: string = 'API call'
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error;
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.warn(`[${context}] Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Should not reach here');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -104,26 +126,27 @@ serve(async (req) => {
           .update({ embedding_status: 'processing' })
           .eq('id', chunk.id);
 
-        // Generate embedding for content (summary for tables, text for regular chunks)
-        const response = await fetch('https://api.openai.com/v1/embeddings', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'text-embedding-3-small',
-            input: chunk.content,
-          }),
-        });
+        // Generate embedding for content with retry logic
+        const embedding = await retryWithBackoff(async () => {
+          const response = await fetch('https://api.openai.com/v1/embeddings', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${openaiApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'text-embedding-3-small',
+              input: chunk.content,
+            }),
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
-        }
+          if (!response.ok) {
+            throw new Error(`OpenAI error: ${response.status}`);
+          }
 
-        const data = await response.json();
-        const embedding = data.data[0].embedding;
+          const data = await response.json();
+          return data.data[0].embedding;
+        }, 3, 500, 'OpenAI embedding');
 
         await supabase
           .from('pipeline_a_chunks_raw')

@@ -11,6 +11,14 @@
  * - Tracks heading hierarchy for semantic context
  */
 
+const ATOMIC_ELEMENT_SIZE_THRESHOLD = 1500; // Caratteri oltre i quali generare summary
+
+interface ExtractedMetadata {
+  dates?: string[];
+  emails?: string[];
+  urls?: string[];
+}
+
 export interface ParsedNode {
   chunk_index: number;
   content: string;              // For embedding (summary for tables)
@@ -24,6 +32,7 @@ export interface ParsedNode {
     h3?: string;
   };
   page_number?: number;
+  extracted_metadata?: ExtractedMetadata;
 }
 
 export interface ParseResult {
@@ -183,6 +192,39 @@ function buildHeadingMap(markdown: string): Map<number, { h1?: string; h2?: stri
 }
 
 /**
+ * Retry with exponential backoff for API calls
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000,
+  context: string = 'API call'
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error;
+      const delay = baseDelay * Math.pow(2, attempt);
+      console.warn(`[${context}] Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error('Should not reach here');
+}
+
+/**
+ * Extract metadata from content using pattern-based detection
+ */
+function extractMetadataFromContent(content: string): ExtractedMetadata {
+  return {
+    dates: content.match(/\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/g) || undefined,
+    emails: content.match(/[\w.-]+@[\w.-]+\.\w+/g) || undefined,
+    urls: content.match(/https?:\/\/[^\s\)]+/g) || undefined,
+  };
+}
+
+/**
  * Generate summary for a table using LLM helper
  * @param tableMarkdown - Table Markdown content
  * @param lovableApiKey - Lovable AI Gateway API key
@@ -194,7 +236,7 @@ async function summarizeTable(
 ): Promise<string> {
   const prompt = `Riassumi questa tabella in una frase concisa, descrivendo i dati principali e il loro scopo:\n\n${tableMarkdown}`;
 
-  try {
+  return retryWithBackoff(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -212,17 +254,92 @@ async function summarizeTable(
     });
 
     if (!response.ok) {
-      console.warn('[MarkdownParser] Table summarization failed, using default');
-      return 'Tabella con dati strutturati';
+      throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const summary = data.choices?.[0]?.message?.content?.trim() || 'Tabella con dati strutturati';
+    const summary = data.choices?.[0]?.message?.content?.trim();
+    if (!summary) throw new Error('Empty summary');
     return summary;
-  } catch (error) {
-    console.warn('[MarkdownParser] Table summarization error:', error);
+  }, 3, 1000, 'summarizeTable').catch(err => {
+    console.warn('[MarkdownParser] Table summarization failed after retries:', err);
     return 'Tabella con dati strutturati';
-  }
+  });
+}
+
+/**
+ * Generate summary for a code block using LLM helper
+ * NOTA TECNICA 3: Identifica linguaggio e librerie per migliorare semantic search
+ */
+async function summarizeCodeBlock(
+  code: string,
+  lovableApiKey: string
+): Promise<string> {
+  const prompt = `Analizza questo codice. Identifica il linguaggio, le librerie principali e riassumi in una frase la logica funzionale e l'obiettivo di questo script:
+
+${code.substring(0, 2000)}`;
+
+  return retryWithBackoff(async () => {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'system', content: 'Sei un esperto programmatore che analizza e riassume blocchi di codice identificando linguaggio e librerie.' },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 200,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || 'Blocco di codice con logica implementativa';
+  }, 3, 1000, 'summarizeCodeBlock').catch(() => 'Blocco di codice con logica implementativa');
+}
+
+/**
+ * Generate summary for a list using LLM helper
+ */
+async function summarizeList(
+  listContent: string,
+  lovableApiKey: string
+): Promise<string> {
+  const prompt = `Riassumi in una frase i punti principali di questa lista:
+
+${listContent.substring(0, 2000)}`;
+
+  return retryWithBackoff(async () => {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'system', content: 'Sei un assistente che riassume liste in modo conciso.' },
+          { role: 'user', content: prompt },
+        ],
+        max_tokens: 150,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || 'Elenco con elementi informativi';
+  }, 3, 1000, 'summarizeList').catch(() => 'Elenco con elementi informativi');
 }
 
 /**
@@ -249,6 +366,9 @@ async function extractAtomicElements(
     // Get heading context for this element
     const headingContext = headingMap.get(element.start) || {};
 
+    // Extract metadata from content
+    const extracted_metadata = extractMetadataFromContent(originalContent);
+
     if (element.type === 'table') {
       // Generate summary for table
       const summary = await summarizeTable(originalContent, lovableApiKey);
@@ -262,31 +382,71 @@ async function extractAtomicElements(
         is_atomic: true,
         heading_hierarchy: headingContext,
         page_number: undefined, // Will be set during final merge
+        extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+          ? extracted_metadata : undefined,
       });
     } else if (element.type === 'code_block') {
-      // Code blocks: use FULL content for embedding (no summary)
-      nodes.push({
-        chunk_index: i,
-        content: originalContent,      // Full code block for embedding
-        original_content: originalContent,
-        summary: undefined,
-        chunk_type: 'code_block',
-        is_atomic: true,
-        heading_hierarchy: headingContext,
-        page_number: undefined,
-      });
+      // FIX 2: Small-to-Big for large code blocks
+      if (originalContent.length > ATOMIC_ELEMENT_SIZE_THRESHOLD) {
+        const summary = await summarizeCodeBlock(originalContent, lovableApiKey);
+        nodes.push({
+          chunk_index: i,
+          content: summary,                   // Summary per embedding
+          original_content: originalContent,  // Codice completo per LLM
+          summary,
+          chunk_type: 'code_block',
+          is_atomic: true,
+          heading_hierarchy: headingContext,
+          page_number: undefined,
+          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+            ? extracted_metadata : undefined,
+        });
+      } else {
+        // Small code block: use full content
+        nodes.push({
+          chunk_index: i,
+          content: originalContent,
+          original_content: originalContent,
+          summary: undefined,
+          chunk_type: 'code_block',
+          is_atomic: true,
+          heading_hierarchy: headingContext,
+          page_number: undefined,
+          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+            ? extracted_metadata : undefined,
+        });
+      }
     } else if (element.type === 'list') {
-      // Lists: use FULL content for embedding (no summary)
-      nodes.push({
-        chunk_index: i,
-        content: originalContent,      // Full list for embedding
-        original_content: originalContent,
-        summary: undefined,
-        chunk_type: 'list',
-        is_atomic: true,
-        heading_hierarchy: headingContext,
-        page_number: undefined,
-      });
+      // FIX 2: Small-to-Big for large lists
+      if (originalContent.length > ATOMIC_ELEMENT_SIZE_THRESHOLD) {
+        const summary = await summarizeList(originalContent, lovableApiKey);
+        nodes.push({
+          chunk_index: i,
+          content: summary,                   // Summary per embedding
+          original_content: originalContent,  // Lista completa per LLM
+          summary,
+          chunk_type: 'list',
+          is_atomic: true,
+          heading_hierarchy: headingContext,
+          page_number: undefined,
+          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+            ? extracted_metadata : undefined,
+        });
+      } else {
+        // Small list: use full content
+        nodes.push({
+          chunk_index: i,
+          content: originalContent,
+          original_content: originalContent,
+          summary: undefined,
+          chunk_type: 'list',
+          is_atomic: true,
+          heading_hierarchy: headingContext,
+          page_number: undefined,
+          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+            ? extracted_metadata : undefined,
+        });
+      }
     } else if (element.type === 'figure') {
       // Figures: use full description for embedding
       nodes.push({
@@ -298,11 +458,49 @@ async function extractAtomicElements(
         is_atomic: true,
         heading_hierarchy: headingContext,
         page_number: undefined,
+        extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+          ? extracted_metadata : undefined,
       });
     }
   }
 
   return nodes;
+}
+
+/**
+ * FIX 3: Recursive split for long paragraphs
+ * NOTA TECNICA 2: La regex può spezzare su abbreviazioni (art. 5, Mr. Smith)
+ * ma è preferibile over-splitting rispetto a chunk giganti
+ */
+function splitLargeParagraph(paragraph: string, maxSize: number): string[] {
+  if (paragraph.length <= maxSize) return [paragraph];
+  
+  const chunks: string[] = [];
+  
+  // Level 4: Split per frasi (accetta over-splitting su abbreviazioni)
+  const sentences = paragraph.split(/(?<=[.!?])\s+/);
+  let currentChunk = '';
+  
+  for (const sentence of sentences) {
+    if ((currentChunk + ' ' + sentence).length > maxSize && currentChunk) {
+      chunks.push(currentChunk.trim());
+      currentChunk = sentence;
+    } else {
+      currentChunk = currentChunk ? currentChunk + ' ' + sentence : sentence;
+    }
+  }
+  if (currentChunk) chunks.push(currentChunk.trim());
+  
+  // Level 5: FAILSAFE - se ancora troppo grande, split per caratteri
+  return chunks.flatMap(chunk => {
+    if (chunk.length <= maxSize) return [chunk];
+    console.warn(`[MarkdownParser] Forcing character split for chunk of ${chunk.length} chars`);
+    const subChunks: string[] = [];
+    for (let i = 0; i < chunk.length; i += maxSize) {
+      subChunks.push(chunk.substring(i, i + maxSize));
+    }
+    return subChunks;
+  });
 }
 
 /**
@@ -366,6 +564,7 @@ function chunkTextContent(
       
       // If section fits in maxChunkSize, keep it whole
       if (section.length <= maxChunkSize) {
+        const extracted_metadata = extractMetadataFromContent(section.trim());
         nodes.push({
           chunk_index: chunkIndex++,
           content: section.trim(),
@@ -373,6 +572,8 @@ function chunkTextContent(
           is_atomic: false,
           heading_hierarchy: { ...headings },
           page_number: pageNum + 1,
+          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+            ? extracted_metadata : undefined,
         });
       } else {
         // LEVEL 3: Section too large, split by paragraphs (\n\n)
@@ -382,17 +583,58 @@ function chunkTextContent(
         for (const paragraph of paragraphs) {
           if (!paragraph.trim()) continue;
           
+          // FIX 3: Se paragrafo singolo > maxChunkSize, splitta ulteriormente
+          if (paragraph.length > maxChunkSize) {
+            // Flush chunk corrente prima
+            if (currentChunk.length > 0) {
+              const chunkContent = currentChunk.join('\n\n').trim();
+              const extracted_metadata = extractMetadataFromContent(chunkContent);
+              nodes.push({
+                chunk_index: chunkIndex++,
+                content: chunkContent,
+                chunk_type: 'text',
+                is_atomic: false,
+                heading_hierarchy: { ...headings },
+                page_number: pageNum + 1,
+                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+                  ? extracted_metadata : undefined,
+              });
+              currentChunk = [];
+            }
+            
+            // Split paragrafo grande in sub-paragrafi
+            const subParagraphs = splitLargeParagraph(paragraph, maxChunkSize);
+            for (const subPara of subParagraphs) {
+              const extracted_metadata = extractMetadataFromContent(subPara.trim());
+              nodes.push({
+                chunk_index: chunkIndex++,
+                content: subPara.trim(),
+                chunk_type: 'text',
+                is_atomic: false,
+                heading_hierarchy: { ...headings },
+                page_number: pageNum + 1,
+                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+                  ? extracted_metadata : undefined,
+              });
+            }
+            continue;
+          }
+          
           const testChunk = [...currentChunk, paragraph].join('\n\n');
           
           if (testChunk.length > maxChunkSize && currentChunk.length > 0) {
             // Flush current chunk
+            const chunkContent = currentChunk.join('\n\n').trim();
+            const extracted_metadata = extractMetadataFromContent(chunkContent);
             nodes.push({
               chunk_index: chunkIndex++,
-              content: currentChunk.join('\n\n').trim(),
+              content: chunkContent,
               chunk_type: 'text',
               is_atomic: false,
               heading_hierarchy: { ...headings },
               page_number: pageNum + 1,
+              extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+                ? extracted_metadata : undefined,
             });
             currentChunk = [paragraph];
           } else {
@@ -402,13 +644,17 @@ function chunkTextContent(
         
         // Flush remaining paragraphs
         if (currentChunk.length > 0) {
+          const chunkContent = currentChunk.join('\n\n').trim();
+          const extracted_metadata = extractMetadataFromContent(chunkContent);
           nodes.push({
             chunk_index: chunkIndex++,
-            content: currentChunk.join('\n\n').trim(),
+            content: chunkContent,
             chunk_type: 'text',
             is_atomic: false,
             heading_hierarchy: { ...headings },
             page_number: pageNum + 1,
+            extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+              ? extracted_metadata : undefined,
           });
         }
       }
