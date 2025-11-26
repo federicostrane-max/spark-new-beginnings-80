@@ -3409,7 +3409,7 @@ The system has automatically executed a search based on your proposed query and 
           // ============================================================================
           // TRACK VIDEO DOCUMENTS AVAILABLE (for Deep Dive on Demand)
           // ============================================================================
-          let videoDocumentsAvailable: any[] = [];
+          videoDocumentsAvailable = [];
           
           try {
             console.log('[VIDEO-TRACKING] Checking for video documents...');
