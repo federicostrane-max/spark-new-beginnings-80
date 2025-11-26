@@ -39,6 +39,17 @@ interface Agent {
   system_prompt: string;
 }
 
+interface VideoDocumentInfo {
+  document_id: string;
+  file_name: string;
+  file_path: string;
+  storage_bucket: string;
+  processing_metadata?: {
+    director_prompt_preview?: string;
+    model_used?: string;
+  };
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -84,6 +95,7 @@ export default function MultiAgentConsultant() {
   const [unsyncedDocsCount, setUnsyncedDocsCount] = useState(0);
   const [agentUpdateTrigger, setAgentUpdateTrigger] = useState(0);
   const [activeLongResponse, setActiveLongResponse] = useState<string | null>(null);
+  const [videoDocumentsForAgent, setVideoDocumentsForAgent] = useState<VideoDocumentInfo[]>([]);
   const [backgroundProgress, setBackgroundProgress] = useState<{
     totalChars: number;
     chunks: number;
@@ -148,6 +160,60 @@ export default function MultiAgentConsultant() {
       loadConversation(currentConversation.id);
     }
   }, [currentConversation?.id]);
+
+  // 🎬 Load video documents assigned to current agent
+  useEffect(() => {
+    if (!currentAgent?.id) {
+      setVideoDocumentsForAgent([]);
+      return;
+    }
+
+    const loadVideoDocuments = async () => {
+      const { data, error } = await supabase
+        .from('pipeline_a_agent_knowledge')
+        .select(`
+          chunk_id,
+          pipeline_a_chunks_raw!inner(
+            document_id,
+            pipeline_a_documents!inner(
+              id,
+              file_name,
+              file_path,
+              storage_bucket,
+              source_type,
+              processing_metadata
+            )
+          )
+        `)
+        .eq('agent_id', currentAgent.id)
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('[VIDEO DOCS] Error loading video documents:', error);
+        return;
+      }
+
+      // Extract unique video documents
+      const videoDocsMap = new Map<string, VideoDocumentInfo>();
+      data?.forEach((item: any) => {
+        const doc = item.pipeline_a_chunks_raw?.pipeline_a_documents;
+        if (doc?.source_type === 'video' && !videoDocsMap.has(doc.id)) {
+          videoDocsMap.set(doc.id, {
+            document_id: doc.id,
+            file_name: doc.file_name,
+            file_path: doc.file_path,
+            storage_bucket: doc.storage_bucket,
+            processing_metadata: doc.processing_metadata
+          });
+        }
+      });
+
+      setVideoDocumentsForAgent(Array.from(videoDocsMap.values()));
+      console.log('[VIDEO DOCS] Loaded video documents for agent:', videoDocsMap.size);
+    };
+
+    loadVideoDocuments();
+  }, [currentAgent?.id]);
 
   // Intelligent auto-scroll - solo quando l'utente è vicino al fondo
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -1392,6 +1458,7 @@ export default function MultiAgentConsultant() {
                         agentId={currentAgent?.id}
                         llmProvider={(msg as any).llm_provider}
                         metadata={(msg as any).metadata}
+                        videoDocumentsForAgent={videoDocumentsForAgent}
                       />
                     ))
                   )}
