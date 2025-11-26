@@ -110,6 +110,11 @@ async function pollUntilActive(
       ? `${fileUri}?key=${apiKey}`
       : `https://generativelanguage.googleapis.com/v1beta/${fileUri}?key=${apiKey}`;
     
+    if (i === 0) {
+      console.log(`[Deep Dive] 🔍 DEBUG - Polling URL: ${pollUrl.replace(apiKey, 'API_KEY_HIDDEN')}`);
+      console.log(`[Deep Dive] 🔍 DEBUG - fileUri starts with http: ${fileUri.startsWith('http')}`);
+    }
+    
     const response = await fetch(pollUrl, { method: 'GET' });
     
     if (!response.ok) {
