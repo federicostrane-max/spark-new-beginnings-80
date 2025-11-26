@@ -10,6 +10,25 @@ const BATCH_SIZE = 20;
 const RATE_LIMIT_DELAY = 100;
 
 /**
+ * Build embedding input with heading context
+ * The heading hierarchy provides semantic context for chunks
+ * that would otherwise be just numbers or lists
+ */
+function buildEmbeddingInput(chunk: any): string {
+  // Extract heading hierarchy if available
+  const headings = chunk.heading_hierarchy || {};
+  const headingParts = [headings.h1, headings.h2, headings.h3].filter(Boolean);
+  
+  // If we have heading context, prepend it to the content
+  if (headingParts.length > 0) {
+    const headingContext = headingParts.join(' > ');
+    return `${headingContext}\n\n${chunk.content}`;
+  }
+  
+  return chunk.content;
+}
+
+/**
  * Retry with exponential backoff for API calls
  */
 async function retryWithBackoff<T>(
@@ -126,6 +145,12 @@ serve(async (req) => {
           .update({ embedding_status: 'processing' })
           .eq('id', chunk.id);
 
+        // Build embedding input with heading context
+        const textToEmbed = buildEmbeddingInput(chunk);
+        const hasHeadingContext = chunk.heading_hierarchy && 
+          (chunk.heading_hierarchy.h1 || chunk.heading_hierarchy.h2 || chunk.heading_hierarchy.h3);
+        console.log(`[Pipeline A Embeddings] Embedding chunk ${chunk.id}: ${textToEmbed.length} chars (heading context: ${hasHeadingContext ? 'yes' : 'no'})`);
+
         // Generate embedding for content with retry logic
         const embedding = await retryWithBackoff(async () => {
           const response = await fetch('https://api.openai.com/v1/embeddings', {
@@ -136,7 +161,7 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               model: 'text-embedding-3-small',
-              input: chunk.content,
+              input: textToEmbed,
             }),
           });
 
