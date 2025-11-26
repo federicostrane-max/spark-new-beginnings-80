@@ -174,13 +174,9 @@ export const DocumentPoolTable = () => {
     loadAvailableFolders();
     loadFolders();
 
-    // TEMPORANEAMENTE DISABILITATA la subscription realtime per fermare il loop
-    // Il loop è causato da continui aggiornamenti nel database durante le operazioni di sync
-    // TODO: Implementare un debounce o un update incrementale più intelligente
-    
-    /* 
-    const channel = supabase
-      .channel('knowledge-documents-changes')
+    // Realtime subscriptions for all pipelines
+    const channelKnowledge = supabase
+      .channel('knowledge_documents_changes')
       .on(
         'postgres_changes',
         {
@@ -188,20 +184,67 @@ export const DocumentPoolTable = () => {
           schema: 'public',
           table: 'knowledge_documents'
         },
-        (payload) => {
-          // Solo reload documenti, non le cartelle (previene loop)
-          loadDocuments();
+        () => {
+          loadDocuments(currentPage, abortController.signal);
+          loadFolders();
+        }
+      )
+      .subscribe();
+
+    const channelPipelineA = supabase
+      .channel('pipeline_a_documents_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_a_documents'
+        },
+        () => {
+          loadDocuments(currentPage, abortController.signal);
+          loadFolders();
+        }
+      )
+      .subscribe();
+
+    const channelPipelineB = supabase
+      .channel('pipeline_b_documents_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_b_documents'
+        },
+        () => {
+          loadDocuments(currentPage, abortController.signal);
+          loadFolders();
+        }
+      )
+      .subscribe();
+
+    const channelPipelineC = supabase
+      .channel('pipeline_c_documents_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_c_documents'
+        },
+        () => {
+          loadDocuments(currentPage, abortController.signal);
+          loadFolders();
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
-    };
-    */
-
-    return () => {
       abortController.abort();
+      supabase.removeChannel(channelKnowledge);
+      supabase.removeChannel(channelPipelineA);
+      supabase.removeChannel(channelPipelineB);
+      supabase.removeChannel(channelPipelineC);
       console.log('[DocumentPoolTable] Component unmounted, pending requests aborted');
     };
   }, []);
@@ -850,8 +893,8 @@ export const DocumentPoolTable = () => {
     
     hierarchicalFolders.push(...standaloneFolders);
 
-    // Add "Senza Cartella" for PDFs without folder - BOTH pipelines
-    const [legacyNoFolder, pipelineBDocs, pipelineCDocs] = await Promise.all([
+    // Add "Senza Cartella" for PDFs without folder - ALL pipelines
+    const [legacyNoFolder, pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
       supabase
         .from('knowledge_documents')
         .select(`
@@ -865,6 +908,10 @@ export const DocumentPoolTable = () => {
         .is('source_url', null)
         .order('created_at', { ascending: false }),
       supabase
+        .from('pipeline_a_documents')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      supabase
         .from('pipeline_b_documents')
         .select('*')
         .order('created_at', { ascending: false }),
@@ -875,6 +922,7 @@ export const DocumentPoolTable = () => {
     ]);
 
     if (legacyNoFolder.error) throw legacyNoFolder.error;
+    if (pipelineADocs.error) throw pipelineADocs.error;
     if (pipelineBDocs.error) throw pipelineBDocs.error;
     if (pipelineCDocs.error) throw pipelineCDocs.error;
 
@@ -907,6 +955,31 @@ export const DocumentPoolTable = () => {
         };
       });
       allNoFolderDocs.push(...transformedLegacy);
+    }
+
+    // Transform Pipeline A docs
+    if (pipelineADocs.data && pipelineADocs.data.length > 0) {
+      const transformedPipelineA = pipelineADocs.data.map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || '',
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count || null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        folder: null,
+        keywords: [],
+        topics: [],
+        complexity_level: '',
+        agent_ids: [],
+        pipeline: 'a' as const,
+        error_message: doc.error_message,
+      }));
+      allNoFolderDocs.push(...transformedPipelineA);
     }
 
     // Transform Pipeline B docs
