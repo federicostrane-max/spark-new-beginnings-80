@@ -1433,6 +1433,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes: number | null
+          folder: string | null
           id: string
           llamaparse_job_id: string | null
           page_count: number | null
@@ -1448,6 +1449,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes?: number | null
+          folder?: string | null
           id?: string
           llamaparse_job_id?: string | null
           page_count?: number | null
@@ -1463,6 +1465,7 @@ export type Database = {
           file_name?: string
           file_path?: string
           file_size_bytes?: number | null
+          folder?: string | null
           id?: string
           llamaparse_job_id?: string | null
           page_count?: number | null
@@ -1576,6 +1579,7 @@ export type Database = {
           file_name: string
           file_path: string | null
           file_size_bytes: number | null
+          folder: string | null
           full_text: string | null
           id: string
           page_count: number | null
@@ -1593,6 +1597,7 @@ export type Database = {
           file_name: string
           file_path?: string | null
           file_size_bytes?: number | null
+          folder?: string | null
           full_text?: string | null
           id?: string
           page_count?: number | null
@@ -1610,6 +1615,7 @@ export type Database = {
           file_name?: string
           file_path?: string | null
           file_size_bytes?: number | null
+          folder?: string | null
           full_text?: string | null
           id?: string
           page_count?: number | null
@@ -1737,6 +1743,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes: number | null
+          folder: string | null
           id: string
           page_count: number | null
           processed_at: string | null
@@ -1750,6 +1757,7 @@ export type Database = {
           file_name: string
           file_path: string
           file_size_bytes?: number | null
+          folder?: string | null
           id?: string
           page_count?: number | null
           processed_at?: string | null
@@ -1763,6 +1771,7 @@ export type Database = {
           file_name?: string
           file_path?: string
           file_size_bytes?: number | null
+          folder?: string | null
           id?: string
           page_count?: number | null
           processed_at?: string | null
