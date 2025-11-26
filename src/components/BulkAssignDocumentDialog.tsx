@@ -454,61 +454,44 @@ export const BulkAssignDocumentDialog = ({
       const allValidatedDocs: Array<{ id: string; pipeline: string }> = [];
       
       if (folderName) {
-        // Folder-based: fetch from ALL THREE pipelines
-        let from = 0;
-        const pageSize = 1000;
-        
-        // Fetch Legacy documents with folder matching
-        while (true) {
-          const { data, error } = await supabase
-            .from("knowledge_documents")
+        // Folder-based: fetch from ALL THREE pipelines (A, B, C)
+        const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+          supabase
+            .from("pipeline_a_documents")
             .select("id")
-            .eq("processing_status", "ready_for_assignment")
-            .eq("validation_status", "validated")
             .like("folder", `${folderName}%`)
-            .range(from, from + pageSize - 1);
-          
-          if (error) throw error;
-          if (!data || data.length === 0) break;
-          
-          allValidatedDocs.push(...data.map(d => ({ id: d.id, pipeline: 'legacy' })));
-          console.log(`Fetched ${allValidatedDocs.length} legacy documents so far...`);
-          
-          if (data.length < pageSize) break;
-          from += pageSize;
-        }
+            .eq("status", "ready"),
+          supabase
+            .from("pipeline_b_documents")
+            .select("id")
+            .like("folder", `${folderName}%`)
+            .eq("status", "ready"),
+          supabase
+            .from("pipeline_c_documents")
+            .select("id")
+            .like("folder", `${folderName}%`)
+            .eq("status", "ready")
+        ]);
         
-        // Fetch Pipeline B documents (folder IS NULL)
-        const { data: pipelineBDocs, error: pipelineBError } = await supabase
-          .from("pipeline_b_documents")
-          .select("id")
-          .is("folder", null)
-          .eq("status", "ready");
+        if (pipelineADocs.error) throw pipelineADocs.error;
+        if (pipelineBDocs.error) throw pipelineBDocs.error;
+        if (pipelineCDocs.error) throw pipelineCDocs.error;
         
-        if (pipelineBError) throw pipelineBError;
-        allValidatedDocs.push(...(pipelineBDocs || []).map(d => ({ id: d.id, pipeline: 'pipeline_b' })));
-        console.log(`Added ${pipelineBDocs?.length || 0} Pipeline B documents`);
-        
-        // Fetch Pipeline C documents (folder IS NULL)
-        const { data: pipelineCDocs, error: pipelineCError } = await supabase
-          .from("pipeline_c_documents")
-          .select("id")
-          .eq("status", "ready");
-        
-        if (pipelineCError) throw pipelineCError;
-        allValidatedDocs.push(...(pipelineCDocs || []).map(d => ({ id: d.id, pipeline: 'pipeline_c' })));
-        console.log(`Added ${pipelineCDocs?.length || 0} Pipeline C documents`);
+        allValidatedDocs.push(
+          ...(pipelineADocs.data || []).map(d => ({ id: d.id, pipeline: 'a' })),
+          ...(pipelineBDocs.data || []).map(d => ({ id: d.id, pipeline: 'b' })),
+          ...(pipelineCDocs.data || []).map(d => ({ id: d.id, pipeline: 'c' }))
+        );
         
         console.log(`Total folder documents: ${allValidatedDocs.length}`);
       } else if (documentIds) {
-        // Manual selection: fetch from ALL pipelines
-        const [legacyDocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+        // Manual selection: fetch from ALL pipelines (A, B, C)
+        const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
           supabase
-            .from("knowledge_documents")
+            .from("pipeline_a_documents")
             .select("id")
             .in("id", documentIds)
-            .eq("processing_status", "ready_for_assignment")
-            .eq("validation_status", "validated"),
+            .eq("status", "ready"),
           supabase
             .from("pipeline_b_documents")
             .select("id")
@@ -521,16 +504,16 @@ export const BulkAssignDocumentDialog = ({
             .eq("status", "ready")
         ]);
         
-        if (legacyDocs.error) throw legacyDocs.error;
+        if (pipelineADocs.error) throw pipelineADocs.error;
         if (pipelineBDocs.error) throw pipelineBDocs.error;
         if (pipelineCDocs.error) throw pipelineCDocs.error;
         
         allValidatedDocs.push(
-          ...(legacyDocs.data || []).map(d => ({ id: d.id, pipeline: 'legacy' })),
+          ...(pipelineADocs.data || []).map(d => ({ id: d.id, pipeline: 'a' })),
           ...(pipelineBDocs.data || []).map(d => ({ id: d.id, pipeline: 'b' })),
           ...(pipelineCDocs.data || []).map(d => ({ id: d.id, pipeline: 'c' }))
         );
-        console.log(`Fetched ${legacyDocs.data?.length || 0} legacy + ${pipelineBDocs.data?.length || 0} Pipeline B + ${pipelineCDocs.data?.length || 0} Pipeline C documents`);
+        console.log(`Fetched ${pipelineADocs.data?.length || 0} Pipeline A + ${pipelineBDocs.data?.length || 0} Pipeline B + ${pipelineCDocs.data?.length || 0} Pipeline C documents`);
       }
 
       const validatedDocs = allValidatedDocs;
@@ -551,12 +534,12 @@ export const BulkAssignDocumentDialog = ({
       
       // Group docs by pipeline
       const docsByPipeline = {
-        legacy: validatedDocs.filter(d => d.pipeline === 'legacy').map(d => d.id),
+        pipeline_a: validatedDocs.filter(d => d.pipeline === 'a').map(d => d.id),
         pipeline_b: validatedDocs.filter(d => d.pipeline === 'b').map(d => d.id),
         pipeline_c: validatedDocs.filter(d => d.pipeline === 'c').map(d => d.id)
       };
       
-      console.log(`Fetching assignments - Legacy: ${docsByPipeline.legacy.length}, Pipeline B: ${docsByPipeline.pipeline_b.length}, Pipeline C: ${docsByPipeline.pipeline_c.length}`);
+      console.log(`Fetching assignments - Pipeline A: ${docsByPipeline.pipeline_a.length}, Pipeline B: ${docsByPipeline.pipeline_b.length}, Pipeline C: ${docsByPipeline.pipeline_c.length}`);
       
       // Fetch assignments for each pipeline separately
       for (const [pipelineType, docIds] of Object.entries(docsByPipeline)) {
@@ -618,7 +601,7 @@ export const BulkAssignDocumentDialog = ({
         
         // Group deletions by pipeline
         const deletesByPipeline: Record<string, typeof toDelete> = {
-          legacy: [],
+          pipeline_a: [],
           pipeline_b: [],
           pipeline_c: []
         };
@@ -627,7 +610,7 @@ export const BulkAssignDocumentDialog = ({
           const doc = validatedDocs.find(d => d.id === del.document_id);
           if (!doc) return;
           
-          const key = doc.pipeline === 'b' ? 'pipeline_b' : doc.pipeline === 'c' ? 'pipeline_c' : 'legacy';
+          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
           deletesByPipeline[key].push(del);
         });
         
@@ -649,7 +632,7 @@ export const BulkAssignDocumentDialog = ({
         
         // Group insertions by pipeline
         const insertsByPipeline: Record<string, typeof toInsert> = {
-          legacy: [],
+          pipeline_a: [],
           pipeline_b: [],
           pipeline_c: []
         };
@@ -658,50 +641,25 @@ export const BulkAssignDocumentDialog = ({
           const doc = validatedDocs.find(d => d.id === ins.document_id);
           if (!doc) return;
           
-          const key = doc.pipeline === 'b' ? 'pipeline_b' : doc.pipeline === 'c' ? 'pipeline_c' : 'legacy';
+          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
           insertsByPipeline[key].push(ins);
         });
         
-        // Execute insertions per pipeline
+        // Execute insertions per pipeline (A/B/C): Use edge function for each assignment
         for (const [pipelineType, items] of Object.entries(insertsByPipeline)) {
           if (items.length === 0) continue;
           
           console.log(`Inserting ${items.length} assignments for ${pipelineType}`);
           
-          if (pipelineType === 'legacy') {
-            // Legacy: Insert into agent_document_links
-            const insertBatchSize = 500;
-            for (let i = 0; i < items.length; i += insertBatchSize) {
-              const batch = items.slice(i, i + insertBatchSize);
-              const { error } = await supabase
-                .from("agent_document_links")
-                .insert(batch);
-              
-              if (error) throw error;
-            }
-            
-            // Mark for background sync
-            const docIds = [...new Set(items.map(x => x.document_id))];
-            for (let i = 0; i < docIds.length; i += batchSize) {
-              const batch = docIds.slice(i, i + batchSize);
-              await supabase
-                .from("agent_document_links")
-                .update({ sync_status: 'pending' })
-                .in("document_id", batch)
-                .in("agent_id", Array.from(selectedAgentIds));
-            }
-          } else {
-            // Pipeline B/C: Use edge function for each assignment
-            for (const item of items) {
-              const pipeline = pipelineType === 'pipeline_b' ? 'b' : 'c';
-              await supabase.functions.invoke('assign-document-to-agent', {
-                body: {
-                  agentId: item.agent_id,
-                  documentId: item.document_id,
-                  pipeline
-                }
-              });
-            }
+          for (const item of items) {
+            const pipeline = pipelineType === 'pipeline_a' ? 'a' : pipelineType === 'pipeline_b' ? 'b' : 'c';
+            await supabase.functions.invoke('assign-document-to-agent', {
+              body: {
+                agentId: item.agent_id,
+                documentId: item.document_id,
+                pipeline
+              }
+            });
           }
         }
         

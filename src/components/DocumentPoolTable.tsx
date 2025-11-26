@@ -525,43 +525,10 @@ export const DocumentPoolTable = () => {
   };
 
   const loadGitHubFolders = async () => {
-    // Load ONLY essential fields, no joins (faster)
-    const { data: githubDocs, error } = await supabase
-      .from('knowledge_documents')
-      .select('id, file_name, folder, validation_status, processing_status, created_at, ai_summary, text_length, page_count')
-      .not('source_url', 'is', null)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    console.log('[loadGitHubFolders] Loaded GitHub docs:', githubDocs?.length || 0);
-
-    // Helper per trasformare un documento (simplified, no agent data)
-    const transformDoc = (doc: any) => {
-      return {
-        id: doc.id,
-        file_name: doc.file_name,
-        validation_status: doc.validation_status,
-        processing_status: doc.processing_status,
-        created_at: doc.created_at,
-        folder: doc.folder,
-        ai_summary: doc.ai_summary,
-        text_length: doc.text_length,
-        page_count: doc.page_count,
-        agent_names: [], // No agent info in folder view for performance
-      };
-    };
-
-    // Mappa documenti per folder path
-    const docsByFolder = new Map<string, any[]>();
-    (githubDocs || []).forEach(doc => {
-      if (doc.folder) {
-        if (!docsByFolder.has(doc.folder)) {
-          docsByFolder.set(doc.folder, []);
-        }
-        docsByFolder.get(doc.folder)!.push(transformDoc(doc));
-      }
-    });
+    // GitHub folders are no longer supported - legacy system removed
+    console.log('[loadGitHubFolders] GitHub folders no longer supported');
+    return [];
+  };
 
     console.log('[loadGitHubFolders] Docs by folder:', docsByFolder.size, 'unique folders');
 
@@ -665,17 +632,19 @@ export const DocumentPoolTable = () => {
 
   const loadPDFFolders = async () => {
 
-    // Get unique folder names from documents with 'folder' column
-    const { data: docsWithFolders, error: docsError } = await supabase
-      .from('knowledge_documents')
-      .select('folder')
-      .not('folder', 'is', null)
-      .is('source_url', null);
+    // Get unique folder names from ALL pipeline documents (A, B, C)
+    const [pipelineAFolders, pipelineBFolders, pipelineCFolders] = await Promise.all([
+      supabase.from('pipeline_a_documents').select('folder').not('folder', 'is', null),
+      supabase.from('pipeline_b_documents').select('folder').not('folder', 'is', null),
+      supabase.from('pipeline_c_documents').select('folder').not('folder', 'is', null)
+    ]);
 
-    if (docsError) throw docsError;
+    if (pipelineAFolders.error) throw pipelineAFolders.error;
+    if (pipelineBFolders.error) throw pipelineBFolders.error;
+    if (pipelineCFolders.error) throw pipelineCFolders.error;
 
     const uniqueFolderNames = new Set<string>();
-    (docsWithFolders || []).forEach(doc => {
+    [...(pipelineAFolders.data || []), ...(pipelineBFolders.data || []), ...(pipelineCFolders.data || [])].forEach(doc => {
       if (doc.folder) uniqueFolderNames.add(doc.folder);
     });
 
@@ -706,44 +675,34 @@ export const DocumentPoolTable = () => {
       }
     });
 
-    // OTTIMIZZAZIONE: Singola query per TUTTI i documenti con folder
-    const { data: allFolderDocs, error: allDocsError } = await supabase
-      .from('knowledge_documents')
-      .select(`
-        *,
-        agent_document_links(
-          agent_id,
-          agents(id, name)
-        )
-      `)
-      .not('folder', 'is', null)
-      .is('source_url', null)
-      .order('created_at', { ascending: false });
+    // Fetch ALL documents with folders from ALL pipelines
+    const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+      supabase.from('pipeline_a_documents').select('*').not('folder', 'is', null),
+      supabase.from('pipeline_b_documents').select('*').not('folder', 'is', null),
+      supabase.from('pipeline_c_documents').select('*').not('folder', 'is', null)
+    ]);
+    
+    if (pipelineADocs.error) throw pipelineADocs.error;
+    if (pipelineBDocs.error) throw pipelineBDocs.error;
+    if (pipelineCDocs.error) throw pipelineCDocs.error;
+    
+    const allFolderDocs = [
+      ...(pipelineADocs.data || []).map(d => ({ ...d, pipeline: 'pipeline_a' })),
+      ...(pipelineBDocs.data || []).map(d => ({ ...d, pipeline: 'pipeline_b' })),
+      ...(pipelineCDocs.data || []).map(d => ({ ...d, pipeline: 'pipeline_c' }))
+    ];
 
-    if (allDocsError) throw allDocsError;
-
-    // Trasforma tutti i documenti in un unico passaggio
+    // Transform all documents (no agent info in folder view for performance)
     const allTransformedDocs = (allFolderDocs || []).map((doc: any) => {
-      const links = doc.agent_document_links || [];
-      const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
       return {
         id: doc.id,
         file_name: doc.file_name,
-        validation_status: doc.validation_status,
-        validation_reason: doc.validation_reason || "",
-        processing_status: doc.processing_status,
-        ai_summary: doc.ai_summary,
-        text_length: doc.text_length,
-        page_count: doc.page_count,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
         created_at: doc.created_at,
-        agent_names: agentNames,
-        agents_count: agentNames.length,
+        agent_names: [], // No agent info for performance
         folder: doc.folder,
-        keywords: doc.keywords || [],
-        topics: doc.topics || [],
-        complexity_level: doc.complexity_level || "",
-        agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
+        pipeline: doc.pipeline
       };
     });
 
@@ -817,143 +776,74 @@ export const DocumentPoolTable = () => {
     
     hierarchicalFolders.push(...standaloneFolders);
 
-    // Add "Senza Cartella" for PDFs without folder - ALL pipelines
-    const [legacyNoFolder, pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
-      supabase
-        .from('knowledge_documents')
-        .select(`
-          *,
-          agent_document_links(
-            agent_id,
-            agents(id, name)
-          )
-        `)
-        .is('folder', null)
-        .is('source_url', null)
-        .order('created_at', { ascending: false }),
+    // Add "Senza Cartella" for PDFs without folder - ALL pipelines (A, B, C)
+    const [pipelineA_NoFolder, pipelineB_NoFolder, pipelineC_NoFolder] = await Promise.all([
       supabase
         .from('pipeline_a_documents')
         .select('*')
+        .is('folder', null)
         .order('created_at', { ascending: false }),
       supabase
         .from('pipeline_b_documents')
         .select('*')
+        .is('folder', null)
         .order('created_at', { ascending: false }),
       supabase
         .from('pipeline_c_documents')
         .select('*')
+        .is('folder', null)
         .order('created_at', { ascending: false })
     ]);
 
-    if (legacyNoFolder.error) throw legacyNoFolder.error;
-    if (pipelineADocs.error) throw pipelineADocs.error;
-    if (pipelineBDocs.error) throw pipelineBDocs.error;
-    if (pipelineCDocs.error) throw pipelineCDocs.error;
+    if (pipelineA_NoFolder.error) throw pipelineA_NoFolder.error;
+    if (pipelineB_NoFolder.error) throw pipelineB_NoFolder.error;
+    if (pipelineC_NoFolder.error) throw pipelineC_NoFolder.error;
 
     const allNoFolderDocs = [];
 
-    // Transform legacy docs
-    if (legacyNoFolder.data && legacyNoFolder.data.length > 0) {
-      const transformedLegacy = legacyNoFolder.data.map((doc: any) => {
-        const links = doc.agent_document_links || [];
-        const agentNames = links.map((link: any) => link.agents?.name).filter(Boolean);
-
-        return {
-          id: doc.id,
-          file_name: doc.file_name,
-          validation_status: doc.validation_status,
-          validation_reason: doc.validation_reason || "",
-          processing_status: doc.processing_status,
-          ai_summary: doc.ai_summary,
-          text_length: doc.text_length,
-          page_count: doc.page_count,
-          created_at: doc.created_at,
-          agent_names: agentNames,
-          agents_count: agentNames.length,
-          folder: null,
-          keywords: doc.keywords || [],
-          topics: doc.topics || [],
-          complexity_level: doc.complexity_level || "",
-          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-          pipeline: 'a' as const,
-        };
-      });
-      allNoFolderDocs.push(...transformedLegacy);
-    }
-
     // Transform Pipeline A docs
-    if (pipelineADocs.data && pipelineADocs.data.length > 0) {
-      const transformedPipelineA = pipelineADocs.data.map((doc: any) => ({
+    if (pipelineA_NoFolder.data && pipelineA_NoFolder.data.length > 0) {
+      const transformedA = pipelineA_NoFolder.data.map((doc: any) => ({
         id: doc.id,
         file_name: doc.file_name,
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
-        validation_reason: doc.error_message || '',
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
-        page_count: doc.page_count || null,
         created_at: doc.created_at,
         agent_names: [],
-        agents_count: 0,
         folder: null,
-        keywords: [],
-        topics: [],
-        complexity_level: '',
-        agent_ids: [],
-        pipeline: 'a' as const,
-        error_message: doc.error_message,
+        pipeline: 'pipeline_a'
       }));
-      allNoFolderDocs.push(...transformedPipelineA);
+      allNoFolderDocs.push(...transformedA);
     }
-
+    
     // Transform Pipeline B docs
-    if (pipelineBDocs.data && pipelineBDocs.data.length > 0) {
-      const transformedPipelineB = pipelineBDocs.data.map((doc: any) => ({
+    if (pipelineB_NoFolder.data && pipelineB_NoFolder.data.length > 0) {
+      const transformedB = pipelineB_NoFolder.data.map((doc: any) => ({
         id: doc.id,
         file_name: doc.file_name,
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
-        validation_reason: doc.error_message || '',
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
-        page_count: doc.page_count || null,
         created_at: doc.created_at,
         agent_names: [],
-        agents_count: 0,
         folder: null,
-        keywords: [],
-        topics: [],
-        complexity_level: '',
-        agent_ids: [],
-        pipeline: 'b' as const,
-        error_message: doc.error_message,
+        pipeline: 'pipeline_b'
       }));
-      allNoFolderDocs.push(...transformedPipelineB);
+      allNoFolderDocs.push(...transformedB);
     }
-
+    
     // Transform Pipeline C docs
-    if (pipelineCDocs.data && pipelineCDocs.data.length > 0) {
-      const transformedPipelineC = pipelineCDocs.data.map((doc: any) => ({
+    if (pipelineC_NoFolder.data && pipelineC_NoFolder.data.length > 0) {
+      const transformedC = pipelineC_NoFolder.data.map((doc: any) => ({
         id: doc.id,
         file_name: doc.file_name,
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
-        validation_reason: doc.error_message || '',
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
-        page_count: doc.page_count || null,
         created_at: doc.created_at,
         agent_names: [],
-        agents_count: 0,
         folder: null,
-        keywords: [],
-        topics: [],
-        complexity_level: '',
-        agent_ids: [],
-        pipeline: 'c' as const,
-        error_message: doc.error_message,
+        pipeline: 'pipeline_c'
       }));
-      allNoFolderDocs.push(...transformedPipelineC);
+      allNoFolderDocs.push(...transformedC);
     }
 
     // Sort by created_at desc
@@ -1116,13 +1006,13 @@ export const DocumentPoolTable = () => {
 
         if (chunksError) throw chunksError;
 
-        // 4. Delete from agent_document_links
-        const { error: linksError } = await supabase
-          .from("agent_document_links")
+        // 4. Delete from pipeline_b_agent_knowledge
+        const { error: agentLinksError } = await supabase
+          .from("pipeline_b_agent_knowledge")
           .delete()
-          .eq("document_id", doc.id);
+          .eq("chunk_id", doc.id);
 
-        if (linksError) throw linksError;
+        if (agentLinksError) throw agentLinksError;
 
         // 5. Delete storage file (shared-pool-uploads bucket)
         const filePath = `${doc.id}/${doc.file_name}`;
@@ -1152,52 +1042,9 @@ export const DocumentPoolTable = () => {
         toast.success("Documento eliminato con successo");
         loadDocuments();
       } else {
-        // Legacy pipeline deletion
-        console.log(`[DELETE] Legacy pipeline document: ${doc.id}`);
-        const { error: linksError } = await supabase
-          .from("agent_document_links")
-          .delete()
-          .eq("document_id", doc.id);
-
-        if (linksError) throw linksError;
-
-        const { error: knowledgeError } = await supabase
-          .from("agent_knowledge")
-          .delete()
-          .eq("pool_document_id", doc.id);
-
-        if (knowledgeError) throw knowledgeError;
-
-        const { error: cacheError } = await supabase
-          .from("document_processing_cache")
-          .delete()
-          .eq("document_id", doc.id);
-
-        if (cacheError) throw cacheError;
-
-        const filePath = `${doc.id}/${doc.file_name}`;
-        console.log(`[DELETE] Deleting file from storage: knowledge-pdfs/${filePath}`);
-        const { error: storageError } = await supabase.storage
-          .from("knowledge-pdfs")
-          .remove([filePath]);
-
-        if (storageError) {
-          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
-        } else {
-          console.log('[DELETE] ✓ Storage file deleted successfully');
-        }
-
-        const { error: docError } = await supabase
-          .from("knowledge_documents")
-          .delete()
-          .eq("id", doc.id);
-
-        if (docError) {
-          console.error('[DELETE] Error deleting legacy document record:', docError);
-          throw docError;
-        }
-
-        console.log('[DELETE] ✓ Legacy document deleted successfully');
+        // Should never reach here - all documents should be Pipeline A/B/C
+        console.error(`[DELETE] Unknown pipeline for document: ${doc.id}`);
+        throw new Error('Unknown document pipeline');
         toast.success("Documento eliminato con successo");
         loadDocuments();
       }
@@ -1294,12 +1141,12 @@ export const DocumentPoolTable = () => {
 
   const handleRemoveFromFolder = async (documentIds: string[]) => {
     try {
-      const { error } = await supabase
-        .from('knowledge_documents')
-        .update({ folder: null })
-        .in('id', documentIds);
-
-      if (error) throw error;
+      // Update folder to null across ALL pipelines (A, B, C)
+      await Promise.all([
+        supabase.from('pipeline_a_documents').update({ folder: null }).in('id', documentIds),
+        supabase.from('pipeline_b_documents').update({ folder: null }).in('id', documentIds),
+        supabase.from('pipeline_c_documents').update({ folder: null }).in('id', documentIds)
+      ]);
 
       toast.success(`${documentIds.length} documento/i rimosso/i dalla cartella`);
       loadDocuments();
@@ -1379,30 +1226,22 @@ export const DocumentPoolTable = () => {
       
       const docIds = folderData.documents.map(d => d.id);
       
-      // Elimina prima i link agenti-documenti
+      // Delete documents from ALL pipelines (A, B, C)
       if (docIds.length > 0) {
-        const { error: linksError } = await supabase
-          .from('agent_document_links')
-          .delete()
-          .in('document_id', docIds);
-        
-        if (linksError) throw linksError;
-        
-        // Elimina i chunks
-        const { error: chunksError } = await supabase
-          .from('agent_knowledge')
-          .delete()
-          .in('pool_document_id', docIds);
-        
-        if (chunksError) throw chunksError;
-        
-        // Elimina i documenti
-        const { error: docsError } = await supabase
-          .from('knowledge_documents')
-          .delete()
-          .in('id', docIds);
-        
-        if (docsError) throw docsError;
+        await Promise.all([
+          // Pipeline A
+          supabase.from('pipeline_a_agent_knowledge').delete().in('chunk_id', docIds),
+          supabase.from('pipeline_a_chunks_raw').delete().in('document_id', docIds),
+          supabase.from('pipeline_a_documents').delete().in('id', docIds),
+          // Pipeline B
+          supabase.from('pipeline_b_agent_knowledge').delete().in('chunk_id', docIds),
+          supabase.from('pipeline_b_chunks_raw').delete().in('document_id', docIds),
+          supabase.from('pipeline_b_documents').delete().in('id', docIds),
+          // Pipeline C
+          supabase.from('pipeline_c_agent_knowledge').delete().in('chunk_id', docIds),
+          supabase.from('pipeline_c_chunks_raw').delete().in('document_id', docIds),
+          supabase.from('pipeline_c_documents').delete().in('id', docIds)
+        ]);
       }
       
       // Elimina la cartella
