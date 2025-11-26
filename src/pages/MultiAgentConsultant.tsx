@@ -1391,6 +1391,7 @@ export default function MultiAgentConsultant() {
                         forceExpanded={allMessagesExpanded}
                         agentId={currentAgent?.id}
                         llmProvider={(msg as any).llm_provider}
+                        metadata={(msg as any).metadata}
                       />
                     ))
                   )}
