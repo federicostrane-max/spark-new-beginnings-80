@@ -3338,6 +3338,7 @@ The system has automatically executed a search based on your proposed query and 
             top_similarity: 0,
             documents_used: 0
           };
+          let videoDocumentsAvailable: any[] = [];
           
           console.log(`🔍 [AUTO-SEARCH] Starting Query Decomposition for: "${message}"`);
           
@@ -3395,15 +3396,63 @@ The system has automatically executed a search based on your proposed query and 
               console.log(`📊 [BREAKDOWN]`, queryBreakdown);
             }
             
-            // ============================================================================
-            // STEP 3: UPDATE METADATA & BUILD CONTEXT
-            // ============================================================================
-            hasKnowledgeContext = documents.length > 0;
-            knowledgeStats = {
-              chunks_found: documents.length,
-              top_similarity: documents[0]?.similarity || 0,
-              documents_used: [...new Set(documents.map((d: any) => d.document_name))].length
-            };
+          // ============================================================================
+          // STEP 3: UPDATE METADATA & BUILD CONTEXT
+          // ============================================================================
+          hasKnowledgeContext = documents.length > 0;
+          knowledgeStats = {
+            chunks_found: documents.length,
+            top_similarity: documents[0]?.similarity || 0,
+            documents_used: [...new Set(documents.map((d: any) => d.document_name))].length
+          };
+          
+          // ============================================================================
+          // TRACK VIDEO DOCUMENTS AVAILABLE (for Deep Dive on Demand)
+          // ============================================================================
+          let videoDocumentsAvailable: any[] = [];
+          
+          try {
+            console.log('[VIDEO-TRACKING] Checking for video documents...');
+            
+            const { data: videoChunks } = await supabase
+              .from('pipeline_a_agent_knowledge')
+              .select('chunk_id')
+              .eq('agent_id', agent.id)
+              .eq('is_active', true);
+            
+            if (videoChunks && videoChunks.length > 0) {
+              const chunkIds = videoChunks.map((c: any) => c.chunk_id);
+              
+              const { data: chunksData } = await supabase
+                .from('pipeline_a_chunks_raw')
+                .select('document_id')
+                .in('id', chunkIds);
+              
+              const uniqueDocIds = [...new Set(chunksData?.map((d: any) => d.document_id) || [])];
+              
+              if (uniqueDocIds.length > 0) {
+                const { data: videoDocs } = await supabase
+                  .from('pipeline_a_documents')
+                  .select('id, file_name, file_path, storage_bucket, processing_metadata')
+                  .in('id', uniqueDocIds)
+                  .eq('source_type', 'video');
+                
+                if (videoDocs && videoDocs.length > 0) {
+                  videoDocumentsAvailable = videoDocs.map((d: any) => ({
+                    document_id: d.id,
+                    file_name: d.file_name,
+                    file_path: d.file_path,
+                    storage_bucket: d.storage_bucket,
+                    processing_metadata: d.processing_metadata
+                  }));
+                  
+                  console.log(`[VIDEO-TRACKING] ✅ Found ${videoDocumentsAvailable.length} video document(s)`);
+                }
+              }
+            }
+          } catch (err) {
+            console.warn('[VIDEO-TRACKING] Failed to fetch video documents:', err);
+          }
             
             if (documents.length > 0) {
               console.log(`✅ [AUTO-SEARCH] Found ${documents.length} relevant chunks from knowledge base`);
@@ -4456,7 +4505,8 @@ ${knowledgeContext}${searchResultsContext}`;
                         has_knowledge_context: hasKnowledgeContext,
                         knowledge_stats: knowledgeStats,
                         tools_used: toolsUsed,
-                        source_reliability: sourceReliability
+                        source_reliability: sourceReliability,
+                        video_documents_available: videoDocumentsAvailable.length > 0 ? videoDocumentsAvailable : undefined
                       }
                     })
                     .eq('id', placeholderMsg.id);
