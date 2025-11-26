@@ -516,8 +516,8 @@ export const ChatMessage = ({
               )}
             </div>
             
-            {/* Deep Dive Button - show when reliability is low AND video documents available */}
-            {sourceBadge.isWarning && metadata?.video_documents_available && metadata.video_documents_available.length > 0 && (
+            {/* Deep Dive Button - always show when video documents available */}
+            {metadata?.video_documents_available && metadata.video_documents_available.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
