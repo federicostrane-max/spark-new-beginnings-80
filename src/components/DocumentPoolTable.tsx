@@ -261,14 +261,10 @@ export const DocumentPoolTable = () => {
       setLoading(true);
       setError(null);
       
-      // Step 1: Count from BOTH tables
-      console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
+      // Step 1: Count from ALL THREE pipeline tables
+      console.log('[DocumentPoolTable] Step 1: Counting documents from all pipelines...');
       
-      const [oldCount, pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
-        supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .abortSignal(signal),
+      const [pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
         supabase
           .from("pipeline_a_documents")
           .select("id", { count: 'exact', head: true })
@@ -283,10 +279,6 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal)
       ]);
 
-      if (oldCount.error) {
-        console.error('[DocumentPoolTable] Old pipeline count error:', oldCount.error);
-        throw oldCount.error;
-      }
       if (pipelineACount.error) {
         console.error('[DocumentPoolTable] Pipeline A count error:', pipelineACount.error);
         throw pipelineACount.error;
@@ -300,24 +292,26 @@ export const DocumentPoolTable = () => {
         throw pipelineCCount.error;
       }
       
-      const total = (oldCount.count || 0) + (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
-      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
+      const total = (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      // Step 2: Load documents from BOTH pipelines
-      console.log('[DocumentPoolTable] Step 2: Loading from both pipelines...');
+      // Step 2: Load documents from ALL THREE pipelines
+      console.log('[DocumentPoolTable] Step 2: Loading from all pipelines...');
       
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const [oldData, pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
+      const [pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
         supabase
-          .from("knowledge_documents")
-          .select(`
-            *,
-            extracted_title,
-            extracted_authors,
+          .from("pipeline_a_documents")
+          .select("id, file_name, status, page_count, created_at, error_message, folder")
+          .range(from, to)
+          .order("created_at", { ascending: false })
+          .abortSignal(signal),
+        supabase
+          .from("pipeline_b_documents")
             metadata_verified_online,
             metadata_verified_source,
             metadata_confidence,
