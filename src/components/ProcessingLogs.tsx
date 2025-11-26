@@ -79,14 +79,8 @@ export const ProcessingLogs = () => {
       .limit(10);
 
     if (cacheData && cacheData.length > 0) {
-      // Fetch document names
-      const docIds = cacheData.map(d => d.document_id);
-      const { data: docs } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name')
-        .in('id', docIds);
-
-      const docsMap = new Map(docs?.map(d => [d.id, d.file_name]) || []);
+      // Legacy table removed - document names not available
+      const docsMap = new Map<string, string>();
 
       const documents: DocumentStatus[] = cacheData.map(cache => ({
         document_id: cache.document_id,

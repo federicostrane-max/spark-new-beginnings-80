@@ -344,196 +344,76 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         system_prompt_length: clonedAgent.system_prompt?.length
       });
 
-      // Clone knowledge base (direct uploads and any non-pool documents)
-      console.log('📚 [CLONE] Fetching all knowledge (direct uploads + NULL source_type)...');
+      // Clone knowledge from Pipeline A/B/C agent_knowledge tables
+      console.log('📚 [CLONE] Cloning knowledge from Pipeline A, B, C...');
       
-      // First, check ALL knowledge items for debugging
-      const { data: allKnowledge, error: allKnowledgeError } = await supabase
-        .from("agent_knowledge")
-        .select("id, document_name, source_type, pool_document_id")
-        .eq("agent_id", editingAgent.id);
+      const clonePromises = [];
       
-      if (allKnowledge) {
-        console.log(`🔍 [CLONE DEBUG] Total knowledge items in original agent: ${allKnowledge.length}`);
-        console.log('🔍 [CLONE DEBUG] Source types breakdown:', 
-          allKnowledge.reduce((acc, item) => {
-            const type = item.source_type || 'NULL';
-            acc[type] = (acc[type] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>)
-        );
-      }
+      // Pipeline A
+      const { data: pipelineALinks } = await supabase
+        .from('pipeline_a_agent_knowledge')
+        .select('chunk_id')
+        .eq('agent_id', editingAgent.id);
       
-      // Fetch non-pool documents (direct_upload or NULL)
-      const { data: knowledgeItems, error: knowledgeError } = await supabase
-        .from("agent_knowledge")
-        .select("*")
-        .eq("agent_id", editingAgent.id)
-        .or("source_type.eq.direct_upload,source_type.is.null");
-
-      if (knowledgeError) {
-        console.error('❌ [CLONE] Error fetching knowledge:', knowledgeError);
-        console.error('❌ [CLONE] Error details:', {
-          message: knowledgeError.message,
-          code: knowledgeError.code,
-          details: knowledgeError.details,
-          hint: knowledgeError.hint
-        });
-      }
-
-      if (!knowledgeError && knowledgeItems && knowledgeItems.length > 0) {
-        console.log(`📚 [CLONE] Found ${knowledgeItems.length} direct upload knowledge items to clone`);
-        console.log('📚 [CLONE] Documents to clone:', knowledgeItems.map(k => ({
-          name: k.document_name,
-          source_type: k.source_type,
-          has_embedding: !!k.embedding
-        })));
-        
-        const clonedKnowledge = knowledgeItems.map(item => ({
+      if (pipelineALinks && pipelineALinks.length > 0) {
+        console.log(`[CLONE] Cloning ${pipelineALinks.length} Pipeline A chunk links`);
+        const clonedALinks = pipelineALinks.map(link => ({
           agent_id: clonedAgent.id,
-          document_name: item.document_name,
-          content: item.content,
-          category: item.category,
-          summary: item.summary,
-          embedding: item.embedding,
-          source_type: item.source_type || "direct_upload"
+          chunk_id: link.chunk_id,
+          is_active: true
         }));
-
-        console.log(`💾 [CLONE] Attempting to insert ${clonedKnowledge.length} knowledge items...`);
-        const { data: insertedData, error: insertKnowledgeError } = await supabase
-          .from("agent_knowledge")
-          .insert(clonedKnowledge)
-          .select();
-
-        if (insertKnowledgeError) {
-          console.error('❌ [CLONE] Error cloning direct knowledge:', insertKnowledgeError);
-          console.error('❌ [CLONE] Insert error details:', {
-            message: insertKnowledgeError.message,
-            code: insertKnowledgeError.code,
-            details: insertKnowledgeError.details,
-            hint: insertKnowledgeError.hint
-          });
-        } else {
-          console.log(`✅ [CLONE] Direct knowledge cloned successfully! Inserted ${insertedData?.length || 0} items`);
-        }
-      } else {
-        console.warn('⚠️ [CLONE] No direct upload knowledge to clone!');
-        if (allKnowledge && allKnowledge.length > 0) {
-          console.warn('⚠️ [CLONE] Original agent HAS knowledge but none matched the filter!');
-        }
-      }
-
-      // Clone pool document links
-      console.log('🔗 [CLONE] Fetching pool document links...');
-      const { data: poolLinks, error: poolLinksError } = await supabase
-        .from("agent_document_links")
-        .select(`
-          *,
-          knowledge_documents!inner(
-            id,
-            validation_status,
-            processing_status
-          )
-        `)
-        .eq("agent_id", editingAgent.id);
-
-      if (!poolLinksError && poolLinks && poolLinks.length > 0) {
-        // Filter out documents with rejected validation or error processing
-        const validLinks = poolLinks.filter((link: any) => 
-          link.knowledge_documents?.validation_status === 'validated' &&
-          link.knowledge_documents?.processing_status !== 'error'
+        clonePromises.push(
+          supabase.from('pipeline_a_agent_knowledge').insert(clonedALinks)
         );
-        
-        const skippedCount = poolLinks.length - validLinks.length;
-        if (skippedCount > 0) {
-          console.log(`⚠️ [CLONE] Skipping ${skippedCount} document(s) with validation/processing issues`);
-        }
-        
-        if (validLinks.length === 0) {
-          console.log('⚠️ [CLONE] No valid pool documents to clone');
+      }
+      
+      // Pipeline B
+      const { data: pipelineBLinks } = await supabase
+        .from('pipeline_b_agent_knowledge')
+        .select('chunk_id')
+        .eq('agent_id', editingAgent.id);
+      
+      if (pipelineBLinks && pipelineBLinks.length > 0) {
+        console.log(`[CLONE] Cloning ${pipelineBLinks.length} Pipeline B chunk links`);
+        const clonedBLinks = pipelineBLinks.map(link => ({
+          agent_id: clonedAgent.id,
+          chunk_id: link.chunk_id,
+          is_active: true
+        }));
+        clonePromises.push(
+          supabase.from('pipeline_b_agent_knowledge').insert(clonedBLinks)
+        );
+      }
+      
+      // Pipeline C
+      const { data: pipelineCLinks } = await supabase
+        .from('pipeline_c_agent_knowledge')
+        .select('chunk_id')
+        .eq('agent_id', editingAgent.id);
+      
+      if (pipelineCLinks && pipelineCLinks.length > 0) {
+        console.log(`[CLONE] Cloning ${pipelineCLinks.length} Pipeline C chunk links`);
+        const clonedCLinks = pipelineCLinks.map(link => ({
+          agent_id: clonedAgent.id,
+          chunk_id: link.chunk_id,
+          is_active: true
+        }));
+        clonePromises.push(
+          supabase.from('pipeline_c_agent_knowledge').insert(clonedCLinks)
+        );
+      }
+      
+      // Execute all clones in parallel
+      if (clonePromises.length > 0) {
+        const results = await Promise.all(clonePromises);
+        const errors = results.filter(r => r.error);
+        if (errors.length > 0) {
+          console.error('❌ [CLONE] Errors cloning knowledge:', errors);
         } else {
-          console.log(`🔗 [CLONE] Found ${validLinks.length} valid pool document links (skipped ${skippedCount})`);
-        
-          const clonedLinks = validLinks.map((link: any) => ({
-            agent_id: clonedAgent.id,
-            document_id: link.document_id,
-            assignment_type: link.assignment_type,
-            assigned_by: user.id,
-            confidence_score: link.confidence_score
-          }));
-
-          const { error: insertLinksError } = await supabase
-            .from("agent_document_links")
-            .insert(clonedLinks);
-
-          if (insertLinksError) {
-            console.error('❌ [CLONE] Error cloning pool links:', insertLinksError);
-          } else {
-            console.log('✅ [CLONE] Pool links cloned successfully');
-          }
-
-          // Clone pool knowledge chunks - COPIAMO I CHUNKS GIÀ ESISTENTI
-          const poolDocIds = validLinks.map((l: any) => l.document_id);
-          console.log(`📄 [CLONE] Fetching pool knowledge for ${poolDocIds.length} documents from ORIGINAL agent...`);
-        
-          // IMPORTANTE: Prendiamo i chunks dall'agente ORIGINALE che sappiamo già funzionano
-          const { data: poolKnowledge, error: poolKnowledgeError } = await supabase
-            .from("agent_knowledge")
-            .select("*")
-            .eq("agent_id", editingAgent.id)
-            .in("source_type", ["pool", "shared_pool"])
-            .in("pool_document_id", poolDocIds);
-
-          if (poolKnowledgeError) {
-            console.error('❌ [CLONE] Error fetching pool knowledge:', poolKnowledgeError);
-            throw new Error(`Errore nel recupero della knowledge del pool: ${poolKnowledgeError.message}`);
-          }
-
-          if (poolKnowledge && poolKnowledge.length > 0) {
-            console.log(`📄 [CLONE] Found ${poolKnowledge.length} pool knowledge chunks from original agent - CLONING DIRECTLY`);
-            
-            const clonedPoolKnowledge = poolKnowledge.map(item => ({
-              agent_id: clonedAgent.id,
-              document_name: item.document_name,
-              content: item.content,
-              category: item.category,
-              summary: item.summary,
-              embedding: item.embedding,
-              source_type: item.source_type, // Mantieni il source_type originale (pool o shared_pool)
-              pool_document_id: item.pool_document_id
-            }));
-
-            const { error: insertPoolKnowledgeError } = await supabase
-              .from("agent_knowledge")
-              .insert(clonedPoolKnowledge);
-
-            if (insertPoolKnowledgeError) {
-              console.error('❌ [CLONE] Error cloning pool knowledge:', insertPoolKnowledgeError);
-            } else {
-              console.log('✅ [CLONE] Pool knowledge cloned successfully');
-              
-              // Update sync_status to 'completed' for cloned document links
-              const { error: updateStatusError } = await supabase
-                .from("agent_document_links")
-                .update({ 
-                  sync_status: 'completed',
-                  sync_completed_at: new Date().toISOString()
-                })
-                .eq('agent_id', clonedAgent.id)
-                .in('document_id', poolDocIds);
-                
-              if (updateStatusError) {
-                console.error('⚠️ [CLONE] Error updating sync status:', updateStatusError);
-              } else {
-                console.log('✅ [CLONE] Sync status updated to completed for all pool documents');
-              }
-            }
-          } else {
-            console.log('ℹ️ [CLONE] No pool knowledge to clone');
-          }
+          console.log('✅ [CLONE] All pipeline knowledge cloned successfully');
         }
       } else {
-        console.log('ℹ️ [CLONE] No pool document links to clone');
+        console.log('ℹ️ [CLONE] No knowledge to clone from any pipeline');
       }
 
       // Final verification log
