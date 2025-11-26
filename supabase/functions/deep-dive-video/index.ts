@@ -105,10 +105,12 @@ async function pollUntilActive(
   const fileName = fileUri.split('/').pop();
   
   for (let i = 0; i < maxAttempts; i++) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${fileUri}?key=${apiKey}`,
-      { method: 'GET' }
-    );
+    // fileUri is already a complete URL from Gemini, use it directly
+    const pollUrl = fileUri.startsWith('http') 
+      ? `${fileUri}?key=${apiKey}`
+      : `https://generativelanguage.googleapis.com/v1beta/${fileUri}?key=${apiKey}`;
+    
+    const response = await fetch(pollUrl, { method: 'GET' });
     
     if (!response.ok) {
       console.error(`[Deep Dive] Poll attempt ${i + 1} failed:`, response.status);
