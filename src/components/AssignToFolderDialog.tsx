@@ -96,7 +96,11 @@ export function AssignToFolderDialog({
       }
 
       // Sistema legacy rimosso - funzionalità folder non più supportata per ora
-      toast.error('Funzionalità cartelle temporaneamente disabilitata durante migrazione');
+      toast({
+        title: "Funzionalità disabilitata",
+        description: "Cartelle temporaneamente disabilitate durante migrazione",
+        variant: "destructive",
+      });
       return;
 
       setSelectedFolder("");

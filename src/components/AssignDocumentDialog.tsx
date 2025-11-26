@@ -25,7 +25,7 @@ interface AssignDocumentDialogProps {
   document: {
     id: string;
     file_name: string;
-    ai_summary: string;
+    ai_summary?: string | null;
     keywords?: string[];
     topics?: string[];
     complexity_level?: string;
