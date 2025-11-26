@@ -32,7 +32,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
   const [newFilesList, setNewFilesList] = useState<File[]>([]);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_b' | 'pipeline_c'>('pipeline_c');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b' | 'pipeline_c'>('pipeline_c');
   const [inputKey, setInputKey] = useState(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,14 +87,19 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       toast.info("Verifica duplicati in corso...", { duration: 2000 });
       console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
-      // Check both Pipeline A (legacy), Pipeline B, and Pipeline C documents
+      // Check all pipelines: legacy, A, B, C
       // Exclude failed documents to allow re-upload
-      const [legacyResult, pipelineBResult, pipelineCResult] = await Promise.all([
+      const [legacyResult, pipelineAResult, pipelineBResult, pipelineCResult] = await Promise.all([
         supabase
           .from('knowledge_documents')
           .select('file_name')
           .in('file_name', selectedFiles.map(f => f.name))
           .neq('processing_status', 'failed'),
+        supabase
+          .from('pipeline_a_documents')
+          .select('file_name')
+          .in('file_name', selectedFiles.map(f => f.name))
+          .neq('status', 'failed'),
         supabase
           .from('pipeline_b_documents')
           .select('file_name')
@@ -110,6 +115,9 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       if (legacyResult.error) {
         throw new Error(`Errore verifica duplicati (legacy): ${legacyResult.error.message}`);
       }
+      if (pipelineAResult.error) {
+        throw new Error(`Errore verifica duplicati (Pipeline A): ${pipelineAResult.error.message}`);
+      }
       if (pipelineBResult.error) {
         throw new Error(`Errore verifica duplicati (Pipeline B): ${pipelineBResult.error.message}`);
       }
@@ -119,6 +127,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
 
       const existingFileNames = new Set([
         ...(legacyResult.data?.map(d => d.file_name) || []),
+        ...(pipelineAResult.data?.map(d => d.file_name) || []),
         ...(pipelineBResult.data?.map(d => d.file_name) || []),
         ...(pipelineCResult.data?.map(d => d.file_name) || [])
       ]);
@@ -169,8 +178,8 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           // Step 2: Upload to selected pipeline (instant upload to storage)
           setProgress((fileIndex / totalFiles) * 100 + 30);
           
-          const pipelineName = selectedPipeline === 'pipeline_b' ? 'Pipeline B' : 'Pipeline C';
-          const edgeFunctionName = selectedPipeline === 'pipeline_b' ? 'pipeline-b-ingest-pdf' : 'pipeline-c-ingest-pdf';
+          const pipelineName = selectedPipeline === 'pipeline_a' ? 'Pipeline A' : selectedPipeline === 'pipeline_b' ? 'Pipeline B' : 'Pipeline C';
+          const edgeFunctionName = selectedPipeline === 'pipeline_a' ? 'pipeline-a-ingest-pdf' : selectedPipeline === 'pipeline_b' ? 'pipeline-b-ingest-pdf' : 'pipeline-c-ingest-pdf';
           
           console.log(`Uploading "${file.name}" to ${pipelineName}...`);
           
@@ -262,7 +271,18 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       <CardContent className="space-y-4">
         <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
           <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
-          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_b' | 'pipeline_c')} disabled={uploading}>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b' | 'pipeline_c')} disabled={uploading}>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_a" id="pipeline-a" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="pipeline-a" className="cursor-pointer font-semibold">
+                  Pipeline A (LlamaParse + Recursive Retrieval) ⭐
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Parsing intelligente con LlamaParse + Recursive Retrieval. Preserva tabelle atomiche, genera summary LLM, swap automatico. Zero information loss.
+                </p>
+              </div>
+            </div>
             <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
               <RadioGroupItem value="pipeline_b" id="pipeline-b" className="mt-1" />
               <div className="flex-1 space-y-1">
@@ -278,7 +298,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
               <RadioGroupItem value="pipeline_c" id="pipeline-c" className="mt-1" />
               <div className="flex-1 space-y-1">
                 <Label htmlFor="pipeline-c" className="cursor-pointer font-semibold">
-                  Pipeline C (Content-Aware Custom) 🆕
+                  Pipeline C (Content-Aware Custom)
                 </Label>
                 <p className="text-sm text-muted-foreground">
                   Chunking content-aware personalizzato. Rispetta boundaries semantici, adaptive sizing, metadata arricchiti. Nessun costo esterno.

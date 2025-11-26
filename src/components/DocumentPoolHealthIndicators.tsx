@@ -27,7 +27,7 @@ interface HealthData {
   
   // Chunks Pronti
   chunks: {
-    ready: { count: number; byPipeline: { legacy: number; b: number; c: number } };
+    ready: { count: number; byPipeline: { legacy: number; a: number; b: number; c: number } };
     missing: { count: number; files: string[] };
   };
   
@@ -67,7 +67,7 @@ export const DocumentPoolHealthIndicators = () => {
       stuck: { count: 0, files: [] }
     },
     chunks: {
-      ready: { count: 0, byPipeline: { legacy: 0, b: 0, c: 0 } },
+      ready: { count: 0, byPipeline: { legacy: 0, a: 0, b: 0, c: 0 } },
       missing: { count: 0, files: [] }
     },
     cronQueue: {
@@ -91,6 +91,27 @@ export const DocumentPoolHealthIndicators = () => {
 
     try {
       // === 1. IN ELABORAZIONE ===
+      // Pipeline A - awaiting cron (ingested < 10 min)
+      const { data: pipelineAAwaitingCron } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'ingested')
+        .gte('created_at', tenMinutesAgo)
+        .limit(10);
+
+      const { data: pipelineAProcessing } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'processing')
+        .limit(10);
+
+      const { data: pipelineAStuck } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'processing')
+        .lt('created_at', fifteenMinutesAgo)
+        .limit(10);
+
       // Pipeline B - awaiting cron (ingested < 10 min)
       const { data: pipelineBAwaitingCron } = await supabase
         .from('pipeline_b_documents')
@@ -137,17 +158,17 @@ export const DocumentPoolHealthIndicators = () => {
 
       const processingData = {
         awaitingCron: {
-          count: (pipelineBAwaitingCron?.length || 0) + (pipelineCAwaitingCron?.length || 0),
-          files: [...(pipelineBAwaitingCron || []), ...(pipelineCAwaitingCron || [])],
+          count: (pipelineAAwaitingCron?.length || 0) + (pipelineBAwaitingCron?.length || 0) + (pipelineCAwaitingCron?.length || 0),
+          files: [...(pipelineAAwaitingCron || []), ...(pipelineBAwaitingCron || []), ...(pipelineCAwaitingCron || [])],
           nextCronMin: getTimeToNextCron(10)
         },
         activeProcessing: {
-          count: (pipelineBProcessing?.length || 0) + (pipelineCProcessing?.length || 0),
-          files: [...(pipelineBProcessing || []), ...(pipelineCProcessing || [])]
+          count: (pipelineAProcessing?.length || 0) + (pipelineBProcessing?.length || 0) + (pipelineCProcessing?.length || 0),
+          files: [...(pipelineAProcessing || []), ...(pipelineBProcessing || []), ...(pipelineCProcessing || [])]
         },
         stuck: {
-          count: (pipelineBStuck?.length || 0) + (pipelineCStuck?.length || 0),
-          files: [...(pipelineBStuck || []), ...(pipelineCStuck || [])]
+          count: (pipelineAStuck?.length || 0) + (pipelineBStuck?.length || 0) + (pipelineCStuck?.length || 0),
+          files: [...(pipelineAStuck || []), ...(pipelineBStuck || []), ...(pipelineCStuck || [])]
         }
       };
 
@@ -158,6 +179,11 @@ export const DocumentPoolHealthIndicators = () => {
         .select('id', { count: 'exact', head: true })
         .is('agent_id', null)
         .eq('is_active', true);
+
+      const { count: pipelineAChunksCount } = await supabase
+        .from('pipeline_a_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('embedding_status', 'ready');
 
       const { count: pipelineBChunksCount } = await supabase
         .from('pipeline_b_chunks_raw')
@@ -171,9 +197,10 @@ export const DocumentPoolHealthIndicators = () => {
 
       const chunksData = {
         ready: {
-          count: (legacyChunksCount || 0) + (pipelineBChunksCount || 0) + (pipelineCChunksCount || 0),
+          count: (legacyChunksCount || 0) + (pipelineAChunksCount || 0) + (pipelineBChunksCount || 0) + (pipelineCChunksCount || 0),
           byPipeline: {
             legacy: legacyChunksCount || 0,
+            a: pipelineAChunksCount || 0,
             b: pipelineBChunksCount || 0,
             c: pipelineCChunksCount || 0
           }
@@ -182,6 +209,12 @@ export const DocumentPoolHealthIndicators = () => {
       };
 
       // === 3. CODA AUTOMATICA (Cron Jobs) ===
+      const { data: pipelineAChunked } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status, created_at')
+        .eq('status', 'chunked')
+        .limit(10);
+
       const { data: pipelineBChunked } = await supabase
         .from('pipeline_b_documents')
         .select('id, file_name, status, created_at')
@@ -201,13 +234,18 @@ export const DocumentPoolHealthIndicators = () => {
           files: processingData.awaitingCron.files
         },
         embeddingQueue: {
-          count: (pipelineBChunked?.length || 0) + (pipelineCChunked?.length || 0),
+          count: (pipelineAChunked?.length || 0) + (pipelineBChunked?.length || 0) + (pipelineCChunked?.length || 0),
           nextCronMin: getTimeToNextCron(5),
-          files: [...(pipelineBChunked || []), ...(pipelineCChunked || [])]
+          files: [...(pipelineAChunked || []), ...(pipelineBChunked || []), ...(pipelineCChunked || [])]
         }
       };
 
       // === 4. EMBEDDINGS ===
+      const { count: pipelineAPendingEmbeddings } = await supabase
+        .from('pipeline_a_chunks_raw')
+        .select('*', { count: 'exact', head: true })
+        .eq('embedding_status', 'pending');
+
       const { count: pipelineBPendingEmbeddings } = await supabase
         .from('pipeline_b_chunks_raw')
         .select('*', { count: 'exact', head: true })
@@ -220,13 +258,19 @@ export const DocumentPoolHealthIndicators = () => {
 
       const embeddingsData = {
         pending: {
-          count: (pipelineBPendingEmbeddings || 0) + (pipelineCPendingEmbeddings || 0),
+          count: (pipelineAPendingEmbeddings || 0) + (pipelineBPendingEmbeddings || 0) + (pipelineCPendingEmbeddings || 0),
           nextCronMin: getTimeToNextCron(5)
         },
         stuck: { count: 0 } // TODO: implement stuck embeddings detection
       };
 
       // === 5. FALLITI ===
+      const { data: pipelineAFailed } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status, error_message')
+        .eq('status', 'failed')
+        .limit(10);
+
       const { data: pipelineBFailed } = await supabase
         .from('pipeline_b_documents')
         .select('id, file_name, status, error_message')
@@ -240,8 +284,13 @@ export const DocumentPoolHealthIndicators = () => {
         .limit(10);
 
       const failedData = {
-        count: (pipelineBFailed?.length || 0) + (pipelineCFailed?.length || 0),
+        count: (pipelineAFailed?.length || 0) + (pipelineBFailed?.length || 0) + (pipelineCFailed?.length || 0),
         files: [
+          ...(pipelineAFailed || []).map(d => ({
+            name: d.file_name,
+            pipeline: 'Pipeline A',
+            error: d.error_message || 'Errore sconosciuto'
+          })),
           ...(pipelineBFailed || []).map(d => ({
             name: d.file_name,
             pipeline: 'Pipeline B',
@@ -451,6 +500,7 @@ export const DocumentPoolHealthIndicators = () => {
               </p>
               <ul className="text-xs mt-2 space-y-1">
                 <li>Legacy: {healthData.chunks.ready.byPipeline.legacy}</li>
+                <li>Pipeline A: {healthData.chunks.ready.byPipeline.a}</li>
                 <li>Pipeline B: {healthData.chunks.ready.byPipeline.b}</li>
                 <li>Pipeline C: {healthData.chunks.ready.byPipeline.c}</li>
               </ul>

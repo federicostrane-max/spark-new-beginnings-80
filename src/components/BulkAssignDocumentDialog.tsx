@@ -65,16 +65,21 @@ export const BulkAssignDocumentDialog = ({
 
     try {
       if (folderName) {
-        // Folder-based: query ALL THREE pipelines
+        // Folder-based: query ALL FOUR pipelines
         const [
-          legacyTotal, pipelineBTotal, pipelineCTotal,
-          legacyValid, pipelineBValid, pipelineCValid
+          legacyTotal, pipelineATotal, pipelineBTotal, pipelineCTotal,
+          legacyValid, pipelineAValid, pipelineBValid, pipelineCValid
         ] = await Promise.all([
           // Legacy total (with folder)
           supabase
             .from("knowledge_documents")
             .select("id", { count: 'exact', head: true })
             .like("folder", `${folderName}%`),
+          // Pipeline A total (folder IS NULL for Pipeline A)
+          supabase
+            .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .is("folder", null),
           // Pipeline B total (folder IS NULL for Pipeline B)
           supabase
             .from("pipeline_b_documents")
@@ -91,6 +96,12 @@ export const BulkAssignDocumentDialog = ({
             .like("folder", `${folderName}%`)
             .eq("processing_status", "ready_for_assignment")
             .eq("validation_status", "validated"),
+          // Pipeline A valid
+          supabase
+            .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .is("folder", null)
+            .eq("status", "ready"),
           // Pipeline B valid
           supabase
             .from("pipeline_b_documents")
@@ -104,12 +115,13 @@ export const BulkAssignDocumentDialog = ({
             .eq("status", "ready")
         ]);
 
-        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const totalCount = (legacyTotal.count || 0) + (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (legacyValid.count || 0) + (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         
         console.log('[BulkAssign] Folder mode counts:', {
           folderName,
           legacyTotal: legacyTotal.count,
+          pipelineATotal: pipelineATotal.count,
           pipelineBTotal: pipelineBTotal.count,
           pipelineCTotal: pipelineCTotal.count,
           totalCount,
@@ -120,15 +132,20 @@ export const BulkAssignDocumentDialog = ({
         setValidatedCount(validCount);
         setProcessingCount(0); // Folder mode doesn't track processing
       } else if (documentIds && documentIds.length > 0) {
-        // Manual selection: check ALL THREE pipelines
+        // Manual selection: check ALL FOUR pipelines
         const [
-          legacyTotal, pipelineBTotal, pipelineCTotal,
-          legacyValid, pipelineBValid, pipelineCValid,
-          pipelineBProcessing, pipelineCProcessing
+          legacyTotal, pipelineATotal, pipelineBTotal, pipelineCTotal,
+          legacyValid, pipelineAValid, pipelineBValid, pipelineCValid,
+          pipelineAProcessing, pipelineBProcessing, pipelineCProcessing
         ] = await Promise.all([
           // Legacy total
           supabase
             .from("knowledge_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds),
+          // Pipeline A total
+          supabase
+            .from("pipeline_a_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds),
           // Pipeline B total
@@ -148,6 +165,12 @@ export const BulkAssignDocumentDialog = ({
             .in("id", documentIds)
             .eq("processing_status", "ready_for_assignment")
             .eq("validation_status", "validated"),
+          // Pipeline A valid
+          supabase
+            .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .eq("status", "ready"),
           // Pipeline B valid
           supabase
             .from("pipeline_b_documents")
@@ -160,6 +183,12 @@ export const BulkAssignDocumentDialog = ({
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
             .eq("status", "ready"),
+          // Pipeline A processing
+          supabase
+            .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .in("status", ["ingested", "processing", "chunked"]),
           // Pipeline B processing
           supabase
             .from("pipeline_b_documents")
@@ -176,18 +205,21 @@ export const BulkAssignDocumentDialog = ({
         
         console.log('[BulkAssign] Query results:', {
           legacyTotal: legacyTotal.count,
+          pipelineATotal: pipelineATotal.count,
           pipelineBTotal: pipelineBTotal.count,
           pipelineCTotal: pipelineCTotal.count,
           legacyValid: legacyValid.count,
+          pipelineAValid: pipelineAValid.count,
           pipelineBValid: pipelineBValid.count,
           pipelineCValid: pipelineCValid.count,
+          pipelineAProcessing: pipelineAProcessing.count,
           pipelineBProcessing: pipelineBProcessing.count,
           pipelineCProcessing: pipelineCProcessing.count
         });
 
-        const totalCount = (legacyTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (legacyValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
-        const processingCount = (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
+        const totalCount = (legacyTotal.count || 0) + (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (legacyValid.count || 0) + (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const processingCount = (pipelineAProcessing.count || 0) + (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
         
         console.log('[BulkAssign] Calculated counts:', {
           totalCount,

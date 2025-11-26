@@ -27,7 +27,30 @@ Deno.serve(async (req) => {
     console.log(`[assign-document-to-agent] Starting assignment: agent=${agentId}, document=${documentId}, pipeline=${pipeline}`);
 
     // 1. Verify document exists and is ready for assignment based on pipeline
-    if (pipeline === 'b') {
+    if (pipeline === 'a') {
+      // Pipeline A: Check status='ready' in pipeline_a_documents
+      const { data: document, error: docError } = await supabase
+        .from('pipeline_a_documents')
+        .select('id, file_name, status')
+        .eq('id', documentId)
+        .single();
+
+      if (docError || !document) {
+        console.error('[assign-document-to-agent] Pipeline A document not found:', docError);
+        return new Response(
+          JSON.stringify({ error: 'Pipeline A document not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (document.status !== 'ready') {
+        console.error('[assign-document-to-agent] Pipeline A document not ready:', document.status);
+        return new Response(
+          JSON.stringify({ error: `Pipeline A document not ready (status: ${document.status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (pipeline === 'b') {
       // Pipeline B: Check status='ready' in pipeline_b_documents
       const { data: document, error: docError } = await supabase
         .from('pipeline_b_documents')
@@ -106,7 +129,42 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2. Handle Pipeline B assignment differently (no agent_document_links)
+    // 2. Handle Pipeline A assignment differently (no agent_document_links)
+    if (pipeline === 'a') {
+      console.log('[assign-document-to-agent] Pipeline A: Syncing directly to agent knowledge');
+      
+      // Invoke pipeline-a-sync-agent to sync chunks directly
+      const { data: syncData, error: syncError } = await supabase.functions.invoke(
+        'pipeline-a-sync-agent',
+        {
+          body: {
+            agentId: agentId,
+            documentIds: [documentId]
+          }
+        }
+      );
+
+      if (syncError) {
+        console.error('[assign-document-to-agent] Pipeline A sync error:', syncError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to sync Pipeline A document to agent' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[assign-document-to-agent] ✅ Pipeline A sync completed: ${syncData?.synced || 0} chunks`);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: `Pipeline A document assigned successfully (${syncData?.synced || 0} chunks synced)`,
+          synced: syncData?.synced || 0
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 3. Handle Pipeline B assignment differently (no agent_document_links)
     if (pipeline === 'b') {
       console.log('[assign-document-to-agent] Pipeline B: Syncing directly to agent knowledge');
       
@@ -141,7 +199,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Handle Pipeline C assignment differently (no agent_document_links)
+    // 4. Handle Pipeline C assignment differently (no agent_document_links)
     if (pipeline === 'c') {
       console.log('[assign-document-to-agent] Pipeline C: Syncing directly to agent knowledge');
       
@@ -176,7 +234,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Legacy pipeline: Check if link already exists
+    // 5. Legacy pipeline: Check if link already exists
     const { data: existingLink } = await supabase
       .from('agent_document_links')
       .select('id, sync_status')
@@ -197,7 +255,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 4. Create the link with 'pending' status (legacy only)
+    // 6. Create the link with 'pending' status (legacy only)
     const { data: newLink, error: linkError } = await supabase
       .from('agent_document_links')
       .insert({
