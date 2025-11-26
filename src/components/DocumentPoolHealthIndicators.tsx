@@ -26,10 +26,10 @@ interface HealthData {
   };
   
   // Chunks Pronti
-    chunks: {
-      ready: { count: number; byPipeline: { a: number; b: number; c: number } };
-      missing: { count: number; files: string[] };
-    };
+  chunks: {
+    ready: { count: number; byPipeline: { legacy: number; a: number; b: number; c: number } };
+    missing: { count: number; files: string[] };
+  };
   
   // Coda Automatica (Cron Jobs)
   cronQueue: {
@@ -67,7 +67,7 @@ export const DocumentPoolHealthIndicators = () => {
       stuck: { count: 0, files: [] }
     },
     chunks: {
-      ready: { count: 0, byPipeline: { a: 0, b: 0, c: 0 } },
+      ready: { count: 0, byPipeline: { legacy: 0, a: 0, b: 0, c: 0 } },
       missing: { count: 0, files: [] }
     },
     cronQueue: {
@@ -174,6 +174,12 @@ export const DocumentPoolHealthIndicators = () => {
 
       // === 2. CHUNKS PRONTI ===
       // Count actual chunks, not documents
+      const { count: legacyChunksCount } = await supabase
+        .from('agent_knowledge')
+        .select('id', { count: 'exact', head: true })
+        .is('agent_id', null)
+        .eq('is_active', true);
+
       const { count: pipelineAChunksCount } = await supabase
         .from('pipeline_a_chunks_raw')
         .select('id', { count: 'exact', head: true })
@@ -191,8 +197,9 @@ export const DocumentPoolHealthIndicators = () => {
 
       const chunksData = {
         ready: {
-          count: (pipelineAChunksCount || 0) + (pipelineBChunksCount || 0) + (pipelineCChunksCount || 0),
+          count: (legacyChunksCount || 0) + (pipelineAChunksCount || 0) + (pipelineBChunksCount || 0) + (pipelineCChunksCount || 0),
           byPipeline: {
+            legacy: legacyChunksCount || 0,
             a: pipelineAChunksCount || 0,
             b: pipelineBChunksCount || 0,
             c: pipelineCChunksCount || 0
@@ -317,44 +324,6 @@ export const DocumentPoolHealthIndicators = () => {
     // Polling every 30 seconds as fallback
     const interval = setInterval(loadHealthIndicators, 30000);
     
-    // Realtime subscription for Pipeline A documents
-    const channelA = supabase
-      .channel('pipeline-a-documents-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_a_documents'
-        },
-        (payload) => {
-          console.log('[HealthIndicators] 🔔 Pipeline A document changed:', payload.new);
-          loadHealthIndicators();
-        }
-      )
-      .subscribe((status) => {
-        console.log('[HealthIndicators] 📡 Pipeline A channel status:', status);
-      });
-    
-    // Realtime subscription for Pipeline A chunks
-    const channelAChunks = supabase
-      .channel('pipeline-a-chunks-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_a_chunks_raw'
-        },
-        (payload) => {
-          console.log('[HealthIndicators] 🔔 Pipeline A chunk changed:', payload.new);
-          loadHealthIndicators();
-        }
-      )
-      .subscribe((status) => {
-        console.log('[HealthIndicators] 📡 Pipeline A chunks channel status:', status);
-      });
-    
     // Realtime subscription for Pipeline B documents
     const channelB = supabase
       .channel('pipeline-b-documents-changes')
@@ -433,8 +402,6 @@ export const DocumentPoolHealthIndicators = () => {
     
     return () => {
       clearInterval(interval);
-      supabase.removeChannel(channelA);
-      supabase.removeChannel(channelAChunks);
       supabase.removeChannel(channelB);
       supabase.removeChannel(channelBChunks);
       supabase.removeChannel(channelC);
@@ -532,6 +499,7 @@ export const DocumentPoolHealthIndicators = () => {
                 ✅ {healthData.chunks.ready.count} documenti pronti con chunks
               </p>
               <ul className="text-xs mt-2 space-y-1">
+                <li>Legacy: {healthData.chunks.ready.byPipeline.legacy}</li>
                 <li>Pipeline A: {healthData.chunks.ready.byPipeline.a}</li>
                 <li>Pipeline B: {healthData.chunks.ready.byPipeline.b}</li>
                 <li>Pipeline C: {healthData.chunks.ready.byPipeline.c}</li>

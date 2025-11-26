@@ -95,20 +95,13 @@ export function AssignToFolderDialog({
         }
       }
 
-      // Assegna i documenti alla cartella - supporta tutte le pipeline
-      const updatePromises = [
-        supabase.from('pipeline_a_documents').update({ folder: folderToAssign }).in('id', documentIds),
-        supabase.from('pipeline_b_documents').update({ folder: folderToAssign }).in('id', documentIds),
-        supabase.from('pipeline_c_documents').update({ folder: folderToAssign }).in('id', documentIds)
-      ];
+      // Assegna i documenti alla cartella
+      const { error } = await supabase
+        .from('knowledge_documents')
+        .update({ folder: folderToAssign })
+        .in('id', documentIds);
 
-      const results = await Promise.all(updatePromises);
-      const errors = results.filter(r => r.error).map(r => r.error);
-      
-      if (errors.length > 0) {
-        console.error('[AssignToFolder] Errors:', errors);
-        throw errors[0];
-      }
+      if (error) throw error;
 
       toast({
         title: "Documenti assegnati",

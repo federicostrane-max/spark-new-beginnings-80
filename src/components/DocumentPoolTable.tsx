@@ -261,10 +261,14 @@ export const DocumentPoolTable = () => {
       setLoading(true);
       setError(null);
       
-      // Step 1: Count from ALL THREE pipeline tables
-      console.log('[DocumentPoolTable] Step 1: Counting documents from all pipelines...');
+      // Step 1: Count from BOTH tables
+      console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
       
-      const [pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
+      const [oldCount, pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
+        supabase
+          .from("knowledge_documents")
+          .select("id", { count: 'exact', head: true })
+          .abortSignal(signal),
         supabase
           .from("pipeline_a_documents")
           .select("id", { count: 'exact', head: true })
@@ -279,6 +283,10 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal)
       ]);
 
+      if (oldCount.error) {
+        console.error('[DocumentPoolTable] Old pipeline count error:', oldCount.error);
+        throw oldCount.error;
+      }
       if (pipelineACount.error) {
         console.error('[DocumentPoolTable] Pipeline A count error:', pipelineACount.error);
         throw pipelineACount.error;
@@ -292,38 +300,59 @@ export const DocumentPoolTable = () => {
         throw pipelineCCount.error;
       }
       
-      const total = (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
-      console.log('[DocumentPoolTable] Total:', total, '(Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
+      const total = (oldCount.count || 0) + (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      // Step 2: Load documents from ALL THREE pipelines
-      console.log('[DocumentPoolTable] Step 2: Loading from all pipelines...');
+      // Step 2: Load documents from BOTH pipelines
+      console.log('[DocumentPoolTable] Step 2: Loading from both pipelines...');
       
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const [pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
+      const [oldData, pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
+        supabase
+          .from("knowledge_documents")
+          .select(`
+            *,
+            extracted_title,
+            extracted_authors,
+            metadata_verified_online,
+            metadata_verified_source,
+            metadata_confidence,
+            agent_document_links(
+              agent_id,
+              agents(id, name)
+            )
+          `)
+          .order("created_at", { ascending: false })
+          .range(from, to)
+          .abortSignal(signal),
         supabase
           .from("pipeline_a_documents")
-          .select("id, file_name, status, page_count, created_at, error_message, folder")
-          .range(from, to)
+          .select("*")
           .order("created_at", { ascending: false })
+          .range(from, to)
           .abortSignal(signal),
         supabase
           .from("pipeline_b_documents")
-          .select("id, file_name, status, page_count, created_at, error_message, folder")
-          .range(from, to)
+          .select("*")
           .order("created_at", { ascending: false })
+          .range(from, to)
           .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
-          .select("id, file_name, status, page_count, created_at, error_message, folder")
-          .range(from, to)
+          .select("*")
           .order("created_at", { ascending: false })
+          .range(from, to)
           .abortSignal(signal)
       ]);
 
+      if (oldData.error) {
+        console.error('[DocumentPoolTable] Old pipeline error:', oldData.error);
+        throw oldData.error;
+      }
       if (pipelineAData.error) {
         console.error('[DocumentPoolTable] Pipeline A error:', pipelineAData.error);
         throw pipelineAData.error;
@@ -739,7 +768,7 @@ export const DocumentPoolTable = () => {
         if (!childFoldersByParent.has(parentPath)) {
           childFoldersByParent.set(parentPath, []);
         }
-        childFoldersByParent.get(parentPath)!.push({
+        childFoldersByParent.get(parentPath).push({
           id: `virtual-${folderName}`,
           name: folderName,
           parent_folder: parentPath,
@@ -753,27 +782,19 @@ export const DocumentPoolTable = () => {
       }
     });
 
-    // Query documents with folders from all pipelines
-    const [pipelineAFolderDocs, pipelineBFolderDocs, pipelineCFolderDocs] = await Promise.all([
-      supabase
-        .from('pipeline_a_documents')
-        .select('*')
-        .not('folder', 'is', null),
-      supabase
-        .from('pipeline_b_documents')
-        .select('*')
-        .not('folder', 'is', null),
-      supabase
-        .from('pipeline_c_documents')
-        .select('*')
-        .not('folder', 'is', null)
-    ]);
-
-    const allFolderDocs = [
-      ...(pipelineAFolderDocs.data || []).map(d => ({ ...d, pipeline: 'a' })),
-      ...(pipelineBFolderDocs.data || []).map(d => ({ ...d, pipeline: 'b' })),
-      ...(pipelineCFolderDocs.data || []).map(d => ({ ...d, pipeline: 'c' }))
-    ];
+    // OTTIMIZZAZIONE: Singola query per TUTTI i documenti con folder
+    const { data: allFolderDocs, error: allDocsError } = await supabase
+      .from('knowledge_documents')
+      .select(`
+        *,
+        agent_document_links(
+          agent_id,
+          agents(id, name)
+        )
+      `)
+      .not('folder', 'is', null)
+      .is('source_url', null)
+      .order('created_at', { ascending: false });
 
     if (allDocsError) throw allDocsError;
 

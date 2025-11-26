@@ -78,16 +78,13 @@ export function RenameFolderDialog({
 
       if (folderError) throw folderError;
 
-      // Update folder field in ALL pipeline documents
-      const updatePromises = [
-        supabase.from('pipeline_a_documents').update({ folder: trimmedName }).eq('folder', currentName),
-        supabase.from('pipeline_b_documents').update({ folder: trimmedName }).eq('folder', currentName),
-        supabase.from('pipeline_c_documents').update({ folder: trimmedName }).eq('folder', currentName)
-      ];
+      // Update folder field in knowledge_documents
+      const { error: docsError } = await supabase
+        .from('knowledge_documents')
+        .update({ folder: trimmedName })
+        .eq('folder', currentName);
 
-      const results = await Promise.all(updatePromises);
-      const errors = results.filter(r => r.error);
-      if (errors.length > 0) throw errors[0].error;
+      if (docsError) throw docsError;
 
       toast({
         title: "Cartella rinominata",
