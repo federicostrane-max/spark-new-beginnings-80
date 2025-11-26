@@ -1156,50 +1156,6 @@ export const DocumentPoolTable = () => {
         console.log('[DELETE] ✓ Pipeline B document deleted successfully');
         toast.success("Documento eliminato con successo");
         loadDocuments();
-      } else if (doc.pipeline === 'c') {
-        // Pipeline C deletion
-        console.log(`[DELETE] Pipeline C document: ${doc.id}`);
-        
-        // 1. Delete from pipeline_c_agent_knowledge
-        const { error: agentLinksError } = await supabase
-          .from("pipeline_c_agent_knowledge")
-          .delete()
-          .eq("chunk_id", doc.id);
-
-        if (agentLinksError) throw agentLinksError;
-
-        // 2. Delete from pipeline_c_chunks_raw
-        const { error: chunksError } = await supabase
-          .from("pipeline_c_chunks_raw")
-          .delete()
-          .eq("document_id", doc.id);
-
-        if (chunksError) throw chunksError;
-
-        // 3. Delete storage file from pipeline-c-uploads
-        console.log(`[DELETE] Deleting file from storage: pipeline-c-uploads/${doc.id}/${doc.file_name}`);
-        const { error: storageError } = await supabase.storage
-          .from('pipeline-c-uploads')
-          .remove([`${doc.id}/${doc.file_name}`]);
-
-        if (storageError) {
-          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
-        }
-
-        // 4. Delete from pipeline_c_documents
-        const { error: docError } = await supabase
-          .from("pipeline_c_documents")
-          .delete()
-          .eq("id", doc.id);
-
-        if (docError) {
-          console.error('[DELETE] Error deleting Pipeline C document record:', docError);
-          throw docError;
-        }
-
-        console.log('[DELETE] ✓ Pipeline C document deleted successfully');
-        toast.success("Documento eliminato con successo");
-        loadDocuments();
       } else if (doc.pipeline === 'a') {
         // Pipeline A deletion
         console.log(`[DELETE] Pipeline A document: ${doc.id}`);
