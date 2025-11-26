@@ -253,5 +253,9 @@ schedule = "*/5 * * * *"
 verify_jwt = true
 timeout = 60
 
+[functions.pipeline-a-ingest-video]
+verify_jwt = true
+timeout = 300
+
 [functions.test-landing-ai-metadata]
 verify_jwt = false

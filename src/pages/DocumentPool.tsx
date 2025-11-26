@@ -5,6 +5,7 @@ import { ArrowLeft, FileText, Github } from "lucide-react";
 import { DocumentPoolTable } from "@/components/DocumentPoolTable";
 import { DocumentPoolUpload } from "@/components/DocumentPoolUpload";
 import { GitHubDocsImport } from "@/components/GitHubDocsImport";
+import { VideoTutorialUpload } from "@/components/VideoTutorialUpload";
 
 export default function DocumentPool() {
   const navigate = useNavigate();
@@ -31,16 +32,17 @@ export default function DocumentPool() {
           <div>
             <h1 className="text-3xl font-bold">Pool Documenti Condivisi</h1>
             <p className="text-muted-foreground mt-1">
-              Carica PDF o importa documentazione da GitHub
+              Carica PDF, importa da GitHub o analizza Video Tutorial
             </p>
           </div>
         </div>
       </div>
 
       {/* Upload/Import Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <DocumentPoolUpload onUploadComplete={handleUploadComplete} />
         <GitHubDocsImport onImportComplete={handleUploadComplete} />
+        <VideoTutorialUpload onUploadComplete={handleUploadComplete} />
       </div>
 
       {/* Single Documents Table showing ALL pool documents */}
