@@ -87,9 +87,14 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       toast.info("Verifica duplicati in corso...", { duration: 2000 });
       console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
-      // Check all pipelines: A, B, C
+      // Check all pipelines: legacy, A, B, C
       // Exclude failed documents to allow re-upload
-      const [pipelineAResult, pipelineBResult, pipelineCResult] = await Promise.all([
+      const [legacyResult, pipelineAResult, pipelineBResult, pipelineCResult] = await Promise.all([
+        supabase
+          .from('knowledge_documents')
+          .select('file_name')
+          .in('file_name', selectedFiles.map(f => f.name))
+          .neq('processing_status', 'failed'),
         supabase
           .from('pipeline_a_documents')
           .select('file_name')
@@ -107,6 +112,9 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           .neq('status', 'failed')
       ]);
 
+      if (legacyResult.error) {
+        throw new Error(`Errore verifica duplicati (legacy): ${legacyResult.error.message}`);
+      }
       if (pipelineAResult.error) {
         throw new Error(`Errore verifica duplicati (Pipeline A): ${pipelineAResult.error.message}`);
       }
@@ -118,6 +126,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       }
 
       const existingFileNames = new Set([
+        ...(legacyResult.data?.map(d => d.file_name) || []),
         ...(pipelineAResult.data?.map(d => d.file_name) || []),
         ...(pipelineBResult.data?.map(d => d.file_name) || []),
         ...(pipelineCResult.data?.map(d => d.file_name) || [])

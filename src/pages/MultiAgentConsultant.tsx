@@ -416,8 +416,19 @@ export default function MultiAgentConsultant() {
   }, [currentConversation?.id]);
 
   useEffect(() => {
-    // Legacy system removed - unsynced docs check disabled
-    setUnsyncedDocsCount(0);
+    const checkUnsynced = async () => {
+      if (!currentAgent?.id) return;
+      
+      const { data: links } = await supabase
+        .from('agent_document_links')
+        .select('document_id')
+        .eq('agent_id', currentAgent.id)
+        .eq('sync_status', 'pending');
+      
+      setUnsyncedDocsCount(links?.length || 0);
+    };
+    
+    checkUnsynced();
   }, [currentAgent?.id]);
 
 

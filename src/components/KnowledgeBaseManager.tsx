@@ -44,7 +44,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
     loadDocuments,
   } = useDocumentSync(agentId);
   
-  const { assignDocument, reprocessDocument, isAssigning } = useDocumentAssignment();
+  const { assignDocument, unassignDocument, reprocessDocument, isAssigning } = useDocumentAssignment();
   
   const [showAssignDialog, setShowAssignDialog] = useState(false);
   const [poolDocuments, setPoolDocuments] = useState<PoolDocument[]>([]);
@@ -70,47 +70,26 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const loadPoolDocuments = useCallback(async () => {
     setLoadingPool(true);
     try {
-      // Query ALL pipeline documents that are ready
-      const [pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
-        supabase
-          .from('pipeline_a_documents')
-          .select('id, file_name, created_at, status')
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false })
-          .limit(33),
-        supabase
-          .from('pipeline_b_documents')
-          .select('id, file_name, created_at, status')
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false })
-          .limit(33),
-        supabase
-          .from('pipeline_c_documents')
-          .select('id, file_name, created_at, status')
-          .eq('status', 'ready')
-          .order('created_at', { ascending: false })
-          .limit(34)
-      ]);
+      const { data, error } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_name, ai_summary, created_at, processing_status, validation_status')
+        .eq('processing_status', 'ready_for_assignment')
+        .eq('validation_status', 'validated')
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-      if (pipelineAData.error) throw pipelineAData.error;
-      if (pipelineBData.error) throw pipelineBData.error;
-      if (pipelineCData.error) throw pipelineCData.error;
+      if (error) throw error;
 
       const assignedIds = new Set(documents.map(d => d.id));
-      
-      const allDocs = [
-        ...(pipelineAData.data || []),
-        ...(pipelineBData.data || []),
-        ...(pipelineCData.data || [])
-      ].map(doc => ({
+      const poolDocs: PoolDocument[] = (data || []).map(doc => ({
         id: doc.id,
         file_name: doc.file_name,
-        ai_summary: null,
+        ai_summary: doc.ai_summary,
         created_at: doc.created_at,
         isAssigned: assignedIds.has(doc.id),
       }));
 
-      setPoolDocuments(allDocs);
+      setPoolDocuments(poolDocs);
     } catch (error) {
       console.error('Error loading pool documents:', error);
       toast.error('Errore nel caricamento del pool');
@@ -191,8 +170,10 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const handleUnassignDocument = async (documentId: string) => {
     setRemovingLinkId(documentId);
     try {
-      toast.info("Rimozione documenti temporaneamente disabilitata");
-      // Unassign functionality removed with legacy system
+      const success = await unassignDocument(agentId, documentId);
+      if (success) {
+        await loadDocuments();
+      }
     } catch (error) {
       console.error('Error removing document:', error);
     } finally {

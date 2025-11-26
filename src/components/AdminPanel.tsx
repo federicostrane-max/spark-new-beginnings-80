@@ -39,8 +39,14 @@ export const AdminPanel = () => {
   const fetchStuckCount = async () => {
     setLoadingCount(true);
     try {
-      // Sistema legacy rimosso
-      setStuckCount(0);
+      const { count, error } = await supabase
+        .from('knowledge_documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('validation_status', 'validated')
+        .eq('processing_status', 'downloaded');
+
+      if (error) throw error;
+      setStuckCount(count || 0);
     } catch (error: any) {
       console.error('Error fetching stuck count:', error);
       toast.error('Errore nel recupero del conteggio documenti');
