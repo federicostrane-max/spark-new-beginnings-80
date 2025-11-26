@@ -56,7 +56,6 @@ export const AgentsSidebar = ({
   const [loading, setLoading] = useState(true);
   const [selectedAgentForKB, setSelectedAgentForKB] = useState<Agent | null>(null);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
-  const [stuckDocumentsCount, setStuckDocumentsCount] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [syncingAgents, setSyncingAgents] = useState<Set<string>>(new Set());
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
@@ -82,7 +81,6 @@ export const AgentsSidebar = ({
   useEffect(() => {
     if (agentUpdateTrigger !== undefined && agentUpdateTrigger > 0) {
       console.log('[AgentsSidebar] agentUpdateTrigger changed:', agentUpdateTrigger);
-      // Add small delay to ensure DB write is complete
       setTimeout(() => {
         loadAgents();
       }, 200);
@@ -101,7 +99,6 @@ export const AgentsSidebar = ({
           event: '*',
           schema: 'public',
           table: 'agents'
-          // NO FILTER - we need to capture DELETE events too
         },
         (payload) => {
           console.log('📡 [AgentsSidebar] Realtime event received:', {
@@ -113,19 +110,15 @@ export const AgentsSidebar = ({
           
           if (payload.eventType === 'INSERT') {
             console.log('✨ [AgentsSidebar] New agent inserted:', payload.new);
-            // Reload immediato per nuovi agenti
             loadAgents();
           } else if (payload.eventType === 'DELETE') {
             console.log('🗑️ [AgentsSidebar] Agent deleted:', payload.old);
-            // Rimuovi immediatamente l'agente dallo stato locale
             setAgents(prev => prev.filter(a => a.id !== payload.old.id));
           } else if (payload.eventType === 'UPDATE') {
             console.log('✏️ [AgentsSidebar] Agent updated:', payload.new);
             if (payload.new.active === false) {
-              // Se l'agente è stato disattivato, rimuovilo
               setAgents(prev => prev.filter(a => a.id !== payload.new.id));
             } else {
-              // Altrimenti reload per aggiornare i dati
               loadAgents();
             }
           }
@@ -143,7 +136,6 @@ export const AgentsSidebar = ({
 
   const loadAgents = async () => {
     console.log('[AgentsSidebar] Loading agents...');
-    // Add a small delay before showing loading state to prevent flashing
     const loadingTimeout = setTimeout(() => setLoading(true), 300);
     
     try {
@@ -156,7 +148,7 @@ export const AgentsSidebar = ({
       if (error) throw error;
       console.log('[AgentsSidebar] Loaded', data?.length || 0, 'agents');
       setAgents(data || []);
-      setLastRefresh(new Date()); // Track last refresh
+      setLastRefresh(new Date());
     } catch (error: any) {
       console.error("[AgentsSidebar] Error loading agents:", error);
     } finally {
@@ -164,26 +156,6 @@ export const AgentsSidebar = ({
       setLoading(false);
     }
   };
-
-  // Check for stuck documents on mount
-  useEffect(() => {
-    const checkStuckDocuments = async () => {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
-
-      if (!error && data !== null) {
-        setStuckDocumentsCount(data.length || 0);
-      }
-    };
-
-    checkStuckDocuments();
-    // Refresh every 30 seconds
-    const interval = setInterval(checkStuckDocuments, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -408,11 +380,6 @@ export const AgentsSidebar = ({
         >
           <Settings className="h-4 w-4" />
           <span className="flex-1 text-left">Admin Panel</span>
-          {stuckDocumentsCount > 0 && (
-            <Badge variant="destructive" className="ml-auto">
-              {stuckDocumentsCount}
-            </Badge>
-          )}
         </Button>
         <Button 
           variant="ghost" 
