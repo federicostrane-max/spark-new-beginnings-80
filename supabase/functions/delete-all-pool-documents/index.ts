@@ -29,8 +29,8 @@ Deno.serve(async (req) => {
     console.log(`[DELETE] Starting deletion of ${documentIds.length} documents`);
 
     // Separate document IDs by pipeline
-    const { data: legacyDocs } = await supabase
-      .from('knowledge_documents')
+    const { data: pipelineADocs } = await supabase
+      .from('pipeline_a_documents')
       .select('id, file_name')
       .in('id', documentIds);
 
@@ -44,76 +44,76 @@ Deno.serve(async (req) => {
       .select('id, file_name')
       .in('id', documentIds);
 
-    const legacyIds = legacyDocs?.map(d => d.id) || [];
+    const pipelineAIds = pipelineADocs?.map(d => d.id) || [];
     const pipelineBIds = pipelineBDocs?.map(d => d.id) || [];
     const pipelineCIds = pipelineCDocs?.map(d => d.id) || [];
 
-    console.log(`[DELETE] Legacy docs: ${legacyIds.length}, Pipeline B docs: ${pipelineBIds.length}, Pipeline C docs: ${pipelineCIds.length}`);
+    console.log(`[DELETE] Pipeline A docs: ${pipelineAIds.length}, Pipeline B docs: ${pipelineBIds.length}, Pipeline C docs: ${pipelineCIds.length}`);
 
     // Use smaller batches (50) to avoid database timeouts on heavy operations
     const BATCH_SIZE = 50;
     let totalDeleted = 0;
     const allFilePaths: Array<{ bucket: string; path: string }> = [];
 
-    // Process Legacy documents
-    for (let i = 0; i < legacyIds.length; i += BATCH_SIZE) {
-      const batchIds = legacyIds.slice(i, i + BATCH_SIZE);
+    // Process Pipeline A documents
+    for (let i = 0; i < pipelineAIds.length; i += BATCH_SIZE) {
+      const batchIds = pipelineAIds.slice(i, i + BATCH_SIZE);
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      console.log(`[LEGACY BATCH ${batchNum}] Processing ${batchIds.length} documents`);
+      console.log(`[PIPELINE A BATCH ${batchNum}] Processing ${batchIds.length} documents`);
 
       // 1. Get file paths BEFORE deleting documents
       const { data: documents, error: fetchError } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name')
+        .from('pipeline_a_documents')
+        .select('id, file_path, storage_bucket')
         .in('id', batchIds);
 
       if (fetchError) {
-        console.error(`[LEGACY BATCH ${batchNum}] Error fetching documents:`, fetchError);
+        console.error(`[PIPELINE A BATCH ${batchNum}] Error fetching documents:`, fetchError);
         throw fetchError;
       }
 
       if (documents && documents.length > 0) {
         documents.forEach(doc => {
-          if (doc.id && doc.file_name) {
-            allFilePaths.push({ bucket: 'knowledge-pdfs', path: `${doc.id}/${doc.file_name}` });
+          if (doc.file_path && doc.storage_bucket) {
+            allFilePaths.push({ bucket: doc.storage_bucket, path: doc.file_path });
           }
         });
       }
 
-      // 2. Delete agent_document_links
-      const { error: linksError } = await supabase
-        .from('agent_document_links')
-        .delete()
+      // 2. Get chunk IDs first, then delete pipeline_a_agent_knowledge
+      const { data: chunks } = await supabase
+        .from('pipeline_a_chunks_raw')
+        .select('id')
         .in('document_id', batchIds);
 
-      if (linksError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting links:`, linksError);
+      if (chunks && chunks.length > 0) {
+        const chunkIds = chunks.map(c => c.id);
+        const { error: agentKnowledgeError } = await supabase
+          .from('pipeline_a_agent_knowledge')
+          .delete()
+          .in('chunk_id', chunkIds);
 
-      // 3. Delete agent_knowledge (shared pool chunks)
+        if (agentKnowledgeError) console.error(`[PIPELINE A BATCH ${batchNum}] Error deleting agent knowledge:`, agentKnowledgeError);
+      }
+
+      // 3. Delete pipeline_a_chunks_raw
       const { error: chunksError } = await supabase
-        .from('agent_knowledge')
-        .delete()
-        .in('pool_document_id', batchIds);
-
-      if (chunksError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting chunks:`, chunksError);
-
-      // 4. Delete document_processing_cache
-      const { error: cacheError } = await supabase
-        .from('document_processing_cache')
+        .from('pipeline_a_chunks_raw')
         .delete()
         .in('document_id', batchIds);
 
-      if (cacheError) console.error(`[LEGACY BATCH ${batchNum}] Error deleting cache:`, cacheError);
+      if (chunksError) throw chunksError;
 
-      // 5. Delete from knowledge_documents table
+      // 4. Delete from pipeline_a_documents table
       const { error: deleteError } = await supabase
-        .from('knowledge_documents')
+        .from('pipeline_a_documents')
         .delete()
         .in('id', batchIds);
 
       if (deleteError) throw deleteError;
       
       totalDeleted += batchIds.length;
-      console.log(`[LEGACY BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
+      console.log(`[PIPELINE A BATCH ${batchNum}] Deleted ${batchIds.length} documents`);
     }
 
     // Process Pipeline B documents
@@ -141,15 +141,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      // 2. Delete agent_document_links
-      const { error: linksError } = await supabase
-        .from('agent_document_links')
-        .delete()
-        .in('document_id', batchIds);
-
-      if (linksError) console.error(`[PIPELINE B BATCH ${batchNum}] Error deleting links:`, linksError);
-
-      // 3. Get chunk IDs first, then delete pipeline_b_agent_knowledge
+      // 2. Get chunk IDs first, then delete pipeline_b_agent_knowledge
       const { data: chunks } = await supabase
         .from('pipeline_b_chunks_raw')
         .select('id')
@@ -165,7 +157,7 @@ Deno.serve(async (req) => {
         if (agentKnowledgeError) console.error(`[PIPELINE B BATCH ${batchNum}] Error deleting agent knowledge:`, agentKnowledgeError);
       }
 
-      // 4. Delete pipeline_b_chunks_raw
+      // 3. Delete pipeline_b_chunks_raw
       const { error: chunksError } = await supabase
         .from('pipeline_b_chunks_raw')
         .delete()
@@ -173,7 +165,7 @@ Deno.serve(async (req) => {
 
       if (chunksError) throw chunksError;
 
-      // 5. Delete from pipeline_b_documents table
+      // 4. Delete from pipeline_b_documents table
       const { error: deleteError } = await supabase
         .from('pipeline_b_documents')
         .delete()
