@@ -468,15 +468,9 @@ export default function MultiAgentConsultant() {
 
   const checkUnsyncedDocs = async (agentId: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('check-and-sync-all', {
-        body: { agentId, autoFix: false }
-      });
-
-      if (!error && data?.statuses) {
-        // Conta sia documenti missing CHE parzialmente sincronizzati
-        const problemCount = data.statuses.filter((s: any) => s.status === 'missing' || s.status === 'partial').length;
-        setUnsyncedDocsCount(problemCount);
-      }
+      // Legacy function removed - check-and-sync-all no longer exists
+      // Document syncing is now handled by Pipeline A/B/C architecture
+      setUnsyncedDocsCount(0);
     } catch (error) {
       console.error('Error checking unsynced docs:', error);
     }
