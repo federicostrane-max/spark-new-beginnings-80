@@ -686,6 +686,15 @@ function chunkTextContent(
 }
 
 /**
+ * Unwrap Markdown content that's wrapped in ```markdown or ```md code blocks
+ * Common pattern when LLMs output Markdown wrapped in code delimiters
+ */
+function unwrapMarkdownCodeBlocks(markdown: string): string {
+  // Pattern: ```markdown ... ``` or ```md ... ```
+  return markdown.replace(/```(?:markdown|md)\s*\n([\s\S]*?)```/g, '$1');
+}
+
+/**
  * Main parsing function: Extract structured elements from Markdown
  * @param markdown - LlamaParse output Markdown
  * @param lovableApiKey - API key for table summarization
@@ -697,19 +706,25 @@ export async function parseMarkdownElements(
 ): Promise<ParseResult> {
   console.log('[MarkdownParser] Starting structured parsing...');
 
-  // Step 0: Build heading map for contextual assignment
-  const headingMap = buildHeadingMap(markdown);
+  // Step 0: Preprocess - unwrap markdown code blocks if present
+  const cleanMarkdown = unwrapMarkdownCodeBlocks(markdown);
+  if (cleanMarkdown !== markdown) {
+    console.log('[MarkdownParser] Unwrapped markdown code block delimiters');
+  }
+
+  // Step 1: Build heading map for contextual assignment
+  const headingMap = buildHeadingMap(cleanMarkdown);
   console.log(`[MarkdownParser] Built heading map with ${headingMap.size} lines`);
 
-  // Step 1: Extract atomic elements (tables, code blocks, lists, figures) with heading context
-  const atomicNodes = await extractAtomicElements(markdown, lovableApiKey, headingMap);
+  // Step 2: Extract atomic elements (tables, code blocks, lists, figures) with heading context
+  const atomicNodes = await extractAtomicElements(cleanMarkdown, lovableApiKey, headingMap);
   console.log(`[MarkdownParser] Found ${atomicNodes.length} atomic elements`);
 
-  // Step 2: Identify atomic ranges to skip during text chunking
-  const atomicElements = identifyAtomicElements(markdown);
+  // Step 3: Identify atomic ranges to skip during text chunking
+  const atomicElements = identifyAtomicElements(cleanMarkdown);
   
-  // Step 3: Chunk remaining text content
-  const textNodes = chunkTextContent(markdown, atomicElements);
+  // Step 4: Chunk remaining text content
+  const textNodes = chunkTextContent(cleanMarkdown, atomicElements);
   console.log(`[MarkdownParser] Created ${textNodes.length} text chunks`);
 
   // Step 4: Combine and reindex

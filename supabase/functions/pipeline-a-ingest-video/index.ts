@@ -241,6 +241,10 @@ FORMATO OUTPUT OBBLIGATORIO:
 - Code blocks con linguaggio specificato (\`\`\`lang)
 - Grafici descritti con: tipo, assi, trend, valori chiave
 
+IMPORTANTE: NON wrappare l'output in code blocks (\`\`\`markdown o \`\`\`md).
+Genera Markdown puro direttamente, senza delimitatori di blocco codice.
+Le tabelle vanno scritte direttamente con sintassi |...|, non dentro \`\`\`markdown.
+
 Inizia l'analisi dettagliata:`
       : VIDEO_TO_MARKDOWN_PROMPT; // Fallback al prompt statico
 
