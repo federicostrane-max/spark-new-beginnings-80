@@ -32,18 +32,20 @@ export interface ParseResult {
 }
 
 /**
- * Identify atomic elements in Markdown (tables, code blocks)
+ * Identify atomic elements in Markdown (tables, code blocks, lists)
  * @param markdown - Input Markdown content
  * @returns Array of atomic element ranges
  */
-function identifyAtomicElements(markdown: string): Array<{ start: number; end: number; type: 'table' | 'code_block' }> {
-  const elements: Array<{ start: number; end: number; type: 'table' | 'code_block' }> = [];
+function identifyAtomicElements(markdown: string): Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' }> {
+  const elements: Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' }> = [];
   const lines = markdown.split('\n');
   
   let inCodeBlock = false;
   let codeBlockStart = -1;
   let inTable = false;
   let tableStart = -1;
+  let inList = false;
+  let listStart = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -64,7 +66,7 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
       continue;
     }
 
-    // Table detection (simplified: any line with |...|)
+    // Table detection (any line with |...|)
     const isTableLine = line.includes('|') && line.split('|').length > 2;
     if (isTableLine && !inCodeBlock) {
       if (!inTable) {
@@ -80,14 +82,38 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
         type: 'table',
       });
     }
+
+    // List detection (bulleted or numbered)
+    const isListLine = /^(\d+\.|[-*+])\s/.test(line) || /^\s{2,}(\d+\.|[-*+])\s/.test(line);
+    if (isListLine && !inCodeBlock && !inTable) {
+      if (!inList) {
+        inList = true;
+        listStart = i;
+      }
+    } else if (inList && !isListLine && line.length > 0) {
+      // List ended (non-empty line that's not a list item)
+      inList = false;
+      elements.push({
+        start: listStart,
+        end: i,
+        type: 'list',
+      });
+    }
   }
 
-  // Close any unclosed table at end of document
+  // Close any unclosed elements at end of document
   if (inTable) {
     elements.push({
       start: tableStart,
       end: lines.length,
       type: 'table',
+    });
+  }
+  if (inList) {
+    elements.push({
+      start: listStart,
+      end: lines.length,
+      type: 'list',
     });
   }
 
@@ -167,6 +193,7 @@ async function extractAtomicElements(
         summary,
         chunk_type: 'table',
         is_atomic: true,
+        page_number: undefined, // Will be set during final merge
       });
     } else if (element.type === 'code_block') {
       // Code blocks: use first line as summary
@@ -179,6 +206,20 @@ async function extractAtomicElements(
         summary: firstLine,
         chunk_type: 'code_block',
         is_atomic: true,
+        page_number: undefined,
+      });
+    } else if (element.type === 'list') {
+      // Lists: use first item as summary
+      const firstItem = elementLines[0] || 'Elenco';
+      
+      nodes.push({
+        chunk_index: i,
+        content: firstItem.slice(0, 200),
+        original_content: originalContent,
+        summary: firstItem,
+        chunk_type: 'list',
+        is_atomic: true,
+        page_number: undefined,
       });
     }
   }
@@ -187,66 +228,113 @@ async function extractAtomicElements(
 }
 
 /**
- * Chunk text content by sections (respecting headings)
+ * Markdown-Aware Chunker: 3-level splitting strategy
+ * Level 1: Page separators (---)
+ * Level 2: Headings (#, ##, ###)
+ * Level 3: Paragraphs (\n\n)
+ * 
  * @param markdown - Markdown content
  * @param atomicRanges - Ranges occupied by atomic elements (to skip)
  * @param maxChunkSize - Maximum chunk size in characters
- * @returns Array of text chunk nodes
+ * @returns Array of text chunk nodes with page tracking
  */
 function chunkTextContent(
   markdown: string,
   atomicRanges: Array<{ start: number; end: number }>,
   maxChunkSize: number = 1500
 ): ParsedNode[] {
-  const lines = markdown.split('\n');
   const nodes: ParsedNode[] = [];
-  
-  let currentChunk: string[] = [];
-  let currentHeadings = { h1: '', h2: '', h3: '' };
   let chunkIndex = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    // Skip lines that are part of atomic elements
-    const inAtomicRange = atomicRanges.some(range => i >= range.start && i < range.end);
-    if (inAtomicRange) continue;
-
-    const line = lines[i];
+  // LEVEL 1: Split by page separators (---)
+  const pages = markdown.split(/\n---\n/);
+  
+  for (let pageNum = 0; pageNum < pages.length; pageNum++) {
+    const pageContent = pages[pageNum];
+    const pageLines = pageContent.split('\n');
     
-    // Update heading hierarchy
-    if (line.startsWith('# ')) {
-      currentHeadings = { h1: line.replace(/^#\s+/, ''), h2: '', h3: '' };
-    } else if (line.startsWith('## ')) {
-      currentHeadings.h2 = line.replace(/^##\s+/, '');
-      currentHeadings.h3 = '';
-    } else if (line.startsWith('### ')) {
-      currentHeadings.h3 = line.replace(/^###\s+/, '');
+    // Calculate line offset for this page in original document
+    const lineOffset = pages.slice(0, pageNum).reduce((acc, page) => acc + page.split('\n').length + 1, 0);
+    
+    // LEVEL 2: Split by headings (preserve heading with its content)
+    const sections = pageContent.split(/(?=^#{1,3}\s)/m);
+    
+    for (const section of sections) {
+      if (!section.trim()) continue;
+      
+      const sectionLines = section.split('\n');
+      const sectionLineStart = lineOffset + pageLines.indexOf(sectionLines[0]);
+      
+      // Skip if section is entirely within atomic range
+      const inAtomicRange = atomicRanges.some(
+        range => sectionLineStart >= range.start && sectionLineStart < range.end
+      );
+      if (inAtomicRange) continue;
+      
+      // Extract heading hierarchy
+      const headings = { h1: '', h2: '', h3: '' };
+      for (const line of sectionLines) {
+        if (line.startsWith('# ')) {
+          headings.h1 = line.replace(/^#\s+/, '');
+          headings.h2 = '';
+          headings.h3 = '';
+        } else if (line.startsWith('## ')) {
+          headings.h2 = line.replace(/^##\s+/, '');
+          headings.h3 = '';
+        } else if (line.startsWith('### ')) {
+          headings.h3 = line.replace(/^###\s+/, '');
+        }
+      }
+      
+      // If section fits in maxChunkSize, keep it whole
+      if (section.length <= maxChunkSize) {
+        nodes.push({
+          chunk_index: chunkIndex++,
+          content: section.trim(),
+          chunk_type: 'text',
+          is_atomic: false,
+          heading_hierarchy: { ...headings },
+          page_number: pageNum + 1,
+        });
+      } else {
+        // LEVEL 3: Section too large, split by paragraphs (\n\n)
+        const paragraphs = section.split(/\n\n+/);
+        let currentChunk: string[] = [];
+        
+        for (const paragraph of paragraphs) {
+          if (!paragraph.trim()) continue;
+          
+          const testChunk = [...currentChunk, paragraph].join('\n\n');
+          
+          if (testChunk.length > maxChunkSize && currentChunk.length > 0) {
+            // Flush current chunk
+            nodes.push({
+              chunk_index: chunkIndex++,
+              content: currentChunk.join('\n\n').trim(),
+              chunk_type: 'text',
+              is_atomic: false,
+              heading_hierarchy: { ...headings },
+              page_number: pageNum + 1,
+            });
+            currentChunk = [paragraph];
+          } else {
+            currentChunk.push(paragraph);
+          }
+        }
+        
+        // Flush remaining paragraphs
+        if (currentChunk.length > 0) {
+          nodes.push({
+            chunk_index: chunkIndex++,
+            content: currentChunk.join('\n\n').trim(),
+            chunk_type: 'text',
+            is_atomic: false,
+            heading_hierarchy: { ...headings },
+            page_number: pageNum + 1,
+          });
+        }
+      }
     }
-
-    currentChunk.push(line);
-
-    const chunkText = currentChunk.join('\n');
-    if (chunkText.length >= maxChunkSize) {
-      // Flush current chunk
-      nodes.push({
-        chunk_index: chunkIndex++,
-        content: chunkText.trim(),
-        chunk_type: 'text',
-        is_atomic: false,
-        heading_hierarchy: { ...currentHeadings },
-      });
-      currentChunk = [];
-    }
-  }
-
-  // Flush remaining chunk
-  if (currentChunk.length > 0) {
-    nodes.push({
-      chunk_index: chunkIndex++,
-      content: currentChunk.join('\n').trim(),
-      chunk_type: 'text',
-      is_atomic: false,
-      heading_hierarchy: { ...currentHeadings },
-    });
   }
 
   return nodes;
