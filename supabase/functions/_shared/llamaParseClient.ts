@@ -138,7 +138,10 @@ export async function getMarkdownResult(
     throw new Error(`LlamaParse result fetch failed (${response.status}): ${errorText}`);
   }
 
-  const markdown = await response.text();
+  // LlamaParse returns JSON: { "markdown": "..." }
+  const data = await response.json();
+  const markdown = typeof data === 'string' ? data : (data.markdown || JSON.stringify(data));
+  
   console.log(`[LlamaParse] Retrieved ${markdown.length} characters of Markdown`);
   
   return markdown;
