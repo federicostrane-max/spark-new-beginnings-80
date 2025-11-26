@@ -12,6 +12,7 @@
  */
 
 const ATOMIC_ELEMENT_SIZE_THRESHOLD = 1500; // Caratteri oltre i quali generare summary
+const MIN_TEXT_CHUNK_SIZE = 100; // Scarta chunk di testo troppo piccoli
 
 interface ExtractedMetadata {
   dates?: string[];
@@ -541,15 +542,23 @@ function chunkTextContent(
       const sectionLines = section.split('\n');
       const sectionLineStart = lineOffset + pageLines.indexOf(sectionLines[0]);
       
-      // Skip if section is entirely within atomic range
-      const inAtomicRange = atomicRanges.some(
-        range => sectionLineStart >= range.start && sectionLineStart < range.end
-      );
-      if (inAtomicRange) continue;
+      // FIX 2: Filtra linea per linea le righe già in elementi atomici (deduplicazione)
+      const filteredSectionLines = sectionLines.filter((_, lineIdx) => {
+        const absoluteLineNum = sectionLineStart + lineIdx;
+        return !atomicRanges.some(
+          range => absoluteLineNum >= range.start && absoluteLineNum < range.end
+        );
+      });
       
-      // Extract heading hierarchy
+      const filteredSection = filteredSectionLines.join('\n').trim();
+      
+      // Scarta sezioni vuote o troppo piccole dopo il filtro
+      if (!filteredSection || filteredSection.length < MIN_TEXT_CHUNK_SIZE) continue;
+      
+      
+      // Extract heading hierarchy from filteredSection
       const headings = { h1: '', h2: '', h3: '' };
-      for (const line of sectionLines) {
+      for (const line of filteredSectionLines) {
         if (line.startsWith('# ')) {
           headings.h1 = line.replace(/^#\s+/, '');
           headings.h2 = '';
@@ -562,12 +571,15 @@ function chunkTextContent(
         }
       }
       
-      // If section fits in maxChunkSize, keep it whole
-      if (section.length <= maxChunkSize) {
-        const extracted_metadata = extractMetadataFromContent(section.trim());
+      // If filteredSection fits in maxChunkSize, keep it whole
+      if (filteredSection.length <= maxChunkSize) {
+        // FIX 1: Scarta chunk troppo piccoli
+        if (filteredSection.trim().length < MIN_TEXT_CHUNK_SIZE) continue;
+        
+        const extracted_metadata = extractMetadataFromContent(filteredSection.trim());
         nodes.push({
           chunk_index: chunkIndex++,
-          content: section.trim(),
+          content: filteredSection.trim(),
           chunk_type: 'text',
           is_atomic: false,
           heading_hierarchy: { ...headings },
@@ -577,7 +589,7 @@ function chunkTextContent(
         });
       } else {
         // LEVEL 3: Section too large, split by paragraphs (\n\n)
-        const paragraphs = section.split(/\n\n+/);
+        const paragraphs = filteredSection.split(/\n\n+/);
         let currentChunk: string[] = [];
         
         for (const paragraph of paragraphs) {
@@ -605,6 +617,9 @@ function chunkTextContent(
             // Split paragrafo grande in sub-paragrafi
             const subParagraphs = splitLargeParagraph(paragraph, maxChunkSize);
             for (const subPara of subParagraphs) {
+              // FIX 1: Scarta sub-paragrafi troppo piccoli
+              if (subPara.trim().length < MIN_TEXT_CHUNK_SIZE) continue;
+              
               const extracted_metadata = extractMetadataFromContent(subPara.trim());
               nodes.push({
                 chunk_index: chunkIndex++,
@@ -625,6 +640,31 @@ function chunkTextContent(
           if (testChunk.length > maxChunkSize && currentChunk.length > 0) {
             // Flush current chunk
             const chunkContent = currentChunk.join('\n\n').trim();
+            // FIX 1: Scarta chunk troppo piccoli
+            if (chunkContent.length >= MIN_TEXT_CHUNK_SIZE) {
+              const extracted_metadata = extractMetadataFromContent(chunkContent);
+              nodes.push({
+                chunk_index: chunkIndex++,
+                content: chunkContent,
+                chunk_type: 'text',
+                is_atomic: false,
+                heading_hierarchy: { ...headings },
+                page_number: pageNum + 1,
+                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+                  ? extracted_metadata : undefined,
+              });
+            }
+            currentChunk = [paragraph];
+          } else {
+            currentChunk.push(paragraph);
+          }
+        }
+        
+        // Flush remaining paragraphs
+        if (currentChunk.length > 0) {
+          const chunkContent = currentChunk.join('\n\n').trim();
+          // FIX 1: Scarta chunk finale troppo piccolo
+          if (chunkContent.length >= MIN_TEXT_CHUNK_SIZE) {
             const extracted_metadata = extractMetadataFromContent(chunkContent);
             nodes.push({
               chunk_index: chunkIndex++,
@@ -636,26 +676,7 @@ function chunkTextContent(
               extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
                 ? extracted_metadata : undefined,
             });
-            currentChunk = [paragraph];
-          } else {
-            currentChunk.push(paragraph);
           }
-        }
-        
-        // Flush remaining paragraphs
-        if (currentChunk.length > 0) {
-          const chunkContent = currentChunk.join('\n\n').trim();
-          const extracted_metadata = extractMetadataFromContent(chunkContent);
-          nodes.push({
-            chunk_index: chunkIndex++,
-            content: chunkContent,
-            chunk_type: 'text',
-            is_atomic: false,
-            heading_hierarchy: { ...headings },
-            page_number: pageNum + 1,
-            extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-              ? extracted_metadata : undefined,
-          });
         }
       }
     }
