@@ -70,10 +70,38 @@ export const ProcessingLogs = () => {
   }, []);
 
   const fetchActiveDocuments = async () => {
-    // Processing logs no longer track individual document processing
-    // Pipeline A/B/C use event-driven architecture without centralized caching
-    console.log('[ProcessingLogs] Removed - document_processing_cache no longer exists');
-    setActiveDocuments([]);
+    // Fetch documents that are currently being processed (not completed and not errored out)
+    const { data: cacheData } = await supabase
+      .from('document_processing_cache')
+      .select('*')
+      .is('processing_completed_at', null) // Not completed
+      .order('updated_at', { ascending: false })
+      .limit(10);
+
+    if (cacheData && cacheData.length > 0) {
+      // Fetch document names
+      const docIds = cacheData.map(d => d.document_id);
+      const { data: docs } = await supabase
+        .from('knowledge_documents')
+        .select('id, file_name')
+        .in('id', docIds);
+
+      const docsMap = new Map(docs?.map(d => [d.id, d.file_name]) || []);
+
+      const documents: DocumentStatus[] = cacheData.map(cache => ({
+        document_id: cache.document_id,
+        file_name: docsMap.get(cache.document_id) || 'Unknown',
+        processing_status: getStatusFromCache(cache),
+        error_message: cache.error_message,
+        processed_chunks: cache.processed_chunks || 0,
+        total_chunks: cache.total_chunks,
+        updated_at: cache.updated_at
+      }));
+
+      setActiveDocuments(documents);
+    } else {
+      setActiveDocuments([]);
+    }
   };
 
   const getStatusFromCache = (cache: any): string => {

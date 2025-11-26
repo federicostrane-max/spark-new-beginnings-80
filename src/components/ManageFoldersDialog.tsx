@@ -52,20 +52,19 @@ export function ManageFoldersDialog({
 
       if (error) throw error;
 
-      // Get document count for each folder from all pipelines
+      // Get document count for each folder
       const foldersWithCounts = await Promise.all(
         (foldersData || []).map(async (folder) => {
-          const [aCount, bCount, cCount] = await Promise.all([
-            supabase.from('pipeline_a_documents').select('*', { count: 'exact', head: true }).eq('folder', folder.name),
-            supabase.from('pipeline_b_documents').select('*', { count: 'exact', head: true }).eq('folder', folder.name),
-            supabase.from('pipeline_c_documents').select('*', { count: 'exact', head: true }).eq('folder', folder.name)
-          ]);
+          const { count, error: countError } = await supabase
+            .from('knowledge_documents')
+            .select('*', { count: 'exact', head: true })
+            .eq('folder', folder.name);
 
-          const totalCount = (aCount.count || 0) + (bCount.count || 0) + (cCount.count || 0);
+          if (countError) throw countError;
 
           return {
             name: folder.name,
-            count: totalCount,
+            count: count || 0,
           };
         })
       );
@@ -122,12 +121,13 @@ export function ManageFoldersDialog({
 
       if (folderError) throw folderError;
 
-      // Update folder name in all pipeline documents
-      await Promise.all([
-        supabase.from('pipeline_a_documents').update({ folder: trimmedName }).eq('folder', oldName),
-        supabase.from('pipeline_b_documents').update({ folder: trimmedName }).eq('folder', oldName),
-        supabase.from('pipeline_c_documents').update({ folder: trimmedName }).eq('folder', oldName)
-      ]);
+      // Update folder name in documents
+      const { error: docsError } = await supabase
+        .from('knowledge_documents')
+        .update({ folder: trimmedName })
+        .eq('folder', oldName);
+
+      if (docsError) throw docsError;
 
       toast({
         title: "Cartella rinominata",
@@ -171,12 +171,13 @@ export function ManageFoldersDialog({
         updateValue = moveToFolder;
       }
 
-      // Update documents in all pipelines
-      await Promise.all([
-        supabase.from('pipeline_a_documents').update({ folder: updateValue }).eq('folder', deletingFolder.name),
-        supabase.from('pipeline_b_documents').update({ folder: updateValue }).eq('folder', deletingFolder.name),
-        supabase.from('pipeline_c_documents').update({ folder: updateValue }).eq('folder', deletingFolder.name)
-      ]);
+      // Update documents first
+      const { error: docsError } = await supabase
+        .from('knowledge_documents')
+        .update({ folder: updateValue })
+        .eq('folder', deletingFolder.name);
+
+      if (docsError) throw docsError;
 
       // Delete folder from folders table
       const { error: folderError } = await supabase
