@@ -18,14 +18,14 @@ import { useState } from "react";
 interface KnowledgeDocument {
   id: string;
   file_name: string;
-  validation_status: string;
-  validation_reason: string;
-  processing_status: string;
-  ai_summary: string;
-  text_length: number;
+  validation_status?: string;
+  validation_reason?: string;
+  processing_status?: string;
+  ai_summary?: string | null;
+  text_length?: number;
   created_at: string;
-  agent_names: string[];
-  agents_count: number;
+  agent_names?: string[];
+  agents_count?: number;
   keywords?: string[];
   topics?: string[];
   complexity_level?: string;
@@ -289,13 +289,13 @@ export const DocumentDetailsDialog = ({
                     <CheckCircle2 className="h-4 w-4 text-green-500" />
                   )}
                   <p className="font-medium capitalize">
-                    {document.validation_status === "validated" ? "Validato" : document.validation_status}
+                    {document.validation_status === "validated" ? "Validato" : document.validation_status || "N/A"}
                   </p>
                 </div>
               </div>
               <div className="space-y-1">
                 <span className="text-muted-foreground">Agenti assegnati:</span>
-                <p className="font-medium">{document.agents_count}</p>
+                <p className="font-medium">{document.agents_count || 0}</p>
               </div>
               <div className="space-y-1">
                 <span className="text-muted-foreground flex items-center gap-1">
