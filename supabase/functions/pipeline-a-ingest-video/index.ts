@@ -46,6 +46,38 @@ Analizza questo video e genera un documento Markdown strutturato che contenga:
 Inizia l'analisi:
 `;
 
+// Director Prompt per analisi preliminare del dominio
+const DIRECTOR_PROMPT = `
+Sei un analista esperto che prepara istruzioni per un'altra IA.
+
+COMPITO: Analizza rapidamente questo video per capire:
+
+1. DOMINIO: L'argomento preciso (trading, programmazione, cucina, fitness, etc.)
+
+2. ELEMENTI VISIVI CRITICI: Quali dettagli visivi sono essenziali per la comprensione?
+   - Se ci sono grafici: quali metriche/indicatori mostrano?
+   - Se c'è codice: quale linguaggio/framework?
+   - Se ci sono tabelle: cosa rappresentano i dati?
+   - Se ci sono dimostrazioni fisiche: quali movimenti/posture sono importanti?
+
+3. CALIBRAZIONE VERBOSITÀ:
+   - Se identifichi un video TECNICO (es. trading, coding, analisi dati): 
+     sii ESTREMAMENTE pedante sui dettagli (valori numerici esatti, sintassi precisa, timestamp di ogni variazione)
+   - Se identifichi un video DISCORSIVO/VLOG (es. interviste, presentazioni, tutorial generici):
+     focalizzati sui concetti chiave e salta i dettagli minori
+
+OUTPUT RICHIESTO:
+Genera un System Prompt ottimizzato (max 500 parole) che istruisca un'altra IA 
+a estrarre i dettagli specifici di QUESTO video. Il prompt deve:
+- Specificare il ruolo esperto appropriato (es. "Agisci come trader professionista...")
+- Elencare esattamente quali dati numerici/visivi estrarre
+- Indicare come formattare tabelle/grafici specifici del dominio
+- Includere terminologia tecnica del settore
+- Specificare il livello di dettaglio appropriato (pedante vs concettuale)
+
+Rispondi SOLO con il System Prompt, senza preamboli o spiegazioni.
+`;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -156,8 +188,61 @@ serve(async (req) => {
       throw new Error(`Video processing failed. State: ${fileState}`);
     }
 
-    // === FASE 4: Generate Content with Gemini 1.5 Pro ===
-    console.log('[Video Ingest] Generating Markdown from video...');
+    // === FASE 4a: THE DIRECTOR - Analisi Dominio ===
+    console.log('[Video Ingest] FASE 4a: Director - Analyzing domain...');
+
+    let customPrompt: string | null = null;
+
+    try {
+      const directorResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleApiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { file_data: { mime_type: 'video/mp4', file_uri: fileUri } },
+                { text: DIRECTOR_PROMPT }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.3,
+              maxOutputTokens: 2048,
+            }
+          }),
+        }
+      );
+
+      const directorData = await directorResponse.json();
+      customPrompt = directorData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (customPrompt) {
+        console.log(`[Video Ingest] Director generated ${customPrompt.length} char custom prompt`);
+        console.log(`[Video Ingest] Custom Prompt Preview: ${customPrompt.substring(0, 300)}...`);
+      } else {
+        console.warn('[Video Ingest] Director returned empty response, using fallback');
+      }
+    } catch (directorError) {
+      console.warn('[Video Ingest] Director failed, using fallback prompt:', directorError);
+    }
+
+    // === FASE 4b: THE ANALYST - Estrazione Dati ===
+    console.log('[Video Ingest] FASE 4b: Analyst - Extracting with optimized prompt...');
+
+    // Combina prompt custom con istruzioni di output standard
+    const analystPrompt = customPrompt 
+      ? `${customPrompt}
+
+FORMATO OUTPUT OBBLIGATORIO:
+- Genera Markdown valido e ben strutturato
+- Usa timestamp [MM:SS] per ogni sezione/evento importante
+- Tabelle in formato Markdown standard (|...|)
+- Code blocks con linguaggio specificato (\`\`\`lang)
+- Grafici descritti con: tipo, assi, trend, valori chiave
+
+Inizia l'analisi dettagliata:`
+      : VIDEO_TO_MARKDOWN_PROMPT; // Fallback al prompt statico
 
     const generateResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleApiKey}`,
@@ -168,12 +253,12 @@ serve(async (req) => {
           contents: [{
             parts: [
               { file_data: { mime_type: 'video/mp4', file_uri: fileUri } },
-              { text: VIDEO_TO_MARKDOWN_PROMPT }
+              { text: analystPrompt }
             ]
           }],
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 65536, // Max output for long videos
+            maxOutputTokens: 65536,
           }
         }),
       }
@@ -189,17 +274,26 @@ serve(async (req) => {
 
     console.log(`[Video Ingest] Generated ${markdownContent.length} characters of Markdown`);
 
-    // === FASE 5: Save to pipeline_a_documents ===
+    // === FASE 5: Save to pipeline_a_documents with metadata ===
     const { data: document, error: dbError } = await supabase
       .from('pipeline_a_documents')
       .insert({
-        file_name: fileName.replace('.mp4', '.md'), // Nome logico come .md
+        file_name: fileName.replace('.mp4', '.md'),
         file_path: filePath,
         storage_bucket: 'pipeline-a-uploads',
         file_size_bytes: fileSize,
-        source_type: 'video', // ⭐ Identificatore per bypass
-        full_text: markdownContent, // ⭐ Il Markdown generato
+        source_type: 'video',
+        full_text: markdownContent,
         status: 'ingested',
+        processing_metadata: {
+          processing_version: '2.0-director-analyst',
+          director_prompt_generated: !!customPrompt,
+          director_prompt_length: customPrompt?.length || 0,
+          director_prompt_preview: customPrompt?.substring(0, 500) || null,
+          analyst_prompt_type: customPrompt ? 'dynamic' : 'static_fallback',
+          model_used: 'gemini-2.0-flash',
+          phases_completed: ['director', 'analyst'],
+        }
       })
       .select()
       .single();
