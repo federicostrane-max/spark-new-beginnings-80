@@ -51,7 +51,22 @@ export const useDocumentAssignment = () => {
 
   const reprocessDocument = async (documentId: string, pipeline: 'a' | 'b' | 'c' = 'a'): Promise<boolean> => {
     try {
-      if (pipeline === 'c') {
+      if (pipeline === 'a') {
+        // Pipeline A: Reset status to 'ingested'
+        const { error } = await supabase
+          .from('pipeline_a_documents')
+          .update({ 
+            status: 'ingested',
+            error_message: null,
+            processed_at: null
+          })
+          .eq('id', documentId);
+
+        if (error) throw error;
+
+        toast.success('Documento Pipeline A ripristinato per riprocessamento');
+        return true;
+      } else if (pipeline === 'c') {
         // Pipeline C: Reset status to 'ingested'
         const { error } = await supabase
           .from('pipeline_c_documents')

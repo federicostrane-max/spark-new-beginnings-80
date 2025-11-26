@@ -2328,9 +2328,9 @@ export type Database = {
       get_agent_sync_status: {
         Args: { p_agent_id: string }
         Returns: {
-          chunk_count: number
+          created_at: string
           document_id: string
-          file_name: string
+          document_name: string
           pipeline_source: string
           sync_status: string
         }[]
