@@ -51,6 +51,202 @@ interface UserIntent {
 // Semantic search is now UNCONDITIONAL for every query
 // ============================================================================
 
+// ============================================================================
+// QUERY DECOMPOSITION HELPERS
+// ============================================================================
+
+/**
+ * Pulisce l'output JSON da eventuali wrapper Markdown.
+ * Gli LLM spesso restituiscono: ```json\n["query1"]\n```
+ */
+function cleanJsonString(raw: string): string {
+  let cleaned = raw.trim();
+  
+  // Rimuovi blocchi Markdown ```json ... ```
+  if (cleaned.startsWith('```json')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+  
+  return cleaned.trim();
+}
+
+/**
+ * Usa un LLM veloce per estrarre query di ricerca distinte da un messaggio utente.
+ * Se il messaggio è semplice (saluto o singola domanda), restituisce array con solo quel testo.
+ */
+async function decomposeQueryWithLLM(userMessage: string): Promise<string[]> {
+  // Early exit per messaggi brevi (probabilmente già atomici)
+  if (userMessage.length < DECOMPOSITION_CONFIG.MIN_MESSAGE_LENGTH) {
+    console.log('⚡ [DECOMPOSITION] Message too short, skipping decomposition');
+    return [userMessage];
+  }
+
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    console.warn('⚠️ [DECOMPOSITION] LOVABLE_API_KEY not found, skipping decomposition');
+    return [userMessage];
+  }
+
+  try {
+    const prompt = `Extract distinct search queries from this user message. 
+Return ONLY a valid JSON array of strings (no markdown, no explanations).
+If it's a greeting, off-topic, or single question, return an array with just the original message.
+
+Examples:
+Input: "What is COPPA? How do you authenticate users?"
+Output: ["What is COPPA", "How do you authenticate users in online studies"]
+
+Input: "Cos'è il CPHS? Quali metodi di autenticazione esistono?"
+Output: ["Cos'è il CPHS", "Quali metodi di autenticazione esistono"]
+
+Input: "Hello"
+Output: ["Hello"]
+
+User message: ${userMessage}`;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: DECOMPOSITION_CONFIG.MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3, // Bassa temperatura per output più deterministico
+      }),
+      signal: AbortSignal.timeout(DECOMPOSITION_CONFIG.TIMEOUT_MS)
+    });
+
+    if (!response.ok) {
+      console.error(`❌ [DECOMPOSITION] LLM request failed: ${response.status}`);
+      return [userMessage];
+    }
+
+    const data = await response.json();
+    const rawContent = data.choices?.[0]?.message?.content;
+    
+    if (!rawContent) {
+      console.error('❌ [DECOMPOSITION] No content in LLM response');
+      return [userMessage];
+    }
+
+    // Pulisci JSON da wrapper Markdown
+    const cleanedJson = cleanJsonString(rawContent);
+    
+    // Parse JSON
+    const queries = JSON.parse(cleanedJson);
+    
+    if (!Array.isArray(queries) || queries.length === 0) {
+      console.error('❌ [DECOMPOSITION] Invalid array format');
+      return [userMessage];
+    }
+
+    // Valida che tutti gli elementi siano stringhe e limita al MAX
+    const validQueries = queries
+      .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+      .slice(0, DECOMPOSITION_CONFIG.MAX_QUERIES);
+    
+    if (validQueries.length === 0) {
+      return [userMessage];
+    }
+
+    console.log(`✅ [DECOMPOSITION] Extracted ${validQueries.length} queries from message`);
+    return validQueries;
+
+  } catch (error) {
+    console.error('❌ [DECOMPOSITION] Error:', error instanceof Error ? error.message : 'Unknown');
+    // Fallback: ritorna messaggio originale
+    return [userMessage];
+  }
+}
+
+/**
+ * Esegue semantic search in parallelo per ogni query e deduplica i risultati.
+ * Rispetta il safety cap di MAX_TOTAL_CHUNKS per evitare Context Window Exceeded.
+ */
+async function parallelSemanticSearch(
+  queries: string[], 
+  agentId: string, 
+  topKPerQuery: number,
+  supabase: any
+): Promise<{ 
+  documents: any[], 
+  queryBreakdown: Record<string, number> 
+}> {
+  console.log(`🔍 [PARALLEL-SEARCH] Executing ${queries.length} searches with topK=${topKPerQuery}`);
+  
+  const queryBreakdown: Record<string, number> = {};
+  
+  try {
+    // Esegui tutte le ricerche in parallelo
+    const searchPromises = queries.map(async (query) => {
+      try {
+        const { data, error } = await supabase.functions.invoke('semantic-search', {
+          body: { query, agentId, topK: topKPerQuery }
+        });
+        
+        if (error) {
+          console.error(`❌ [PARALLEL-SEARCH] Error for query "${query}":`, error);
+          queryBreakdown[query] = 0;
+          return [];
+        }
+        
+        const docs = Array.isArray(data) ? data : data?.documents || [];
+        queryBreakdown[query] = docs.length;
+        return docs;
+        
+      } catch (err) {
+        console.error(`❌ [PARALLEL-SEARCH] Exception for query "${query}":`, err);
+        queryBreakdown[query] = 0;
+        return [];
+      }
+    });
+    
+    // Attendi tutte le ricerche
+    const results = await Promise.all(searchPromises);
+    
+    // Flatten e deduplica per chunk ID
+    const chunkMap = new Map<string, any>();
+    
+    for (const docs of results) {
+      for (const doc of docs) {
+        const chunkId = doc.id;
+        
+        // Se il chunk esiste già, mantieni quello con similarity più alta
+        if (chunkMap.has(chunkId)) {
+          const existing = chunkMap.get(chunkId);
+          if ((doc.similarity || 0) > (existing.similarity || 0)) {
+            chunkMap.set(chunkId, doc);
+          }
+        } else {
+          chunkMap.set(chunkId, doc);
+        }
+      }
+    }
+    
+    // Converti Map in array e ordina per similarity
+    let uniqueDocs = Array.from(chunkMap.values())
+      .sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+    
+    // SAFETY CAP: rispetta rigorosamente MAX_TOTAL_CHUNKS
+    if (uniqueDocs.length > DECOMPOSITION_CONFIG.MAX_TOTAL_CHUNKS) {
+      console.log(`⚠️ [SAFETY-CAP] Limiting ${uniqueDocs.length} chunks to ${DECOMPOSITION_CONFIG.MAX_TOTAL_CHUNKS}`);
+      uniqueDocs = uniqueDocs.slice(0, DECOMPOSITION_CONFIG.MAX_TOTAL_CHUNKS);
+    }
+    
+    console.log(`✅ [PARALLEL-SEARCH] Retrieved ${uniqueDocs.length} unique chunks after deduplication`);
+    
+    return { documents: uniqueDocs, queryBreakdown };
+    
+  } catch (error) {
+    console.error('❌ [PARALLEL-SEARCH] Fatal error:', error);
+    return { documents: [], queryBreakdown };
+  }
+}
+
 // Helper function to generate query variants with full transparency
 function generateQueryVariants(originalTopic: string): string[] {
   const queries: string[] = [];
@@ -86,6 +282,18 @@ function generateQueryVariants(originalTopic: string): string[] {
   // Rimuovi duplicati mantenendo l'ordine
   return [...new Set(queries)];
 }
+
+// ============================================================================
+// QUERY DECOMPOSITION CONFIGURATION
+// ============================================================================
+const DECOMPOSITION_CONFIG = {
+  MODEL: 'google/gemini-2.5-flash',  // LLM veloce per decomposizione
+  MAX_QUERIES: 10,                    // Massimo query decomposte
+  TOP_K_PER_QUERY: 5,                 // Chunk per query (adattivo)
+  MAX_TOTAL_CHUNKS: 25,               // Limite finale dopo merge
+  TIMEOUT_MS: 5000,                   // Timeout per chiamata LLM
+  MIN_MESSAGE_LENGTH: 30              // Sotto questa lunghezza, skip decomposizione
+};
 
 interface SearchResult {
   number: number;
@@ -3131,72 +3339,113 @@ The system has automatically executed a search based on your proposed query and 
             documents_used: 0
           };
           
-          console.log(`🔍 [AUTO-SEARCH] Executing unconditional semantic search for: "${message}"`);
+          console.log(`🔍 [AUTO-SEARCH] Starting Query Decomposition for: "${message}"`);
           
           try {
-            const { data: searchData, error: searchError } = await supabase.functions.invoke(
-              'semantic-search',
-              {
-                body: {
-                  query: message,
-                  agentId: agent.id,
-                  topK: 10  // Retrieve top 10 most relevant chunks
+            // ============================================================================
+            // STEP 1: QUERY DECOMPOSITION
+            // ============================================================================
+            const decomposedQueries = await decomposeQueryWithLLM(message);
+            console.log(`🧩 [DECOMPOSITION] Extracted ${decomposedQueries.length} queries:`, decomposedQueries);
+            
+            // ============================================================================
+            // STEP 2: PARALLEL RETRIEVAL (or single search if only 1 query)
+            // ============================================================================
+            let documents: any[] = [];
+            let queryBreakdown: Record<string, number> = {};
+            
+            if (decomposedQueries.length === 1) {
+              // Early exit optimization: single query, use existing logic
+              console.log('⚡ [OPTIMIZATION] Single query detected, using direct search');
+              
+              const { data: searchData, error: searchError } = await supabase.functions.invoke(
+                'semantic-search',
+                {
+                  body: {
+                    query: decomposedQueries[0],
+                    agentId: agent.id,
+                    topK: 10
+                  }
                 }
-              }
-            );
-
-            if (!searchError && searchData) {
-              // Handle both array format and wrapped object format
-              const documents = Array.isArray(searchData) ? searchData : searchData?.documents || [];
+              );
               
-              // Update metadata tracking
-              hasKnowledgeContext = documents.length > 0;
-              knowledgeStats = {
-                chunks_found: documents.length,
-                top_similarity: documents[0]?.similarity || 0,
-                documents_used: [...new Set(documents.map((d: any) => d.document_name))].length
-              };
-              
-              if (documents.length > 0) {
-                console.log(`✅ [AUTO-SEARCH] Found ${documents.length} relevant chunks from knowledge base`);
-                
-                knowledgeContext = '\n\n## 📚 RELEVANT KNOWLEDGE BASE CONTENT\n\n';
-                knowledgeContext += `The following excerpts from your knowledge base are automatically loaded and relevant to the user's query:\n\n`;
-                
-                documents.forEach((doc: any, index: number) => {
-                  knowledgeContext += `### Excerpt ${index + 1}: ${doc.document_name}\n`;
-                  if (doc.category) knowledgeContext += `**Category**: ${doc.category}\n`;
-                  if (doc.summary) knowledgeContext += `**Summary**: ${doc.summary}\n`;
-                  knowledgeContext += `**Similarity**: ${((doc.similarity || 0) * 100).toFixed(1)}%\n`;
-                  knowledgeContext += `\n**Content**:\n${doc.content}\n\n`;
-                  knowledgeContext += `---\n\n`;
-                });
-                
-                knowledgeContext += `\n**INSTRUCTIONS**:\n`;
-                knowledgeContext += `- Use the excerpts above to answer the user's question\n`;
-                knowledgeContext += `- Cite the source documents when referencing information (e.g., "According to [document_name]...")\n`;
-                knowledgeContext += `- If the excerpts don't contain sufficient information, acknowledge what's missing\n`;
-                knowledgeContext += `- DO NOT call semantic_search tool again - this content was automatically loaded\n`;
-                knowledgeContext += `- The get_agent_knowledge and semantic_search tools are available ONLY for:\n`;
-                knowledgeContext += `  * Querying OTHER agents' knowledge bases\n`;
-                knowledgeContext += `  * Performing additional/follow-up searches beyond this automatic search\n\n`;
-                
-              } else {
-                console.log('ℹ️ [AUTO-SEARCH] No relevant content found in knowledge base');
-                knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE STATUS\n\n';
-                knowledgeContext += `No relevant content was found in your knowledge base for this query.\n`;
-                knowledgeContext += `This could mean:\n`;
-                knowledgeContext += `- Your knowledge base doesn't contain documents on this topic\n`;
-                knowledgeContext += `- The query is too specific or uses different terminology\n\n`;
+              if (!searchError && searchData) {
+                documents = Array.isArray(searchData) ? searchData : searchData?.documents || [];
+                queryBreakdown[decomposedQueries[0]] = documents.length;
               }
               
             } else {
-              console.log('⚠️ [AUTO-SEARCH] Search returned no data');
-              if (searchError) {
-                console.error('❌ [AUTO-SEARCH] Error during search:', searchError);
+              // Multiple queries: execute parallel searches
+              const topKPerQuery = Math.max(
+                DECOMPOSITION_CONFIG.TOP_K_PER_QUERY, 
+                Math.floor(15 / decomposedQueries.length)
+              );
+              
+              const searchResult = await parallelSemanticSearch(
+                decomposedQueries, 
+                agent.id, 
+                topKPerQuery,
+                supabase
+              );
+              
+              documents = searchResult.documents;
+              queryBreakdown = searchResult.queryBreakdown;
+              
+              console.log(`✅ [PARALLEL-SEARCH] Retrieved ${documents.length} unique chunks`);
+              console.log(`📊 [BREAKDOWN]`, queryBreakdown);
+            }
+            
+            // ============================================================================
+            // STEP 3: UPDATE METADATA & BUILD CONTEXT
+            // ============================================================================
+            hasKnowledgeContext = documents.length > 0;
+            knowledgeStats = {
+              chunks_found: documents.length,
+              top_similarity: documents[0]?.similarity || 0,
+              documents_used: [...new Set(documents.map((d: any) => d.document_name))].length
+            };
+            
+            if (documents.length > 0) {
+              console.log(`✅ [AUTO-SEARCH] Found ${documents.length} relevant chunks from knowledge base`);
+              
+              knowledgeContext = '\n\n## 📚 RELEVANT KNOWLEDGE BASE CONTENT\n\n';
+              
+              // Add decomposition info if multiple queries
+              if (decomposedQueries.length > 1) {
+                knowledgeContext += `Your query was decomposed into ${decomposedQueries.length} search queries:\n`;
+                decomposedQueries.forEach((q, i) => {
+                  knowledgeContext += `  ${i+1}. "${q}" → ${queryBreakdown[q] || 0} chunks\n`;
+                });
+                knowledgeContext += `\nTotal unique chunks retrieved: ${documents.length}\n\n`;
               }
-              knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE ERROR\n\n';
-              knowledgeContext += `Failed to search knowledge base. Proceeding without automatic context.\n\n`;
+              
+              knowledgeContext += `The following excerpts from your knowledge base are automatically loaded and relevant to the user's query:\n\n`;
+              
+              documents.forEach((doc: any, index: number) => {
+                knowledgeContext += `### Excerpt ${index + 1}: ${doc.document_name}\n`;
+                if (doc.category) knowledgeContext += `**Category**: ${doc.category}\n`;
+                if (doc.summary) knowledgeContext += `**Summary**: ${doc.summary}\n`;
+                knowledgeContext += `**Similarity**: ${((doc.similarity || 0) * 100).toFixed(1)}%\n`;
+                knowledgeContext += `\n**Content**:\n${doc.content}\n\n`;
+                knowledgeContext += `---\n\n`;
+              });
+              
+              knowledgeContext += `\n**INSTRUCTIONS**:\n`;
+              knowledgeContext += `- Use the excerpts above to answer the user's question\n`;
+              knowledgeContext += `- Cite the source documents when referencing information (e.g., "According to [document_name]...")\n`;
+              knowledgeContext += `- If the excerpts don't contain sufficient information, acknowledge what's missing\n`;
+              knowledgeContext += `- DO NOT call semantic_search tool again - this content was automatically loaded\n`;
+              knowledgeContext += `- The get_agent_knowledge and semantic_search tools are available ONLY for:\n`;
+              knowledgeContext += `  * Querying OTHER agents' knowledge bases\n`;
+              knowledgeContext += `  * Performing additional/follow-up searches beyond this automatic search\n\n`;
+              
+            } else {
+              console.log('ℹ️ [AUTO-SEARCH] No relevant content found in knowledge base');
+              knowledgeContext = '\n\n## 📚 KNOWLEDGE BASE STATUS\n\n';
+              knowledgeContext += `No relevant content was found in your knowledge base for this query.\n`;
+              knowledgeContext += `This could mean:\n`;
+              knowledgeContext += `- Your knowledge base doesn't contain documents on this topic\n`;
+              knowledgeContext += `- The query is too specific or uses different terminology\n\n`;
             }
             
           } catch (err) {
