@@ -16,7 +16,7 @@ export interface ParsedNode {
   content: string;              // For embedding (summary for tables)
   original_content?: string;    // Full Markdown (for tables)
   summary?: string;             // LLM-generated summary
-  chunk_type: 'text' | 'table' | 'code_block' | 'list' | 'header';
+  chunk_type: 'text' | 'table' | 'code_block' | 'list' | 'figure' | 'header';
   is_atomic: boolean;           // Cannot be split
   heading_hierarchy?: {
     h1?: string;
@@ -32,12 +32,12 @@ export interface ParseResult {
 }
 
 /**
- * Identify atomic elements in Markdown (tables, code blocks, lists)
+ * Identify atomic elements in Markdown (tables, code blocks, lists, figures)
  * @param markdown - Input Markdown content
  * @returns Array of atomic element ranges
  */
-function identifyAtomicElements(markdown: string): Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' }> {
-  const elements: Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' }> = [];
+function identifyAtomicElements(markdown: string): Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' | 'figure' }> {
+  const elements: Array<{ start: number; end: number; type: 'table' | 'code_block' | 'list' | 'figure' }> = [];
   const lines = markdown.split('\n');
   
   let inCodeBlock = false;
@@ -46,6 +46,8 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
   let tableStart = -1;
   let inList = false;
   let listStart = -1;
+  let inFigure = false;
+  let figureStart = -1;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -66,9 +68,24 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
       continue;
     }
 
+    // Figure detection (pattern: **Figura X:... or **Figure X:...)
+    const isFigureLine = line.startsWith('**Figura') || line.startsWith('**Figure');
+    if (isFigureLine && !inCodeBlock) {
+      inFigure = true;
+      figureStart = i;
+    } else if (inFigure && (line === '' || line === '---')) {
+      // Figure ended at empty line or page separator
+      inFigure = false;
+      elements.push({
+        start: figureStart,
+        end: i,
+        type: 'figure',
+      });
+    }
+
     // Table detection (any line with |...|)
     const isTableLine = line.includes('|') && line.split('|').length > 2;
-    if (isTableLine && !inCodeBlock) {
+    if (isTableLine && !inCodeBlock && !inFigure) {
       if (!inTable) {
         inTable = true;
         tableStart = i;
@@ -85,7 +102,7 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
 
     // List detection (bulleted or numbered)
     const isListLine = /^(\d+\.|[-*+])\s/.test(line) || /^\s{2,}(\d+\.|[-*+])\s/.test(line);
-    if (isListLine && !inCodeBlock && !inTable) {
+    if (isListLine && !inCodeBlock && !inTable && !inFigure) {
       if (!inList) {
         inList = true;
         listStart = i;
@@ -116,8 +133,53 @@ function identifyAtomicElements(markdown: string): Array<{ start: number; end: n
       type: 'list',
     });
   }
+  if (inFigure) {
+    elements.push({
+      start: figureStart,
+      end: lines.length,
+      type: 'figure',
+    });
+  }
 
   return elements;
+}
+
+/**
+ * Build a heading map: for each line, track current heading context
+ * @param markdown - Full Markdown content
+ * @returns Map of line numbers to heading hierarchy
+ */
+function buildHeadingMap(markdown: string): Map<number, { h1?: string; h2?: string; h3?: string }> {
+  const headingMap = new Map<number, { h1?: string; h2?: string; h3?: string }>();
+  const lines = markdown.split('\n');
+  
+  let currentH1 = '';
+  let currentH2 = '';
+  let currentH3 = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    if (line.startsWith('# ')) {
+      currentH1 = line.replace(/^#\s+/, '');
+      currentH2 = '';
+      currentH3 = '';
+    } else if (line.startsWith('## ')) {
+      currentH2 = line.replace(/^##\s+/, '');
+      currentH3 = '';
+    } else if (line.startsWith('### ')) {
+      currentH3 = line.replace(/^###\s+/, '');
+    }
+    
+    // Store current heading context for this line
+    headingMap.set(i, {
+      h1: currentH1 || undefined,
+      h2: currentH2 || undefined,
+      h3: currentH3 || undefined,
+    });
+  }
+
+  return headingMap;
 }
 
 /**
@@ -164,14 +226,16 @@ async function summarizeTable(
 }
 
 /**
- * Extract atomic elements (tables, code blocks) with summaries
+ * Extract atomic elements (tables, code blocks, lists, figures) with summaries and heading context
  * @param markdown - Full Markdown content
  * @param lovableApiKey - Lovable AI API key for summarization
+ * @param headingMap - Map of line numbers to heading hierarchy
  * @returns Array of parsed nodes for atomic elements
  */
 async function extractAtomicElements(
   markdown: string,
-  lovableApiKey: string
+  lovableApiKey: string,
+  headingMap: Map<number, { h1?: string; h2?: string; h3?: string }>
 ): Promise<ParsedNode[]> {
   const lines = markdown.split('\n');
   const atomicElements = identifyAtomicElements(markdown);
@@ -181,6 +245,9 @@ async function extractAtomicElements(
     const element = atomicElements[i];
     const elementLines = lines.slice(element.start, element.end);
     const originalContent = elementLines.join('\n');
+    
+    // Get heading context for this element
+    const headingContext = headingMap.get(element.start) || {};
 
     if (element.type === 'table') {
       // Generate summary for table
@@ -193,32 +260,43 @@ async function extractAtomicElements(
         summary,
         chunk_type: 'table',
         is_atomic: true,
+        heading_hierarchy: headingContext,
         page_number: undefined, // Will be set during final merge
       });
     } else if (element.type === 'code_block') {
-      // Code blocks: use first line as summary
-      const firstLine = elementLines[1] || 'Blocco di codice';
-      
+      // Code blocks: use FULL content for embedding (no summary)
       nodes.push({
         chunk_index: i,
-        content: firstLine.slice(0, 200),
+        content: originalContent,      // Full code block for embedding
         original_content: originalContent,
-        summary: firstLine,
+        summary: undefined,
         chunk_type: 'code_block',
         is_atomic: true,
+        heading_hierarchy: headingContext,
         page_number: undefined,
       });
     } else if (element.type === 'list') {
-      // Lists: use first item as summary
-      const firstItem = elementLines[0] || 'Elenco';
-      
+      // Lists: use FULL content for embedding (no summary)
       nodes.push({
         chunk_index: i,
-        content: firstItem.slice(0, 200),
+        content: originalContent,      // Full list for embedding
         original_content: originalContent,
-        summary: firstItem,
+        summary: undefined,
         chunk_type: 'list',
         is_atomic: true,
+        heading_hierarchy: headingContext,
+        page_number: undefined,
+      });
+    } else if (element.type === 'figure') {
+      // Figures: use full description for embedding
+      nodes.push({
+        chunk_index: i,
+        content: originalContent,      // Full figure description for embedding
+        original_content: originalContent,
+        summary: undefined,
+        chunk_type: 'figure',
+        is_atomic: true,
+        heading_hierarchy: headingContext,
         page_number: undefined,
       });
     }
@@ -352,8 +430,12 @@ export async function parseMarkdownElements(
 ): Promise<ParseResult> {
   console.log('[MarkdownParser] Starting structured parsing...');
 
-  // Step 1: Extract atomic elements (tables, code blocks) with summaries
-  const atomicNodes = await extractAtomicElements(markdown, lovableApiKey);
+  // Step 0: Build heading map for contextual assignment
+  const headingMap = buildHeadingMap(markdown);
+  console.log(`[MarkdownParser] Built heading map with ${headingMap.size} lines`);
+
+  // Step 1: Extract atomic elements (tables, code blocks, lists, figures) with heading context
+  const atomicNodes = await extractAtomicElements(markdown, lovableApiKey, headingMap);
   console.log(`[MarkdownParser] Found ${atomicNodes.length} atomic elements`);
 
   // Step 2: Identify atomic ranges to skip during text chunking
@@ -369,11 +451,8 @@ export async function parseMarkdownElements(
     node.chunk_index = idx;
   });
 
-  // Step 5: Create objects map for recursive retrieval
+  // Step 5: Simplified objects map (RPC handles recursive retrieval via CASE statement)
   const objectsMap = new Map<string, ParsedNode>();
-  atomicNodes.forEach(node => {
-    objectsMap.set(node.chunk_index.toString(), node);
-  });
 
   console.log(`[MarkdownParser] Parsing complete: ${allNodes.length} total nodes`);
 
