@@ -23,13 +23,13 @@ export const VideoTutorialUpload = ({ onUploadComplete }: VideoTutorialUploadPro
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validazione: solo MP4, max 500MB
+    // Validazione: solo MP4, max 2GB (limite Gemini File API)
     if (!file.type.includes('video/mp4')) {
       toast.error("Solo file .mp4 sono supportati");
       return;
     }
-    if (file.size > 500 * 1024 * 1024) {
-      toast.error("Il file supera i 500MB");
+    if (file.size > 2000 * 1024 * 1024) {
+      toast.error("Il file supera i 2GB - limite massimo per Gemini File API");
       return;
     }
 
@@ -40,27 +40,41 @@ export const VideoTutorialUpload = ({ onUploadComplete }: VideoTutorialUploadPro
     if (!selectedFile) return;
 
     setUploading(true);
-    setProgress(10);
-    setStatus("Caricamento video...");
+    setProgress(0);
+    setStatus("Caricamento su Storage...");
 
     try {
-      // Converti in base64
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => 
-          data + String.fromCharCode(byte), ''
-        )
-      );
+      // Upload diretto a Supabase Storage
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const randomId = crypto.randomUUID();
+      const filePath = `videos/${randomId}/${timestamp}_${selectedFile.name}`;
 
-      setProgress(30);
+      const { error: uploadError } = await supabase.storage
+        .from('pipeline-a-uploads')
+        .upload(filePath, selectedFile, {
+          contentType: 'video/mp4',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw new Error(`Upload fallito: ${uploadError.message}`);
+      }
+
+      // Ottieni URL pubblico
+      const { data: urlData } = supabase.storage
+        .from('pipeline-a-uploads')
+        .getPublicUrl(filePath);
+
+      setProgress(40);
       setStatus("Invio a Gemini per analisi...");
 
-      // Chiama edge function
+      // Chiama edge function con URL
       const { data, error } = await supabase.functions.invoke('pipeline-a-ingest-video', {
         body: { 
+          fileUrl: urlData.publicUrl,
           fileName: selectedFile.name,
-          fileData: base64,
-          fileSize: selectedFile.size
+          fileSize: selectedFile.size,
+          filePath: filePath,
         },
       });
 
@@ -74,12 +88,13 @@ export const VideoTutorialUpload = ({ onUploadComplete }: VideoTutorialUploadPro
 
       setSelectedFile(null);
       setUploading(false);
-      setInputKey(prev => prev + 1); // Reset input
+      setInputKey(prev => prev + 1);
       onUploadComplete();
     } catch (err) {
       console.error('[Video Upload] Error:', err);
       toast.error(err instanceof Error ? err.message : "Errore nell'elaborazione video");
       setUploading(false);
+      setProgress(0);
     }
   };
 
@@ -93,7 +108,7 @@ export const VideoTutorialUpload = ({ onUploadComplete }: VideoTutorialUploadPro
           <div>
             <CardTitle className="text-lg">Importa Video Tutorial</CardTitle>
             <CardDescription className="text-sm">
-              Carica video .mp4. Gemini 1.5 Pro estrarrà trascrizione e contenuto visuale.
+              Carica video .mp4 (max 2GB). Gemini 2.0 Flash estrarrà trascrizione e contenuto visuale.
             </CardDescription>
           </div>
         </div>
@@ -155,7 +170,8 @@ export const VideoTutorialUpload = ({ onUploadComplete }: VideoTutorialUploadPro
           <AlertDescription className="text-xs space-y-1">
             <p className="font-medium">ℹ️ Come funziona</p>
             <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
-              <li>Gemini 1.5 Pro trascriverà tutto il parlato</li>
+              <li>Limite: 2GB per video (compressione ottimale per risultati migliori)</li>
+              <li>Gemini 2.0 Flash trascriverà tutto il parlato</li>
               <li>Tabelle e grafici saranno convertiti in Markdown</li>
               <li>Il risultato entrerà nella Pipeline A standard</li>
               <li>Potrai chiedere all'agente: "Cosa mostra il grafico al minuto 5?"</li>
