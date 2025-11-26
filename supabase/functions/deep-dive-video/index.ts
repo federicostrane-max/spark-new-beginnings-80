@@ -326,14 +326,31 @@ ${extractedContent}
     
     console.log(`[Deep Dive] ✅ Content appended (${appendedContent.length} chars)`);
     
-    // Step 6.5: Delete old chunks to allow re-chunking
-    console.log('[Deep Dive] Step 6.5: Deleting old chunks for re-processing...');
-
-    // First, get chunk IDs for this document
+    // Step 6.4: Save agent assignments BEFORE deletion
+    console.log('[Deep Dive] Step 6.4: Saving agent assignments for re-sync...');
+    
     const { data: oldChunks } = await supabase
       .from('pipeline_a_chunks_raw')
       .select('id')
       .eq('document_id', documentId);
+    
+    let savedAgentIds: string[] = [];
+    
+    if (oldChunks && oldChunks.length > 0) {
+      const chunkIds = oldChunks.map(c => c.id);
+      
+      // Get all agent_ids that had this document's chunks
+      const { data: previousAssignments } = await supabase
+        .from('pipeline_a_agent_knowledge')
+        .select('agent_id')
+        .in('chunk_id', chunkIds);
+      
+      savedAgentIds = [...new Set(previousAssignments?.map(a => a.agent_id) || [])];
+      console.log(`[Deep Dive] ✅ Saved ${savedAgentIds.length} agent assignments`);
+    }
+    
+    // Step 6.5: Delete old chunks to allow re-chunking
+    console.log('[Deep Dive] Step 6.5: Deleting old chunks for re-processing...');
 
     if (oldChunks && oldChunks.length > 0) {
       const chunkIds = oldChunks.map(c => c.id);
@@ -374,11 +391,71 @@ ${extractedContent}
       if (rechunkResponse.error) {
         console.error('[Deep Dive] Re-chunking error:', rechunkResponse.error);
       } else {
-        console.log('[Deep Dive] ✅ Re-chunking triggered');
+        console.log('[Deep Dive] ✅ Re-chunking completed');
       }
     } catch (rechunkError) {
       console.error('[Deep Dive] Re-chunking invocation failed:', rechunkError);
       // Non-blocking error - re-chunking can be triggered by cron fallback
+    }
+    
+    // Step 7.5: Trigger embedding generation (event-driven)
+    console.log('[Deep Dive] Step 7.5: Triggering embedding generation...');
+    
+    try {
+      const embedResponse = await supabase.functions.invoke('pipeline-a-generate-embeddings', {
+        body: { documentId }
+      });
+      
+      if (embedResponse.error) {
+        console.error('[Deep Dive] Embedding generation error:', embedResponse.error);
+      } else {
+        console.log('[Deep Dive] ✅ Embeddings generated');
+      }
+    } catch (embedError) {
+      console.error('[Deep Dive] Embedding invocation failed:', embedError);
+    }
+    
+    // Step 8: Re-sync new chunks with saved agents
+    if (savedAgentIds.length > 0) {
+      console.log(`[Deep Dive] Step 8: Re-syncing with ${savedAgentIds.length} agents...`);
+      
+      try {
+        // Get all new chunks that are ready
+        const { data: newChunks } = await supabase
+          .from('pipeline_a_chunks_raw')
+          .select('id')
+          .eq('document_id', documentId)
+          .eq('embedding_status', 'ready');
+        
+        if (newChunks && newChunks.length > 0) {
+          // Re-create links for each agent
+          for (const agentId of savedAgentIds) {
+            const links = newChunks.map(chunk => ({
+              chunk_id: chunk.id,
+              agent_id: agentId,
+              is_active: true
+            }));
+            
+            const { error: insertError } = await supabase
+              .from('pipeline_a_agent_knowledge')
+              .insert(links);
+            
+            if (insertError) {
+              console.error(`[Deep Dive] Error re-syncing agent ${agentId}:`, insertError);
+            } else {
+              console.log(`[Deep Dive] ✅ Re-synced ${links.length} chunks with agent ${agentId}`);
+            }
+          }
+          
+          console.log(`[Deep Dive] ✅ Re-sync complete: ${newChunks.length} chunks × ${savedAgentIds.length} agents`);
+        } else {
+          console.log('[Deep Dive] ⚠️ No ready chunks found for re-sync');
+        }
+      } catch (resyncError) {
+        console.error('[Deep Dive] Re-sync failed:', resyncError);
+      }
+    } else {
+      console.log('[Deep Dive] Step 8: No agents to re-sync (document was not assigned)');
     }
     
     console.log('='.repeat(80));
