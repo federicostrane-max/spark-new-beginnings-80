@@ -52,16 +52,17 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, fileData, fileSize } = await req.json();
+    const { fileName, fileUrl, fileSize, filePath } = await req.json();
 
-    if (!fileName || !fileData) {
+    if (!fileName || !fileUrl || !filePath) {
       return new Response(
-        JSON.stringify({ error: 'Missing fileName or fileData' }),
+        JSON.stringify({ error: 'Missing fileName, fileUrl, or filePath' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log(`[Video Ingest] Processing: ${fileName} (${(fileSize / (1024*1024)).toFixed(1)} MB)`);
+    console.log(`[Video Ingest] Storage path: ${filePath}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -73,26 +74,16 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Decode base64 video
-    const decodedData = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
-
-    // === FASE 1: Upload to Supabase Storage ===
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const randomId = crypto.randomUUID();
-    const filePath = `${randomId}/${timestamp}_${fileName}`;
-
-    console.log('[Video Ingest] Uploading to Supabase Storage...');
-
-    const { error: uploadError } = await supabase.storage
-      .from('pipeline-a-uploads')
-      .upload(filePath, decodedData, {
-        contentType: 'video/mp4',
-        upsert: false,
-      });
-
-    if (uploadError) {
-      throw new Error(`Storage upload failed: ${uploadError.message}`);
+    // === FASE 1: Download video from Storage URL ===
+    console.log('[Video Ingest] Downloading from Storage...');
+    
+    const videoResponse = await fetch(fileUrl);
+    if (!videoResponse.ok) {
+      throw new Error(`Failed to download video from Storage: ${videoResponse.statusText}`);
     }
+    
+    const videoData = new Uint8Array(await videoResponse.arrayBuffer());
+    console.log(`[Video Ingest] Downloaded ${videoData.length} bytes`);
 
     // === FASE 2: Upload to Gemini File API ===
     console.log('[Video Ingest] Uploading to Gemini File API...');
@@ -105,7 +96,7 @@ serve(async (req) => {
         headers: {
           'X-Goog-Upload-Protocol': 'resumable',
           'X-Goog-Upload-Command': 'start',
-          'X-Goog-Upload-Header-Content-Length': String(decodedData.length),
+          'X-Goog-Upload-Header-Content-Length': String(videoData.length),
           'X-Goog-Upload-Header-Content-Type': 'video/mp4',
           'Content-Type': 'application/json',
         },
@@ -124,11 +115,11 @@ serve(async (req) => {
     const uploadResponse = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
-        'Content-Length': String(decodedData.length),
+        'Content-Length': String(videoData.length),
         'X-Goog-Upload-Offset': '0',
         'X-Goog-Upload-Command': 'upload, finalize',
       },
-      body: decodedData,
+      body: videoData,
     });
 
     const fileInfo = await uploadResponse.json();
