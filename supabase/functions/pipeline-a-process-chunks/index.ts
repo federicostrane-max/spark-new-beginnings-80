@@ -153,7 +153,11 @@ serve(async (req) => {
         let jobId: string | null = null;
 
         // ⭐ AMPHIBIOUS BYPASS LOGIC
-        if (doc.source_type === 'github' && doc.full_text) {
+        if (doc.source_type === 'video' && doc.full_text) {
+          // 🎬 BYPASS: Video - Markdown già generato da Gemini!
+          console.log(`[Pipeline A Process] BYPASS mode (Video): ${doc.file_name}`);
+          markdown = doc.full_text; // Già Markdown perfetto
+        } else if (doc.source_type === 'github' && doc.full_text) {
           // 🚀 BYPASS: GitHub text file - no LlamaParse needed!
           console.log(`[Pipeline A Process] BYPASS mode (GitHub text): ${doc.file_name}`);
           markdown = prepareMarkdownForParsing(doc.full_text, doc.file_name);
