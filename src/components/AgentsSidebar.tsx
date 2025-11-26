@@ -168,15 +168,8 @@ export const AgentsSidebar = ({
   // Check for stuck documents on mount
   useEffect(() => {
     const checkStuckDocuments = async () => {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
-
-      if (!error && data !== null) {
-        setStuckDocumentsCount(data.length || 0);
-      }
+      // Sistema legacy rimosso - non ci sono più documenti "stuck"
+      setStuckDocumentsCount(0);
     };
 
     checkStuckDocuments();
