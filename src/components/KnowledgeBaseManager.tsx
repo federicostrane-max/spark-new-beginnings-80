@@ -29,6 +29,7 @@ interface PoolDocument {
   ai_summary: string | null;
   created_at: string;
   isAssigned: boolean;
+  pipeline: 'a' | 'b' | 'c';
 }
 
 interface KnowledgeBaseManagerProps {
@@ -110,6 +111,7 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
         ai_summary: null, // Pipelines don't have ai_summary
         created_at: doc.created_at,
         isAssigned: assignedIds.has(doc.id),
+        pipeline: doc.pipeline as 'a' | 'b' | 'c',
       }));
 
       setPoolDocuments(poolDocs);
@@ -170,7 +172,9 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
       
       // Assign documents one by one using the new function
       for (const docId of documentIds) {
-        const success = await assignDocument(agentId, docId);
+        const doc = poolDocuments.find(d => d.id === docId);
+        const pipeline = doc?.pipeline || 'a';
+        const success = await assignDocument(agentId, docId, pipeline);
         if (success) successCount++;
       }
       
