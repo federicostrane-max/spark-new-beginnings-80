@@ -1439,6 +1439,7 @@ export type Database = {
           llamaparse_job_id: string | null
           page_count: number | null
           processed_at: string | null
+          processing_metadata: Json | null
           repo_path: string | null
           repo_url: string | null
           source_type: string | null
@@ -1458,6 +1459,7 @@ export type Database = {
           llamaparse_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
+          processing_metadata?: Json | null
           repo_path?: string | null
           repo_url?: string | null
           source_type?: string | null
@@ -1477,6 +1479,7 @@ export type Database = {
           llamaparse_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
+          processing_metadata?: Json | null
           repo_path?: string | null
           repo_url?: string | null
           source_type?: string | null
