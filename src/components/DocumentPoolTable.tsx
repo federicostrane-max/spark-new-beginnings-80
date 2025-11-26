@@ -312,41 +312,18 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal),
         supabase
           .from("pipeline_b_documents")
-            metadata_verified_online,
-            metadata_verified_source,
-            metadata_confidence,
-            agent_document_links(
-              agent_id,
-              agents(id, name)
-            )
-          `)
-          .order("created_at", { ascending: false })
+          .select("id, file_name, status, page_count, created_at, error_message, folder")
           .range(from, to)
-          .abortSignal(signal),
-        supabase
-          .from("pipeline_a_documents")
-          .select("*")
           .order("created_at", { ascending: false })
-          .range(from, to)
-          .abortSignal(signal),
-        supabase
-          .from("pipeline_b_documents")
-          .select("*")
-          .order("created_at", { ascending: false })
-          .range(from, to)
           .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
-          .select("*")
-          .order("created_at", { ascending: false })
+          .select("id, file_name, status, page_count, created_at, error_message, folder")
           .range(from, to)
+          .order("created_at", { ascending: false })
           .abortSignal(signal)
       ]);
 
-      if (oldData.error) {
-        console.error('[DocumentPoolTable] Old pipeline error:', oldData.error);
-        throw oldData.error;
-      }
       if (pipelineAData.error) {
         console.error('[DocumentPoolTable] Pipeline A error:', pipelineAData.error);
         throw pipelineAData.error;
@@ -762,7 +739,7 @@ export const DocumentPoolTable = () => {
         if (!childFoldersByParent.has(parentPath)) {
           childFoldersByParent.set(parentPath, []);
         }
-        childFoldersByParent.get(parentPath).push({
+        childFoldersByParent.get(parentPath)!.push({
           id: `virtual-${folderName}`,
           name: folderName,
           parent_folder: parentPath,
@@ -776,19 +753,27 @@ export const DocumentPoolTable = () => {
       }
     });
 
-    // OTTIMIZZAZIONE: Singola query per TUTTI i documenti con folder
-    const { data: allFolderDocs, error: allDocsError } = await supabase
-      .from('knowledge_documents')
-      .select(`
-        *,
-        agent_document_links(
-          agent_id,
-          agents(id, name)
-        )
-      `)
-      .not('folder', 'is', null)
-      .is('source_url', null)
-      .order('created_at', { ascending: false });
+    // Query documents with folders from all pipelines
+    const [pipelineAFolderDocs, pipelineBFolderDocs, pipelineCFolderDocs] = await Promise.all([
+      supabase
+        .from('pipeline_a_documents')
+        .select('*')
+        .not('folder', 'is', null),
+      supabase
+        .from('pipeline_b_documents')
+        .select('*')
+        .not('folder', 'is', null),
+      supabase
+        .from('pipeline_c_documents')
+        .select('*')
+        .not('folder', 'is', null)
+    ]);
+
+    const allFolderDocs = [
+      ...(pipelineAFolderDocs.data || []).map(d => ({ ...d, pipeline: 'a' })),
+      ...(pipelineBFolderDocs.data || []).map(d => ({ ...d, pipeline: 'b' })),
+      ...(pipelineCFolderDocs.data || []).map(d => ({ ...d, pipeline: 'c' }))
+    ];
 
     if (allDocsError) throw allDocsError;
 
