@@ -5604,12 +5604,21 @@ ${knowledgeContext}${searchResultsContext}`;
             }
           }
 
-          // Final update to DB
+          // Final update to DB with complete metadata
+          const sourceReliability = hasKnowledgeContext ? 'high' : (toolsUsed.length > 0 ? 'medium' : 'low');
+          
           await supabase
             .from('agent_messages')
             .update({ 
               content: fullResponse,
-              llm_provider: llmProvider  // Persist which LLM was used
+              llm_provider: llmProvider,
+              metadata: {
+                has_knowledge_context: hasKnowledgeContext,
+                knowledge_stats: knowledgeStats,
+                tools_used: toolsUsed,
+                source_reliability: sourceReliability,
+                video_documents_available: videoDocumentsAvailable.length > 0 ? videoDocumentsAvailable : undefined
+              }
             })
             .eq('id', placeholderMsg.id);
 
