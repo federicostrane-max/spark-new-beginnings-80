@@ -326,6 +326,43 @@ ${extractedContent}
     
     console.log(`[Deep Dive] ✅ Content appended (${appendedContent.length} chars)`);
     
+    // Step 6.5: Delete old chunks to allow re-chunking
+    console.log('[Deep Dive] Step 6.5: Deleting old chunks for re-processing...');
+
+    // First, get chunk IDs for this document
+    const { data: oldChunks } = await supabase
+      .from('pipeline_a_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+
+    if (oldChunks && oldChunks.length > 0) {
+      const chunkIds = oldChunks.map(c => c.id);
+      
+      // Delete from agent_knowledge first (foreign key constraint)
+      const { error: akDeleteError } = await supabase
+        .from('pipeline_a_agent_knowledge')
+        .delete()
+        .in('chunk_id', chunkIds);
+      
+      if (akDeleteError) {
+        console.error('[Deep Dive] Error deleting agent_knowledge refs:', akDeleteError);
+      }
+      
+      // Delete the chunks themselves
+      const { error: chunksDeleteError } = await supabase
+        .from('pipeline_a_chunks_raw')
+        .delete()
+        .eq('document_id', documentId);
+      
+      if (chunksDeleteError) {
+        console.error('[Deep Dive] Error deleting chunks:', chunksDeleteError);
+      } else {
+        console.log(`[Deep Dive] ✅ Deleted ${oldChunks.length} old chunks`);
+      }
+    } else {
+      console.log('[Deep Dive] No existing chunks to delete');
+    }
+    
     // Step 7: Trigger re-chunking (event-driven)
     console.log('[Deep Dive] Step 7: Triggering re-chunking...');
     
