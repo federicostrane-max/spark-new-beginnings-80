@@ -95,13 +95,35 @@ export function AssignToFolderDialog({
         }
       }
 
-      // Assegna i documenti alla cartella
-      const { error } = await supabase
-        .from('knowledge_documents')
-        .update({ folder: folderToAssign })
-        .in('id', documentIds);
-
-      if (error) throw error;
+      // Assegna i documenti alla cartella - supporta tutte le pipeline
+      const updatePromises = [];
+      
+      // Determina quali pipeline sono coinvolte dai documentIds
+      for (const docId of documentIds) {
+        // Prova Pipeline A
+        const { data: docA } = await supabase.from('pipeline_a_documents').select('id').eq('id', docId).maybeSingle();
+        if (docA) {
+          updatePromises.push(supabase.from('pipeline_a_documents').update({ folder: folderToAssign }).eq('id', docId));
+          continue;
+        }
+        
+        // Prova Pipeline B
+        const { data: docB } = await supabase.from('pipeline_b_documents').select('id').eq('id', docId).maybeSingle();
+        if (docB) {
+          updatePromises.push(supabase.from('pipeline_b_documents').update({ folder: folderToAssign }).eq('id', docId));
+          continue;
+        }
+        
+        // Prova Pipeline C
+        const { data: docC } = await supabase.from('pipeline_c_documents').select('id').eq('id', docId).maybeSingle();
+        if (docC) {
+          updatePromises.push(supabase.from('pipeline_c_documents').update({ folder: folderToAssign }).eq('id', docId));
+        }
+      }
+      
+      const results = await Promise.all(updatePromises);
+      const errors = results.filter(r => r.error);
+      if (errors.length > 0) throw errors[0].error;
 
       toast({
         title: "Documenti assegnati",

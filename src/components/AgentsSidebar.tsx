@@ -165,17 +165,20 @@ export const AgentsSidebar = ({
     }
   };
 
-  // Check for stuck documents on mount
+  // Check for stuck documents on mount - now checks all pipelines
   useEffect(() => {
     const checkStuckDocuments = async () => {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
+      try {
+        const [countA, countB, countC] = await Promise.all([
+          supabase.from('pipeline_a_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+          supabase.from('pipeline_b_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+          supabase.from('pipeline_c_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+        ]);
 
-      if (!error && data !== null) {
-        setStuckDocumentsCount(data.length || 0);
+        const totalCount = (countA.count || 0) + (countB.count || 0) + (countC.count || 0);
+        setStuckDocumentsCount(totalCount);
+      } catch (error) {
+        console.error('[AgentsSidebar] Error checking stuck documents:', error);
       }
     };
 

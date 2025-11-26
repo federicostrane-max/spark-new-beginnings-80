@@ -39,14 +39,15 @@ export const AdminPanel = () => {
   const fetchStuckCount = async () => {
     setLoadingCount(true);
     try {
-      const { count, error } = await supabase
-        .from('knowledge_documents')
-        .select('*', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
+      // Count documents in processing states across all pipelines
+      const [countA, countB, countC] = await Promise.all([
+        supabase.from('pipeline_a_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+        supabase.from('pipeline_b_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+        supabase.from('pipeline_c_documents').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
+      ]);
 
-      if (error) throw error;
-      setStuckCount(count || 0);
+      const totalCount = (countA.count || 0) + (countB.count || 0) + (countC.count || 0);
+      setStuckCount(totalCount);
     } catch (error: any) {
       console.error('Error fetching stuck count:', error);
       toast.error('Errore nel recupero del conteggio documenti');
