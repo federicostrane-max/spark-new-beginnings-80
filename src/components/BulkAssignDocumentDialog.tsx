@@ -493,22 +493,9 @@ export const BulkAssignDocumentDialog = ({
   };
 
   const processPendingSync = async () => {
-    try {
-      toast.info("Avvio sincronizzazione documenti pending...");
-      const { data, error } = await supabase.functions.invoke('process-sync-queue', {
-        body: { batchSize: 100 }
-      });
-      
-      if (error) throw error;
-      
-      toast.success(`Elaborazione completata: ${data.stats?.successCount || 0} documenti sincronizzati`);
-      if (data.stats?.failedCount > 0) {
-        toast.warning(`${data.stats.failedCount} documenti falliti`);
-      }
-    } catch (error) {
-      console.error("Errore sync pending:", error);
-      toast.error("Errore durante la sincronizzazione");
-    }
+    // Legacy function removed - process-sync-queue no longer exists
+    // Document syncing is now handled automatically by Pipeline A/B/C architecture
+    console.log('[BulkAssign] Legacy sync function removed - syncing handled by pipelines');
   };
 
   const handleAssign = async () => {
@@ -750,23 +737,8 @@ export const BulkAssignDocumentDialog = ({
 
       setProgressMessage("Finalizzazione...");
 
-      // 🚀 Trigger background sync process
-      console.log('[BulkAssign] Triggering background sync for pending documents...');
-      try {
-        const { error: syncError } = await supabase.functions.invoke('process-sync-queue', {
-          body: { batchSize: 50 }
-        });
-
-        if (syncError) {
-          console.error('[BulkAssign] Failed to start sync process:', syncError);
-          toast.error(
-            `Documenti assegnati ma la sincronizzazione automatica potrebbe aver fallito. Controlla lo stato.`,
-            { duration: 5000 }
-          );
-        }
-      } catch (syncTriggerError) {
-        console.error('[BulkAssign] Exception triggering sync:', syncTriggerError);
-      }
+      // Legacy sync queue removed - Pipeline A/B/C handle syncing automatically
+      console.log('[BulkAssign] Document assignment complete - syncing handled by pipelines');
 
       toast.success(
         `Assegnati ${validatedDocs.length} documenti a ${selectedAgentIds.size} agenti. Sincronizzazione in background avviata.`,
