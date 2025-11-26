@@ -56,11 +56,6 @@ COMPITO: Analizza rapidamente questo video per capire:
 
 2. ELEMENTI VISIVI CRITICI: Quali dettagli visivi sono essenziali per la comprensione?
    - Se ci sono grafici: quali metriche/indicatori mostrano?
-   - **Per grafici di TRADING/FINANZIARI: ESTRARRE SEMPRE:**
-     * Punti di intersezione/tocco tra prezzo e medie mobili (SMA, EMA, bande di Bollinger)
-     * Specificare timestamp ESATTO [MM:SS] e livello di PREZZO ESATTO di ogni tocco
-     * Indicare se il tocco è avvenuto dall'alto (price touching from above) o dal basso (price touching from below)
-     * Segnalare rotture (breakout) o rimbalzi sulle medie mobili
    - Se c'è codice: quale linguaggio/framework?
    - Se ci sono tabelle: cosa rappresentano i dati?
    - Se ci sono dimostrazioni fisiche: quali movimenti/posture sono importanti?
@@ -68,8 +63,6 @@ COMPITO: Analizza rapidamente questo video per capire:
 3. CALIBRAZIONE VERBOSITÀ:
    - Se identifichi un video TECNICO (es. trading, coding, analisi dati): 
      sii ESTREMAMENTE pedante sui dettagli (valori numerici esatti, sintassi precisa, timestamp di ogni variazione)
-     **Per VIDEO DI TRADING: estrai OGNI SINGOLO punto in cui il prezzo tocca/incrocia indicatori tecnici**
-     **(SMA, EMA, bande di Bollinger, supporti, resistenze) con timestamp [MM:SS] e prezzo esatto**
    - Se identifichi un video DISCORSIVO/VLOG (es. interviste, presentazioni, tutorial generici):
      focalizzati sui concetti chiave e salta i dettagli minori
 
@@ -84,6 +77,51 @@ a estrarre i dettagli specifici di QUESTO video. Il prompt deve:
 
 Rispondi SOLO con il System Prompt, senza preamboli o spiegazioni.
 `;
+
+// Funzione che INIETTA direttamente istruzioni specifiche nel prompt dell'Analyst
+// Questa funzione modifica il prompt DOPO che il Director l'ha generato,
+// ma PRIMA che l'Analyst lo riceva per l'analisi del video
+function enhanceAnalystPrompt(basePrompt: string): string {
+  const tradingEnhancement = `
+
+=== ISTRUZIONI CRITICHE PER GRAFICI DI TRADING/FINANZIARI ===
+
+**SE IL VIDEO CONTIENE GRAFICI DI PREZZI CON INDICATORI TECNICI (SMA, EMA, Bande di Bollinger, etc.):**
+
+DEVI ESTRARRE **OGNI SINGOLO PUNTO** in cui il prezzo tocca o incrocia un indicatore tecnico.
+
+Per OGNI touch point, specifica:
+1. **Timestamp esatto**: [MM:SS]
+2. **Prezzo esatto** al momento del tocco (es. €1.2345, $50.75, etc.)
+3. **Indicatore coinvolto** (es. "SMA 20", "EMA 50", "Banda di Bollinger superiore")
+4. **Direzione del tocco**:
+   - "Price touching from above" (prezzo che scende e tocca l'indicatore dall'alto)
+   - "Price touching from below" (prezzo che sale e tocca l'indicatore dal basso)
+5. **Tipo di evento**:
+   - "Bounce" (rimbalzo sull'indicatore)
+   - "Breakout" (rottura dell'indicatore)
+   - "Cross" (attraversamento)
+
+**FORMATO RICHIESTO per touch points:**
+\`\`\`
+[MM:SS] TOUCH POINT: Price €X.XXXX touching [INDICATORE] from [above/below] → [Bounce/Breakout/Cross]
+\`\`\`
+
+**ESEMPIO:**
+\`\`\`
+[03:45] TOUCH POINT: Price €1.0823 touching SMA 50 from below → Bounce
+[07:12] TOUCH POINT: Price €1.0891 touching EMA 20 from above → Breakout
+[12:30] TOUCH POINT: Price €1.0765 touching Bollinger Band (lower) from above → Bounce
+\`\`\`
+
+**IMPERATIVO:** Non saltare NESSUN touch point visibile nel grafico. 
+Anche tocchi che sembrano "minori" devono essere documentati con precisione assoluta.
+
+=== FINE ISTRUZIONI CRITICHE ===
+`;
+
+  return basePrompt + tradingEnhancement;
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -234,11 +272,18 @@ serve(async (req) => {
       console.warn('[Video Ingest] Director failed, using fallback prompt:', directorError);
     }
 
-    // === FASE 4b: THE ANALYST - Estrazione Dati ===
-    console.log('[Video Ingest] FASE 4b: Analyst - Extracting with optimized prompt...');
+    // === ENHANCEMENT: Inietta istruzioni specifiche nel prompt ===
+    // Questa fase modifica il prompt DOPO il Director ma PRIMA dell'Analyst
+    const basePrompt = customPrompt || VIDEO_TO_MARKDOWN_PROMPT;
+    const enhancedPrompt = enhanceAnalystPrompt(basePrompt);
+    
+    console.log(`[Video Ingest] Prompt enhanced: ${basePrompt.length} → ${enhancedPrompt.length} chars`);
 
-    // Combina prompt custom con istruzioni di output standard
-    const analystPrompt = customPrompt 
+    // === FASE 4b: THE ANALYST - Estrazione Dati ===
+    console.log('[Video Ingest] FASE 4b: Analyst - Extracting with enhanced prompt...');
+
+    // Combina prompt enhanced con istruzioni di output standard
+    const analystPrompt = enhancedPrompt
       ? `${customPrompt}
 
 FORMATO OUTPUT OBBLIGATORIO:
