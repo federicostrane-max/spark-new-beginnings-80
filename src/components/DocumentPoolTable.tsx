@@ -175,22 +175,6 @@ export const DocumentPoolTable = () => {
     loadFolders();
 
     // Realtime subscriptions for all pipelines
-    const channelKnowledge = supabase
-      .channel('knowledge_documents_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'knowledge_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
-      )
-      .subscribe();
-
     const channelPipelineA = supabase
       .channel('pipeline_a_documents_changes')
       .on(
@@ -241,7 +225,6 @@ export const DocumentPoolTable = () => {
 
     return () => {
       abortController.abort();
-      supabase.removeChannel(channelKnowledge);
       supabase.removeChannel(channelPipelineA);
       supabase.removeChannel(channelPipelineB);
       supabase.removeChannel(channelPipelineC);
@@ -261,14 +244,10 @@ export const DocumentPoolTable = () => {
       setLoading(true);
       setError(null);
       
-      // Step 1: Count from BOTH tables
-      console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
+      // Step 1: Count from Pipeline A/B/C tables
+      console.log('[DocumentPoolTable] Step 1: Counting documents from all pipelines...');
       
-      const [oldCount, pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
-        supabase
-          .from("knowledge_documents")
-          .select("id", { count: 'exact', head: true })
-          .abortSignal(signal),
+      const [pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
         supabase
           .from("pipeline_a_documents")
           .select("id", { count: 'exact', head: true })
@@ -283,10 +262,6 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal)
       ]);
 
-      if (oldCount.error) {
-        console.error('[DocumentPoolTable] Old pipeline count error:', oldCount.error);
-        throw oldCount.error;
-      }
       if (pipelineACount.error) {
         console.error('[DocumentPoolTable] Pipeline A count error:', pipelineACount.error);
         throw pipelineACount.error;
@@ -300,35 +275,18 @@ export const DocumentPoolTable = () => {
         throw pipelineCCount.error;
       }
       
-      const total = (oldCount.count || 0) + (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
-      console.log('[DocumentPoolTable] Total:', total, '(old:', oldCount.count, '+ Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
+      const total = (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
-      // Step 2: Load documents from BOTH pipelines
-      console.log('[DocumentPoolTable] Step 2: Loading from both pipelines...');
+      // Step 2: Load documents from all pipelines
+      console.log('[DocumentPoolTable] Step 2: Loading from all pipelines...');
       
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const [oldData, pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
-        supabase
-          .from("knowledge_documents")
-          .select(`
-            *,
-            extracted_title,
-            extracted_authors,
-            metadata_verified_online,
-            metadata_verified_source,
-            metadata_confidence,
-            agent_document_links(
-              agent_id,
-              agents(id, name)
-            )
-          `)
-          .order("created_at", { ascending: false })
-          .range(from, to)
-          .abortSignal(signal),
+      const [pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
         supabase
           .from("pipeline_a_documents")
           .select("*")
@@ -349,10 +307,6 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal)
       ]);
 
-      if (oldData.error) {
-        console.error('[DocumentPoolTable] Old pipeline error:', oldData.error);
-        throw oldData.error;
-      }
       if (pipelineAData.error) {
         console.error('[DocumentPoolTable] Pipeline A error:', pipelineAData.error);
         throw pipelineAData.error;
@@ -366,37 +320,7 @@ export const DocumentPoolTable = () => {
         throw pipelineCData.error;
       }
 
-      console.log('[DocumentPoolTable] Loaded', oldData.data?.length || 0, 'old +', pipelineAData.data?.length || 0, 'Pipeline A +', pipelineBData.data?.length || 0, 'Pipeline B +', pipelineCData.data?.length || 0, 'Pipeline C docs');
-
-      // Transform OLD pipeline documents
-      const transformedOld = (oldData.data || []).map((doc: any) => {
-        const links = doc.agent_document_links || [];
-        const agentNames = links
-          .map((link: any) => link.agents?.name)
-          .filter(Boolean);
-        
-        return {
-          id: doc.id,
-          file_name: doc.file_name,
-          validation_status: doc.validation_status,
-          validation_reason: doc.validation_reason,
-          processing_status: doc.processing_status,
-          ai_summary: doc.ai_summary,
-          text_length: doc.text_length,
-          page_count: doc.page_count,
-          created_at: doc.created_at,
-          agent_names: agentNames,
-          agents_count: agentNames.length,
-          keywords: doc.keywords || [],
-          topics: doc.topics || [],
-          complexity_level: doc.complexity_level || "",
-          agent_ids: links.map((link: any) => link.agents?.id).filter(Boolean),
-          folder: doc.folder,
-          search_query: doc.search_query,
-          source_url: doc.source_url,
-          pipeline: 'a' as const,
-        };
-      });
+      console.log('[DocumentPoolTable] Loaded', pipelineAData.data?.length || 0, 'Pipeline A +', pipelineBData.data?.length || 0, 'Pipeline B +', pipelineCData.data?.length || 0, 'Pipeline C docs');
 
       // Transform Pipeline A documents
       const transformedPipelineA = (pipelineAData.data || []).map((doc: any) => ({
@@ -471,7 +395,7 @@ export const DocumentPoolTable = () => {
       }));
 
       // Merge and sort by created_at
-      const transformedData = [...transformedOld, ...transformedPipelineA, ...transformedPipelineB, ...transformedPipelineC]
+      const transformedData = [...transformedPipelineA, ...transformedPipelineB, ...transformedPipelineC]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       console.log('[DocumentPoolTable] ✅ Documents loaded successfully');

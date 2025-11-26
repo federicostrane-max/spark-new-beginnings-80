@@ -165,25 +165,7 @@ export const AgentsSidebar = ({
     }
   };
 
-  // Check for stuck documents on mount
-  useEffect(() => {
-    const checkStuckDocuments = async () => {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id', { count: 'exact', head: true })
-        .eq('validation_status', 'validated')
-        .eq('processing_status', 'downloaded');
-
-      if (!error && data !== null) {
-        setStuckDocumentsCount(data.length || 0);
-      }
-    };
-
-    checkStuckDocuments();
-    // Refresh every 30 seconds
-    const interval = setInterval(checkStuckDocuments, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  // Stuck documents check removed - legacy pipeline eliminated
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

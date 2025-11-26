@@ -30,13 +30,33 @@ export const useDocumentAssignment = () => {
     }
   };
 
-  const unassignDocument = async (agentId: string, documentId: string): Promise<boolean> => {
+  const unassignDocument = async (agentId: string, documentId: string, pipeline: 'a' | 'b' | 'c' = 'a'): Promise<boolean> => {
     try {
+      // Delete from appropriate pipeline_*_agent_knowledge table
+      const table = pipeline === 'a' ? 'pipeline_a_agent_knowledge' : 
+                     pipeline === 'b' ? 'pipeline_b_agent_knowledge' : 
+                     'pipeline_c_agent_knowledge';
+      
+      // Get chunks for this document first
+      const chunksTable = pipeline === 'a' ? 'pipeline_a_chunks_raw' : 
+                          pipeline === 'b' ? 'pipeline_b_chunks_raw' : 
+                          'pipeline_c_chunks_raw';
+      
+      const { data: chunks } = await supabase
+        .from(chunksTable)
+        .select('id')
+        .eq('document_id', documentId);
+      
+      if (!chunks || chunks.length === 0) {
+        toast.error('No chunks found for document');
+        return false;
+      }
+      
       const { error } = await supabase
-        .from('agent_document_links')
+        .from(table)
         .delete()
         .eq('agent_id', agentId)
-        .eq('document_id', documentId);
+        .in('chunk_id', chunks.map(c => c.id));
 
       if (error) throw error;
 

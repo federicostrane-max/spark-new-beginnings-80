@@ -70,18 +70,22 @@ export const KnowledgeBaseManager = ({ agentId, agentName, onDocsUpdated }: Know
   const loadPoolDocuments = useCallback(async () => {
     setLoadingPool(true);
     try {
-      const { data, error } = await supabase
-        .from('knowledge_documents')
-        .select('id, file_name, ai_summary, created_at, processing_status, validation_status')
-        .eq('processing_status', 'ready_for_assignment')
-        .eq('validation_status', 'validated')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
+      // Load documents from all pipelines
+      const [aData, bData, cData] = await Promise.all([
+        supabase.from('pipeline_a_documents').select('id, file_name, created_at, status').eq('status', 'ready').order('created_at', { ascending: false }).limit(50),
+        supabase.from('pipeline_b_documents').select('id, file_name, created_at, status').eq('status', 'ready').order('created_at', { ascending: false }).limit(50),
+        supabase.from('pipeline_c_documents').select('id, file_name, created_at, status').eq('status', 'ready').order('created_at', { ascending: false }).limit(50)
+      ]);
 
       const assignedIds = new Set(documents.map(d => d.id));
-      const poolDocs: PoolDocument[] = (data || []).map(doc => ({
+      
+      const allDocs = [
+        ...(aData.data || []).map(doc => ({ ...doc, ai_summary: null })),
+        ...(bData.data || []).map(doc => ({ ...doc, ai_summary: null })),
+        ...(cData.data || []).map(doc => ({ ...doc, ai_summary: null }))
+      ];
+
+      const poolDocs: PoolDocument[] = allDocs.map(doc => ({
         id: doc.id,
         file_name: doc.file_name,
         ai_summary: doc.ai_summary,

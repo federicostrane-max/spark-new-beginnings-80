@@ -65,16 +65,11 @@ export const BulkAssignDocumentDialog = ({
 
     try {
       if (folderName) {
-        // Folder-based: query ALL FOUR pipelines
+        // Folder-based: query Pipeline A/B/C
         const [
-          legacyTotal, pipelineATotal, pipelineBTotal, pipelineCTotal,
-          legacyValid, pipelineAValid, pipelineBValid, pipelineCValid
+          pipelineATotal, pipelineBTotal, pipelineCTotal,
+          pipelineAValid, pipelineBValid, pipelineCValid
         ] = await Promise.all([
-          // Legacy total (with folder)
-          supabase
-            .from("knowledge_documents")
-            .select("id", { count: 'exact', head: true })
-            .like("folder", `${folderName}%`),
           // Pipeline A total (folder IS NULL for Pipeline A)
           supabase
             .from("pipeline_a_documents")
@@ -89,13 +84,6 @@ export const BulkAssignDocumentDialog = ({
           supabase
             .from("pipeline_c_documents")
             .select("id", { count: 'exact', head: true }),
-          // Legacy valid
-          supabase
-            .from("knowledge_documents")
-            .select("id", { count: 'exact', head: true })
-            .like("folder", `${folderName}%`)
-            .eq("processing_status", "ready_for_assignment")
-            .eq("validation_status", "validated"),
           // Pipeline A valid
           supabase
             .from("pipeline_a_documents")
@@ -115,12 +103,11 @@ export const BulkAssignDocumentDialog = ({
             .eq("status", "ready")
         ]);
 
-        const totalCount = (legacyTotal.count || 0) + (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (legacyValid.count || 0) + (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const totalCount = (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         
         console.log('[BulkAssign] Folder mode counts:', {
           folderName,
-          legacyTotal: legacyTotal.count,
           pipelineATotal: pipelineATotal.count,
           pipelineBTotal: pipelineBTotal.count,
           pipelineCTotal: pipelineCTotal.count,
@@ -132,17 +119,12 @@ export const BulkAssignDocumentDialog = ({
         setValidatedCount(validCount);
         setProcessingCount(0); // Folder mode doesn't track processing
       } else if (documentIds && documentIds.length > 0) {
-        // Manual selection: check ALL FOUR pipelines
+        // Manual selection: check Pipeline A/B/C
         const [
-          legacyTotal, pipelineATotal, pipelineBTotal, pipelineCTotal,
-          legacyValid, pipelineAValid, pipelineBValid, pipelineCValid,
+          pipelineATotal, pipelineBTotal, pipelineCTotal,
+          pipelineAValid, pipelineBValid, pipelineCValid,
           pipelineAProcessing, pipelineBProcessing, pipelineCProcessing
         ] = await Promise.all([
-          // Legacy total
-          supabase
-            .from("knowledge_documents")
-            .select("id", { count: 'exact', head: true })
-            .in("id", documentIds),
           // Pipeline A total
           supabase
             .from("pipeline_a_documents")
@@ -158,13 +140,6 @@ export const BulkAssignDocumentDialog = ({
             .from("pipeline_c_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds),
-          // Legacy valid
-          supabase
-            .from("knowledge_documents")
-            .select("id", { count: 'exact', head: true })
-            .in("id", documentIds)
-            .eq("processing_status", "ready_for_assignment")
-            .eq("validation_status", "validated"),
           // Pipeline A valid
           supabase
             .from("pipeline_a_documents")
@@ -204,11 +179,9 @@ export const BulkAssignDocumentDialog = ({
         ]);
         
         console.log('[BulkAssign] Query results:', {
-          legacyTotal: legacyTotal.count,
           pipelineATotal: pipelineATotal.count,
           pipelineBTotal: pipelineBTotal.count,
           pipelineCTotal: pipelineCTotal.count,
-          legacyValid: legacyValid.count,
           pipelineAValid: pipelineAValid.count,
           pipelineBValid: pipelineBValid.count,
           pipelineCValid: pipelineCValid.count,
@@ -217,8 +190,8 @@ export const BulkAssignDocumentDialog = ({
           pipelineCProcessing: pipelineCProcessing.count
         });
 
-        const totalCount = (legacyTotal.count || 0) + (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (legacyValid.count || 0) + (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const totalCount = (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         const processingCount = (pipelineAProcessing.count || 0) + (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
         
         console.log('[BulkAssign] Calculated counts:', {
@@ -313,33 +286,8 @@ export const BulkAssignDocumentDialog = ({
       if (error) throw error;
       setAgents(data || []);
 
-      // Pre-select agents ONLY for manual selections (not folder-based)
-      if (documentIds && documentIds.length > 0 && documentIds.length < 100 && !folderName) {
-        const { data: assignmentsData, error: assignmentsError } = await supabase
-          .from("agent_document_links")
-          .select("agent_id, document_id")
-          .in("document_id", documentIds);
-
-        if (assignmentsError) throw assignmentsError;
-
-        // Count how many documents each agent is assigned to
-        const agentCounts = new Map<string, number>();
-        assignmentsData?.forEach(link => {
-          agentCounts.set(link.agent_id, (agentCounts.get(link.agent_id) || 0) + 1);
-        });
-
-        // Pre-select only agents that are assigned to ALL selected documents
-        const commonlyAssignedIds = new Set(
-          Array.from(agentCounts.entries())
-            .filter(([_, count]) => count === documentIds.length)
-            .map(([agentId, _]) => agentId)
-        );
-
-        setSelectedAgentIds(commonlyAssignedIds);
-      } else {
-        // For folder selections or large selections, don't pre-select (too many docs)
-        setSelectedAgentIds(new Set());
-      }
+      // For folder selections or large selections, don't pre-select (too many docs)
+      setSelectedAgentIds(new Set());
     } catch (error: any) {
       console.error("Error loading agents:", error);
       toast.error("Errore nel caricamento degli agenti");
@@ -417,15 +365,9 @@ export const BulkAssignDocumentDialog = ({
         agent_id: a.agent_id,
         document_id: chunkToDoc.get(a.chunk_id)!
       }));
-    } else {
-      // Legacy pipeline
-      const { data } = await supabase
-        .from('agent_document_links')
-        .select('agent_id, document_id')
-        .in('document_id', documentIds);
-      
-      return data || [];
     }
+    
+    return [];
   };
 
   // Pipeline-aware helper: Remove assignments
@@ -464,18 +406,6 @@ export const BulkAssignDocumentDialog = ({
         .delete()
         .in('agent_id', agentIds)
         .in('chunk_id', chunks.map(c => c.id));
-      
-      if (error) throw error;
-    } else {
-      // Legacy pipeline
-      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
-      const docIds = [...new Set(toDelete.map(x => x.document_id))];
-      
-      const { error } = await supabase
-        .from('agent_document_links')
-        .delete()
-        .in('agent_id', agentIds)
-        .in('document_id', docIds);
       
       if (error) throw error;
     }

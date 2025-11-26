@@ -78,15 +78,9 @@ const getCurrentAssignments = async (documentId: string, pipeline: PipelineType)
     // Return unique agent_ids
     const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
     return uniqueAgents.map(agent_id => ({ agent_id }));
-  } else {
-    // Legacy: Query agent_document_links
-    const { data } = await supabase
-      .from('agent_document_links')
-      .select('agent_id')
-      .eq('document_id', documentId);
-    
-    return data || [];
   }
+  
+  return [];
 };
 
 // Helper function to remove assignments based on pipeline
@@ -127,16 +121,9 @@ const removeAssignments = async (documentId: string, agentIds: string[], pipelin
       .in('chunk_id', chunkIds);
     
     return error;
-  } else {
-    // Legacy: Delete from agent_document_links
-    const { error } = await supabase
-      .from('agent_document_links')
-      .delete()
-      .eq('document_id', documentId)
-      .in('agent_id', agentIds);
-    
-    return error;
   }
+  
+  return null;
 };
 
 export const AssignDocumentDialog = ({
@@ -195,20 +182,6 @@ export const AssignDocumentDialog = ({
         
         if (docData.status !== 'ready') {
           toast.error(`Documento Pipeline C non pronto (status: ${docData.status})`);
-          onOpenChange(false);
-          return;
-        }
-      } else {
-        const { data: docData, error: docError } = await supabase
-          .from("knowledge_documents")
-          .select("validation_status, processing_status")
-          .eq("id", document.id)
-          .single();
-        
-        if (docError) throw docError;
-        
-        if (docData.validation_status !== 'validated' || docData.processing_status !== 'ready_for_assignment') {
-          toast.error("Questo documento non è pronto per essere assegnato");
           onOpenChange(false);
           return;
         }
