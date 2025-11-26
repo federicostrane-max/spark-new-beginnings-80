@@ -257,5 +257,9 @@ timeout = 60
 verify_jwt = true
 timeout = 300
 
+[functions.deep-dive-video]
+verify_jwt = true
+timeout = 600
+
 [functions.test-landing-ai-metadata]
 verify_jwt = false

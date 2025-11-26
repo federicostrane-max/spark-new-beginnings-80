@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { DeepDiveVideoDialog } from "@/components/DeepDiveVideoDialog";
+
+interface VideoDocumentInfo {
+  document_id: string;
+  file_name: string;
+  file_path: string;
+  storage_bucket: string;
+  processing_metadata?: {
+    director_prompt_preview?: string;
+    model_used?: string;
+  };
+}
 
 interface MessageMetadata {
   has_knowledge_context?: boolean;
@@ -17,6 +29,7 @@ interface MessageMetadata {
   };
   tools_used?: string[];
   source_reliability?: 'high' | 'medium' | 'low';
+  video_documents_available?: VideoDocumentInfo[];
 }
 
 interface ChatMessageProps {
@@ -53,6 +66,7 @@ export const ChatMessage = ({
   const [isManuallyExpanded, setIsManuallyExpanded] = useState<boolean | null>(null);
   const [justReceivedLongContent, setJustReceivedLongContent] = useState(false);
   const [reloadingContent, setReloadingContent] = useState(false);
+  const [showDeepDiveDialog, setShowDeepDiveDialog] = useState(false);
   const prevContentLengthRef = useRef(content.length);
   const { currentMessageId, status, playMessage, stop } = useTTS();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -481,23 +495,41 @@ export const ChatMessage = ({
 
         {/* Source Reliability Badge - only for assistant messages */}
         {sourceBadge && !isStreaming && (
-          <div className="flex items-center gap-1 mt-2">
-            <span className="text-sm">{sourceBadge.icon}</span>
-            <Badge 
-              variant="outline" 
-              className={cn(
-                "text-xs font-medium border cursor-help",
-                sourceBadge.color,
-                sourceBadge.isWarning && "animate-pulse"
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <div className="flex items-center gap-1">
+              <span className="text-sm">{sourceBadge.icon}</span>
+              <Badge 
+                variant="outline" 
+                className={cn(
+                  "text-xs font-medium border cursor-help",
+                  sourceBadge.color,
+                  sourceBadge.isWarning && "animate-pulse"
+                )}
+                title={sourceBadge.tooltip}
+              >
+                {sourceBadge.label}
+              </Badge>
+              {sourceBadge.isWarning && (
+                <span className="text-xs text-yellow-600 ml-1">
+                  (verifica accuratezza)
+                </span>
               )}
-              title={sourceBadge.tooltip}
-            >
-              {sourceBadge.label}
-            </Badge>
-            {sourceBadge.isWarning && (
-              <span className="text-xs text-yellow-600 ml-1">
-                (verifica accuratezza)
-              </span>
+            </div>
+            
+            {/* Deep Dive Button - show when reliability is low AND video documents available */}
+            {sourceBadge.isWarning && metadata?.video_documents_available && metadata.video_documents_available.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeepDiveDialog(true);
+                }}
+                className="h-7 gap-1 text-xs border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10"
+              >
+                <Video className="h-3 w-3" />
+                Cerca nel Video
+              </Button>
             )}
           </div>
         )}
@@ -629,6 +661,17 @@ export const ChatMessage = ({
           </div>
         )}
       </div>
+      
+      {/* Deep Dive Video Dialog */}
+      {showDeepDiveDialog && metadata?.video_documents_available && (
+        <DeepDiveVideoDialog
+          isOpen={showDeepDiveDialog}
+          onClose={() => setShowDeepDiveDialog(false)}
+          videoDocuments={metadata.video_documents_available}
+          suggestedQuery={content}
+          agentId={agentId}
+        />
+      )}
     </div>
   );
 };
