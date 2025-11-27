@@ -128,12 +128,12 @@ serve(async (req) => {
               console.log('[Vision Enhancement] Attempting Claude Vision with Cloudmersive conversion...');
               const claudeStartTime = Date.now();
               
-              // Convert PDF to PNG
-              const imageBase64 = await convertPdfToImage(pdfBuffer, cloudmersiveKey);
+              // Convert PDF to image
+              const imageData = await convertPdfToImage(pdfBuffer, cloudmersiveKey);
               
-              if (imageBase64) {
+              if (imageData) {
                 // Call Claude with contextual prompt
-                const claudeText = await enhanceWithClaudeVision(imageBase64, anthropicKey, ocrIssues);
+                const claudeText = await enhanceWithClaudeVision(imageData, anthropicKey, ocrIssues);
                 
                 if (claudeText && claudeText.length > 0) {
                   superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
