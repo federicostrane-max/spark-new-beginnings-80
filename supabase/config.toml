@@ -166,3 +166,7 @@ timeout = 600
 
 [functions.test-landing-ai-metadata]
 verify_jwt = false
+
+[functions.test-llamaparse-layout]
+verify_jwt = false
+timeout = 300
