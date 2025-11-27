@@ -1993,37 +1993,8 @@ export type Database = {
           document_id: string
         }[]
       }
-      consolidate_pool_chunks: {
-        Args: never
-        Returns: {
-          chunks_after: number
-          chunks_before: number
-          document_id: string
-          document_name: string
-          duplicates_removed: number
-        }[]
-      }
-      consolidate_pool_chunks_batch: {
-        Args: { batch_limit?: number }
-        Returns: {
-          chunks_after: number
-          chunks_before: number
-          document_id: string
-          document_name: string
-          duplicates_removed: number
-        }[]
-      }
       count_documents_without_chunks: { Args: never; Returns: number }
       count_processing_documents: { Args: never; Returns: number }
-      find_orphaned_chunks: {
-        Args: never
-        Returns: {
-          agent_id: string
-          chunk_id: string
-          document_name: string
-          pool_document_id: string
-        }[]
-      }
       get_agent_sync_status: {
         Args: { p_agent_id: string }
         Returns: {
