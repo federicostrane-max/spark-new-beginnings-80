@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
+import { detectOCRIssues, enhanceWithVisionAPI, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -105,9 +106,48 @@ serve(async (req) => {
         console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
         console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
 
-        // Parse reconstructed document into chunks
+        // ===== VISION ENHANCEMENT LAYER =====
+        let visionEnhancementUsed = false;
+        let issuesDetected: any[] = [];
+        let superDocumentToChunk = superDocument; // Preserva originale
+
+        const ocrIssues = detectOCRIssues(superDocument);
+        console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
+
+        if (ocrIssues.length > 0) {
+          console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
+          issuesDetected = ocrIssues;
+
+          try {
+            const googleVisionKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
+
+            if (!googleVisionKey) {
+              console.warn('[Vision Enhancement] GOOGLE_CLOUD_VISION_API_KEY not configured, skipping enhancement');
+            } else {
+              console.log('[Vision Enhancement] Calling Google Cloud Vision API...');
+              const visionStartTime = Date.now();
+              const visionText = await enhanceWithVisionAPI(pdfBuffer, googleVisionKey);
+              console.log(`[Vision Enhancement] Vision API completed in ${Date.now() - visionStartTime}ms`);
+
+              if (visionText && visionText.length > 0) {
+                superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
+                visionEnhancementUsed = true;
+                console.log(`[Vision Enhancement] ✓ Enhanced document, added ${visionText.length} chars`);
+              } else {
+                console.warn('[Vision Enhancement] Vision API returned empty text');
+              }
+            }
+          } catch (visionError) {
+            console.error('[Vision Enhancement] Failed (graceful degradation):', visionError);
+            // Continue with original document - no blocking
+          }
+        } else {
+          console.log('[Vision Enhancement] No OCR issues detected, using original document');
+        }
+
+        // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
         console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
-        const parseResult = await parseMarkdownElements(superDocument, doc.file_name);
+        const parseResult = await parseMarkdownElements(superDocumentToChunk, doc.file_name);
         const chunks = parseResult.baseNodes;
 
         console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from reconstructed document`);
@@ -150,7 +190,10 @@ serve(async (req) => {
               ...doc.processing_metadata,
               llamaparse_job_id: jsonResult.jobId,
               chunks_generated: chunks.length,
-              reconstruction_method: 'hierarchical_reading_order'
+              reconstruction_method: 'hierarchical_reading_order',
+              vision_enhancement_used: visionEnhancementUsed,
+              ocr_issues_detected: issuesDetected.length,
+              ocr_issue_types: issuesDetected.map((i: any) => i.type)
             }
           })
           .eq('id', doc.id);
