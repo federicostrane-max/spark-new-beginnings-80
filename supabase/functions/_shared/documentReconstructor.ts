@@ -49,6 +49,18 @@ export function orderElements(elements: LlamaParseElement[]): OrderedElement[] {
   const orderedElements: OrderedElement[] = [];
 
   for (const element of elements) {
+    // DIAGNOSTIC: Log first element's actual values
+    if (orderedElements.length === 0 && elements.indexOf(element) === 0) {
+      console.log('[DocumentReconstructor] DIAGNOSTIC - orderElements check:',
+        JSON.stringify({
+          type: element.type,
+          bbox: element.bbox,
+          page: element.page,
+          bboxIsFalsy: !element.bbox,
+          pageIsUndefined: element.page === undefined
+        }));
+    }
+    
     if (!element.bbox || element.page === undefined) {
       console.warn('[DocumentReconstructor] Skipping element without bbox or page:', element.type);
       continue;
@@ -183,7 +195,16 @@ export function reconstructFromLlamaParse(jsonOutput: any): {
           // Try multiple bbox property names
           const itemBbox = item.bbox || item.bounding_box || item.bounds;
           
-          elements.push({ 
+          // DIAGNOSTIC: Log first item to see actual LlamaParse structure
+          if (elements.length === 0) {
+            console.log('[DocumentReconstructor] DIAGNOSTIC - First item keys:', Object.keys(item));
+            console.log('[DocumentReconstructor] DIAGNOSTIC - item.bbox:', JSON.stringify(item.bbox));
+            console.log('[DocumentReconstructor] DIAGNOSTIC - itemBbox resolved:', JSON.stringify(itemBbox));
+            console.log('[DocumentReconstructor] DIAGNOSTIC - typeof itemBbox:', typeof itemBbox);
+            console.log('[DocumentReconstructor] DIAGNOSTIC - pageNum:', pageNum);
+          }
+          
+          const newElement = { 
             ...item, 
             page: pageNum,
             // Use actual bbox or generate virtual position preserving reading order
@@ -193,8 +214,15 @@ export function reconstructFromLlamaParse(jsonOutput: any): {
               w: 100, 
               h: 50 
             }
-          });
+          };
           
+          // DIAGNOSTIC: Log the element we're actually pushing
+          if (elements.length === 0) {
+            console.log('[DocumentReconstructor] DIAGNOSTIC - newElement.bbox:', JSON.stringify(newElement.bbox));
+            console.log('[DocumentReconstructor] DIAGNOSTIC - newElement.page:', newElement.page);
+          }
+          
+          elements.push(newElement);
           virtualY += 60; // Increment for next element
         }
       } else if (page.text || page.md || page.markdown) {
