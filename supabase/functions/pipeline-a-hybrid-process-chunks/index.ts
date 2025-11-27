@@ -93,12 +93,17 @@ serve(async (req) => {
         const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
 
         // Extract JSON with layout from LlamaParse
-        console.log(`[Pipeline A-Hybrid Process] Calling LlamaParse for ${doc.file_name}`);
+        console.log(`[Pipeline A-Hybrid Process] Starting LlamaParse for ${doc.file_name}, size: ${pdfBuffer.length} bytes`);
+        const startTime = Date.now();
         const jsonResult = await extractJsonWithLayout(pdfBuffer, doc.file_name, llamaCloudKey);
+        console.log(`[Pipeline A-Hybrid Process] LlamaParse completed in ${Date.now() - startTime}ms, jobId: ${jsonResult.jobId}`);
+        console.log(`[Pipeline A-Hybrid Process] Raw JSON has ${jsonResult.rawJson?.items?.length || 0} items, ${jsonResult.rawJson?.layout?.length || 0} layout elements`);
 
         // Reconstruct document using hierarchical algorithm
         console.log('[Pipeline A-Hybrid Process] Reconstructing document with hierarchical reading order');
         const { superDocument, orderedElements, headingMap } = reconstructFromLlamaParse(jsonResult.rawJson);
+        console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
+        console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
 
         // Parse reconstructed document into chunks
         console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
@@ -165,12 +170,19 @@ serve(async (req) => {
         }
 
       } catch (docError) {
-        console.error(`[Pipeline A-Hybrid Process] Error processing document ${doc.id}:`, docError);
+        const errorMessage = docError instanceof Error ? docError.message : 'Unknown error';
+        const errorStack = docError instanceof Error ? docError.stack : undefined;
+        console.error(`[Pipeline A-Hybrid Process] Error processing document ${doc.id}:`, {
+          error: errorMessage,
+          stack: errorStack,
+          documentName: doc.file_name,
+          documentId: doc.id
+        });
         await supabase
           .from('pipeline_a_hybrid_documents')
           .update({
             status: 'failed',
-            error_message: docError instanceof Error ? docError.message : 'Unknown error',
+            error_message: errorMessage,
             updated_at: new Date().toISOString()
           })
           .eq('id', doc.id);
