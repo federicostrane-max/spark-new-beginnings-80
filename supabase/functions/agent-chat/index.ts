@@ -3479,14 +3479,25 @@ The system has automatically executed a search based on your proposed query and 
                 knowledgeContext += `---\n\n`;
               });
               
-              knowledgeContext += `\n**INSTRUCTIONS**:\n`;
-              knowledgeContext += `- Use the excerpts above to answer the user's question\n`;
-              knowledgeContext += `- Cite the source documents when referencing information (e.g., "According to [document_name]...")\n`;
-              knowledgeContext += `- If the excerpts don't contain sufficient information, acknowledge what's missing\n`;
-              knowledgeContext += `- DO NOT call semantic_search tool again - this content was automatically loaded\n`;
-              knowledgeContext += `- The get_agent_knowledge and semantic_search tools are available ONLY for:\n`;
-              knowledgeContext += `  * Querying OTHER agents' knowledge bases\n`;
-              knowledgeContext += `  * Performing additional/follow-up searches beyond this automatic search\n\n`;
+              knowledgeContext += `\n**⚠️ REGOLE ANTI-HALLUCINATION OBBLIGATORIE**:\n`;
+              knowledgeContext += `1. **RISPONDI SOLO** utilizzando informazioni ESPLICITAMENTE presenti negli excerpt sopra\n`;
+              knowledgeContext += `2. Per OGNI affermazione, **CITA LA FONTE** specifica: "[Da: nome_documento, Excerpt N]"\n`;
+              knowledgeContext += `3. Se un'informazione NON è presente negli excerpt, rispondi ESPLICITAMENTE:\n`;
+              knowledgeContext += `   → "Questa informazione specifica non è presente nei documenti della knowledge base"\n`;
+              knowledgeContext += `4. **NON INVENTARE MAI**:\n`;
+              knowledgeContext += `   - Dati, numeri, percentuali non presenti nei chunk\n`;
+              knowledgeContext += `   - Nomi, date, fonti non esplicitamente citati\n`;
+              knowledgeContext += `   - Conclusioni non supportate dagli excerpt\n`;
+              knowledgeContext += `5. Se la domanda copre PIÙ ARGOMENTI e solo ALCUNI sono presenti:\n`;
+              knowledgeContext += `   - Rispondi per gli argomenti coperti con citazioni\n`;
+              knowledgeContext += `   - Specifica esplicitamente quali argomenti NON sono coperti\n`;
+              knowledgeContext += `6. **PRIORITÀ**: Precisione > Completezza. Meglio dire "non presente" che inventare\n\n`;
+              knowledgeContext += `**ISTRUZIONI GENERALI**:\n`;
+              knowledgeContext += `- Usa gli excerpt sopra per rispondere alla domanda dell'utente\n`;
+              knowledgeContext += `- NON chiamare nuovamente il tool semantic_search - questo contenuto è stato caricato automaticamente\n`;
+              knowledgeContext += `- I tool get_agent_knowledge e semantic_search sono disponibili SOLO per:\n`;
+              knowledgeContext += `  * Interrogare la knowledge base di ALTRI agenti\n`;
+              knowledgeContext += `  * Eseguire ricerche aggiuntive/di follow-up oltre questa ricerca automatica\n\n`;
               
             } else {
               console.log('ℹ️ [AUTO-SEARCH] No relevant content found in knowledge base');
