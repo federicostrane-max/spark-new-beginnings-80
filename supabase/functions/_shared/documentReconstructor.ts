@@ -18,9 +18,14 @@ interface BoundingBox {
 interface LlamaParseElement {
   type: string;
   markdown?: string;
-  bbox?: BoundingBox;
-  page?: number;
+  md?: string;
   text?: string;
+  value?: string;
+  bbox?: BoundingBox;
+  bBox?: BoundingBox;
+  bounding_box?: BoundingBox;
+  bounds?: BoundingBox;
+  page?: number;
 }
 
 interface OrderedElement {
@@ -66,7 +71,7 @@ export function orderElements(elements: LlamaParseElement[]): OrderedElement[] {
       continue;
     }
 
-    const content = element.markdown || element.text || '';
+    const content = element.markdown || element.md || element.text || element.value || '';
     if (!content.trim()) {
       console.warn('[DocumentReconstructor] Skipping empty element:', element.type);
       continue;
@@ -193,7 +198,7 @@ export function reconstructFromLlamaParse(jsonOutput: any): {
         
         for (const item of page.items) {
           // Try multiple bbox property names
-          const itemBbox = item.bbox || item.bounding_box || item.bounds;
+          const itemBbox = item.bbox || item.bBox || item.bounding_box || item.bounds;
           
           // DIAGNOSTIC: Log first item to see actual LlamaParse structure
           if (elements.length === 0) {
