@@ -17,7 +17,8 @@ Analizza questo video e genera un documento Markdown strutturato che contenga:
 
 1. TRASCRIZIONE TEMPORALE
    - Trascrivi tutto il parlato con timestamp [MM:SS]
-   - Usa heading ## per sezioni/argomenti principali
+   - Usa heading Markdown standard (## per sezioni principali, ### per sotto-sezioni)
+   - NON usare mai testo in grassetto (**...**) per i titoli - usa SOLO heading ## o ###
    - Usa paragrafi per il flusso naturale del discorso
 
 2. ELEMENTI VISUALI (CRITICO!)
@@ -28,8 +29,8 @@ Analizza questo video e genera un documento Markdown strutturato che contenga:
       |-----------|-----------|
       | dato 1    | dato 2    |
 
-   b) GRAFICI → Descrivi dettagliatamente:
-      **[GRAFICO - MM:SS]**
+   b) GRAFICI → Descrivi dettagliatamente con heading:
+      ## [MM:SS] Grafico - Titolo
       - Tipo: (barre, linee, torta, etc.)
       - Assi: X = ..., Y = ...
       - Trend: descrivilo
@@ -41,7 +42,14 @@ Analizza questo video e genera un documento Markdown strutturato che contenga:
 
 3. FORMATO OUTPUT
    Genera Markdown valido e ben strutturato.
-   Includi sempre il timestamp quando cambia sezione o appare contenuto visivo.
+   Usa SOLO heading standard (## e ###) per tutti i titoli di sezione.
+   VIETATO usare testo in grassetto (**...**) per i titoli.
+   Includi sempre il timestamp nei heading quando cambia sezione o appare contenuto visivo.
+   
+   Esempio corretto:
+   ## [00:04] Introduzione
+   ## [02:15] Livelli di Supporto
+   ### [02:30] Dettaglio SMA 50
 
 Inizia l'analisi:
 `;
@@ -90,6 +98,8 @@ function enhanceAnalystPrompt(basePrompt: string): string {
 
 DEVI ESTRARRE **OGNI SINGOLO PUNTO** in cui il prezzo tocca o incrocia un indicatore tecnico.
 
+IMPORTANTE: Usa SOLO heading Markdown (## o ###) per organizzare i dati, MAI testo in grassetto (**...**) per i titoli.
+
 Per OGNI touch point, specifica:
 1. **Timestamp esatto**: [MM:SS]
 2. **Prezzo esatto** al momento del tocco (es. €1.2345, $50.75, etc.)
@@ -102,20 +112,21 @@ Per OGNI touch point, specifica:
    - "Breakout" (rottura dell'indicatore)
    - "Cross" (attraversamento)
 
-**FORMATO RICHIESTO per touch points:**
-\`\`\`
-[MM:SS] TOUCH POINT: Price €X.XXXX touching [INDICATORE] from [above/below] → [Bounce/Breakout/Cross]
-\`\`\`
+**FORMATO RICHIESTO per sezioni touch points:**
+## [MM:SS] Touch Point Analysis
+- [MM:SS] Price €X.XXXX touching [INDICATORE] from [above/below] → [Bounce/Breakout/Cross]
 
 **ESEMPIO:**
-\`\`\`
-[03:45] TOUCH POINT: Price €1.0823 touching SMA 50 from below → Bounce
-[07:12] TOUCH POINT: Price €1.0891 touching EMA 20 from above → Breakout
-[12:30] TOUCH POINT: Price €1.0765 touching Bollinger Band (lower) from above → Bounce
-\`\`\`
+## [03:45] SMA 50 Touch Points
+- [03:45] Price €1.0823 touching SMA 50 from below → Bounce
+- [07:12] Price €1.0891 touching EMA 20 from above → Breakout
+- [12:30] Price €1.0765 touching Bollinger Band (lower) from above → Bounce
 
-**IMPERATIVO:** Non saltare NESSUN touch point visibile nel grafico. 
-Anche tocchi che sembrano "minori" devono essere documentati con precisione assoluta.
+**IMPERATIVO:** 
+- Non saltare NESSUN touch point visibile nel grafico
+- Usa heading ## o ### per ogni sezione di analisi
+- NON usare mai testo in grassetto per titoli di sezione
+- Anche tocchi che sembrano "minori" devono essere documentati con precisione assoluta
 
 === FINE ISTRUZIONI CRITICHE ===
 `;
@@ -284,18 +295,25 @@ serve(async (req) => {
 
     // Combina prompt enhanced con istruzioni di output standard
     const analystPrompt = enhancedPrompt
-      ? `${customPrompt}
+      ? `${enhancedPrompt}
 
 FORMATO OUTPUT OBBLIGATORIO:
 - Genera Markdown valido e ben strutturato
-- Usa timestamp [MM:SS] per ogni sezione/evento importante
+- Usa heading Markdown standard (## per sezioni principali, ### per sotto-sezioni)
+- VIETATO usare testo in grassetto (**...**) per titoli di sezione - usa SOLO ## o ###
+- Usa timestamp [MM:SS] nei heading quando inizi nuove sezioni
 - Tabelle in formato Markdown standard (|...|)
 - Code blocks con linguaggio specificato (\`\`\`lang)
-- Grafici descritti con: tipo, assi, trend, valori chiave
+- Grafici descritti con heading ## [MM:SS] seguiti da lista puntata di dettagli
 
 IMPORTANTE: NON wrappare l'output in code blocks (\`\`\`markdown o \`\`\`md).
 Genera Markdown puro direttamente, senza delimitatori di blocco codice.
 Le tabelle vanno scritte direttamente con sintassi |...|, non dentro \`\`\`markdown.
+
+Esempio formato corretto per sezioni:
+## [00:04] Introduzione al Trading
+## [02:15] Analisi SMA 50
+### [02:30] Touch Points Identificati
 
 Inizia l'analisi dettagliata:`
       : VIDEO_TO_MARKDOWN_PROMPT; // Fallback al prompt statico
