@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
-import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudeVision, convertPdfToImage, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
+import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudePDF, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -119,34 +119,28 @@ serve(async (req) => {
           console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
           issuesDetected = ocrIssues;
 
-          // TRY CLAUDE VISION FIRST (contextual reasoning)
+          // TRY CLAUDE PDF FIRST (native PDF support with contextual reasoning)
           const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-          const cloudmersiveKey = Deno.env.get('CLOUDMERSIVE_API_KEY');
           
-          if (anthropicKey && cloudmersiveKey) {
+          if (anthropicKey) {
             try {
-              console.log('[Vision Enhancement] Attempting Claude Vision with Cloudmersive conversion...');
+              console.log('[Vision Enhancement] Attempting Claude PDF native processing...');
               const claudeStartTime = Date.now();
               
-              // Convert PDF to image
-              const imageData = await convertPdfToImage(pdfBuffer, cloudmersiveKey);
+              // Call Claude with native PDF support (no conversion needed!)
+              const claudeText = await enhanceWithClaudePDF(pdfBuffer, anthropicKey, ocrIssues);
               
-              if (imageData) {
-                // Call Claude with contextual prompt
-                const claudeText = await enhanceWithClaudeVision(imageData, anthropicKey, ocrIssues);
-                
-                if (claudeText && claudeText.length > 0) {
-                  superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
-                  visionEnhancementUsed = true;
-                  visionEngine = 'claude';
-                  console.log(`[Vision Enhancement] ✓ Claude Vision completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
-                }
+              if (claudeText && claudeText.length > 0) {
+                superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
+                visionEnhancementUsed = true;
+                visionEngine = 'claude';
+                console.log(`[Vision Enhancement] ✓ Claude PDF completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
               }
             } catch (claudeError) {
-              console.warn('[Vision Enhancement] Claude Vision failed, falling back to Google:', claudeError);
+              console.warn('[Vision Enhancement] Claude PDF failed, falling back to Google:', claudeError);
             }
           } else {
-            console.log('[Vision Enhancement] Claude/Cloudmersive not configured, trying Google Vision');
+            console.log('[Vision Enhancement] Claude not configured, trying Google Vision');
           }
 
           // FALLBACK TO GOOGLE VISION if Claude didn't succeed

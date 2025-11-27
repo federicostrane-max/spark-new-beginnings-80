@@ -54,79 +54,42 @@ export function detectOCRIssues(text: string): OCRIssue[] {
   return issues;
 }
 
-// ============= FUNCTION 2A: PDF TO IMAGE CONVERSION =============
+// ============= FUNCTION 2A: PDF TO IMAGE CONVERSION (DEPRECATED) =============
 
+/**
+ * @deprecated Cloudmersive conversion is no longer needed.
+ * Claude 3.5 Sonnet now supports native PDF input via the Messages API.
+ * This function is kept for potential future use cases only.
+ */
 export async function convertPdfToImage(
   pdfBuffer: Uint8Array,
   cloudmersiveKey: string
 ): Promise<{ base64: string; mediaType: string } | null> {
-  console.log('[Vision Enhancement] Converting PDF to image via Cloudmersive');
-  console.log(`[Vision Enhancement] PDF buffer size: ${pdfBuffer.length} bytes`);
-
-  try {
-    const formData = new FormData();
-    const file = new File([pdfBuffer as unknown as BlobPart], 'document.pdf', { type: 'application/pdf' });
-    formData.append('file', file);
-
-    console.log('[Vision Enhancement] Calling Cloudmersive API (single PNG conversion)...');
-    
-    // Use endpoint that returns SINGLE PNG image
-    const response = await fetch(
-      'https://api.cloudmersive.com/convert/document/pdf/to/png/single',
-      {
-        method: 'POST',
-        headers: { 'Apikey': cloudmersiveKey },
-        body: formData
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Vision Enhancement] Cloudmersive error ${response.status}:`, errorText);
-      return null;
-    }
-
-    const imageBuffer = await response.arrayBuffer();
-    const imageBytes = new Uint8Array(imageBuffer);
-    
-    // Validate it's not a ZIP file (ZIP starts with 0x50 0x4B "PK")
-    if (imageBytes[0] === 0x50 && imageBytes[1] === 0x4B) {
-      console.error('[Vision Enhancement] Received ZIP instead of image - wrong endpoint');
-      return null;
-    }
-    
-    // Detect image type from magic bytes
-    let mediaType = 'image/png'; // default
-    if (imageBytes[0] === 0xFF && imageBytes[1] === 0xD8) {
-      mediaType = 'image/jpeg';
-      console.log('[Vision Enhancement] Detected JPEG format');
-    } else if (imageBytes[0] === 0x89 && imageBytes[1] === 0x50) {
-      mediaType = 'image/png';
-      console.log('[Vision Enhancement] Detected PNG format');
-    }
-    
-    const base64Image = encodeBase64(imageBytes);
-    console.log(`[Vision Enhancement] PDF converted to ${mediaType}, base64 length: ${base64Image.length} chars`);
-    
-    return { base64: base64Image, mediaType };
-
-  } catch (error) {
-    console.error('[Vision Enhancement] Exception in convertPdfToImage:', error);
-    return null;
-  }
+  console.warn('[Vision Enhancement] convertPdfToImage is DEPRECATED - Claude now supports native PDF');
+  return null;
 }
 
-// ============= FUNCTION 2B: CLAUDE VISION WITH CONTEXTUAL REASONING =============
+// ============= FUNCTION 2B: CLAUDE PDF WITH CONTEXTUAL REASONING =============
 
-export async function enhanceWithClaudeVision(
-  imageData: { base64: string; mediaType: string },
+/**
+ * Enhances extracted text using Claude's native PDF support (Nov 2024 feature)
+ * Eliminates the need for PDF-to-image conversion via Cloudmersive
+ * @param pdfBuffer Raw PDF file buffer
+ * @param anthropicKey Anthropic API key
+ * @param ocrIssues Array of detected OCR issues to guide Claude's contextual reasoning
+ */
+export async function enhanceWithClaudePDF(
+  pdfBuffer: Uint8Array,
   anthropicKey: string,
   ocrIssues: OCRIssue[]
 ): Promise<string | null> {
-  console.log('[Vision Enhancement] Starting Claude Vision analysis');
-  console.log(`[Vision Enhancement] Image base64 length: ${imageData.base64.length} chars, media type: ${imageData.mediaType}, OCR issues: ${ocrIssues.length}`);
+  console.log('[Vision Enhancement] Using Claude native PDF support (no conversion needed)');
+  console.log(`[Vision Enhancement] PDF buffer size: ${pdfBuffer.length} bytes, OCR issues: ${ocrIssues.length}`);
 
   try {
+    const base64Pdf = encodeBase64(pdfBuffer);
+    console.log(`[Vision Enhancement] PDF encoded to base64: ${base64Pdf.length} chars`);
+    
     const issuesList = ocrIssues.map(i => `- ${i.type}: "${i.pattern}"`).join('\n');
     
     const contextualPrompt = `Trascrivi TUTTO il testo visibile in questo documento con MASSIMA PRECISIONE.
@@ -151,12 +114,13 @@ ISTRUZIONI PER TESTO CORROTTO:
 OBIETTIVO: Produrre una trascrizione accurata dove le date ambigue 
 sono RISOLTE usando il contesto disponibile nel documento stesso.`;
 
-    console.log('[Vision Enhancement] Calling Claude API...');
+    console.log('[Vision Enhancement] Calling Claude API with native PDF...');
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'x-api-key': anthropicKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25', // Beta header for native PDF support
         'content-type': 'application/json'
       },
       body: JSON.stringify({
@@ -166,11 +130,11 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
           role: 'user',
           content: [
             {
-              type: 'image',
+              type: 'document',
               source: {
                 type: 'base64',
-                media_type: imageData.mediaType,
-                data: imageData.base64
+                media_type: 'application/pdf',
+                data: base64Pdf
               }
             },
             {
@@ -191,16 +155,29 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
     const result = await response.json();
     const extractedText = result.content?.[0]?.text;
     
-    console.log(`[Vision Enhancement] Claude extracted ${extractedText?.length || 0} characters`);
+    console.log(`[Vision Enhancement] Claude PDF extraction successful: ${extractedText?.length || 0} characters`);
     return extractedText || null;
 
   } catch (error) {
-    console.error('[Vision Enhancement] Exception in enhanceWithClaudeVision:', error);
+    console.error('[Vision Enhancement] Exception in enhanceWithClaudePDF:', error);
     throw error;
   }
 }
 
-// ============= FUNCTION 2C: GOOGLE VISION API CALL =============
+/**
+ * @deprecated Use enhanceWithClaudePDF instead.
+ * This function is kept for backwards compatibility only.
+ */
+export async function enhanceWithClaudeVision(
+  imageData: { base64: string; mediaType: string },
+  anthropicKey: string,
+  ocrIssues: OCRIssue[]
+): Promise<string | null> {
+  console.warn('[Vision Enhancement] enhanceWithClaudeVision is DEPRECATED - use enhanceWithClaudePDF instead');
+  return null;
+}
+
+// ============= FUNCTION 2C: GOOGLE VISION API CALL (FALLBACK) =============
 
 export async function enhanceWithVisionAPI(
   pdfBuffer: Uint8Array,
