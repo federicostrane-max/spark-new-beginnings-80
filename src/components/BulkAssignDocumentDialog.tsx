@@ -29,7 +29,7 @@ interface KnowledgeDocument {
   pipeline?: 'a' | 'b' | 'c' | 'a-hybrid';
 }
 
-type PipelineType = 'pipeline_a' | 'pipeline_b' | 'pipeline_c';
+type PipelineType = 'pipeline_a' | 'pipeline_a_hybrid' | 'pipeline_b' | 'pipeline_c';
 
 interface BulkAssignDocumentDialogProps {
   documentIds?: string[];       // For manual selection (max ~100 docs)
@@ -65,14 +65,19 @@ export const BulkAssignDocumentDialog = ({
 
     try {
       if (folderName) {
-        // Folder-based: query ALL FOUR pipelines
+        // Folder-based: query ALL pipelines (A, A-Hybrid, B, C)
         const [
-          pipelineATotal, pipelineBTotal, pipelineCTotal,
-          pipelineAValid, pipelineBValid, pipelineCValid
+          pipelineATotal, pipelineAHybridTotal, pipelineBTotal, pipelineCTotal,
+          pipelineAValid, pipelineAHybridValid, pipelineBValid, pipelineCValid
         ] = await Promise.all([
           // Pipeline A total (with folder)
           supabase
             .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .like("folder", `${folderName}%`),
+          // Pipeline A-Hybrid total (with folder)
+          supabase
+            .from("pipeline_a_hybrid_documents")
             .select("id", { count: 'exact', head: true })
             .like("folder", `${folderName}%`),
           // Pipeline B total (with folder)
@@ -91,6 +96,12 @@ export const BulkAssignDocumentDialog = ({
             .select("id", { count: 'exact', head: true })
             .like("folder", `${folderName}%`)
             .eq("status", "ready"),
+          // Pipeline A-Hybrid valid
+          supabase
+            .from("pipeline_a_hybrid_documents")
+            .select("id", { count: 'exact', head: true })
+            .like("folder", `${folderName}%`)
+            .eq("status", "ready"),
           // Pipeline B valid
           supabase
             .from("pipeline_b_documents")
@@ -105,8 +116,8 @@ export const BulkAssignDocumentDialog = ({
             .eq("status", "ready")
         ]);
 
-        const totalCount = (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const totalCount = (pipelineATotal.count || 0) + (pipelineAHybridTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (pipelineAValid.count || 0) + (pipelineAHybridValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
         
         console.log('[BulkAssign] Folder mode counts:', {
           folderName,
@@ -121,15 +132,20 @@ export const BulkAssignDocumentDialog = ({
         setValidatedCount(validCount);
         setProcessingCount(0); // Folder mode doesn't track processing
       } else if (documentIds && documentIds.length > 0) {
-        // Manual selection: check ALL THREE pipelines
+        // Manual selection: check ALL pipelines (A, A-Hybrid, B, C)
         const [
-          pipelineATotal, pipelineBTotal, pipelineCTotal,
-          pipelineAValid, pipelineBValid, pipelineCValid,
-          pipelineAProcessing, pipelineBProcessing, pipelineCProcessing
+          pipelineATotal, pipelineAHybridTotal, pipelineBTotal, pipelineCTotal,
+          pipelineAValid, pipelineAHybridValid, pipelineBValid, pipelineCValid,
+          pipelineAProcessing, pipelineAHybridProcessing, pipelineBProcessing, pipelineCProcessing
         ] = await Promise.all([
           // Pipeline A total
           supabase
             .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds),
+          // Pipeline A-Hybrid total
+          supabase
+            .from("pipeline_a_hybrid_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds),
           // Pipeline B total
@@ -145,6 +161,12 @@ export const BulkAssignDocumentDialog = ({
           // Pipeline A valid
           supabase
             .from("pipeline_a_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .eq("status", "ready"),
+          // Pipeline A-Hybrid valid
+          supabase
+            .from("pipeline_a_hybrid_documents")
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
             .eq("status", "ready"),
@@ -166,6 +188,12 @@ export const BulkAssignDocumentDialog = ({
             .select("id", { count: 'exact', head: true })
             .in("id", documentIds)
             .in("status", ["ingested", "processing", "chunked"]),
+          // Pipeline A-Hybrid processing
+          supabase
+            .from("pipeline_a_hybrid_documents")
+            .select("id", { count: 'exact', head: true })
+            .in("id", documentIds)
+            .in("status", ["ingested", "processing", "chunked"]),
           // Pipeline B processing
           supabase
             .from("pipeline_b_documents")
@@ -182,19 +210,22 @@ export const BulkAssignDocumentDialog = ({
         
         console.log('[BulkAssign] Query results:', {
           pipelineATotal: pipelineATotal.count,
+          pipelineAHybridTotal: pipelineAHybridTotal.count,
           pipelineBTotal: pipelineBTotal.count,
           pipelineCTotal: pipelineCTotal.count,
           pipelineAValid: pipelineAValid.count,
+          pipelineAHybridValid: pipelineAHybridValid.count,
           pipelineBValid: pipelineBValid.count,
           pipelineCValid: pipelineCValid.count,
           pipelineAProcessing: pipelineAProcessing.count,
+          pipelineAHybridProcessing: pipelineAHybridProcessing.count,
           pipelineBProcessing: pipelineBProcessing.count,
           pipelineCProcessing: pipelineCProcessing.count
         });
 
-        const totalCount = (pipelineATotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
-        const validCount = (pipelineAValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
-        const processingCount = (pipelineAProcessing.count || 0) + (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
+        const totalCount = (pipelineATotal.count || 0) + (pipelineAHybridTotal.count || 0) + (pipelineBTotal.count || 0) + (pipelineCTotal.count || 0);
+        const validCount = (pipelineAValid.count || 0) + (pipelineAHybridValid.count || 0) + (pipelineBValid.count || 0) + (pipelineCValid.count || 0);
+        const processingCount = (pipelineAProcessing.count || 0) + (pipelineAHybridProcessing.count || 0) + (pipelineBProcessing.count || 0) + (pipelineCProcessing.count || 0);
         
         console.log('[BulkAssign] Calculated counts:', {
           totalCount,
@@ -250,6 +281,25 @@ export const BulkAssignDocumentDialog = ({
         console.log('[BulkAssignDocumentDialog] 📡 Pipeline B channel status:', status);
       });
 
+    // Realtime subscription for Pipeline A-Hybrid documents
+    const channelAHybrid = supabase
+      .channel('bulk-assign-pipeline-a-hybrid-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pipeline_a_hybrid_documents'
+        },
+        (payload) => {
+          console.log('[BulkAssignDocumentDialog] 🔔 Pipeline A-Hybrid document updated:', payload.new);
+          countDocuments();
+        }
+      )
+      .subscribe((status) => {
+        console.log('[BulkAssignDocumentDialog] 📡 Pipeline A-Hybrid channel status:', status);
+      });
+
     // Realtime subscription for Pipeline C documents
     const channelC = supabase
       .channel('bulk-assign-pipeline-c-changes')
@@ -272,6 +322,7 @@ export const BulkAssignDocumentDialog = ({
     return () => {
       if (interval) clearInterval(interval);
       supabase.removeChannel(channelB);
+      supabase.removeChannel(channelAHybrid);
       supabase.removeChannel(channelC);
     };
   }, [open, processingCount, documentIds, folderName]);
@@ -299,6 +350,14 @@ export const BulkAssignDocumentDialog = ({
           const { data: aAssignments } = await supabase.from('pipeline_a_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', aChunks.map(c => c.id));
           const chunkToDoc = new Map(aChunks.map(c => [c.id, c.document_id]));
           allAssignments.push(...(aAssignments || []).map(a => ({ agent_id: a.agent_id, document_id: chunkToDoc.get(a.chunk_id)! })));
+        }
+        
+        // Pipeline A-Hybrid
+        const { data: aHybridChunks } = await supabase.from('pipeline_a_hybrid_chunks_raw').select('id, document_id').in('document_id', documentIds);
+        if (aHybridChunks && aHybridChunks.length > 0) {
+          const { data: aHybridAssignments } = await supabase.from('pipeline_a_hybrid_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', aHybridChunks.map(c => c.id));
+          const chunkToDoc = new Map(aHybridChunks.map(c => [c.id, c.document_id]));
+          allAssignments.push(...(aHybridAssignments || []).map(a => ({ agent_id: a.agent_id, document_id: chunkToDoc.get(a.chunk_id)! })));
         }
         
         // Pipeline B
@@ -392,6 +451,25 @@ export const BulkAssignDocumentDialog = ({
         agent_id: a.agent_id,
         document_id: chunkToDoc.get(a.chunk_id)!
       }));
+    } else if (pipeline === 'pipeline_a_hybrid') {
+      const { data } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id, document_id')
+        .in('document_id', documentIds);
+      
+      if (!data) return [];
+      
+      const chunkIds = data.map(c => c.id);
+      const { data: assignments } = await supabase
+        .from('pipeline_a_hybrid_agent_knowledge')
+        .select('agent_id, chunk_id')
+        .in('chunk_id', chunkIds);
+      
+      const chunkToDoc = new Map(data.map(c => [c.id, c.document_id]));
+      return (assignments || []).map(a => ({
+        agent_id: a.agent_id,
+        document_id: chunkToDoc.get(a.chunk_id)!
+      }));
     } else if (pipeline === 'pipeline_b') {
       const { data } = await supabase
         .from('pipeline_b_chunks_raw')
@@ -448,6 +526,24 @@ export const BulkAssignDocumentDialog = ({
       
       const { error } = await supabase
         .from('pipeline_a_agent_knowledge')
+        .delete()
+        .in('agent_id', agentIds)
+        .in('chunk_id', chunks.map(c => c.id));
+      
+      if (error) throw error;
+    } else if (pipeline === 'pipeline_a_hybrid') {
+      const docIds = [...new Set(toDelete.map(x => x.document_id))];
+      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
+      
+      const { data: chunks } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id')
+        .in('document_id', docIds);
+      
+      if (!chunks) return;
+      
+      const { error } = await supabase
+        .from('pipeline_a_hybrid_agent_knowledge')
         .delete()
         .in('agent_id', agentIds)
         .in('chunk_id', chunks.map(c => c.id));
@@ -522,10 +618,15 @@ export const BulkAssignDocumentDialog = ({
       const allValidatedDocs: Array<{ id: string; pipeline: string }> = [];
       
       if (folderName) {
-        // Folder-based: fetch from ALL THREE pipelines
-        const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+        // Folder-based: fetch from ALL pipelines
+        const [pipelineADocs, pipelineAHybridDocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
           supabase
             .from("pipeline_a_documents")
+            .select("id")
+            .like("folder", `${folderName}%`)
+            .eq("status", "ready"),
+          supabase
+            .from("pipeline_a_hybrid_documents")
             .select("id")
             .like("folder", `${folderName}%`)
             .eq("status", "ready"),
@@ -542,21 +643,28 @@ export const BulkAssignDocumentDialog = ({
         ]);
         
         if (pipelineADocs.error) throw pipelineADocs.error;
+        if (pipelineAHybridDocs.error) throw pipelineAHybridDocs.error;
         if (pipelineBDocs.error) throw pipelineBDocs.error;
         if (pipelineCDocs.error) throw pipelineCDocs.error;
         
         allValidatedDocs.push(
           ...(pipelineADocs.data || []).map(d => ({ id: d.id, pipeline: 'a' })),
+          ...(pipelineAHybridDocs.data || []).map(d => ({ id: d.id, pipeline: 'a-hybrid' })),
           ...(pipelineBDocs.data || []).map(d => ({ id: d.id, pipeline: 'b' })),
           ...(pipelineCDocs.data || []).map(d => ({ id: d.id, pipeline: 'c' }))
         );
         
-        console.log(`Folder documents: Pipeline A: ${pipelineADocs.data?.length || 0}, B: ${pipelineBDocs.data?.length || 0}, C: ${pipelineCDocs.data?.length || 0}`);
+        console.log(`Folder documents: Pipeline A: ${pipelineADocs.data?.length || 0}, A-Hybrid: ${pipelineAHybridDocs.data?.length || 0}, B: ${pipelineBDocs.data?.length || 0}, C: ${pipelineCDocs.data?.length || 0}`);
       } else if (documentIds) {
-        // Manual selection: fetch from ALL THREE pipelines
-        const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+        // Manual selection: fetch from ALL pipelines
+        const [pipelineADocs, pipelineAHybridDocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
           supabase
             .from("pipeline_a_documents")
+            .select("id")
+            .in("id", documentIds)
+            .eq("status", "ready"),
+          supabase
+            .from("pipeline_a_hybrid_documents")
             .select("id")
             .in("id", documentIds)
             .eq("status", "ready"),
@@ -573,15 +681,17 @@ export const BulkAssignDocumentDialog = ({
         ]);
         
         if (pipelineADocs.error) throw pipelineADocs.error;
+        if (pipelineAHybridDocs.error) throw pipelineAHybridDocs.error;
         if (pipelineBDocs.error) throw pipelineBDocs.error;
         if (pipelineCDocs.error) throw pipelineCDocs.error;
         
         allValidatedDocs.push(
           ...(pipelineADocs.data || []).map(d => ({ id: d.id, pipeline: 'a' })),
+          ...(pipelineAHybridDocs.data || []).map(d => ({ id: d.id, pipeline: 'a-hybrid' })),
           ...(pipelineBDocs.data || []).map(d => ({ id: d.id, pipeline: 'b' })),
           ...(pipelineCDocs.data || []).map(d => ({ id: d.id, pipeline: 'c' }))
         );
-        console.log(`Manual selection: Pipeline A: ${pipelineADocs.data?.length || 0}, B: ${pipelineBDocs.data?.length || 0}, C: ${pipelineCDocs.data?.length || 0}`);
+        console.log(`Manual selection: Pipeline A: ${pipelineADocs.data?.length || 0}, A-Hybrid: ${pipelineAHybridDocs.data?.length || 0}, B: ${pipelineBDocs.data?.length || 0}, C: ${pipelineCDocs.data?.length || 0}`);
       }
 
       const validatedDocs = allValidatedDocs;
@@ -603,11 +713,12 @@ export const BulkAssignDocumentDialog = ({
       // Group docs by pipeline
       const docsByPipeline = {
         pipeline_a: validatedDocs.filter(d => d.pipeline === 'a').map(d => d.id),
+        pipeline_a_hybrid: validatedDocs.filter(d => d.pipeline === 'a-hybrid').map(d => d.id),
         pipeline_b: validatedDocs.filter(d => d.pipeline === 'b').map(d => d.id),
         pipeline_c: validatedDocs.filter(d => d.pipeline === 'c').map(d => d.id)
       };
       
-      console.log(`Fetching assignments - Pipeline A: ${docsByPipeline.pipeline_a.length}, Pipeline B: ${docsByPipeline.pipeline_b.length}, Pipeline C: ${docsByPipeline.pipeline_c.length}`);
+      console.log(`Fetching assignments - Pipeline A: ${docsByPipeline.pipeline_a.length}, A-Hybrid: ${docsByPipeline.pipeline_a_hybrid.length}, B: ${docsByPipeline.pipeline_b.length}, C: ${docsByPipeline.pipeline_c.length}`);
       
       // Fetch assignments for each pipeline separately
       for (const [pipelineType, docIds] of Object.entries(docsByPipeline)) {
@@ -670,6 +781,7 @@ export const BulkAssignDocumentDialog = ({
         // Group deletions by pipeline
         const deletesByPipeline: Record<string, typeof toDelete> = {
           pipeline_a: [],
+          pipeline_a_hybrid: [],
           pipeline_b: [],
           pipeline_c: []
         };
@@ -678,7 +790,7 @@ export const BulkAssignDocumentDialog = ({
           const doc = validatedDocs.find(d => d.id === del.document_id);
           if (!doc) return;
           
-          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
+          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'a-hybrid' ? 'pipeline_a_hybrid' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
           deletesByPipeline[key].push(del);
         });
         
@@ -701,6 +813,7 @@ export const BulkAssignDocumentDialog = ({
         // Group insertions by pipeline
         const insertsByPipeline: Record<string, typeof toInsert> = {
           pipeline_a: [],
+          pipeline_a_hybrid: [],
           pipeline_b: [],
           pipeline_c: []
         };
@@ -709,11 +822,11 @@ export const BulkAssignDocumentDialog = ({
           const doc = validatedDocs.find(d => d.id === ins.document_id);
           if (!doc) return;
           
-          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
+          const key = doc.pipeline === 'a' ? 'pipeline_a' : doc.pipeline === 'a-hybrid' ? 'pipeline_a_hybrid' : doc.pipeline === 'b' ? 'pipeline_b' : 'pipeline_c';
           insertsByPipeline[key].push(ins);
         });
         
-        // Execute insertions per pipeline - Pipeline A/B/C use edge function
+        // Execute insertions per pipeline - All pipelines use edge function
         for (const [pipelineType, items] of Object.entries(insertsByPipeline)) {
           if (items.length === 0) continue;
           
@@ -721,7 +834,7 @@ export const BulkAssignDocumentDialog = ({
           
           // All pipelines use edge function for assignment
           for (const item of items) {
-            const pipeline = pipelineType === 'pipeline_a' ? 'a' : pipelineType === 'pipeline_b' ? 'b' : 'c';
+            const pipeline = pipelineType === 'pipeline_a' ? 'a' : pipelineType === 'pipeline_a_hybrid' ? 'a-hybrid' : pipelineType === 'pipeline_b' ? 'b' : 'c';
             await supabase.functions.invoke('assign-document-to-agent', {
               body: {
                 agentId: item.agent_id,

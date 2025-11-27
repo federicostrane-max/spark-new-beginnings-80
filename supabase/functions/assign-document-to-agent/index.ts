@@ -8,7 +8,7 @@ const corsHeaders = {
 interface AssignRequest {
   agentId: string;
   documentId: string;
-  pipeline?: 'a' | 'b' | 'c';
+  pipeline?: 'a' | 'a-hybrid' | 'b' | 'c';
 }
 
 Deno.serve(async (req) => {
@@ -47,6 +47,29 @@ Deno.serve(async (req) => {
         console.error('[assign-document-to-agent] Pipeline A document not ready:', document.status);
         return new Response(
           JSON.stringify({ error: `Pipeline A document not ready (status: ${document.status})` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (pipeline === 'a-hybrid') {
+      // Pipeline A-Hybrid: Check status='ready' in pipeline_a_hybrid_documents
+      const { data: document, error: docError } = await supabase
+        .from('pipeline_a_hybrid_documents')
+        .select('id, file_name, status')
+        .eq('id', documentId)
+        .single();
+
+      if (docError || !document) {
+        console.error('[assign-document-to-agent] Pipeline A-Hybrid document not found:', docError);
+        return new Response(
+          JSON.stringify({ error: 'Pipeline A-Hybrid document not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (document.status !== 'ready') {
+        console.error('[assign-document-to-agent] Pipeline A-Hybrid document not ready:', document.status);
+        return new Response(
+          JSON.stringify({ error: `Pipeline A-Hybrid document not ready (status: ${document.status})` }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -100,7 +123,7 @@ Deno.serve(async (req) => {
       // Unsupported pipeline
       console.error('[assign-document-to-agent] Unsupported pipeline type:', pipeline);
       return new Response(
-        JSON.stringify({ error: `Unsupported pipeline type: ${pipeline}. Only 'a', 'b', 'c' are supported.` }),
+        JSON.stringify({ error: `Unsupported pipeline type: ${pipeline}. Only 'a', 'a-hybrid', 'b', 'c' are supported.` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -140,7 +163,42 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Handle Pipeline B assignment differently (no agent_document_links)
+    // 3. Handle Pipeline A-Hybrid assignment
+    if (pipeline === 'a-hybrid') {
+      console.log('[assign-document-to-agent] Pipeline A-Hybrid: Syncing directly to agent knowledge');
+      
+      // Invoke pipeline-a-hybrid-sync-agent to sync chunks directly
+      const { data: syncData, error: syncError } = await supabase.functions.invoke(
+        'pipeline-a-hybrid-sync-agent',
+        {
+          body: {
+            agentId: agentId,
+            documentIds: [documentId]
+          }
+        }
+      );
+
+      if (syncError) {
+        console.error('[assign-document-to-agent] Pipeline A-Hybrid sync error:', syncError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to sync Pipeline A-Hybrid document to agent' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[assign-document-to-agent] ✅ Pipeline A-Hybrid sync completed: ${syncData?.synced || 0} chunks`);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: `Pipeline A-Hybrid document assigned successfully (${syncData?.synced || 0} chunks synced)`,
+          synced: syncData?.synced || 0
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 4. Handle Pipeline B assignment differently (no agent_document_links)
     if (pipeline === 'b') {
       console.log('[assign-document-to-agent] Pipeline B: Syncing directly to agent knowledge');
       
@@ -175,7 +233,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 4. Handle Pipeline C assignment differently (no agent_document_links)
+    // 5. Handle Pipeline C assignment differently (no agent_document_links)
     if (pipeline === 'c') {
       console.log('[assign-document-to-agent] Pipeline C: Syncing directly to agent knowledge');
       
