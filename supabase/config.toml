@@ -152,10 +152,6 @@ verify_jwt = true
 [functions.update-alignment-prompt]
 verify_jwt = true
 
-[functions.import-github-markdown]
-verify_jwt = true
-timeout = 300
-
 [functions.cleanup-broken-pdfs]
 verify_jwt = false
 

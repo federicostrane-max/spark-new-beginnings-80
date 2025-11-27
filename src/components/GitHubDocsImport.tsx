@@ -88,21 +88,18 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       
       toast.loading(`Importazione di tutti i repository da ${orgName}...`, { id: 'org-github-import' });
 
-      // Pipeline A uses dedicated GitHub ingest function
+      // Route to correct pipeline function
       const functionName = selectedPipeline === 'pipeline_a' 
         ? 'pipeline-a-ingest-github' 
-        : 'import-github-markdown';
+        : selectedPipeline === 'pipeline_b'
+        ? 'pipeline-b-ingest-github'
+        : 'pipeline-c-ingest-github'; // Not implemented yet, will need to be created
 
-      const requestBody = selectedPipeline === 'pipeline_a'
-        ? { repoUrl: orgName, importAllOrgRepos: true }
-        : {
-            repo: orgName,
-            path: "",
-            maxFiles: 999999,
-            filePattern: "*.md",
-            importAllOrgRepos: true,
-            pipeline: selectedPipeline
-          };
+      // All pipelines now use the same body format
+      const requestBody = { 
+        repoUrl: orgName, 
+        importAllOrgRepos: true 
+      };
 
       const { data, error } = await supabase.functions.invoke(functionName, {
         body: requestBody
