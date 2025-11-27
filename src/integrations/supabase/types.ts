@@ -1122,6 +1122,51 @@ export type Database = {
           },
         ]
       }
+      llamaparse_debug_logs: {
+        Row: {
+          bbox_format: string | null
+          created_at: string | null
+          document_name: string
+          element_types_found: string[] | null
+          has_bounding_boxes: boolean | null
+          has_reading_order: boolean | null
+          id: string
+          image_format: string | null
+          images_info: Json | null
+          parse_settings: Json
+          raw_json_output: Json | null
+          total_elements: number | null
+        }
+        Insert: {
+          bbox_format?: string | null
+          created_at?: string | null
+          document_name: string
+          element_types_found?: string[] | null
+          has_bounding_boxes?: boolean | null
+          has_reading_order?: boolean | null
+          id?: string
+          image_format?: string | null
+          images_info?: Json | null
+          parse_settings: Json
+          raw_json_output?: Json | null
+          total_elements?: number | null
+        }
+        Update: {
+          bbox_format?: string | null
+          created_at?: string | null
+          document_name?: string
+          element_types_found?: string[] | null
+          has_bounding_boxes?: boolean | null
+          has_reading_order?: boolean | null
+          id?: string
+          image_format?: string | null
+          images_info?: Json | null
+          parse_settings?: Json
+          raw_json_output?: Json | null
+          total_elements?: number | null
+        }
+        Relationships: []
+      }
       maintenance_execution_logs: {
         Row: {
           agents_sync_failed: number | null

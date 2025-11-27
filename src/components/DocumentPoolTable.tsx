@@ -54,6 +54,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Github,
+  FlaskConical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -67,6 +68,7 @@ import { RenameFolderDialog } from "./RenameFolderDialog";
 import { FolderTreeView } from "./FolderTreeView";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DocumentPoolHealthIndicators } from "./DocumentPoolHealthIndicators";
+import { LlamaParseTestResultDialog } from "./LlamaParseTestResultDialog";
 import {
   Tooltip,
   TooltipContent,
@@ -165,6 +167,11 @@ export const DocumentPoolTable = () => {
   const [pageSize] = useState(100); // 100 documenti per pagina
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
+
+  // Test LlamaParse Layout state
+  const [testingDocumentId, setTestingDocumentId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [showTestDialog, setShowTestDialog] = useState(false);
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1331,6 +1338,41 @@ export const DocumentPoolTable = () => {
     }
   };
 
+  const handleTestLayout = async (documentId: string) => {
+    try {
+      setTestingDocumentId(documentId);
+      toast.loading('Avvio test LlamaParse Layout JSON...', { id: 'test-layout' });
+
+      const { data, error } = await supabase.functions.invoke('test-llamaparse-layout', {
+        body: { documentId }
+      });
+
+      toast.dismiss('test-layout');
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Test fallito');
+      }
+
+      setTestResult(data);
+      setShowTestDialog(true);
+      toast.success('Test completato con successo');
+    } catch (error: any) {
+      console.error('[DocumentPoolTable] Test error:', error);
+      toast.error(`Errore nel test: ${error.message}`);
+      setTestResult({
+        success: false,
+        error: error.message
+      });
+      setShowTestDialog(true);
+    } finally {
+      setTestingDocumentId(null);
+    }
+  };
+
   const handleBulkDocumentSelect = (docIds: string[], shouldSelect: boolean, folderName?: string) => {
     // Questa funzione è usata per selezioni MANUALI con checkbox
     // NON deve impostare selectedFolderForAssignment - quello è riservato a "Assegna tutta la cartella"
@@ -1962,6 +2004,22 @@ export const DocumentPoolTable = () => {
                       >
                         <Info className="h-3.5 w-3.5" />
                       </Button>
+                      {doc.pipeline === 'a' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleTestLayout(doc.id)}
+                          disabled={testingDocumentId === doc.id}
+                          className="text-purple-600 h-8 w-8 p-0"
+                          title="Test Layout JSON - Analizza struttura LlamaParse"
+                        >
+                          {testingDocumentId === doc.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <FlaskConical className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      )}
                       {doc.validation_status === "validating" && (
                         <Button
                           size="sm"
@@ -2393,6 +2451,13 @@ export const DocumentPoolTable = () => {
           loadFolders();
           setFolderToRename(null);
         }}
+      />
+
+      {/* LlamaParse Test Result Dialog */}
+      <LlamaParseTestResultDialog
+        open={showTestDialog}
+        onOpenChange={setShowTestDialog}
+        result={testResult}
       />
 
       {/* Delete Confirmation Dialog */}

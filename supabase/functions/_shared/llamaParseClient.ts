@@ -50,6 +50,21 @@ export interface LlamaParseResult {
   status: 'SUCCESS';
 }
 
+export interface LlamaParseJsonResult {
+  jobId: string;
+  rawJson: any;
+  status: 'SUCCESS';
+}
+
+export interface LlamaParseLayoutElement {
+  type: string;
+  content?: string;
+  bbox?: any;
+  page?: number;
+  reading_order?: number;
+  [key: string]: any; // For undiscovered fields
+}
+
 /**
  * Upload PDF to LlamaParse for processing
  * @param pdfBuffer - PDF file as Uint8Array
@@ -174,6 +189,115 @@ export async function getMarkdownResult(
     
     return markdown;
   }, 3, 1000, 'LlamaParse getMarkdown');
+}
+
+/**
+ * Upload PDF to LlamaParse for JSON + Layout extraction
+ * @param pdfBuffer - PDF file as Uint8Array
+ * @param fileName - Original file name
+ * @param apiKey - LlamaParse API key
+ * @returns Job ID for status polling
+ */
+export async function uploadToLlamaParseJson(
+  pdfBuffer: Uint8Array,
+  fileName: string,
+  apiKey: string
+): Promise<string> {
+  console.log(`[LlamaParse] Uploading ${fileName} for JSON extraction with layout (${pdfBuffer.length} bytes)`);
+
+  return retryWithBackoff(async () => {
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
+    formData.append('file', blob, fileName);
+    
+    // Enable JSON output with layout extraction
+    formData.append('vendor_multimodal_mode', 'true');
+    formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
+    formData.append('result_type', 'json');
+    formData.append('extract_layout', 'true');
+    formData.append('extract_images', 'true');
+    formData.append('language', 'it');
+
+    const response = await fetch(`${LLAMAPARSE_API_BASE}/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LlamaParse upload failed (${response.status}): ${errorText}`);
+    }
+
+    const data: LlamaParseUploadResponse = await response.json();
+    console.log(`[LlamaParse] Upload successful, job_id: ${data.id}`);
+    
+    return data.id;
+  }, 3, 1000, 'LlamaParse JSON upload');
+}
+
+/**
+ * Get JSON result from completed job
+ * @param jobId - Job ID
+ * @param apiKey - LlamaParse API key
+ * @returns Parsed JSON content with layout
+ */
+export async function getJsonResult(
+  jobId: string,
+  apiKey: string
+): Promise<any> {
+  return retryWithBackoff(async () => {
+    const response = await fetch(`${LLAMAPARSE_API_BASE}/job/${jobId}/result/json`, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`LlamaParse JSON result fetch failed (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[LlamaParse] Retrieved JSON with ${JSON.stringify(data).length} characters`);
+    
+    return data;
+  }, 3, 1000, 'LlamaParse getJson');
+}
+
+/**
+ * Complete PDF to JSON + Layout extraction workflow
+ * @param pdfBuffer - PDF file as Uint8Array
+ * @param fileName - Original file name
+ * @param apiKey - LlamaParse API key
+ * @returns JSON content with layout and job ID
+ */
+export async function extractJsonWithLayout(
+  pdfBuffer: Uint8Array,
+  fileName: string,
+  apiKey: string
+): Promise<LlamaParseJsonResult> {
+  // Step 1: Upload PDF with JSON + layout settings
+  const jobId = await uploadToLlamaParseJson(pdfBuffer, fileName, apiKey);
+  
+  // Step 2: Poll until complete
+  const jobStatus = await pollJobUntilComplete(jobId, apiKey);
+  
+  // Step 3: Extract JSON
+  let rawJson: any;
+  if (jobStatus.result) {
+    rawJson = jobStatus.result;
+  } else {
+    rawJson = await getJsonResult(jobId, apiKey);
+  }
+
+  return {
+    jobId,
+    rawJson,
+    status: 'SUCCESS',
+  };
 }
 
 /**
