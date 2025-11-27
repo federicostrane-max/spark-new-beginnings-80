@@ -154,6 +154,20 @@ schedule = "*/5 * * * *"
 
 [functions.pipeline-a-sync-agent]
 verify_jwt = true
+
+[functions.pipeline-a-hybrid-ingest-pdf]
+verify_jwt = true
+
+[functions.pipeline-a-hybrid-process-chunks]
+verify_jwt = true
+schedule = "*/10 * * * *"
+
+[functions.pipeline-a-hybrid-generate-embeddings]
+verify_jwt = true
+schedule = "*/5 * * * *"
+
+[functions.pipeline-a-hybrid-sync-agent]
+verify_jwt = true
 timeout = 60
 
 [functions.pipeline-a-ingest-video]

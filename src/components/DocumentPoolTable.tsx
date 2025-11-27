@@ -110,7 +110,7 @@ interface KnowledgeDocument {
   metadata_verified_source?: string;
   metadata_confidence?: string;
   folder?: string;
-  pipeline?: 'a' | 'b' | 'c';
+  pipeline?: 'a' | 'b' | 'c' | 'a-hybrid';
   error_message?: string;
 }
 
@@ -246,12 +246,29 @@ export const DocumentPoolTable = () => {
       )
       .subscribe();
 
+    const channelPipelineAHybrid = supabase
+      .channel('pipeline_a_hybrid_documents_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'pipeline_a_hybrid_documents'
+        },
+        () => {
+          loadDocuments(currentPage, abortController.signal);
+          loadFolders();
+        }
+      )
+      .subscribe();
+
     return () => {
       abortController.abort();
       supabase.removeChannel(channelKnowledge);
       supabase.removeChannel(channelPipelineA);
       supabase.removeChannel(channelPipelineB);
       supabase.removeChannel(channelPipelineC);
+      supabase.removeChannel(channelPipelineAHybrid);
       console.log('[DocumentPoolTable] Component unmounted, pending requests aborted');
     };
   }, []);
@@ -271,7 +288,7 @@ export const DocumentPoolTable = () => {
       // Step 1: Count from BOTH tables
       console.log('[DocumentPoolTable] Step 1: Counting documents from both pipelines...');
       
-      const [pipelineACount, pipelineBCount, pipelineCCount] = await Promise.all([
+      const [pipelineACount, pipelineBCount, pipelineCCount, pipelineAHybridCount] = await Promise.all([
         supabase
           .from("pipeline_a_documents")
           .select("id", { count: 'exact', head: true })
@@ -282,6 +299,10 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
+          .select("id", { count: 'exact', head: true })
+          .abortSignal(signal),
+        supabase
+          .from("pipeline_a_hybrid_documents")
           .select("id", { count: 'exact', head: true })
           .abortSignal(signal)
       ]);
@@ -298,9 +319,13 @@ export const DocumentPoolTable = () => {
         console.error('[DocumentPoolTable] Pipeline C count error:', pipelineCCount.error);
         throw pipelineCCount.error;
       }
+      if (pipelineAHybridCount.error) {
+        console.error('[DocumentPoolTable] Pipeline A-Hybrid count error:', pipelineAHybridCount.error);
+        throw pipelineAHybridCount.error;
+      }
       
-      const total = (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0);
-      console.log('[DocumentPoolTable] Total:', total, '(Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, ')');
+      const total = (pipelineACount.count || 0) + (pipelineBCount.count || 0) + (pipelineCCount.count || 0) + (pipelineAHybridCount.count || 0);
+      console.log('[DocumentPoolTable] Total:', total, '(Pipeline A:', pipelineACount.count, '+ Pipeline B:', pipelineBCount.count, '+ Pipeline C:', pipelineCCount.count, '+ Pipeline A-Hybrid:', pipelineAHybridCount.count, ')');
       setTotalCount(total);
       setTotalPages(Math.ceil(total / pageSize));
 
@@ -310,7 +335,7 @@ export const DocumentPoolTable = () => {
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      const [pipelineAData, pipelineBData, pipelineCData] = await Promise.all([
+      const [pipelineAData, pipelineBData, pipelineCData, pipelineAHybridData] = await Promise.all([
         supabase
           .from("pipeline_a_documents")
           .select("*")
@@ -325,6 +350,12 @@ export const DocumentPoolTable = () => {
           .abortSignal(signal),
         supabase
           .from("pipeline_c_documents")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .range(from, to)
+          .abortSignal(signal),
+        supabase
+          .from("pipeline_a_hybrid_documents")
           .select("*")
           .order("created_at", { ascending: false })
           .range(from, to)
@@ -343,8 +374,12 @@ export const DocumentPoolTable = () => {
         console.error('[DocumentPoolTable] Pipeline C error:', pipelineCData.error);
         throw pipelineCData.error;
       }
+      if (pipelineAHybridData.error) {
+        console.error('[DocumentPoolTable] Pipeline A-Hybrid error:', pipelineAHybridData.error);
+        throw pipelineAHybridData.error;
+      }
 
-      console.log('[DocumentPoolTable] Loaded', pipelineAData.data?.length || 0, 'Pipeline A +', pipelineBData.data?.length || 0, 'Pipeline B +', pipelineCData.data?.length || 0, 'Pipeline C docs');
+      console.log('[DocumentPoolTable] Loaded', pipelineAData.data?.length || 0, 'Pipeline A +', pipelineBData.data?.length || 0, 'Pipeline B +', pipelineCData.data?.length || 0, 'Pipeline C +', pipelineAHybridData.data?.length || 0, 'Pipeline A-Hybrid docs');
 
       // Transform Pipeline A documents
       const transformedPipelineA = (pipelineAData.data || []).map((doc: any) => ({
@@ -418,8 +453,32 @@ export const DocumentPoolTable = () => {
         error_message: doc.error_message,
       }));
 
+      // Transform Pipeline A-Hybrid documents
+      const transformedPipelineAHybrid = (pipelineAHybridData.data || []).map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || null,
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count || null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        keywords: [],
+        topics: [],
+        complexity_level: "",
+        agent_ids: [],
+        folder: null,
+        search_query: null,
+        source_url: null,
+        pipeline: 'a-hybrid' as const,
+        error_message: doc.error_message,
+      }));
+
       // Merge and sort by created_at
-      const transformedData = [...transformedPipelineA, ...transformedPipelineB, ...transformedPipelineC]
+      const transformedData = [...transformedPipelineA, ...transformedPipelineB, ...transformedPipelineC, ...transformedPipelineAHybrid]
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       console.log('[DocumentPoolTable] ✅ Documents loaded successfully');
