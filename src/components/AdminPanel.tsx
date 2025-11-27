@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Database, CheckCircle, XCircle } from "lucide-react";
+import { Loader2, RefreshCw, Database, CheckCircle, XCircle, FileText, ExternalLink } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProcessingLogs } from "./ProcessingLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +12,7 @@ import { FilterPromptEditor } from "./FilterPromptEditor";
 import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
 import AlignmentMetricsMonitor from "./AlignmentMetricsMonitor";
 import { AirtopBrowserAutomation } from "./AirtopBrowserAutomation";
+import { useNavigate } from "react-router-dom";
 
 interface ProcessingResult {
   id: string;
@@ -30,6 +31,7 @@ interface BatchSummary {
 }
 
 export const AdminPanel = () => {
+  const navigate = useNavigate();
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<ProcessingResult[] | null>(null);
   const [summary, setSummary] = useState<BatchSummary | null>(null);
@@ -119,6 +121,7 @@ export const AdminPanel = () => {
         <TabsTrigger value="filter-prompt">Filter Prompt</TabsTrigger>
         <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
         <TabsTrigger value="airtop">Airtop.ai</TabsTrigger>
+        <TabsTrigger value="docvqa">DocVQA Test</TabsTrigger>
       </TabsList>
 
       <TabsContent value="metrics">
@@ -312,6 +315,45 @@ export const AdminPanel = () => {
 
       <TabsContent value="airtop">
         <AirtopBrowserAutomation />
+      </TabsContent>
+
+      <TabsContent value="docvqa">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              DocVQA Test Dataset
+            </CardTitle>
+            <CardDescription>
+              Dataset di benchmark per testare Pipeline A con documenti ibridi (testo + immagini)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Il dataset DocVQA contiene 20 documenti PDF con domande e risposte ground-truth per valutare 
+                la capacità di Pipeline A di estrarre informazioni da documenti ibridi (testo + immagini).
+              </p>
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg space-y-2">
+                <p className="text-sm font-medium">📋 Caratteristiche Dataset:</p>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>20 documenti PDF (doc_0000.pdf - doc_0019.pdf)</li>
+                  <li>Ogni documento ha 1+ domande con risposta attesa</li>
+                  <li>Domande disponibili in 5 lingue (IT, EN, ES, FR, DE)</li>
+                  <li>Test di recall semantico (date, nomi, numeri specifici)</li>
+                </ul>
+              </div>
+            </div>
+            
+            <Button 
+              onClick={() => navigate('/docvqa-test')}
+              className="w-full gap-2"
+            >
+              Apri Dataset DocVQA
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
       </TabsContent>
     </Tabs>
   );

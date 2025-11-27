@@ -16,6 +16,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const Admin = lazy(() => import("./pages/Admin"));
 const UpdateChePrompt = lazy(() => import("./pages/UpdateChePrompt"));
 const UpdateDocumentFinderPrompt = lazy(() => import("./pages/UpdateDocumentFinderPrompt"));
+const DocVQATest = lazy(() => import("./pages/DocVQATest"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 
@@ -97,6 +98,14 @@ const App = () => {
                     element={
                       <ProtectedRoute>
                         <UpdateDocumentFinderPrompt />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/docvqa-test"
+                    element={
+                      <ProtectedRoute>
+                        <DocVQATest />
                       </ProtectedRoute>
                     }
                   />

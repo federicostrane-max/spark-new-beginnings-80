@@ -1,0 +1,342 @@
+[
+  {
+    "doc_id": "train_0",
+    "pdf_file": "doc_0000.pdf",
+    "image_file": "doc_0000.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wie lautet das Datum, das in diesem Brief erwähnt wird?",
+          "en": "what is the date mentioned in this letter?",
+          "es": "¿Cuál es la fecha mencionada en esta carta?",
+          "fr": "Quelle est la date mentionnée dans cette lettre?",
+          "it": "Qual è la data indicata in questa lettera?"
+        },
+        "answer": "1/8/93"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_3",
+    "pdf_file": "doc_0001.pdf",
+    "image_file": "doc_0001.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wer ist in diesem Brief?",
+          "en": "Who is in  cc in this letter?",
+          "es": "¿Quién está en cc en esta carta?",
+          "fr": "Qui est dans cette lettre?",
+          "it": "Chi c'è in questa lettera?"
+        },
+        "answer": "T.F. Riehl"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_4",
+    "pdf_file": "doc_0002.pdf",
+    "image_file": "doc_0002.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Was ist das Thema dieses Briefes?",
+          "en": "what is the subject of  this letter?",
+          "es": "¿Cuál es el tema de esta carta?",
+          "fr": "Quel est le sujet de cette lettre?",
+          "it": "Qual è l'oggetto di questa lettera?"
+        },
+        "answer": "Review of existing Brainstorming Ideas/483"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_5",
+    "pdf_file": "doc_0003.pdf",
+    "image_file": "doc_0003.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wie ist die Zahl unten auf der Seite, in Fettdruck?",
+          "en": "What is the number at the bottom of the page, in bold?",
+          "es": "¿Cuál es el número en la parte inferior de la página, en negrita?",
+          "fr": "Quel est le numéro au bas de la page, en caractères gras?",
+          "it": "Qual è il numero in fondo alla pagina, in grassetto?"
+        },
+        "answer": "499150498"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_6",
+    "pdf_file": "doc_0004.pdf",
+    "image_file": "doc_0004.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wie viele Punkte gibt es in Änderungen der Ausleseinstrumentierung",
+          "en": "How many points are there in modifications to readout instrumentation",
+          "es": "¿Cuántos puntos hay en las modificaciones a la instrumentación de lectura",
+          "fr": "Combien de points y a-t-il dans les modifications à l'instrumentation de lecture",
+          "it": "Quanti punti ci sono nelle modifiche alla strumentazione di lettura"
+        },
+        "answer": "5."
+      }
+    ]
+  },
+  {
+    "doc_id": "train_7",
+    "pdf_file": "doc_0005.pdf",
+    "image_file": "doc_0005.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "was ist das Datum in dem Brief",
+          "en": "what is the date in the letter",
+          "es": "¿Cuál es la fecha en la carta",
+          "fr": "quelle est la date dans la lettre",
+          "it": "qual è la data nella lettera"
+        },
+        "answer": "June 11, 1990"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_9",
+    "pdf_file": "doc_0006.pdf",
+    "image_file": "doc_0006.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wer hat den Brief geschickt?",
+          "en": "Who sent the letter?",
+          "es": "¿Quién envió la carta?",
+          "fr": "Qui a envoyé la lettre?",
+          "it": "Chi ha mandato la lettera?"
+        },
+        "answer": "Ted Sanders"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_10",
+    "pdf_file": "doc_0007.pdf",
+    "image_file": "doc_0007.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Welcher Teil von Virginia ist dieser Brief von",
+          "en": "Which part of Virginia is this letter sent from",
+          "es": "¿Qué parte de Virginia es esta carta enviada desde",
+          "fr": "Quelle partie de la Virginie est cette lettre envoyée de",
+          "it": "Quale parte della Virginia è questa lettera inviata da"
+        },
+        "answer": "Richmond"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_11",
+    "pdf_file": "doc_0008.pdf",
+    "image_file": "doc_0008.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Was für eine Art von Kommunikation/Brief ist das?",
+          "en": "What sort of communication/letter is this ?",
+          "es": "¿Qué tipo de comunicación/carta es esta?",
+          "fr": "Quel genre de communication/lettre est-ce?",
+          "it": "Che tipo di comunicazione/lettera è questa?"
+        },
+        "answer": "INTER-OFFICE CORRESPONDENCE"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_12",
+    "pdf_file": "doc_0009.pdf",
+    "image_file": "doc_0009.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Wie lautet das Datum, das in dem Brief erwähnt wird?",
+          "en": "What is the date mentioned in the letter?",
+          "es": "¿Cuál es la fecha mencionada en la carta?",
+          "fr": "Quelle est la date mentionnée dans la lettre?",
+          "it": "Qual è la data indicata nella lettera?"
+        },
+        "answer": "April 27, 1990"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_13",
+    "pdf_file": "doc_0010.pdf",
+    "image_file": "doc_0010.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Mit welchem Test werden ART Menthol-Werte bewertet, die ausgeliefert wurden?",
+          "en": "Which test is used to evaluate ART menthol levels that has been shipped?",
+          "es": "¿Qué prueba se utiliza para evaluar los niveles de ART mentol que se ha enviado?",
+          "fr": "Quel test est utilisé pour évaluer les niveaux de menthol ART qui ont été expédiés?",
+          "it": "Quale test viene utilizzato per valutare i livelli di mentolo ART che è stato spedito?"
+        },
+        "answer": "A second Danchi Test"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_14",
+    "pdf_file": "doc_0011.pdf",
+    "image_file": "doc_0011.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Was ist das Thema des Dokuments/Buchstabens?",
+          "en": "What is the subject of the document/letter?",
+          "es": "¿Cuál es el tema del documento/carta?",
+          "fr": "Quel est le sujet du document ou de la lettre?",
+          "it": "Qual è l'oggetto del documento/lettera?"
+        },
+        "answer": "Flavor Development Monthly Summary for April, 1990"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_15",
+    "pdf_file": "doc_0012.pdf",
+    "image_file": "doc_0012.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "was ist der Index für die Aufbewahrung von Franchise",
+          "en": "what is the index for Retention of Franchise",
+          "es": "Cuál es el índice de retención de la franquicia",
+          "fr": "quel est l'index pour Conservation de Franchise",
+          "it": "qual è l'indice per la conservazione del franchise"
+        },
+        "answer": "100"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_16",
+    "pdf_file": "doc_0013.pdf",
+    "image_file": "doc_0013.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Was ist die Quelle?",
+          "en": "What is the source",
+          "es": "¿Cuál es la fuente?",
+          "fr": "Quelle est la source",
+          "it": "Qual è la fonte"
+        },
+        "answer": "USMM 1/95-6/95, 12-Month Data"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_17",
+    "pdf_file": "doc_0014.pdf",
+    "image_file": "doc_0014.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Die auf der rechten Seite des linken Rands erwähnte Zahl?",
+          "en": "The number mentioned on the right of the leftside margin?",
+          "es": "¿El número mencionado a la derecha del margen izquierdo?",
+          "fr": "Le nombre mentionné à droite de la marge de gauche?",
+          "it": "Il numero menzionato sulla destra del margine di sinistra?"
+        },
+        "answer": "314002838"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_19",
+    "pdf_file": "doc_0015.pdf",
+    "image_file": "doc_0015.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "welche mm Marlboro Menthol subjektiv vom Richmond Panel geraucht wurden",
+          "en": "what mm Marlboro Menthol were subjectively smoked by the Richmond Panel",
+          "es": "qué mm Marlboro Menthol fue fumado subjetivamente por el Panel de Richmond",
+          "fr": "quel mm Marlboro Mentol ont été fumées subjectivement par le panneau Richmond",
+          "it": "cosa mm Marlboro Menthol sono stati soggettivamente fumati dal Richmond Panel"
+        },
+        "answer": "80mm and 83mm"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_20",
+    "pdf_file": "doc_0016.pdf",
+    "image_file": "doc_0016.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Zigaretten werden hergestellt und zu welchem Zweck bei O/C Panel eingereicht?",
+          "en": "Cigarettes will be produced and submitted to O/C Panel for what purpose?",
+          "es": "¿Con qué propósito se producirán y presentarán los cigarrillos al Grupo O/C?",
+          "fr": "Les cigarettes seront produites et soumises au comité d'O/C à quelle fin?",
+          "it": "Le sigarette saranno prodotte e presentate al pannello O/C a che scopo?"
+        },
+        "answer": "evaluation of lip release"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_21",
+    "pdf_file": "doc_0017.pdf",
+    "image_file": "doc_0017.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Ein weiteres Modell der 83mm mit Nulllüftung wird bei Semiworks in wie vielen Wochen hergestellt",
+          "en": "Another model of the 83mm with zero ventilation will be made at Semiworks within how many weeks",
+          "es": "Otro modelo de la 83mm con cero ventilación se hará en Semiworks dentro de cuántas semanas",
+          "fr": "Un autre modèle de la 83mm avec ventilation zéro sera fait à Semiworks dans combien de semaines",
+          "it": "Un altro modello degli 83mm con ventilazione zero sarà realizzato a Semiworks entro quante settimane"
+        },
+        "answer": "next 2-3 weeks"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_22",
+    "pdf_file": "doc_0018.pdf",
+    "image_file": "doc_0018.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Unter BOLD wird die Primärproduktion von Blend #24- bis zu diesem Datum abgeschlossen sein.",
+          "en": "Under BOLD, primary production of Blend #24- will be completed by which date",
+          "es": "Bajo BOLD, la producción primaria de Blend #24- se completará en qué fecha",
+          "fr": "En vertu de BOLD, la production primaire de Blend #24 sera terminée à la date à laquelle",
+          "it": "Sotto BOLD, la produzione primaria di Blend #24- sarà completata entro quale data"
+        },
+        "answer": "6/7/90"
+      }
+    ]
+  },
+  {
+    "doc_id": "train_23",
+    "pdf_file": "doc_0019.pdf",
+    "image_file": "doc_0019.jpg",
+    "qa_pairs": [
+      {
+        "question": {
+          "de": "Während des Prozesses der Prototypenproduktion und des Klingelns wurde beobachtet, dass einige Zigaretten ein Loch in dem Papier verbrannt haben.",
+          "en": "During the process of prototype production and ringtipping, some cigarettes were observed to have burn holed in which paper",
+          "es": "Durante el proceso de producción de prototipos y anillas, se observó que algunos cigarrillos se habían quemado en los que el papel",
+          "fr": "Au cours du processus de production de prototypes et d'enroulement, on a observé que certaines cigarettes avaient été brûlées dans lesquelles du papier",
+          "it": "Durante il processo di produzione del prototipo e ringhiatura, alcune sigarette sono state osservate per bruciare bucato in cui la carta"
+        },
+        "answer": "Cigarette paper"
+      }
+    ]
+  }
+]
