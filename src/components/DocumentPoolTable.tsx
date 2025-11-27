@@ -749,18 +749,20 @@ export const DocumentPoolTable = () => {
   const loadPDFFolders = async () => {
 
     // Get unique folder names from ALL pipelines with 'folder' column
-    const [pipelineAFolders, pipelineBFolders, pipelineCFolders] = await Promise.all([
+    const [pipelineAFolders, pipelineBFolders, pipelineCFolders, pipelineAHybridFolders] = await Promise.all([
       supabase.from('pipeline_a_documents').select('folder').not('folder', 'is', null),
       supabase.from('pipeline_b_documents').select('folder').not('folder', 'is', null).neq('source_type', 'github'),
-      supabase.from('pipeline_c_documents').select('folder').not('folder', 'is', null)
+      supabase.from('pipeline_c_documents').select('folder').not('folder', 'is', null),
+      supabase.from('pipeline_a_hybrid_documents').select('folder').not('folder', 'is', null)
     ]);
 
     if (pipelineAFolders.error) throw pipelineAFolders.error;
     if (pipelineBFolders.error) throw pipelineBFolders.error;
     if (pipelineCFolders.error) throw pipelineCFolders.error;
+    if (pipelineAHybridFolders.error) throw pipelineAHybridFolders.error;
 
     const uniqueFolderNames = new Set<string>();
-    [...(pipelineAFolders.data || []), ...(pipelineBFolders.data || []), ...(pipelineCFolders.data || [])].forEach(doc => {
+    [...(pipelineAFolders.data || []), ...(pipelineBFolders.data || []), ...(pipelineCFolders.data || []), ...(pipelineAHybridFolders.data || [])].forEach(doc => {
       if (doc.folder) uniqueFolderNames.add(doc.folder);
     });
 
@@ -792,15 +794,17 @@ export const DocumentPoolTable = () => {
     });
 
     // Query ALL pipelines for documents with folder
-    const [pipelineAWithFolder, pipelineBWithFolder, pipelineCWithFolder] = await Promise.all([
+    const [pipelineAWithFolder, pipelineBWithFolder, pipelineCWithFolder, pipelineAHybridWithFolder] = await Promise.all([
       supabase.from('pipeline_a_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
       supabase.from('pipeline_b_documents').select('*').not('folder', 'is', null).neq('source_type', 'github').order('created_at', { ascending: false }),
-      supabase.from('pipeline_c_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false })
+      supabase.from('pipeline_c_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
+      supabase.from('pipeline_a_hybrid_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false })
     ]);
 
     if (pipelineAWithFolder.error) throw pipelineAWithFolder.error;
     if (pipelineBWithFolder.error) throw pipelineBWithFolder.error;
     if (pipelineCWithFolder.error) throw pipelineCWithFolder.error;
+    if (pipelineAHybridWithFolder.error) throw pipelineAHybridWithFolder.error;
 
     // Transform all pipeline documents
     const allTransformedDocs = [
@@ -860,6 +864,25 @@ export const DocumentPoolTable = () => {
         complexity_level: "",
         agent_ids: [],
         pipeline: 'c' as const,
+      })),
+      ...(pipelineAHybridWithFolder.data || []).map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || "",
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        folder: doc.folder,
+        keywords: [],
+        topics: [],
+        complexity_level: "",
+        agent_ids: [],
+        pipeline: 'a-hybrid' as const,
       }))
     ];
 
@@ -934,7 +957,7 @@ export const DocumentPoolTable = () => {
     hierarchicalFolders.push(...standaloneFolders);
 
     // Add "Senza Cartella" for ALL pipelines (no folder OR folder IS NULL)
-    const [pipelineADocs, pipelineBDocs, pipelineCDocs] = await Promise.all([
+    const [pipelineADocs, pipelineBDocs, pipelineCDocs, pipelineAHybridDocs] = await Promise.all([
       supabase
         .from('pipeline_a_documents')
         .select('*')
@@ -949,12 +972,18 @@ export const DocumentPoolTable = () => {
         .from('pipeline_c_documents')
         .select('*')
         .is('folder', null)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('pipeline_a_hybrid_documents')
+        .select('*')
+        .is('folder', null)
         .order('created_at', { ascending: false })
     ]);
 
     if (pipelineADocs.error) throw pipelineADocs.error;
     if (pipelineBDocs.error) throw pipelineBDocs.error;
     if (pipelineCDocs.error) throw pipelineCDocs.error;
+    if (pipelineAHybridDocs.error) throw pipelineAHybridDocs.error;
 
     const allNoFolderDocs = [];
 
@@ -1031,6 +1060,31 @@ export const DocumentPoolTable = () => {
         error_message: doc.error_message,
       }));
       allNoFolderDocs.push(...transformedPipelineC);
+    }
+
+    // Transform Pipeline A-Hybrid docs
+    if (pipelineAHybridDocs.data && pipelineAHybridDocs.data.length > 0) {
+      const transformedPipelineAHybrid = pipelineAHybridDocs.data.map((doc: any) => ({
+        id: doc.id,
+        file_name: doc.file_name,
+        validation_status: doc.status === 'ready' ? 'validated' : 'pending',
+        validation_reason: doc.error_message || '',
+        processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
+        ai_summary: null,
+        text_length: null,
+        page_count: doc.page_count || null,
+        created_at: doc.created_at,
+        agent_names: [],
+        agents_count: 0,
+        folder: null,
+        keywords: [],
+        topics: [],
+        complexity_level: '',
+        agent_ids: [],
+        pipeline: 'a-hybrid' as const,
+        error_message: doc.error_message,
+      }));
+      allNoFolderDocs.push(...transformedPipelineAHybrid);
     }
 
     // Sort by created_at desc

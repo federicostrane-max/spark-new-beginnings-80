@@ -164,9 +164,41 @@ export function reconstructFromLlamaParse(jsonOutput: any): {
   headingMap: Map<number, any>;
 } {
   console.log('[DocumentReconstructor] Starting reconstruction from LlamaParse JSON');
+  console.log(`[DocumentReconstructor] JSON top-level keys: ${Object.keys(jsonOutput).join(', ')}`);
 
-  const elements = jsonOutput.items || [];
-  console.log(`[DocumentReconstructor] Processing ${elements.length} elements`);
+  // Support multiple LlamaParse JSON formats
+  let elements: LlamaParseElement[] = [];
+
+  if (jsonOutput.pages && Array.isArray(jsonOutput.pages)) {
+    // Format: { pages: [{ text, items, page, md, ... }] }
+    console.log(`[DocumentReconstructor] Found pages[] format with ${jsonOutput.pages.length} pages`);
+    
+    for (const page of jsonOutput.pages) {
+      if (page.items && Array.isArray(page.items)) {
+        // Page has structured items with bounding boxes
+        elements.push(...page.items.map((item: any) => ({ 
+          ...item, 
+          page: page.page || page.page_number || 1 
+        })));
+      } else if (page.text || page.md || page.markdown) {
+        // Simple page format with just text
+        elements.push({
+          type: 'text',
+          markdown: page.text || page.md || page.markdown || '',
+          page: page.page || page.page_number || 1,
+          bbox: { x: 0, y: 0, w: 100, h: 100 }
+        });
+      }
+    }
+  } else if (jsonOutput.items && Array.isArray(jsonOutput.items)) {
+    // Format: { items: [...] } (legacy format)
+    console.log(`[DocumentReconstructor] Found items[] format with ${jsonOutput.items.length} items`);
+    elements = jsonOutput.items;
+  } else {
+    console.warn('[DocumentReconstructor] Unknown JSON format, no pages[] or items[] found');
+  }
+
+  console.log(`[DocumentReconstructor] Extracted ${elements.length} elements from ${jsonOutput.pages ? 'pages[]' : jsonOutput.items ? 'items[]' : 'unknown'} format`);
 
   const orderedElements = orderElements(elements);
   const headingMap = buildHeadingMap(orderedElements);
