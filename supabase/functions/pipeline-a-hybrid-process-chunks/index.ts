@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
-import { detectOCRIssues, enhanceWithVisionAPI, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
+import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudeVision, convertPdfToImage, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -108,6 +108,7 @@ serve(async (req) => {
 
         // ===== VISION ENHANCEMENT LAYER =====
         let visionEnhancementUsed = false;
+        let visionEngine: 'claude' | 'google' | null = null;
         let issuesDetected: any[] = [];
         let superDocumentToChunk = superDocument; // Preserva originale
 
@@ -118,28 +119,62 @@ serve(async (req) => {
           console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
           issuesDetected = ocrIssues;
 
-          try {
-            const googleVisionKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
-
-            if (!googleVisionKey) {
-              console.warn('[Vision Enhancement] GOOGLE_CLOUD_VISION_API_KEY not configured, skipping enhancement');
-            } else {
-              console.log('[Vision Enhancement] Calling Google Cloud Vision API...');
-              const visionStartTime = Date.now();
-              const visionText = await enhanceWithVisionAPI(pdfBuffer, googleVisionKey);
-              console.log(`[Vision Enhancement] Vision API completed in ${Date.now() - visionStartTime}ms`);
-
-              if (visionText && visionText.length > 0) {
-                superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
-                visionEnhancementUsed = true;
-                console.log(`[Vision Enhancement] ✓ Enhanced document, added ${visionText.length} chars`);
-              } else {
-                console.warn('[Vision Enhancement] Vision API returned empty text');
+          // TRY CLAUDE VISION FIRST (contextual reasoning)
+          const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+          const cloudmersiveKey = Deno.env.get('CLOUDMERSIVE_API_KEY');
+          
+          if (anthropicKey && cloudmersiveKey) {
+            try {
+              console.log('[Vision Enhancement] Attempting Claude Vision with Cloudmersive conversion...');
+              const claudeStartTime = Date.now();
+              
+              // Convert PDF to PNG
+              const imageBase64 = await convertPdfToImage(pdfBuffer, cloudmersiveKey);
+              
+              if (imageBase64) {
+                // Call Claude with contextual prompt
+                const claudeText = await enhanceWithClaudeVision(imageBase64, anthropicKey, ocrIssues);
+                
+                if (claudeText && claudeText.length > 0) {
+                  superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
+                  visionEnhancementUsed = true;
+                  visionEngine = 'claude';
+                  console.log(`[Vision Enhancement] ✓ Claude Vision completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
+                }
               }
+            } catch (claudeError) {
+              console.warn('[Vision Enhancement] Claude Vision failed, falling back to Google:', claudeError);
             }
-          } catch (visionError) {
-            console.error('[Vision Enhancement] Failed (graceful degradation):', visionError);
-            // Continue with original document - no blocking
+          } else {
+            console.log('[Vision Enhancement] Claude/Cloudmersive not configured, trying Google Vision');
+          }
+
+          // FALLBACK TO GOOGLE VISION if Claude didn't succeed
+          if (!visionEnhancementUsed) {
+            const googleVisionKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
+            
+            if (googleVisionKey) {
+              try {
+                console.log('[Vision Enhancement] Falling back to Google Cloud Vision...');
+                const visionStartTime = Date.now();
+                const visionText = await enhanceWithVisionAPI(pdfBuffer, googleVisionKey);
+                console.log(`[Vision Enhancement] Google Vision completed in ${Date.now() - visionStartTime}ms`);
+
+                if (visionText && visionText.length > 0) {
+                  superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
+                  visionEnhancementUsed = true;
+                  visionEngine = 'google';
+                  console.log(`[Vision Enhancement] ✓ Google Vision enhancement, added ${visionText.length} chars`);
+                } else {
+                  console.warn('[Vision Enhancement] Google Vision returned empty text');
+                }
+              } catch (visionError) {
+                console.error('[Vision Enhancement] Google Vision also failed (graceful degradation):', visionError);
+                // Continue with original document - no blocking
+              }
+            } else {
+              console.warn('[Vision Enhancement] No vision API keys configured, using original document');
+            }
           }
         } else {
           console.log('[Vision Enhancement] No OCR issues detected, using original document');
@@ -192,6 +227,7 @@ serve(async (req) => {
               chunks_generated: chunks.length,
               reconstruction_method: 'hierarchical_reading_order',
               vision_enhancement_used: visionEnhancementUsed,
+              vision_engine: visionEngine, // 'claude' | 'google' | null
               ocr_issues_detected: issuesDetected.length,
               ocr_issue_types: issuesDetected.map((i: any) => i.type)
             }

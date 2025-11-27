@@ -54,7 +54,135 @@ export function detectOCRIssues(text: string): OCRIssue[] {
   return issues;
 }
 
-// ============= FUNCTION 2: VISION API CALL =============
+// ============= FUNCTION 2A: PDF TO IMAGE CONVERSION =============
+
+export async function convertPdfToImage(
+  pdfBuffer: Uint8Array,
+  cloudmersiveKey: string
+): Promise<string | null> {
+  console.log('[Vision Enhancement] Converting PDF to PNG via Cloudmersive');
+  console.log(`[Vision Enhancement] PDF buffer size: ${pdfBuffer.length} bytes`);
+
+  try {
+    // Create FormData with PDF - use type assertion to satisfy Deno's strict typing
+    const formData = new FormData();
+    const file = new File([pdfBuffer as unknown as BlobPart], 'document.pdf', { type: 'application/pdf' });
+    formData.append('file', file);
+
+    console.log('[Vision Enhancement] Calling Cloudmersive API...');
+    const response = await fetch(
+      'https://api.cloudmersive.com/convert/pdf/to/png/direct',
+      {
+        method: 'POST',
+        headers: { 'Apikey': cloudmersiveKey },
+        body: formData
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Vision Enhancement] Cloudmersive error ${response.status}:`, errorText);
+      throw new Error(`Cloudmersive API failed: ${response.status} - ${errorText}`);
+    }
+
+    // Returns first page as PNG
+    const pngBuffer = await response.arrayBuffer();
+    const base64Image = encodeBase64(new Uint8Array(pngBuffer));
+    console.log(`[Vision Enhancement] PDF converted to PNG, base64 length: ${base64Image.length} chars`);
+    
+    return base64Image;
+
+  } catch (error) {
+    console.error('[Vision Enhancement] Exception in convertPdfToImage:', error);
+    throw error;
+  }
+}
+
+// ============= FUNCTION 2B: CLAUDE VISION WITH CONTEXTUAL REASONING =============
+
+export async function enhanceWithClaudeVision(
+  imageBase64: string,
+  anthropicKey: string,
+  ocrIssues: OCRIssue[]
+): Promise<string | null> {
+  console.log('[Vision Enhancement] Starting Claude Vision analysis');
+  console.log(`[Vision Enhancement] Image base64 length: ${imageBase64.length} chars, OCR issues: ${ocrIssues.length}`);
+
+  try {
+    const issuesList = ocrIssues.map(i => `- ${i.type}: "${i.pattern}"`).join('\n');
+    
+    const contextualPrompt = `Trascrivi TUTTO il testo visibile in questo documento con MASSIMA PRECISIONE.
+
+ATTENZIONE CRITICA - PROBLEMI OCR RILEVATI:
+L'OCR precedente ha estratto questi valori probabilmente errati:
+${issuesList}
+
+ISTRUZIONI SPECIALI PER DATE AMBIGUE:
+1. Se vedi una data parzialmente illeggibile (es. "1/8/??" o "1/8/8"), 
+   CERCA ALTRE DATE nel documento per inferire l'anno corretto.
+2. In particolare, se "PROPOSED RELEASE DATE" mostra "1/8/93", 
+   è ALTAMENTE PROBABILE che la data principale sia anch'essa del 1993.
+3. Usa il CONTESTO SEMANTICO: in un documento di approvazione aziendale,
+   la data del documento e la data di rilascio proposta sono tipicamente vicine.
+4. NON inventare - se non riesci a dedurre con sicurezza, indica l'incertezza.
+
+ISTRUZIONI PER TESTO CORROTTO:
+- Se vedi caratteri illeggibili, prova a dedurre dal contesto.
+- Preserva la struttura del documento (tabelle, liste, intestazioni).
+
+OBIETTIVO: Produrre una trascrizione accurata dove le date ambigue 
+sono RISOLTE usando il contesto disponibile nel documento stesso.`;
+
+    console.log('[Vision Enhancement] Calling Claude API...');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: imageBase64
+              }
+            },
+            {
+              type: 'text',
+              text: contextualPrompt
+            }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Vision Enhancement] Claude API error ${response.status}:`, errorText);
+      throw new Error(`Claude API failed: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    const extractedText = result.content?.[0]?.text;
+    
+    console.log(`[Vision Enhancement] Claude extracted ${extractedText?.length || 0} characters`);
+    return extractedText || null;
+
+  } catch (error) {
+    console.error('[Vision Enhancement] Exception in enhanceWithClaudeVision:', error);
+    throw error;
+  }
+}
+
+// ============= FUNCTION 2C: GOOGLE VISION API CALL =============
 
 export async function enhanceWithVisionAPI(
   pdfBuffer: Uint8Array,
