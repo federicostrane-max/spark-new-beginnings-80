@@ -142,52 +142,47 @@ async function pollUntilActive(
 }
 
 /**
- * Calls Gemini with surgical prompt to extract specific information
+ * STEP 1: Blind Extraction - Extract ALL visual elements WITHOUT knowing user query
+ * This prevents confirmation bias by ensuring color/attribute determination happens objectively
  */
-async function extractWithSurgicalPrompt(
+async function blindExtraction(
   fileUri: string,
   mimeType: string,
-  searchQuery: string,
   apiKey: string
 ): Promise<string> {
-  console.log(`[Deep Dive] Generating surgical prompt for: "${searchQuery}"`);
+  console.log('[Deep Dive - Phase 1] Starting BLIND EXTRACTION (no user query)...');
   
-  const surgicalPrompt = `COMPITO: Analisi visiva mirata del video.
+  const blindExtractionPrompt = `Analizza questo video e documenta TUTTI gli elementi visivi che vengono disegnati, tracciati o mostrati.
 
-## FASE 1 - ESTRAZIONE OGGETTIVA
-L'utente cerca: "${searchQuery}"
+## COMPITO: ESTRAZIONE OGGETTIVA COMPLETA
 
-Identifica TUTTI gli elementi visivi nel video che potrebbero essere correlati a questa ricerca.
-Per OGNI elemento trovato, documenta:
-- [MM:SS] Timestamp esatto
-- Tipo di elemento (linea, forma, indicatore, candela, barra, etc.)
-- COLORE ESATTO che vedi (bianco, arancione, rosso, blu, verde, giallo, grigio, etc.)
-- Posizione/valore (prezzo, coordinate, percentuale, etc.)
-- Contesto (cosa sta accadendo nel video in quel momento)
+Per OGNI elemento che appare nel video, documenta:
 
-## FASE 2 - RISPOSTA ALLA DOMANDA
-Dopo aver documentato TUTTI gli elementi, rispondi alla domanda originale dell'utente.
-Specifica CHIARAMENTE quali elementi corrispondono ai criteri richiesti e quali NO.
+- **[MM:SS]** Timestamp esatto di quando appare/viene tracciato
+- **Tipo**: linea orizzontale, linea verticale, rettangolo, freccia, testo, indicatore, candela, barra, etc.
+- **COLORE ESATTO**: bianco, arancione, rosso, blu, verde, giallo, grigio, nero, etc. (DESCRIVI il colore che VEDI)
+- **Posizione/Valore**: prezzo, coordinate, percentuale, livello, etc.
+- **Come appare**: viene tracciato manualmente? compare improvvisamente? viene modificato?
+- **Contesto**: cosa sta accadendo in quel momento del video
 
-## REGOLE CRITICHE
-⚠️ NON assumere che tutti gli elementi siano del colore/tipo menzionato dall'utente
-⚠️ DESCRIVI i colori che REALMENTE vedi nel video, anche se diversi da quelli richiesti
-⚠️ Se l'utente cerca "linee arancioni" ma vedi anche linee di altri colori, documenta TUTTE le linee con i loro colori reali
-⚠️ Sii OGGETTIVO - il tuo compito è descrivere ciò che vedi, non confermare ciò che l'utente si aspetta
+## REGOLE FONDAMENTALI
+
+🔴 DESCRIVI ESATTAMENTE i colori che VEDI nel video
+🔴 NON fare assunzioni - se una linea è BIANCA, scrivi BIANCA (anche se pensi possa essere di un altro colore)
+🔴 NON saltare elementi - documenta TUTTO ciò che viene disegnato/mostrato
+🔴 Sii PRECISO con i timestamp [MM:SS]
+🔴 OGGETTIVITÀ ASSOLUTA - descrivi solo ciò che osservi
 
 ## OUTPUT FORMATO
 
-### Elementi Trovati
-[Lista completa di TUTTI gli elementi visivi correlati con timestamp, colore REALE, valore]
+Fornisci una lista dettagliata nel formato:
 
-### Risposta alla Domanda
-[Risposta basata sui dati estratti, specificando cosa corrisponde e cosa no]
+**[MM:SS] - Tipo: [tipo elemento] - Colore: [colore REALE] - Valore: [valore/posizione] - Note: [contesto]**
 
-Se trovi informazioni parziali o approssimative, includile specificando [STIMATO] o [PARZIALE].
-Se non trovi nulla, scrivi: "Non ho trovato elementi correlati a '${searchQuery}' nel video."`;
+Esempio:
+**[00:04] - Tipo: Linea orizzontale - Colore: ARANCIONE - Valore: 4,131.591 - Note: Tracciata manualmente, livello superiore**
+**[00:08] - Tipo: Linea orizzontale - Colore: BIANCO - Valore: 4,043.361 - Note: Tracciata manualmente, livello inferiore**`;
 
-  console.log('[Deep Dive] Calling Gemini with surgical prompt...');
-  
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
@@ -203,11 +198,11 @@ Se non trovi nulla, scrivi: "Non ho trovato elementi correlati a '${searchQuery}
                 fileUri: fileUri
               }
             },
-            { text: surgicalPrompt }
+            { text: blindExtractionPrompt }
           ]
         }],
         generationConfig: {
-          temperature: 0.3,
+          temperature: 0.1, // Ultra-low temperature for objective extraction
           maxOutputTokens: 4096
         }
       })
@@ -216,18 +211,137 @@ Se non trovi nulla, scrivi: "Non ho trovato elementi correlati a '${searchQuery}
   
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+    throw new Error(`Blind extraction API error: ${response.status} - ${errorText}`);
   }
   
   const result = await response.json();
-  const extractedContent = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  const extractedData = result.candidates?.[0]?.content?.parts?.[0]?.text;
   
-  if (!extractedContent) {
-    throw new Error('No content extracted from Gemini');
+  if (!extractedData) {
+    throw new Error('No data extracted from blind extraction');
   }
   
-  console.log(`[Deep Dive] ✅ Extraction complete: ${extractedContent.length} chars`);
-  return extractedContent;
+  console.log(`[Deep Dive - Phase 1] ✅ Blind extraction complete: ${extractedData.length} chars`);
+  console.log('[Deep Dive - Phase 1] Sample:', extractedData.substring(0, 200));
+  
+  return extractedData;
+}
+
+/**
+ * STEP 2: Answer Query - Answer user question BASED ONLY ON extracted data
+ * This prevents bias by separating interpretation from observation
+ */
+async function answerFromExtraction(
+  extractedData: string,
+  searchQuery: string,
+  apiKey: string
+): Promise<string> {
+  console.log(`[Deep Dive - Phase 2] Answering query: "${searchQuery}"`);
+  
+  const answerPrompt = `Basandoti ESCLUSIVAMENTE sui seguenti dati estratti oggettivamente dal video:
+
+---
+${extractedData}
+---
+
+Rispondi alla seguente domanda dell'utente:
+"${searchQuery}"
+
+## ISTRUZIONI
+
+✅ Usa SOLO i dati estratti sopra per rispondere
+✅ Se i dati mostrano elementi con caratteristiche DIVERSE da quelle richieste (es: colore diverso), segnalalo CHIARAMENTE
+✅ Specifica quali elementi corrispondono ai criteri e quali NO
+✅ Se ci sono discrepanze, spiegale (es: "L'utente cerca linea arancione, ma i dati mostrano una linea BIANCA a quel livello")
+
+## OUTPUT FORMATO
+
+### Risposta Diretta
+[Risposta precisa alla domanda]
+
+### Elementi Corrispondenti
+[Lista elementi che corrispondono ai criteri richiesti]
+
+### Elementi Non Corrispondenti (se presenti)
+[Lista elementi che NON corrispondono, spiegando perché]
+
+Se non ci sono elementi corrispondenti, scrivi chiaramente: "Nessun elemento trovato che corrisponda esattamente a '${searchQuery}'."`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [{ text: answerPrompt }]
+        }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 2048
+        }
+      })
+    }
+  );
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Answer generation API error: ${response.status} - ${errorText}`);
+  }
+  
+  const result = await response.json();
+  const answer = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  
+  if (!answer) {
+    throw new Error('No answer generated');
+  }
+  
+  console.log(`[Deep Dive - Phase 2] ✅ Answer generated: ${answer.length} chars`);
+  
+  return answer;
+}
+
+/**
+ * Main extraction function with Anti-Bias Pattern (2 separate API calls)
+ * CRITICAL: Data extraction happens BEFORE and INDEPENDENTLY of user query
+ */
+async function extractWithSurgicalPrompt(
+  fileUri: string,
+  mimeType: string,
+  searchQuery: string,
+  apiKey: string
+): Promise<string> {
+  console.log('='.repeat(60));
+  console.log('🛡️ ANTI-BIAS EXTRACTION - 2-PHASE PATTERN');
+  console.log(`   Query: "${searchQuery}"`);
+  console.log('='.repeat(60));
+  
+  // PHASE 1: Blind Extraction (WITHOUT user query)
+  const extractedData = await blindExtraction(fileUri, mimeType, apiKey);
+  
+  // PHASE 2: Answer Query (WITH extracted data + user query)
+  const answer = await answerFromExtraction(extractedData, searchQuery, apiKey);
+  
+  // Combine both phases for final output
+  const finalOutput = `## 📋 Dati Estratti Oggettivamente
+
+${extractedData}
+
+---
+
+## ✅ Risposta alla Domanda
+
+${answer}`;
+  
+  console.log('='.repeat(60));
+  console.log('✅ ANTI-BIAS EXTRACTION COMPLETE');
+  console.log(`   Phase 1 (Blind): ${extractedData.length} chars`);
+  console.log(`   Phase 2 (Answer): ${answer.length} chars`);
+  console.log(`   Total output: ${finalOutput.length} chars`);
+  console.log('='.repeat(60));
+  
+  return finalOutput;
 }
 
 Deno.serve(async (req) => {
