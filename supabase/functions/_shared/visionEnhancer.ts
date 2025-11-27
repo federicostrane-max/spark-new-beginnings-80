@@ -149,24 +149,14 @@ export function buildEnhancedSuperDocument(
   visionText: string,
   issues: OCRIssue[]
 ): string {
-  const issuesList = issues
-    .map(i => `- **${i.type}** (${i.severity}): "${i.pattern}"`)
-    .join('\n');
-
   const enhancedSection = `
 
 ---
-## 🔍 HIGH-CONFIDENCE VISUAL TRANSCRIPTION (Source: AI Vision Analysis)
+## 🔍 HIGH-CONFIDENCE VISUAL TRANSCRIPTION
 
-### ⚠️ Instruction to Agent:
-Trust this section for handwriting, dates, and unclear text. 
-When the original text above shows corrupted data (like "1/8/8"), 
-prefer the corrected version from this section (like "1/8/93").
+**⚠️ ISTRUZIONE PER L'AGENTE**: Questa sezione contiene una trascrizione ad alta affidabilità generata da AI Vision Analysis. Quando il testo originale sopra mostra dati corrotti o illeggibili, usa i valori di questa sezione. Problemi rilevati nel testo originale: ${issues.map(i => i.pattern).join(', ')}.
 
-### Issues Detected in Original:
-${issuesList}
-
-### Clean Transcription:
+**TRASCRIZIONE CORRETTA:**
 ${visionText}
 
 ---`;
