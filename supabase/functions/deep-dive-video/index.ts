@@ -152,20 +152,39 @@ async function extractWithSurgicalPrompt(
 ): Promise<string> {
   console.log(`[Deep Dive] Generating surgical prompt for: "${searchQuery}"`);
   
-  const surgicalPrompt = `IGNORA TUTTO IL RESTO DEL VIDEO.
+  const surgicalPrompt = `COMPITO: Analisi visiva mirata del video.
 
-COMPITO UNICO: Scansiona il video cercando ESCLUSIVAMENTE:
-${searchQuery}
+## FASE 1 - ESTRAZIONE OGGETTIVA
+L'utente cerca: "${searchQuery}"
 
-OUTPUT RICHIESTO:
-- Lista di timestamp [MM:SS] dove trovi ciò che cerchi
-- Per ogni timestamp, includi il valore/contesto specifico rilevante
-- Se non trovi nulla, dillo chiaramente: "Non ho trovato ${searchQuery} nel video."
+Identifica TUTTI gli elementi visivi nel video che potrebbero essere correlati a questa ricerca.
+Per OGNI elemento trovato, documenta:
+- [MM:SS] Timestamp esatto
+- Tipo di elemento (linea, forma, indicatore, candela, barra, etc.)
+- COLORE ESATTO che vedi (bianco, arancione, rosso, blu, verde, giallo, grigio, etc.)
+- Posizione/valore (prezzo, coordinate, percentuale, etc.)
+- Contesto (cosa sta accadendo nel video in quel momento)
 
-NON includere altra analisi. NON fare riassunti. NON commentare altri aspetti del video.
-SOLO i risultati della ricerca specifica richiesta.
+## FASE 2 - RISPOSTA ALLA DOMANDA
+Dopo aver documentato TUTTI gli elementi, rispondi alla domanda originale dell'utente.
+Specifica CHIARAMENTE quali elementi corrispondono ai criteri richiesti e quali NO.
 
-Se trovi informazioni parziali o approssimative, includile comunque specificando [STIMATO] o [PARZIALE].`;
+## REGOLE CRITICHE
+⚠️ NON assumere che tutti gli elementi siano del colore/tipo menzionato dall'utente
+⚠️ DESCRIVI i colori che REALMENTE vedi nel video, anche se diversi da quelli richiesti
+⚠️ Se l'utente cerca "linee arancioni" ma vedi anche linee di altri colori, documenta TUTTE le linee con i loro colori reali
+⚠️ Sii OGGETTIVO - il tuo compito è descrivere ciò che vedi, non confermare ciò che l'utente si aspetta
+
+## OUTPUT FORMATO
+
+### Elementi Trovati
+[Lista completa di TUTTI gli elementi visivi correlati con timestamp, colore REALE, valore]
+
+### Risposta alla Domanda
+[Risposta basata sui dati estratti, specificando cosa corrisponde e cosa no]
+
+Se trovi informazioni parziali o approssimative, includile specificando [STIMATO] o [PARZIALE].
+Se non trovi nulla, scrivi: "Non ho trovato elementi correlati a '${searchQuery}' nel video."`;
 
   console.log('[Deep Dive] Calling Gemini with surgical prompt...');
   
