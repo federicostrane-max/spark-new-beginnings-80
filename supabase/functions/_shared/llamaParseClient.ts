@@ -262,6 +262,9 @@ export async function getJsonResult(
 
     const data = await response.json();
     console.log(`[LlamaParse] Retrieved JSON with ${JSON.stringify(data).length} characters`);
+    console.log(`[LlamaParse] JSON top-level keys: ${Object.keys(data).join(', ')}`);
+    if (data.pages) console.log(`[LlamaParse] pages count: ${data.pages.length}`);
+    if (data.items) console.log(`[LlamaParse] items count: ${data.items.length}`);
     
     return data;
   }, 3, 1000, 'LlamaParse getJson');
