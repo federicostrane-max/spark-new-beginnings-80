@@ -29,7 +29,7 @@ interface KnowledgeDocument {
   keywords?: string[];
   topics?: string[];
   complexity_level?: string;
-  pipeline?: 'a' | 'b' | 'c';
+  pipeline?: 'a' | 'b' | 'c' | 'a-hybrid';
   status?: string; // For Pipeline B and C
 }
 
@@ -62,6 +62,22 @@ export const DocumentDetailsDialog = ({
         
         const { error } = await supabase
           .from('pipeline_a_documents')
+          .update({ 
+            status: 'ingested',
+            error_message: null,
+            processed_at: null
+          })
+          .eq('id', document.id);
+
+        if (error) throw error;
+
+        toast.success("Documento ripristinato! Verrà riprocessato automaticamente dal CRON.");
+      } else if (document.pipeline === 'a-hybrid') {
+        // Pipeline A-Hybrid: Reset status to 'ingested' to trigger reprocessing
+        toast.info("Ripristino documento per riprocessamento...");
+        
+        const { error } = await supabase
+          .from('pipeline_a_hybrid_documents')
           .update({ 
             status: 'ingested',
             error_message: null,

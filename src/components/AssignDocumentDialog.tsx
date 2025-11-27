@@ -29,14 +29,14 @@ interface AssignDocumentDialogProps {
     keywords?: string[];
     topics?: string[];
     complexity_level?: string;
-    pipeline?: 'a' | 'b' | 'c';
+    pipeline?: 'a' | 'b' | 'c' | 'a-hybrid';
   };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAssigned: () => void;
 }
 
-type PipelineType = 'pipeline_a' | 'pipeline_b' | 'pipeline_c';
+type PipelineType = 'pipeline_a' | 'pipeline_a_hybrid' | 'pipeline_b' | 'pipeline_c';
 
 // Helper function to get current assignments based on pipeline
 const getCurrentAssignments = async (documentId: string, pipeline: PipelineType) => {
@@ -52,6 +52,23 @@ const getCurrentAssignments = async (documentId: string, pipeline: PipelineType)
     
     const { data } = await supabase
       .from('pipeline_a_agent_knowledge')
+      .select('agent_id')
+      .in('chunk_id', chunkIds);
+    
+    const uniqueAgents = [...new Set(data?.map(a => a.agent_id) || [])];
+    return uniqueAgents.map(agent_id => ({ agent_id }));
+  } else if (pipeline === 'pipeline_a_hybrid') {
+    const { data: chunks } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return [];
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { data } = await supabase
+      .from('pipeline_a_hybrid_agent_knowledge')
       .select('agent_id')
       .in('chunk_id', chunkIds);
     
@@ -113,6 +130,23 @@ const removeAssignments = async (documentId: string, agentIds: string[], pipelin
       .in('chunk_id', chunkIds);
     
     return error;
+  } else if (pipeline === 'pipeline_a_hybrid') {
+    const { data: chunks } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id')
+      .eq('document_id', documentId);
+    
+    if (!chunks || chunks.length === 0) return null;
+    
+    const chunkIds = chunks.map(c => c.id);
+    
+    const { error } = await supabase
+      .from('pipeline_a_hybrid_agent_knowledge')
+      .delete()
+      .in('agent_id', agentIds)
+      .in('chunk_id', chunkIds);
+    
+    return error;
   } else if (pipeline === 'pipeline_b') {
     const { data: chunks } = await supabase
       .from('pipeline_b_chunks_raw')
@@ -165,6 +199,7 @@ export const AssignDocumentDialog = ({
   // Determine pipeline type
   const getPipelineType = (): PipelineType => {
     if (document.pipeline === 'a') return 'pipeline_a';
+    if (document.pipeline === 'a-hybrid') return 'pipeline_a_hybrid';
     if (document.pipeline === 'b') return 'pipeline_b';
     return 'pipeline_c';
   };
@@ -182,6 +217,7 @@ export const AssignDocumentDialog = ({
       
       // Verify document is ready for assignment based on pipeline
       const tableName = pipelineType === 'pipeline_a' ? 'pipeline_a_documents' :
+                        pipelineType === 'pipeline_a_hybrid' ? 'pipeline_a_hybrid_documents' :
                         pipelineType === 'pipeline_b' ? 'pipeline_b_documents' : 'pipeline_c_documents';
       
       const { data: docData, error: docError } = await supabase

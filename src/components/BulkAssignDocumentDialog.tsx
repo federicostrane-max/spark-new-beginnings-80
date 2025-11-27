@@ -26,7 +26,7 @@ interface KnowledgeDocument {
   file_name: string;
   validation_status: string;
   processing_status: string;
-  pipeline?: string; // 'a' (legacy), 'b', 'c'
+  pipeline?: 'a' | 'b' | 'c' | 'a-hybrid';
 }
 
 type PipelineType = 'pipeline_a' | 'pipeline_b' | 'pipeline_c';
