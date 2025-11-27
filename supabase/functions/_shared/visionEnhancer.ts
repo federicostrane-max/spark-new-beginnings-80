@@ -54,20 +54,6 @@ export function detectOCRIssues(text: string): OCRIssue[] {
   return issues;
 }
 
-// ============= FUNCTION 2A: PDF TO IMAGE CONVERSION (DEPRECATED) =============
-
-/**
- * @deprecated Cloudmersive conversion is no longer needed.
- * Claude 3.5 Sonnet now supports native PDF input via the Messages API.
- * This function is kept for potential future use cases only.
- */
-export async function convertPdfToImage(
-  pdfBuffer: Uint8Array,
-  cloudmersiveKey: string
-): Promise<{ base64: string; mediaType: string } | null> {
-  console.warn('[Vision Enhancement] convertPdfToImage is DEPRECATED - Claude now supports native PDF');
-  return null;
-}
 
 // ============= FUNCTION 2B: CLAUDE PDF WITH CONTEXTUAL REASONING =============
 
@@ -164,18 +150,6 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
   }
 }
 
-/**
- * @deprecated Use enhanceWithClaudePDF instead.
- * This function is kept for backwards compatibility only.
- */
-export async function enhanceWithClaudeVision(
-  imageData: { base64: string; mediaType: string },
-  anthropicKey: string,
-  ocrIssues: OCRIssue[]
-): Promise<string | null> {
-  console.warn('[Vision Enhancement] enhanceWithClaudeVision is DEPRECATED - use enhanceWithClaudePDF instead');
-  return null;
-}
 
 // ============= FUNCTION 2C: GOOGLE VISION API CALL (FALLBACK) =============
 
