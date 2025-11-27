@@ -1222,6 +1222,57 @@ export const DocumentPoolTable = () => {
         console.log('[DELETE] ✓ Pipeline B document deleted successfully');
         toast.success("Documento eliminato con successo");
         loadDocuments();
+      } else if (doc.pipeline === 'a-hybrid') {
+        // Pipeline A-Hybrid deletion
+        console.log(`[DELETE] Pipeline A-Hybrid document: ${doc.id}`);
+        
+        // 1. Delete from pipeline_a_hybrid_agent_knowledge
+        const { data: chunks } = await supabase
+          .from("pipeline_a_hybrid_chunks_raw")
+          .select("id")
+          .eq("document_id", doc.id);
+        
+        if (chunks && chunks.length > 0) {
+          const { error: agentLinksError } = await supabase
+            .from("pipeline_a_hybrid_agent_knowledge")
+            .delete()
+            .in("chunk_id", chunks.map(c => c.id));
+
+          if (agentLinksError) throw agentLinksError;
+        }
+
+        // 2. Delete from pipeline_a_hybrid_chunks_raw
+        const { error: chunksError } = await supabase
+          .from("pipeline_a_hybrid_chunks_raw")
+          .delete()
+          .eq("document_id", doc.id);
+
+        if (chunksError) throw chunksError;
+
+        // 3. Delete storage file (Pipeline A-Hybrid uses pipeline-a-uploads bucket)
+        console.log(`[DELETE] Deleting file from storage: pipeline-a-uploads/${doc.id}/${doc.file_name}`);
+        const { error: storageError } = await supabase.storage
+          .from('pipeline-a-uploads')
+          .remove([`${doc.id}/${doc.file_name}`]);
+
+        if (storageError) {
+          console.warn('[DELETE] Storage deletion warning (file may not exist):', storageError);
+        }
+
+        // 4. Delete from pipeline_a_hybrid_documents
+        const { error: docError } = await supabase
+          .from("pipeline_a_hybrid_documents")
+          .delete()
+          .eq("id", doc.id);
+
+        if (docError) {
+          console.error('[DELETE] Error deleting Pipeline A-Hybrid document record:', docError);
+          throw docError;
+        }
+
+        console.log('[DELETE] ✓ Pipeline A-Hybrid document deleted successfully');
+        toast.success("Documento eliminato con successo");
+        loadDocuments();
       } else if (doc.pipeline === 'a') {
         // Pipeline A deletion
         console.log(`[DELETE] Pipeline A document: ${doc.id}`);
@@ -1266,15 +1317,11 @@ export const DocumentPoolTable = () => {
           .eq("id", doc.id);
 
         if (docError) {
-          console.error('[DELETE] Error deleting Pipeline A document record:', docError);
+          console.error('[DELETE] Error deleting Pipeline A-Hybrid document record:', docError);
           throw docError;
         }
 
         console.log('[DELETE] ✓ Pipeline A document deleted successfully');
-        toast.success("Documento eliminato con successo");
-        loadDocuments();
-
-        console.log('[DELETE] ✓ Legacy document deleted successfully');
         toast.success("Documento eliminato con successo");
         loadDocuments();
       }
