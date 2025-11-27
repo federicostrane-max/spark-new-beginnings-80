@@ -59,19 +59,20 @@ export function detectOCRIssues(text: string): OCRIssue[] {
 export async function convertPdfToImage(
   pdfBuffer: Uint8Array,
   cloudmersiveKey: string
-): Promise<string | null> {
-  console.log('[Vision Enhancement] Converting PDF to PNG via Cloudmersive');
+): Promise<{ base64: string; mediaType: string } | null> {
+  console.log('[Vision Enhancement] Converting PDF to image via Cloudmersive');
   console.log(`[Vision Enhancement] PDF buffer size: ${pdfBuffer.length} bytes`);
 
   try {
-    // Create FormData with PDF - use type assertion to satisfy Deno's strict typing
     const formData = new FormData();
     const file = new File([pdfBuffer as unknown as BlobPart], 'document.pdf', { type: 'application/pdf' });
     formData.append('file', file);
 
-    console.log('[Vision Enhancement] Calling Cloudmersive API...');
+    console.log('[Vision Enhancement] Calling Cloudmersive API (first page rasterize)...');
+    
+    // Use endpoint that returns SINGLE image, not ZIP
     const response = await fetch(
-      'https://api.cloudmersive.com/convert/pdf/to/png/direct',
+      'https://api.cloudmersive.com/convert/pdf/pages/rasterize/first',
       {
         method: 'POST',
         headers: { 'Apikey': cloudmersiveKey },
@@ -82,31 +83,48 @@ export async function convertPdfToImage(
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[Vision Enhancement] Cloudmersive error ${response.status}:`, errorText);
-      throw new Error(`Cloudmersive API failed: ${response.status} - ${errorText}`);
+      return null;
     }
 
-    // Returns first page as PNG
-    const pngBuffer = await response.arrayBuffer();
-    const base64Image = encodeBase64(new Uint8Array(pngBuffer));
-    console.log(`[Vision Enhancement] PDF converted to PNG, base64 length: ${base64Image.length} chars`);
+    const imageBuffer = await response.arrayBuffer();
+    const imageBytes = new Uint8Array(imageBuffer);
     
-    return base64Image;
+    // Validate it's not a ZIP file (ZIP starts with 0x50 0x4B "PK")
+    if (imageBytes[0] === 0x50 && imageBytes[1] === 0x4B) {
+      console.error('[Vision Enhancement] Received ZIP instead of image - wrong endpoint');
+      return null;
+    }
+    
+    // Detect image type from magic bytes
+    let mediaType = 'image/png'; // default
+    if (imageBytes[0] === 0xFF && imageBytes[1] === 0xD8) {
+      mediaType = 'image/jpeg';
+      console.log('[Vision Enhancement] Detected JPEG format');
+    } else if (imageBytes[0] === 0x89 && imageBytes[1] === 0x50) {
+      mediaType = 'image/png';
+      console.log('[Vision Enhancement] Detected PNG format');
+    }
+    
+    const base64Image = encodeBase64(imageBytes);
+    console.log(`[Vision Enhancement] PDF converted to ${mediaType}, base64 length: ${base64Image.length} chars`);
+    
+    return { base64: base64Image, mediaType };
 
   } catch (error) {
     console.error('[Vision Enhancement] Exception in convertPdfToImage:', error);
-    throw error;
+    return null;
   }
 }
 
 // ============= FUNCTION 2B: CLAUDE VISION WITH CONTEXTUAL REASONING =============
 
 export async function enhanceWithClaudeVision(
-  imageBase64: string,
+  imageData: { base64: string; mediaType: string },
   anthropicKey: string,
   ocrIssues: OCRIssue[]
 ): Promise<string | null> {
   console.log('[Vision Enhancement] Starting Claude Vision analysis');
-  console.log(`[Vision Enhancement] Image base64 length: ${imageBase64.length} chars, OCR issues: ${ocrIssues.length}`);
+  console.log(`[Vision Enhancement] Image base64 length: ${imageData.base64.length} chars, media type: ${imageData.mediaType}, OCR issues: ${ocrIssues.length}`);
 
   try {
     const issuesList = ocrIssues.map(i => `- ${i.type}: "${i.pattern}"`).join('\n');
@@ -151,8 +169,8 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: 'image/png',
-                data: imageBase64
+                media_type: imageData.mediaType,
+                data: imageData.base64
               }
             },
             {
