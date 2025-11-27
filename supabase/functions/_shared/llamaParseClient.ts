@@ -71,6 +71,7 @@ export async function uploadToLlamaParse(
     
     // CRITICAL: Enable multimodal mode for graph/chart descriptions
     formData.append('vendor_multimodal_mode', 'true');
+    formData.append('vendor_multimodal_model_name', 'gemini-2.5-flash');
     formData.append('result_type', 'markdown');
     formData.append('language', 'it');
 
