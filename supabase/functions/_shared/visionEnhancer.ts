@@ -95,28 +95,45 @@ export async function enhanceWithVisionAPI(
 
     const result = await response.json();
     console.log('[Vision Enhancement] API response received');
+    
+    // Debug logging per struttura risposta
+    console.log('[Vision Enhancement] Response structure:', JSON.stringify(Object.keys(result)));
+    console.log('[Vision Enhancement] Responses count:', result.responses?.length);
+    if (result.responses?.[0]) {
+      console.log('[Vision Enhancement] First response keys:', JSON.stringify(Object.keys(result.responses[0])));
+    }
 
-    // Estrai il testo completo da tutte le pagine
-    const responses = result.responses || [];
-    if (responses.length === 0) {
-      console.warn('[Vision Enhancement] No responses from Vision API');
+    // Per files:annotate (PDF), la struttura è: responses[file].responses[page]
+    const fileResponse = result.responses?.[0];
+    if (!fileResponse) {
+      console.warn('[Vision Enhancement] No file response from Vision API');
+      return null;
+    }
+
+    // Accedi alle risposte delle pagine (struttura nidificata per PDF)
+    const pageResponses = fileResponse.responses || [];
+    if (pageResponses.length === 0) {
+      console.warn('[Vision Enhancement] No page responses from Vision API');
+      console.log('[Vision Enhancement] File response structure:', JSON.stringify(Object.keys(fileResponse)));
       return null;
     }
 
     let fullText = '';
-    for (let i = 0; i < responses.length; i++) {
-      const pageResponse = responses[i];
+    for (let i = 0; i < pageResponses.length; i++) {
+      const pageResponse = pageResponses[i];
       const fullTextAnnotation = pageResponse.fullTextAnnotation;
       
       if (fullTextAnnotation && fullTextAnnotation.text) {
         fullText += fullTextAnnotation.text;
-        if (i < responses.length - 1) {
+        if (i < pageResponses.length - 1) {
           fullText += '\n\n---PAGE BREAK---\n\n';
         }
+      } else {
+        console.log(`[Vision Enhancement] Page ${i + 1}: No text annotation found`);
       }
     }
 
-    console.log(`[Vision Enhancement] Extracted ${fullText.length} characters from ${responses.length} page(s)`);
+    console.log(`[Vision Enhancement] Extracted ${fullText.length} characters from ${pageResponses.length} page(s)`);
     return fullText.trim();
 
   } catch (error) {
