@@ -68,11 +68,11 @@ export async function convertPdfToImage(
     const file = new File([pdfBuffer as unknown as BlobPart], 'document.pdf', { type: 'application/pdf' });
     formData.append('file', file);
 
-    console.log('[Vision Enhancement] Calling Cloudmersive API (first page rasterize)...');
+    console.log('[Vision Enhancement] Calling Cloudmersive API (single PNG conversion)...');
     
-    // Use endpoint that returns SINGLE image, not ZIP
+    // Use endpoint that returns SINGLE PNG image
     const response = await fetch(
-      'https://api.cloudmersive.com/convert/pdf/pages/rasterize/first',
+      'https://api.cloudmersive.com/convert/document/pdf/to/png/single',
       {
         method: 'POST',
         headers: { 'Apikey': cloudmersiveKey },
