@@ -175,11 +175,28 @@ export function reconstructFromLlamaParse(jsonOutput: any): {
     
     for (const page of jsonOutput.pages) {
       if (page.items && Array.isArray(page.items)) {
-        // Page has structured items with bounding boxes
-        elements.push(...page.items.map((item: any) => ({ 
-          ...item, 
-          page: page.page || page.page_number || 1 
-        })));
+        // Page has structured items - add virtual bbox if missing
+        const pageNum = page.page || page.page_number || 1;
+        let virtualY = 0;
+        
+        for (const item of page.items) {
+          // Try multiple bbox property names
+          const itemBbox = item.bbox || item.bounding_box || item.bounds;
+          
+          elements.push({ 
+            ...item, 
+            page: pageNum,
+            // Use actual bbox or generate virtual position preserving reading order
+            bbox: itemBbox || { 
+              x: 0, 
+              y: virtualY,
+              w: 100, 
+              h: 50 
+            }
+          });
+          
+          virtualY += 60; // Increment for next element
+        }
       } else if (page.text || page.md || page.markdown) {
         // Simple page format with just text
         elements.push({
