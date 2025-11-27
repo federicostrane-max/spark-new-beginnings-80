@@ -262,6 +262,25 @@ export const BulkAssignDocumentDialog = ({
       countDocuments();
     }, 5000) : null;
 
+    // Realtime subscription for Pipeline A documents
+    const channelA = supabase
+      .channel('bulk-assign-pipeline-a-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'pipeline_a_documents'
+        },
+        (payload) => {
+          console.log('[BulkAssignDocumentDialog] 🔔 Pipeline A document updated:', payload.new);
+          countDocuments();
+        }
+      )
+      .subscribe((status) => {
+        console.log('[BulkAssignDocumentDialog] 📡 Pipeline A channel status:', status);
+      });
+
     // Realtime subscription for Pipeline B documents
     const channelB = supabase
       .channel('bulk-assign-pipeline-b-changes')
@@ -321,6 +340,7 @@ export const BulkAssignDocumentDialog = ({
 
     return () => {
       if (interval) clearInterval(interval);
+      supabase.removeChannel(channelA);
       supabase.removeChannel(channelB);
       supabase.removeChannel(channelAHybrid);
       supabase.removeChannel(channelC);
