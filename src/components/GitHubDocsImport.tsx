@@ -28,7 +28,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [orgImporting, setOrgImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress[]>([]);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b' | 'pipeline_c'>('pipeline_a');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b'>('pipeline_a');
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -91,9 +91,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       // Route to correct pipeline function
       const functionName = selectedPipeline === 'pipeline_a' 
         ? 'pipeline-a-ingest-github' 
-        : selectedPipeline === 'pipeline_b'
-        ? 'pipeline-b-ingest-github'
-        : 'pipeline-c-ingest-github'; // Not implemented yet, will need to be created
+        : 'pipeline-b-ingest-github';
 
       // All pipelines now use the same body format
       const requestBody = { 
@@ -198,7 +196,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       <CardContent className="space-y-6">
         <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
           <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
-          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b' | 'pipeline_c')} disabled={orgImporting}>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b')} disabled={orgImporting}>
             <div className="flex items-start space-x-3 p-3 rounded-lg border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors">
               <RadioGroupItem value="pipeline_a" id="gh-pipeline-a" className="mt-1" />
               <div className="flex-1 space-y-1">
@@ -218,17 +216,6 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
                 </Label>
                 <p className="text-sm text-muted-foreground">
                   Parsing avanzato con API Landing AI. Chunk semantici con visual grounding.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
-              <RadioGroupItem value="pipeline_c" id="gh-pipeline-c" className="mt-1" />
-              <div className="flex-1 space-y-1">
-                <Label htmlFor="gh-pipeline-c" className="cursor-pointer font-semibold">
-                  Pipeline C (Content-Aware Custom) 🆕
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Chunking content-aware personalizzato. Nessun costo esterno.
                 </p>
               </div>
             </div>

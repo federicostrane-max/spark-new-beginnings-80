@@ -1890,14 +1890,14 @@ export const DocumentPoolTable = () => {
                               Pipeline A
                             </Badge>
                           )}
+                          {doc.pipeline === 'a-hybrid' && (
+                            <Badge variant="secondary" className="text-xs bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200 shrink-0">
+                              Pipeline A-Hybrid
+                            </Badge>
+                          )}
                           {doc.pipeline === 'b' && (
                             <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200 shrink-0">
                               Pipeline B
-                            </Badge>
-                          )}
-                          {doc.pipeline === 'c' && (
-                            <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shrink-0">
-                              Pipeline C
                             </Badge>
                           )}
                           {doc.extracted_title && (
@@ -2150,14 +2150,19 @@ export const DocumentPoolTable = () => {
                       <div className="flex-1">
                           <div className="font-medium break-words text-sm mb-1">
                             {doc.file_name}
+                            {doc.pipeline === 'a' && (
+                              <Badge variant="secondary" className="text-xs ml-2 bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+                                Pipeline A
+                              </Badge>
+                            )}
+                            {doc.pipeline === 'a-hybrid' && (
+                              <Badge variant="secondary" className="text-xs ml-2 bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200">
+                                Pipeline A-Hybrid
+                              </Badge>
+                            )}
                             {doc.pipeline === 'b' && (
                               <Badge variant="secondary" className="text-xs ml-2 bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200">
                                 Pipeline B
-                              </Badge>
-                            )}
-                            {doc.pipeline === 'c' && (
-                              <Badge variant="secondary" className="text-xs ml-2 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                                Pipeline C
                               </Badge>
                             )}
                           </div>
