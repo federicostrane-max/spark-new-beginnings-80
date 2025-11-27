@@ -47,18 +47,25 @@ serve(async (req) => {
 
     if (stuckDocs && stuckDocs.length > 0) {
       for (const doc of stuckDocs) {
-        const { count } = await supabase
+        // Verifica che esistano chunks E siano TUTTI ready
+        const { count: totalChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id);
+
+        const { count: readyChunks } = await supabase
           .from('pipeline_a_hybrid_chunks_raw')
           .select('id', { count: 'exact', head: true })
           .eq('document_id', doc.id)
-          .neq('embedding_status', 'ready');
+          .eq('embedding_status', 'ready');
 
-        if (count === 0) {
+        // Solo se ha chunks E sono tutti ready
+        if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
           await supabase
             .from('pipeline_a_hybrid_documents')
             .update({ status: 'ready', updated_at: new Date().toISOString() })
             .eq('id', doc.id);
-          console.log(`[Pipeline A-Hybrid Embeddings] Reconciled document ${doc.id} to ready`);
+          console.log(`[Pipeline A-Hybrid Embeddings] Reconciled document ${doc.id} to ready (${readyChunks}/${totalChunks} chunks ready)`);
         }
       }
     }
@@ -128,18 +135,25 @@ serve(async (req) => {
     // Update document status to ready
     const documentIds = [...new Set(chunks.map(c => c.document_id))];
     for (const docId of documentIds) {
-      const { count } = await supabase
+      // Verifica che esistano chunks E siano TUTTI ready
+      const { count: totalChunks } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', docId);
+
+      const { count: readyChunks } = await supabase
         .from('pipeline_a_hybrid_chunks_raw')
         .select('id', { count: 'exact', head: true })
         .eq('document_id', docId)
-        .neq('embedding_status', 'ready');
+        .eq('embedding_status', 'ready');
 
-      if (count === 0) {
+      // Solo se ha chunks E sono tutti ready
+      if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
         await supabase
           .from('pipeline_a_hybrid_documents')
           .update({ status: 'ready', updated_at: new Date().toISOString() })
           .eq('id', docId);
-        console.log(`[Pipeline A-Hybrid Embeddings] Document ${docId} marked ready`);
+        console.log(`[Pipeline A-Hybrid Embeddings] Document ${docId} marked ready (${readyChunks}/${totalChunks} chunks ready)`);
       }
     }
 
