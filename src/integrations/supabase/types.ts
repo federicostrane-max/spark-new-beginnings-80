@@ -700,6 +700,62 @@ export type Database = {
           },
         ]
       }
+      benchmark_datasets: {
+        Row: {
+          created_at: string | null
+          document_id: string | null
+          file_name: string
+          ground_truth: string
+          id: string
+          is_active: boolean | null
+          provisioned_at: string | null
+          question: string
+          question_language: string | null
+          source_metadata: Json | null
+          source_repo: string | null
+          storage_path: string | null
+          suite_category: string
+        }
+        Insert: {
+          created_at?: string | null
+          document_id?: string | null
+          file_name: string
+          ground_truth: string
+          id?: string
+          is_active?: boolean | null
+          provisioned_at?: string | null
+          question: string
+          question_language?: string | null
+          source_metadata?: Json | null
+          source_repo?: string | null
+          storage_path?: string | null
+          suite_category: string
+        }
+        Update: {
+          created_at?: string | null
+          document_id?: string | null
+          file_name?: string
+          ground_truth?: string
+          id?: string
+          is_active?: boolean | null
+          provisioned_at?: string | null
+          question?: string
+          question_language?: string | null
+          source_metadata?: Json | null
+          source_repo?: string | null
+          storage_path?: string | null
+          suite_category?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmark_datasets_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_a_hybrid_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmark_results: {
         Row: {
           agent_response: string | null
