@@ -9,7 +9,67 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10;
 
-function buildEmbeddingInput(chunk: any, fileName: string): string {
+/**
+ * Generate semantic summary for table chunks using Gemini Flash
+ * This creates dense, data-rich summaries from Markdown tables for embedding generation
+ */
+async function generateTableSummary(tableMarkdown: string): Promise<string> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  
+  if (!lovableApiKey) {
+    console.warn('[Table Summary] LOVABLE_API_KEY not found, using placeholder');
+    return tableMarkdown; // Fallback to original content
+  }
+
+  try {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          {
+            role: 'system',
+            content: 'Sei un assistente specializzato nel creare sommari densi e ricchi di dati per tabelle. Il tuo compito è estrarre TUTTI i valori chiave (numeri, nomi, date, totali) dalla tabella Markdown e creare un breve testo descrittivo che catturi il contenuto essenziale.'
+          },
+          {
+            role: 'user',
+            content: `Crea un sommario breve (max 3 righe) di questa tabella, includendo TUTTI i valori numerici importanti, nomi, e totali:\n\n${tableMarkdown}\n\nSommario:`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 300,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const summary = data.choices?.[0]?.message?.content?.trim();
+
+    if (!summary) {
+      throw new Error('Empty summary from Gemini');
+    }
+
+    console.log(`[Table Summary] Generated: ${summary.slice(0, 100)}...`);
+    return summary;
+
+  } catch (error) {
+    console.error('[Table Summary] Generation failed:', error);
+    return tableMarkdown; // Fallback to original content
+  }
+}
+
+/**
+ * Build embedding input text with semantic context
+ * For tables: generates descriptive summary instead of using placeholder
+ */
+async function buildEmbeddingInput(chunk: any, fileName: string): Promise<string> {
   let embeddingText = `Document: ${fileName}\n\n`;
   
   if (chunk.heading_hierarchy && Array.isArray(chunk.heading_hierarchy) && chunk.heading_hierarchy.length > 0) {
@@ -19,7 +79,26 @@ function buildEmbeddingInput(chunk: any, fileName: string): string {
     }
   }
   
-  embeddingText += chunk.content;
+  // TABLE SEMANTIC SUMMARY GENERATION
+  // If chunk is a table with placeholder content, generate semantic summary from original_content
+  if (chunk.chunk_type === 'table' && chunk.original_content) {
+    const isPlaceholder = chunk.content.includes('Tabella con dati strutturati') || 
+                          chunk.content.includes('Table with structured data');
+    
+    if (isPlaceholder) {
+      console.log(`[Embedding Input] Generating semantic summary for table chunk ${chunk.id}`);
+      const tableSummary = await generateTableSummary(chunk.original_content);
+      embeddingText += tableSummary;
+      
+      // Update chunk.content with summary for storage (will be saved later)
+      chunk.semantic_summary = tableSummary;
+    } else {
+      embeddingText += chunk.content;
+    }
+  } else {
+    embeddingText += chunk.content;
+  }
+  
   return embeddingText;
 }
 
@@ -110,16 +189,25 @@ serve(async (req) => {
           .eq('id', chunk.id);
 
         const fileName = chunk.pipeline_a_hybrid_documents?.file_name || 'Unknown';
-        const embeddingInput = buildEmbeddingInput(chunk, fileName);
+        const embeddingInput = await buildEmbeddingInput(chunk, fileName);
         const result = await generateEmbedding(embeddingInput, openaiKey);
+
+        // Prepare update object
+        const updateData: any = {
+          embedding: JSON.stringify(result.embedding),
+          embedding_status: 'ready',
+          embedded_at: new Date().toISOString()
+        };
+
+        // If semantic summary was generated, update content field
+        if (chunk.semantic_summary) {
+          updateData.content = chunk.semantic_summary;
+          console.log(`[Pipeline A-Hybrid Embeddings] Updated content with semantic summary for chunk ${chunk.id}`);
+        }
 
         await supabase
           .from('pipeline_a_hybrid_chunks_raw')
-          .update({
-            embedding: JSON.stringify(result.embedding),
-            embedding_status: 'ready',
-            embedded_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('id', chunk.id);
 
         processedCount++;

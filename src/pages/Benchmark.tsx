@@ -72,10 +72,43 @@ export default function Benchmark() {
     safety: true 
   });
   const [sampleSize, setSampleSize] = useState(5);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   useEffect(() => {
     loadDataset();
   }, []);
+
+  const handleRegenerateTableEmbeddings = async () => {
+    setIsRegenerating(true);
+    
+    try {
+      toast.info('Avvio rigenerazione embedding tabelle...');
+      
+      const { data, error } = await supabase.functions.invoke('regenerate-table-embeddings', {
+        body: {}
+      });
+
+      if (error) throw error;
+
+      const result = data as { success: boolean; processed: number; failed: number; total: number; message: string };
+      
+      if (result.success) {
+        toast.success(`✅ ${result.message}`, { duration: 5000 });
+        
+        if (result.failed > 0) {
+          toast.warning(`⚠️ ${result.failed} chunk non rigenerati. Controlla i log.`, { duration: 5000 });
+        }
+      } else {
+        throw new Error('Regeneration failed');
+      }
+      
+    } catch (error) {
+      console.error('Regenerate embeddings error:', error);
+      toast.error('Errore durante la rigenerazione degli embedding');
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
 
   const loadDataset = async () => {
     try {
@@ -512,6 +545,15 @@ export default function Benchmark() {
           >
             <Settings className="h-4 w-4" />
             Configura Dataset
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleRegenerateTableEmbeddings}
+            disabled={isRegenerating}
+            className="gap-2"
+          >
+            <RefreshCw className={`h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+            {isRegenerating ? 'Rigenerando...' : 'Rigenera Embedding Tabelle'}
           </Button>
           <Button
             onClick={runBenchmark}
