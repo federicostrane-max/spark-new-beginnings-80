@@ -33,6 +33,35 @@ const ADVERSARIAL_QUESTIONS = [
   { question: "How many chromosomes do humans have?", answer: "Information not found in document" }
 ];
 
+// Code Q&A for tiny-invariant repository
+const CODE_QA_QUESTIONS = [
+  { 
+    question: "What is the main function exported by tiny-invariant and what does it do?", 
+    answer: "invariant - throws an error with a message when a condition is falsy",
+    targetFile: "README.md"
+  },
+  { 
+    question: "What TypeScript type does tiny-invariant use for the assertion message parameter?", 
+    answer: "string | (() => string)",
+    targetFile: "src/tiny-invariant.ts"
+  },
+  { 
+    question: "What happens when the condition passed to invariant is false?", 
+    answer: "An Invariant Violation error is thrown with the provided message",
+    targetFile: "src/tiny-invariant.ts"
+  },
+  { 
+    question: "How does tiny-invariant handle the message parameter for production builds?", 
+    answer: "In production, the message is stripped out and only 'Invariant failed' is thrown",
+    targetFile: "README.md"
+  },
+  { 
+    question: "What is the license of the tiny-invariant package?", 
+    answer: "MIT",
+    targetFile: "README.md"
+  }
+];
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -62,7 +91,8 @@ serve(async (req) => {
       receipts: { success: 0, failed: 0, documents: [] as any[] },
       science: { success: 0, failed: 0, documents: [] as any[] },
       narrative: { success: 0, failed: 0, documents: [] as any[] },
-      safety: { success: 0, failed: 0, documents: [] as any[] }
+      safety: { success: 0, failed: 0, documents: [] as any[] },
+      code: { success: 0, failed: 0, documents: [] as any[] }
     };
 
     // ===== PHASE 1: General (DocVQA) - BATCH PROCESSING =====
@@ -691,11 +721,87 @@ serve(async (req) => {
       }
     }
 
+    // ===== PHASE 8: Code Suite (GitHub Repository) =====
+    if (suites.code) {
+      console.log('[Provision Benchmark] Processing Code suite (tiny-invariant)...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'code', 'benchmark_code');
+      console.log(`[Provision Benchmark] Cleaned up Code: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        const repoUrl = 'https://github.com/alexreardon/tiny-invariant';
+        const branch = 'main';
+        
+        // Invoke pipeline-a-ingest-github to import the repository
+        console.log('[Provision Benchmark] Invoking pipeline-a-ingest-github for tiny-invariant...');
+        const { data: ingestResult, error: ingestError } = await supabase.functions.invoke('pipeline-a-ingest-github', {
+          body: {
+            repoUrl,
+            branch,
+            folder: 'benchmark_code'
+          }
+        });
+        
+        if (ingestError) throw new Error(`GitHub ingest failed: ${ingestError.message}`);
+        console.log('[Provision Benchmark] GitHub ingest result:', ingestResult);
+        
+        // Wait a moment for documents to be created
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Fetch the ingested documents
+        const { data: codeDocs } = await supabase
+          .from('pipeline_a_documents')
+          .select('id, file_name')
+          .eq('folder', 'benchmark_code');
+        
+        if (codeDocs && codeDocs.length > 0) {
+          console.log(`[Provision Benchmark] Found ${codeDocs.length} code documents`);
+          
+          // Map Q&A to documents by matching targetFile
+          for (const qa of CODE_QA_QUESTIONS) {
+            // Find the best matching document for this Q&A
+            const matchingDoc = codeDocs.find(d => 
+              d.file_name.toLowerCase().includes(qa.targetFile.toLowerCase().replace('src/', ''))
+            ) || codeDocs[0]; // Fallback to first doc if no match
+            
+            const { error: insertError } = await supabase
+              .from('benchmark_datasets')
+              .insert({
+                file_name: matchingDoc.file_name,
+                suite_category: 'code',
+                question: qa.question,
+                ground_truth: qa.answer,
+                source_repo: 'alexreardon/tiny-invariant',
+                document_id: matchingDoc.id,
+                provisioned_at: new Date().toISOString()
+              });
+            
+            if (insertError) {
+              console.error('[Provision Benchmark] Code Q&A insert failed:', insertError);
+              results.code.failed++;
+            } else {
+              results.code.success++;
+            }
+          }
+          
+          results.code.documents = codeDocs.map(d => ({ fileName: d.file_name, documentId: d.id }));
+          console.log(`[Provision Benchmark] Code suite complete: ${results.code.success} Q&A pairs`);
+        } else {
+          console.error('[Provision Benchmark] No code documents found after ingestion');
+          results.code.failed = CODE_QA_QUESTIONS.length;
+        }
+        
+      } catch (codeError) {
+        console.error('[Provision Benchmark] Code suite failed:', codeError);
+        results.code.failed = CODE_QA_QUESTIONS.length;
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         results,
-        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.safety.success} safety tests. Documents will be ready in ~30-60s.`
+        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety tests. Documents will be ready in ~30-60s.`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -910,7 +1016,7 @@ function convertNarrativeQAToMarkdown(entry: any, index: number): string {
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety',
+  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);
