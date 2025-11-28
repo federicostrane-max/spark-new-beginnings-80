@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, PlayCircle, CheckCircle, XCircle, AlertCircle, Clock, Settings } from "lucide-react";
+import { ArrowLeft, PlayCircle, CheckCircle, XCircle, AlertCircle, Clock, Settings, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -70,6 +70,10 @@ export default function Benchmark() {
 
   const loadDataset = async () => {
     try {
+      // 🔧 FIX: Reset state before loading to prevent stale data
+      setResults([]);
+      setDataset([]);
+      
       // Load from benchmark_datasets table
       const { data, error } = await supabase
         .from('benchmark_datasets')
@@ -131,7 +135,12 @@ export default function Benchmark() {
       
       toast.success(`Provisioning completato! ${data.message}`);
       
-      // Reload dataset after provisioning
+      // 🔧 FIX: Small delay to ensure all DB operations are committed
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // 🔧 FIX: Force complete state reset and reload
+      setResults([]);
+      setDataset([]);
       await loadDataset();
       setShowProvisioning(false);
     } catch (error: any) {
@@ -474,6 +483,19 @@ export default function Benchmark() {
               ))}
             </SelectContent>
           </Select>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              setResults([]);
+              setDataset([]);
+              await loadDataset();
+              toast.success('Dataset ricaricato');
+            }}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
           <Button
             variant="outline"
             onClick={() => setShowProvisioning(true)}
