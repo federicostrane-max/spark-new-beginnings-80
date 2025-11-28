@@ -143,6 +143,7 @@ export default function Benchmark() {
   };
 
   const runBenchmark = async () => {
+    console.log('[BENCHMARK DEBUG] runBenchmark function called!');
     try {
       setIsRunning(true);
       setProgress(0);
@@ -172,40 +173,42 @@ export default function Benchmark() {
         return;
       }
 
-    for (let i = 0; i < filteredDatasetWithIndex.length; i++) {
-      const { entry, originalIndex } = filteredDatasetWithIndex[i];
-      
-      // Detect format (benchmark_datasets vs legacy)
-      const isNewFormat = 'file_name' in entry;
-      const fileName = isNewFormat ? entry.file_name : entry.pdf_file;
-      const questionText = isNewFormat ? entry.question : entry.qa_pairs[0].question.en;
-      const groundTruth = isNewFormat ? entry.ground_truth : entry.qa_pairs[0].answer;
-      
-      const question = `Regarding document '${fileName}': ${questionText}`;
+      console.log('[BENCHMARK DEBUG] About to start loop with', filteredDatasetWithIndex.length, 'items');
 
-      setCurrentDoc({ index: originalIndex, file: fileName, question });
-      
-      const result: BenchmarkResult = {
-        pdf_file: fileName,
-        question,
-        groundTruth,
-        status: 'running'
-      };
+      for (let i = 0; i < filteredDatasetWithIndex.length; i++) {
+        const { entry, originalIndex } = filteredDatasetWithIndex[i];
+        
+        // Detect format (benchmark_datasets vs legacy)
+        const isNewFormat = 'file_name' in entry;
+        const fileName = isNewFormat ? entry.file_name : entry.pdf_file;
+        const questionText = isNewFormat ? entry.question : entry.qa_pairs[0].question.en;
+        const groundTruth = isNewFormat ? entry.ground_truth : entry.qa_pairs[0].answer;
+        
+        const question = `Regarding document '${fileName}': ${questionText}`;
 
-      // Update UI with running status
-      setResults(prev => {
-        const updated = [...prev];
-        updated[originalIndex] = result;
-        return updated;
-      });
+        setCurrentDoc({ index: originalIndex, file: fileName, question });
+        
+        const result: BenchmarkResult = {
+          pdf_file: fileName,
+          question,
+          groundTruth,
+          status: 'running'
+        };
 
-      try {
-        // 1. Check if document exists and is ready
-        const { data: doc, error: docError } = await supabase
-          .from('pipeline_a_hybrid_documents')
-          .select('id, status')
-          .eq('file_name', fileName)
-          .maybeSingle();
+        // Update UI with running status
+        setResults(prev => {
+          const updated = [...prev];
+          updated[originalIndex] = result;
+          return updated;
+        });
+
+        try {
+          // 1. Check if document exists and is ready
+          const { data: doc, error: docError } = await supabase
+            .from('pipeline_a_hybrid_documents')
+            .select('id, status')
+            .eq('file_name', fileName)
+            .maybeSingle();
 
         if (docError) throw docError;
 
@@ -255,111 +258,111 @@ export default function Benchmark() {
           continue;
         }
 
-        // 2. Send question to agent with isolated conversation
-        const conversationId = crypto.randomUUID(); // Generate random ID for complete isolation
-        const startTime = Date.now();
-        const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
-          body: {
-            agentSlug: AGENT_SLUG,
-            message: question,
-            conversationId, // Force new conversation per test
-            stream: false // Disable streaming for benchmark
-          }
-        });
-
-        if (agentError) throw agentError;
-        
-        // Diagnostic logging to see full response structure
-        console.log('[Benchmark] Agent response structure:', JSON.stringify(agentData, null, 2));
-        
-        // Handle multiple possible response field names
-        const agentResponse = agentData?.response || agentData?.message || agentData?.reply || agentData?.content || '';
-        
-        if (!agentResponse) {
-          console.error('[Benchmark] Empty agent response! Full data:', agentData);
-          result.status = 'error';
-          result.error = 'Agent returned empty response';
-          result.responseTimeMs = Date.now() - startTime;
-          newResults.push(result);
-          setResults(prev => {
-            const updated = [...prev];
-            updated[originalIndex] = result;
-            return updated;
+          // 2. Send question to agent with isolated conversation
+          const conversationId = crypto.randomUUID(); // Generate random ID for complete isolation
+          const startTime = Date.now();
+          const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
+            body: {
+              agentSlug: AGENT_SLUG,
+              message: question,
+              conversationId, // Force new conversation per test
+              stream: false // Disable streaming for benchmark
+            }
           });
+
+          if (agentError) throw agentError;
           
+          // Diagnostic logging to see full response structure
+          console.log('[Benchmark] Agent response structure:', JSON.stringify(agentData, null, 2));
+          
+          // Handle multiple possible response field names
+          const agentResponse = agentData?.response || agentData?.message || agentData?.reply || agentData?.content || '';
+          
+          if (!agentResponse) {
+            console.error('[Benchmark] Empty agent response! Full data:', agentData);
+            result.status = 'error';
+            result.error = 'Agent returned empty response';
+            result.responseTimeMs = Date.now() - startTime;
+            newResults.push(result);
+            setResults(prev => {
+              const updated = [...prev];
+              updated[originalIndex] = result;
+              return updated;
+            });
+            
+            await supabase.from('benchmark_results').insert({
+              run_id: runId,
+              pdf_file: fileName,
+              question,
+              ground_truth: groundTruth,
+              status: 'failed',
+              error: 'Agent returned empty response',
+              response_time_ms: result.responseTimeMs
+            });
+            
+            continue;
+          }
+          
+          result.agentResponse = agentResponse;
+          result.responseTimeMs = Date.now() - startTime;
+          console.log('[Benchmark] Extracted response:', agentResponse);
+
+          // 3. Evaluate with LLM Judge
+          const { data: evaluation, error: evalError } = await supabase.functions.invoke('evaluate-answer', {
+            body: {
+              question,
+              agentResponse,
+              groundTruths: [groundTruth]
+            }
+          });
+
+          if (evalError) throw evalError;
+          if (!evaluation) throw new Error('No evaluation data returned from judge');
+          if (evaluation.error) throw new Error(`Judge error: ${evaluation.error}`);
+
+          result.correct = evaluation.correct;
+          result.reason = evaluation.reason;
+          result.status = 'completed';
+          newResults.push(result);
+          
+          // Save to database with retrieval metadata
           await supabase.from('benchmark_results').insert({
             run_id: runId,
             pdf_file: fileName,
             question,
             ground_truth: groundTruth,
-            status: 'failed',
-            error: 'Agent returned empty response',
-            response_time_ms: result.responseTimeMs
+            agent_response: agentResponse,
+            correct: evaluation.correct,
+            reason: evaluation.reason,
+            response_time_ms: result.responseTimeMs,
+            status: 'completed',
+            retrieval_metadata: agentData?.metadata || {}
           });
+
+        } catch (error: any) {
+          result.status = 'error';
+          result.error = error.message;
+          newResults.push(result);
           
-          continue;
-        }
-        
-        result.agentResponse = agentResponse;
-        result.responseTimeMs = Date.now() - startTime;
-        console.log('[Benchmark] Extracted response:', agentResponse);
-
-        // 3. Evaluate with LLM Judge
-        const { data: evaluation, error: evalError } = await supabase.functions.invoke('evaluate-answer', {
-          body: {
+          // Save error to database
+          await supabase.from('benchmark_results').insert({
+            run_id: runId,
+            pdf_file: fileName,
             question,
-            agentResponse,
-            groundTruths: [groundTruth]
-          }
-        });
+            ground_truth: groundTruth,
+            status: 'error',
+            error: error.message
+          });
+        }
 
-        if (evalError) throw evalError;
-        if (!evaluation) throw new Error('No evaluation data returned from judge');
-        if (evaluation.error) throw new Error(`Judge error: ${evaluation.error}`);
-
-        result.correct = evaluation.correct;
-        result.reason = evaluation.reason;
-        result.status = 'completed';
-        newResults.push(result);
-        
-        // Save to database with retrieval metadata
-        await supabase.from('benchmark_results').insert({
-          run_id: runId,
-          pdf_file: fileName,
-          question,
-          ground_truth: groundTruth,
-          agent_response: agentResponse,
-          correct: evaluation.correct,
-          reason: evaluation.reason,
-          response_time_ms: result.responseTimeMs,
-          status: 'completed',
-          retrieval_metadata: agentData?.metadata || {}
+        // Update results and progress
+        setResults(prev => {
+          const updated = [...prev];
+          updated[originalIndex] = result;
+          return updated;
         });
-
-      } catch (error: any) {
-        result.status = 'error';
-        result.error = error.message;
-        newResults.push(result);
-        
-        // Save error to database
-        await supabase.from('benchmark_results').insert({
-          run_id: runId,
-          pdf_file: fileName,
-          question,
-          ground_truth: groundTruth,
-          status: 'error',
-          error: error.message
-        });
+        setProgress(((i + 1) / filteredDatasetWithIndex.length) * 100);
       }
-
-      // Update results and progress
-      setResults(prev => {
-        const updated = [...prev];
-        updated[originalIndex] = result;
-        return updated;
-      });
-      setProgress(((i + 1) / filteredDatasetWithIndex.length) * 100);
-    }
 
       setIsRunning(false);
       setCurrentDoc(null);
