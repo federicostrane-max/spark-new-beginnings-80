@@ -56,10 +56,10 @@ export default function Benchmark() {
       const data: DatasetEntry[] = await response.json();
       setDataset(data);
       
-      // Initialize results
+      // Initialize results with document context in question
       const initialResults: BenchmarkResult[] = data.map(entry => ({
         pdf_file: entry.pdf_file,
-        question: entry.qa_pairs[0].question.en,
+        question: `Regarding document '${entry.pdf_file}': ${entry.qa_pairs[0].question.en}`,
         groundTruth: entry.qa_pairs[0].answer,
         status: 'pending'
       }));
@@ -82,7 +82,7 @@ export default function Benchmark() {
 
     for (let i = 0; i < dataset.length; i++) {
       const entry = dataset[i];
-      const question = entry.qa_pairs[0].question.en;
+      const question = `Regarding document '${entry.pdf_file}': ${entry.qa_pairs[0].question.en}`;
       const groundTruth = entry.qa_pairs[0].answer;
 
       setCurrentDoc({ index: i, file: entry.pdf_file, question });
@@ -157,12 +157,14 @@ export default function Benchmark() {
           continue;
         }
 
-        // 2. Send question to agent (non-streaming mode)
+        // 2. Send question to agent with isolated conversation
+        const conversationId = crypto.randomUUID(); // Generate random ID for complete isolation
         const startTime = Date.now();
         const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
           body: {
             agentSlug: AGENT_SLUG,
             message: question,
+            conversationId, // Force new conversation per test
             stream: false // Disable streaming for benchmark
           }
         });
