@@ -802,10 +802,46 @@ function convertQASPERToMarkdown(paper: any): string {
     md += `## Abstract\n${paper.abstract}\n\n`;
   }
   
-  for (const section of paper.full_text || []) {
-    md += `## ${section.section_name || 'Section'}\n`;
-    for (const para of section.paragraphs || []) {
-      md += `${para}\n\n`;
+  // QASPER full_text can have different structures:
+  // Option A: { section_name: [...], paragraphs: [...] } as parallel arrays
+  // Option B: [{ section_name: '...', paragraphs: [...] }, ...] as array of objects
+  const fullText = paper.full_text;
+  
+  if (fullText) {
+    // Check if it's parallel arrays structure (section_name and paragraphs are arrays)
+    if (Array.isArray(fullText.section_name) && Array.isArray(fullText.paragraphs)) {
+      // Parallel arrays: section_name[i] corresponds to paragraphs[i]
+      for (let i = 0; i < fullText.section_name.length; i++) {
+        const sectionName = fullText.section_name[i] || 'Section';
+        md += `## ${sectionName}\n`;
+        
+        const paras = fullText.paragraphs[i];
+        if (Array.isArray(paras)) {
+          for (const para of paras) {
+            md += `${para}\n\n`;
+          }
+        } else if (typeof paras === 'string') {
+          md += `${paras}\n\n`;
+        }
+      }
+    } 
+    // Check if it's an array of section objects
+    else if (Array.isArray(fullText)) {
+      for (const section of fullText) {
+        md += `## ${section.section_name || 'Section'}\n`;
+        const paras = section.paragraphs;
+        if (Array.isArray(paras)) {
+          for (const para of paras) {
+            md += `${para}\n\n`;
+          }
+        } else if (typeof paras === 'string') {
+          md += `${paras}\n\n`;
+        }
+      }
+    }
+    // Fallback: just stringify whatever we got
+    else if (typeof fullText === 'object') {
+      md += `## Content\n${JSON.stringify(fullText, null, 2)}\n\n`;
     }
   }
   
