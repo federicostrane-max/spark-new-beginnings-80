@@ -14,6 +14,12 @@
 const ATOMIC_ELEMENT_SIZE_THRESHOLD = 1500; // Caratteri oltre i quali generare summary
 const MIN_TEXT_CHUNK_SIZE = 100; // Scarta chunk di testo troppo piccoli
 
+// Small-to-Big Retrieval Configuration
+const PARENT_CHUNK_SIZE = 4000;   // ~1000 token - contesto quasi a pagina
+const CHILD_CHUNK_SIZE = 500;     // ~128-150 token - precisione ricerca
+const PARENT_OVERLAP = 200;       // Overlap tra parent chunks
+const CHILD_OVERLAP = 50;         // Overlap tra child chunks
+
 interface ExtractedMetadata {
   dates?: string[];
   emails?: string[];
@@ -223,6 +229,123 @@ function extractMetadataFromContent(content: string): ExtractedMetadata {
     emails: content.match(/[\w.-]+@[\w.-]+\.\w+/g) || undefined,
     urls: content.match(/https?:\/\/[^\s\)]+/g) || undefined,
   };
+}
+
+/**
+ * Find the best word boundary near a target position
+ * Priority: Paragraphs > Sentences > Spaces > Never mid-word
+ */
+function findWordBoundary(text: string, targetPos: number): number {
+  if (targetPos >= text.length) return text.length;
+  if (targetPos <= 0) return 0;
+
+  // Search window: ±50 chars from target
+  const searchStart = Math.max(0, targetPos - 50);
+  const searchEnd = Math.min(text.length, targetPos + 50);
+  const searchWindow = text.substring(searchStart, searchEnd);
+  const relativeTarget = targetPos - searchStart;
+
+  // Priority 1: Paragraph boundary (\n\n)
+  const paragraphBoundaries: number[] = [];
+  let pos = 0;
+  while ((pos = searchWindow.indexOf('\n\n', pos)) !== -1) {
+    paragraphBoundaries.push(pos);
+    pos += 2;
+  }
+  if (paragraphBoundaries.length > 0) {
+    const closest = paragraphBoundaries.reduce((prev, curr) => 
+      Math.abs(curr - relativeTarget) < Math.abs(prev - relativeTarget) ? curr : prev
+    );
+    return searchStart + closest + 2; // +2 to skip \n\n
+  }
+
+  // Priority 2: Sentence boundary (. ! ?)
+  const sentenceBoundaries: number[] = [];
+  const sentenceRegex = /[.!?]\s+/g;
+  let match;
+  while ((match = sentenceRegex.exec(searchWindow)) !== null) {
+    sentenceBoundaries.push(match.index + match[0].length);
+  }
+  if (sentenceBoundaries.length > 0) {
+    const closest = sentenceBoundaries.reduce((prev, curr) => 
+      Math.abs(curr - relativeTarget) < Math.abs(prev - relativeTarget) ? curr : prev
+    );
+    return searchStart + closest;
+  }
+
+  // Priority 3: Space boundary
+  const spaceBoundaries: number[] = [];
+  pos = 0;
+  while ((pos = searchWindow.indexOf(' ', pos)) !== -1) {
+    spaceBoundaries.push(pos);
+    pos++;
+  }
+  if (spaceBoundaries.length > 0) {
+    const closest = spaceBoundaries.reduce((prev, curr) => 
+      Math.abs(curr - relativeTarget) < Math.abs(prev - relativeTarget) ? curr : prev
+    );
+    return searchStart + closest + 1; // +1 to skip space
+  }
+
+  // Fallback: target position (never mid-word guarantee failed)
+  console.warn('[findWordBoundary] No boundary found in search window, using target position');
+  return targetPos;
+}
+
+/**
+ * Create parent chunks (~4000 chars) with intelligent overlap
+ */
+function createParentChunks(
+  text: string,
+  headings: { h1: string; h2: string; h3: string },
+  pageNum: number
+): Array<{ content: string; heading_hierarchy: any; page_number: number }> {
+  const parents: Array<{ content: string; heading_hierarchy: any; page_number: number }> = [];
+  
+  let start = 0;
+  while (start < text.length) {
+    const targetEnd = start + PARENT_CHUNK_SIZE;
+    const actualEnd = findWordBoundary(text, targetEnd);
+    
+    const content = text.substring(start, actualEnd).trim();
+    if (content.length >= MIN_TEXT_CHUNK_SIZE) {
+      parents.push({
+        content,
+        heading_hierarchy: { ...headings },
+        page_number: pageNum,
+      });
+    }
+    
+    // Move to next chunk with overlap
+    start = actualEnd - PARENT_OVERLAP;
+    if (start >= text.length - PARENT_OVERLAP) break; // Avoid tiny trailing chunks
+  }
+  
+  return parents;
+}
+
+/**
+ * Create child chunks (~500 chars) from a parent chunk
+ */
+function createChildChunks(parentContent: string): string[] {
+  const children: string[] = [];
+  
+  let start = 0;
+  while (start < parentContent.length) {
+    const targetEnd = start + CHILD_CHUNK_SIZE;
+    const actualEnd = findWordBoundary(parentContent, targetEnd);
+    
+    const content = parentContent.substring(start, actualEnd).trim();
+    if (content.length >= MIN_TEXT_CHUNK_SIZE) {
+      children.push(content);
+    }
+    
+    // Move to next chunk with overlap
+    start = actualEnd - CHILD_OVERLAP;
+    if (start >= parentContent.length - CHILD_OVERLAP) break;
+  }
+  
+  return children;
 }
 
 /**
@@ -571,112 +694,27 @@ function chunkTextContent(
         }
       }
       
-      // If filteredSection fits in maxChunkSize, keep it whole
-      if (filteredSection.length <= maxChunkSize) {
-        // FIX 1: Scarta chunk troppo piccoli
-        if (filteredSection.trim().length < MIN_TEXT_CHUNK_SIZE) continue;
+      // SMALL-TO-BIG RETRIEVAL: Two-step splitting
+      // Step 1: Create PARENT chunks (~4000 chars)
+      const parentChunks = createParentChunks(filteredSection, headings, pageNum + 1);
+      
+      // Step 2: For each PARENT, create CHILD chunks (~500 chars)
+      for (const parent of parentChunks) {
+        const childChunks = createChildChunks(parent.content);
         
-        const extracted_metadata = extractMetadataFromContent(filteredSection.trim());
-        nodes.push({
-          chunk_index: chunkIndex++,
-          content: filteredSection.trim(),
-          chunk_type: 'text',
-          is_atomic: false,
-          heading_hierarchy: { ...headings },
-          page_number: pageNum + 1,
-          extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-            ? extracted_metadata : undefined,
-        });
-      } else {
-        // LEVEL 3: Section too large, split by paragraphs (\n\n)
-        const paragraphs = filteredSection.split(/\n\n+/);
-        let currentChunk: string[] = [];
-        
-        for (const paragraph of paragraphs) {
-          if (!paragraph.trim()) continue;
-          
-          // FIX 3: Se paragrafo singolo > maxChunkSize, splitta ulteriormente
-          if (paragraph.length > maxChunkSize) {
-            // Flush chunk corrente prima
-            if (currentChunk.length > 0) {
-              const chunkContent = currentChunk.join('\n\n').trim();
-              const extracted_metadata = extractMetadataFromContent(chunkContent);
-              nodes.push({
-                chunk_index: chunkIndex++,
-                content: chunkContent,
-                chunk_type: 'text',
-                is_atomic: false,
-                heading_hierarchy: { ...headings },
-                page_number: pageNum + 1,
-                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-                  ? extracted_metadata : undefined,
-              });
-              currentChunk = [];
-            }
-            
-            // Split paragrafo grande in sub-paragrafi
-            const subParagraphs = splitLargeParagraph(paragraph, maxChunkSize);
-            for (const subPara of subParagraphs) {
-              // FIX 1: Scarta sub-paragrafi troppo piccoli
-              if (subPara.trim().length < MIN_TEXT_CHUNK_SIZE) continue;
-              
-              const extracted_metadata = extractMetadataFromContent(subPara.trim());
-              nodes.push({
-                chunk_index: chunkIndex++,
-                content: subPara.trim(),
-                chunk_type: 'text',
-                is_atomic: false,
-                heading_hierarchy: { ...headings },
-                page_number: pageNum + 1,
-                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-                  ? extracted_metadata : undefined,
-              });
-            }
-            continue;
-          }
-          
-          const testChunk = [...currentChunk, paragraph].join('\n\n');
-          
-          if (testChunk.length > maxChunkSize && currentChunk.length > 0) {
-            // Flush current chunk
-            const chunkContent = currentChunk.join('\n\n').trim();
-            // FIX 1: Scarta chunk troppo piccoli
-            if (chunkContent.length >= MIN_TEXT_CHUNK_SIZE) {
-              const extracted_metadata = extractMetadataFromContent(chunkContent);
-              nodes.push({
-                chunk_index: chunkIndex++,
-                content: chunkContent,
-                chunk_type: 'text',
-                is_atomic: false,
-                heading_hierarchy: { ...headings },
-                page_number: pageNum + 1,
-                extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-                  ? extracted_metadata : undefined,
-              });
-            }
-            currentChunk = [paragraph];
-          } else {
-            currentChunk.push(paragraph);
-          }
-        }
-        
-        // Flush remaining paragraphs
-        if (currentChunk.length > 0) {
-          const chunkContent = currentChunk.join('\n\n').trim();
-          // FIX 1: Scarta chunk finale troppo piccolo
-          if (chunkContent.length >= MIN_TEXT_CHUNK_SIZE) {
-            const extracted_metadata = extractMetadataFromContent(chunkContent);
-            nodes.push({
-              chunk_index: chunkIndex++,
-              content: chunkContent,
-              chunk_type: 'text',
-              is_atomic: false,
-              heading_hierarchy: { ...headings },
-              page_number: pageNum + 1,
-              extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
-                ? extracted_metadata : undefined,
-            });
-          }
+        for (const childContent of childChunks) {
+          const extracted_metadata = extractMetadataFromContent(childContent);
+          nodes.push({
+            chunk_index: chunkIndex++,
+            content: childContent,              // ★ CHILD per embedding (500 chars)
+            original_content: parent.content,   // ★ PARENT per LLM (4000 chars)
+            chunk_type: 'text',
+            is_atomic: false,
+            heading_hierarchy: parent.heading_hierarchy,
+            page_number: parent.page_number,
+            extracted_metadata: (extracted_metadata.dates || extracted_metadata.emails || extracted_metadata.urls) 
+              ? extracted_metadata : undefined,
+          });
         }
       }
     }
