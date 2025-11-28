@@ -82,7 +82,7 @@ serve(async (req) => {
           .update({ status: 'processing', updated_at: new Date().toISOString() })
           .eq('id', doc.id);
 
-        // Download PDF from storage
+        // Download file from storage
         const { data: fileData, error: downloadError } = await supabase.storage
           .from(doc.storage_bucket)
           .download(doc.file_path);
@@ -91,93 +91,129 @@ serve(async (req) => {
           throw new Error(`Failed to download file: ${downloadError?.message || 'No data'}`);
         }
 
-        const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
+        // ===== FORK BASED ON SOURCE_TYPE =====
+        let superDocumentToChunk: string;
+        let chunks: any[];
+        let metadata: any = {};
 
-        // Extract JSON with layout from LlamaParse
-        console.log(`[Pipeline A-Hybrid Process] Starting LlamaParse for ${doc.file_name}, size: ${pdfBuffer.length} bytes`);
-        const startTime = Date.now();
-        const jsonResult = await extractJsonWithLayout(pdfBuffer, doc.file_name, llamaCloudKey);
-        console.log(`[Pipeline A-Hybrid Process] LlamaParse completed in ${Date.now() - startTime}ms, jobId: ${jsonResult.jobId}`);
-        console.log(`[Pipeline A-Hybrid Process] Raw JSON has ${jsonResult.rawJson?.items?.length || 0} items, ${jsonResult.rawJson?.layout?.length || 0} layout elements`);
-
-        // Reconstruct document using hierarchical algorithm
-        console.log('[Pipeline A-Hybrid Process] Reconstructing document with hierarchical reading order');
-        const { superDocument, orderedElements, headingMap } = reconstructFromLlamaParse(jsonResult.rawJson);
-        console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
-        console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
-
-        // ===== VISION ENHANCEMENT LAYER =====
-        let visionEnhancementUsed = false;
-        let visionEngine: 'claude' | 'google' | null = null;
-        let issuesDetected: any[] = [];
-        let superDocumentToChunk = superDocument; // Preserva originale
-
-        const ocrIssues = detectOCRIssues(superDocument);
-        console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
-
-        if (ocrIssues.length > 0) {
-          console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
-          issuesDetected = ocrIssues;
-
-          // TRY CLAUDE PDF FIRST (native PDF support with contextual reasoning)
-          const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+        if (doc.source_type === 'markdown') {
+          // MARKDOWN PATH: Skip LlamaParse, parse directly
+          console.log(`[Pipeline A-Hybrid Process] Processing Markdown file: ${doc.file_name}`);
+          const markdownContent = await fileData.text();
           
-          if (anthropicKey) {
-            try {
-              console.log('[Vision Enhancement] Attempting Claude PDF native processing...');
-              const claudeStartTime = Date.now();
-              
-              // Call Claude with native PDF support (no conversion needed!)
-              const claudeText = await enhanceWithClaudePDF(pdfBuffer, anthropicKey, ocrIssues);
-              
-              if (claudeText && claudeText.length > 0) {
-                superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
-                visionEnhancementUsed = true;
-                visionEngine = 'claude';
-                console.log(`[Vision Enhancement] ✓ Claude PDF completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
-              }
-            } catch (claudeError) {
-              console.warn('[Vision Enhancement] Claude PDF failed, falling back to Google:', claudeError);
-            }
-          } else {
-            console.log('[Vision Enhancement] Claude not configured, trying Google Vision');
-          }
+          console.log('[Pipeline A-Hybrid Process] Parsing Markdown elements directly');
+          const parseResult = await parseMarkdownElements(markdownContent, doc.file_name);
+          chunks = parseResult.baseNodes;
+          
+          metadata = {
+            source_type: 'markdown',
+            chunks_generated: chunks.length,
+            processing_method: 'direct_markdown_parse'
+          };
+          
+          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from Markdown`);
+        } else {
+          // PDF PATH: Existing LlamaParse + Vision Enhancement flow
+          const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
 
-          // FALLBACK TO GOOGLE VISION if Claude didn't succeed
-          if (!visionEnhancementUsed) {
-            const googleVisionKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
+          // Extract JSON with layout from LlamaParse
+          console.log(`[Pipeline A-Hybrid Process] Starting LlamaParse for ${doc.file_name}, size: ${pdfBuffer.length} bytes`);
+          const startTime = Date.now();
+          const jsonResult = await extractJsonWithLayout(pdfBuffer, doc.file_name, llamaCloudKey);
+          console.log(`[Pipeline A-Hybrid Process] LlamaParse completed in ${Date.now() - startTime}ms, jobId: ${jsonResult.jobId}`);
+          console.log(`[Pipeline A-Hybrid Process] Raw JSON has ${jsonResult.rawJson?.items?.length || 0} items, ${jsonResult.rawJson?.layout?.length || 0} layout elements`);
+
+          // Reconstruct document using hierarchical algorithm
+          console.log('[Pipeline A-Hybrid Process] Reconstructing document with hierarchical reading order');
+          const { superDocument, orderedElements, headingMap } = reconstructFromLlamaParse(jsonResult.rawJson);
+          console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
+          console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
+
+          // ===== VISION ENHANCEMENT LAYER =====
+          let visionEnhancementUsed = false;
+          let visionEngine: 'claude' | 'google' | null = null;
+          let issuesDetected: any[] = [];
+          superDocumentToChunk = superDocument; // Preserva originale
+
+          const ocrIssues = detectOCRIssues(superDocument);
+          console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
+
+          if (ocrIssues.length > 0) {
+            console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
+            issuesDetected = ocrIssues;
+
+            // TRY CLAUDE PDF FIRST (native PDF support with contextual reasoning)
+            const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
             
-            if (googleVisionKey) {
+            if (anthropicKey) {
               try {
-                console.log('[Vision Enhancement] Falling back to Google Cloud Vision...');
-                const visionStartTime = Date.now();
-                const visionText = await enhanceWithVisionAPI(pdfBuffer, googleVisionKey);
-                console.log(`[Vision Enhancement] Google Vision completed in ${Date.now() - visionStartTime}ms`);
-
-                if (visionText && visionText.length > 0) {
-                  superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
+                console.log('[Vision Enhancement] Attempting Claude PDF native processing...');
+                const claudeStartTime = Date.now();
+                
+                // Call Claude with native PDF support (no conversion needed!)
+                const claudeText = await enhanceWithClaudePDF(pdfBuffer, anthropicKey, ocrIssues);
+                
+                if (claudeText && claudeText.length > 0) {
+                  superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
                   visionEnhancementUsed = true;
-                  visionEngine = 'google';
-                  console.log(`[Vision Enhancement] ✓ Google Vision enhancement, added ${visionText.length} chars`);
-                } else {
-                  console.warn('[Vision Enhancement] Google Vision returned empty text');
+                  visionEngine = 'claude';
+                  console.log(`[Vision Enhancement] ✓ Claude PDF completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
                 }
-              } catch (visionError) {
-                console.error('[Vision Enhancement] Google Vision also failed (graceful degradation):', visionError);
-                // Continue with original document - no blocking
+              } catch (claudeError) {
+                console.warn('[Vision Enhancement] Claude PDF failed, falling back to Google:', claudeError);
               }
             } else {
-              console.warn('[Vision Enhancement] No vision API keys configured, using original document');
+              console.log('[Vision Enhancement] Claude not configured, trying Google Vision');
             }
-          }
-        } else {
-          console.log('[Vision Enhancement] No OCR issues detected, using original document');
-        }
 
-        // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
-        console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
-        const parseResult = await parseMarkdownElements(superDocumentToChunk, doc.file_name);
-        const chunks = parseResult.baseNodes;
+            // FALLBACK TO GOOGLE VISION if Claude didn't succeed
+            if (!visionEnhancementUsed) {
+              const googleVisionKey = Deno.env.get('GOOGLE_CLOUD_VISION_API_KEY');
+              
+              if (googleVisionKey) {
+                try {
+                  console.log('[Vision Enhancement] Falling back to Google Cloud Vision...');
+                  const visionStartTime = Date.now();
+                  const visionText = await enhanceWithVisionAPI(pdfBuffer, googleVisionKey);
+                  console.log(`[Vision Enhancement] Google Vision completed in ${Date.now() - visionStartTime}ms`);
+
+                  if (visionText && visionText.length > 0) {
+                    superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
+                    visionEnhancementUsed = true;
+                    visionEngine = 'google';
+                    console.log(`[Vision Enhancement] ✓ Google Vision enhancement, added ${visionText.length} chars`);
+                  } else {
+                    console.warn('[Vision Enhancement] Google Vision returned empty text');
+                  }
+                } catch (visionError) {
+                  console.error('[Vision Enhancement] Google Vision also failed (graceful degradation):', visionError);
+                  // Continue with original document - no blocking
+                }
+              } else {
+                console.warn('[Vision Enhancement] No vision API keys configured, using original document');
+              }
+            }
+          } else {
+            console.log('[Vision Enhancement] No OCR issues detected, using original document');
+          }
+
+          // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
+          console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
+          const parseResult = await parseMarkdownElements(superDocumentToChunk, doc.file_name);
+          chunks = parseResult.baseNodes;
+
+          metadata = {
+            llamaparse_job_id: jsonResult.jobId,
+            chunks_generated: chunks.length,
+            reconstruction_method: 'hierarchical_reading_order',
+            vision_enhancement_used: visionEnhancementUsed,
+            vision_engine: visionEngine,
+            ocr_issues_detected: issuesDetected.length,
+            ocr_issue_types: issuesDetected.map((i: any) => i.type)
+          };
+
+          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from reconstructed document`);
+        }
 
         console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from reconstructed document`);
 
@@ -212,18 +248,12 @@ serve(async (req) => {
           .from('pipeline_a_hybrid_documents')
           .update({
             status: 'chunked',
-            llamaparse_job_id: jsonResult.jobId,
-            page_count: orderedElements.length > 0 ? Math.max(...orderedElements.map(e => e.page)) : null,
+            llamaparse_job_id: metadata.llamaparse_job_id || null,
+            page_count: null, // Not applicable for markdown
             processed_at: new Date().toISOString(),
             processing_metadata: {
               ...doc.processing_metadata,
-              llamaparse_job_id: jsonResult.jobId,
-              chunks_generated: chunks.length,
-              reconstruction_method: 'hierarchical_reading_order',
-              vision_enhancement_used: visionEnhancementUsed,
-              vision_engine: visionEngine, // 'claude' | 'google' | null
-              ocr_issues_detected: issuesDetected.length,
-              ocr_issue_types: issuesDetected.map((i: any) => i.type)
+              ...metadata
             }
           })
           .eq('id', doc.id);
