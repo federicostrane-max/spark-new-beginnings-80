@@ -36,7 +36,7 @@ interface BenchmarkResult {
   error?: string;
 }
 
-const AGENT_ID = "bcca9289-0d7b-4e74-87f5-0f66ae93249c"; // Pipeline C Tester
+const AGENT_SLUG = "book-serach-expert"; // Book Search Expert (Pipeline A-Hybrid)
 
 export default function Benchmark() {
   const navigate = useNavigate();
@@ -134,9 +134,8 @@ export default function Benchmark() {
         const startTime = Date.now();
         const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
           body: {
-            agentId: AGENT_ID,
-            message: question,
-            messages: []
+            agentSlug: AGENT_SLUG,
+            message: question
           }
         });
 
