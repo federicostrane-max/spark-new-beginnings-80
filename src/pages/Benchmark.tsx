@@ -152,8 +152,19 @@ export default function Benchmark() {
     console.log(`🎯 [BENCHMARK] Starting run ${runId}`);
     toast.info(`Benchmark Run ID: ${runId.substring(0, 8)}...`);
 
-    for (let i = 0; i < dataset.length; i++) {
-      const entry = dataset[i];
+    // Filter dataset by selected suite
+    const filteredDataset = selectedSuite === 'all' 
+      ? dataset 
+      : dataset.filter(entry => entry.suite_category === selectedSuite);
+    
+    if (filteredDataset.length === 0) {
+      toast.error('Nessun documento trovato per la suite selezionata');
+      setIsRunning(false);
+      return;
+    }
+
+    for (let i = 0; i < filteredDataset.length; i++) {
+      const entry = filteredDataset[i];
       
       // Detect format (benchmark_datasets vs legacy)
       const isNewFormat = 'file_name' in entry;
@@ -307,7 +318,7 @@ export default function Benchmark() {
         updated[i] = result;
         return updated;
       });
-      setProgress(((i + 1) / dataset.length) * 100);
+      setProgress(((i + 1) / filteredDataset.length) * 100);
     }
 
     setIsRunning(false);
