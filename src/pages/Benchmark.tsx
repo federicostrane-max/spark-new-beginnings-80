@@ -74,6 +74,11 @@ export default function Benchmark() {
     setIsRunning(true);
     setProgress(0);
     const newResults: BenchmarkResult[] = [];
+    
+    // Generate unique run_id for this benchmark execution
+    const runId = crypto.randomUUID();
+    console.log(`🎯 [BENCHMARK] Starting run ${runId}`);
+    toast.info(`Benchmark Run ID: ${runId.substring(0, 8)}...`);
 
     for (let i = 0; i < dataset.length; i++) {
       const entry = dataset[i];
@@ -115,6 +120,17 @@ export default function Benchmark() {
             updated[i] = result;
             return updated;
           });
+          
+          // Save to database
+          await supabase.from('benchmark_results').insert({
+            run_id: runId,
+            pdf_file: entry.pdf_file,
+            question,
+            ground_truth: groundTruth,
+            status: 'missing',
+            error: result.error
+          });
+          
           continue;
         }
 
@@ -127,6 +143,17 @@ export default function Benchmark() {
             updated[i] = result;
             return updated;
           });
+          
+          // Save to database
+          await supabase.from('benchmark_results').insert({
+            run_id: runId,
+            pdf_file: entry.pdf_file,
+            question,
+            ground_truth: groundTruth,
+            status: 'not_ready',
+            error: result.error
+          });
+          
           continue;
         }
 
@@ -161,11 +188,35 @@ export default function Benchmark() {
         result.reason = evaluation.reason;
         result.status = 'completed';
         newResults.push(result);
+        
+        // Save to database with retrieval metadata
+        await supabase.from('benchmark_results').insert({
+          run_id: runId,
+          pdf_file: entry.pdf_file,
+          question,
+          ground_truth: groundTruth,
+          agent_response: agentResponse,
+          correct: evaluation.correct,
+          reason: evaluation.reason,
+          response_time_ms: result.responseTimeMs,
+          status: 'completed',
+          retrieval_metadata: agentData?.metadata || {}
+        });
 
       } catch (error: any) {
         result.status = 'error';
         result.error = error.message;
         newResults.push(result);
+        
+        // Save error to database
+        await supabase.from('benchmark_results').insert({
+          run_id: runId,
+          pdf_file: entry.pdf_file,
+          question,
+          ground_truth: groundTruth,
+          status: 'error',
+          error: error.message
+        });
       }
 
       // Update results and progress
@@ -179,7 +230,7 @@ export default function Benchmark() {
 
     setIsRunning(false);
     setCurrentDoc(null);
-    toast.success('Benchmark completato!');
+    toast.success(`Benchmark completato! Run ID: ${runId.substring(0, 8)}...`);
   };
 
   const stats = {

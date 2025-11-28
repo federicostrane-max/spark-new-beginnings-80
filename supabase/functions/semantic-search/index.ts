@@ -67,7 +67,7 @@ serve(async (req) => {
     const semanticParams = {
       query_embedding: queryEmbedding,
       p_agent_id: agentId || null,
-      match_threshold: 0.15, // Production threshold - balanced for metadata queries
+      match_threshold: 0.10, // DECREASED: 0.15→0.10 per maggior recall (Benchmark tuning)
       match_count: topK * 2,
     };
     const keywordParams = {
