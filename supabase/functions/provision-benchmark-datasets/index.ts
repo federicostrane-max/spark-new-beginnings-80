@@ -52,6 +52,10 @@ serve(async (req) => {
     // ===== PHASE 1: FinQA (Finance Suite) =====
     if (suites.finance) {
       console.log('[Provision Benchmark] Processing FinQA suite...');
+      
+      // ✅ Cleanup existing suite before provisioning
+      const cleanup = await cleanupExistingSuite(supabase, 'finance', 'benchmark_finance');
+      console.log(`[Provision Benchmark] Cleaned up Finance: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       try {
         const finqaUrl = 'https://raw.githubusercontent.com/czyssrs/FinQA/master/dataset/train.json';
         const headers: any = { 'Accept': 'application/json' };
@@ -128,6 +132,10 @@ serve(async (req) => {
     // ===== PHASE 2: ChartQA (Charts Suite) =====
     if (suites.charts) {
       console.log('[Provision Benchmark] Processing ChartQA suite...');
+      
+      // ✅ Cleanup existing suite before provisioning
+      const cleanup = await cleanupExistingSuite(supabase, 'charts', 'benchmark_charts');
+      console.log(`[Provision Benchmark] Cleaned up Charts: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       try {
         const chartqaUrl = 'https://raw.githubusercontent.com/vis-nlp/ChartQA/main/ChartQA%20Dataset/test/test_human.json';
         const headers: any = { 'Accept': 'application/json' };
@@ -222,6 +230,19 @@ serve(async (req) => {
     // ===== PHASE 3: Safety Suite (Adversarial) =====
     if (suites.safety) {
       console.log('[Provision Benchmark] Processing Safety suite...');
+      
+      // ✅ Cleanup only benchmark_datasets (Safety has no documents)
+      const { error: cleanupError } = await supabase
+        .from('benchmark_datasets')
+        .delete()
+        .eq('suite_category', 'safety');
+      
+      if (cleanupError) {
+        console.error('[Provision Benchmark] Failed to cleanup Safety suite:', cleanupError);
+      } else {
+        console.log('[Provision Benchmark] Cleaned up Safety suite (Q&A entries only)');
+      }
+      
       try {
         // Generate adversarial tests for existing finance documents
         const { data: financeDocuments } = await supabase
@@ -394,6 +415,112 @@ async function assignDocumentToAgent(
   }
 
   return chunks.length;
+}
+
+// ===== HELPER: Cleanup existing suite before re-provisioning =====
+async function cleanupExistingSuite(
+  supabase: any,
+  suiteCategory: 'finance' | 'charts' | 'safety',
+  folderName: string
+): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
+  console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);
+  
+  try {
+    // 1. Get existing documents for this suite
+    const { data: existingDocs, error: docsError } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id')
+      .eq('folder', folderName);
+    
+    if (docsError) {
+      console.error('[Provision Benchmark] Error fetching existing documents:', docsError);
+      return { documentsDeleted: 0, chunksDeleted: 0, datasetsDeleted: 0 };
+    }
+    
+    const docIds = existingDocs?.map((d: any) => d.id) || [];
+    console.log(`[Provision Benchmark] Found ${docIds.length} existing documents to cleanup`);
+    
+    let chunksDeletedCount = 0;
+    
+    if (docIds.length > 0) {
+      // 2. Get chunks for these documents
+      const { data: chunks, error: chunksQueryError } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id')
+        .in('document_id', docIds);
+      
+      if (chunksQueryError) {
+        console.error('[Provision Benchmark] Error fetching chunks:', chunksQueryError);
+      } else {
+        const chunkIds = chunks?.map((c: any) => c.id) || [];
+        console.log(`[Provision Benchmark] Found ${chunkIds.length} chunks to cleanup`);
+        
+        if (chunkIds.length > 0) {
+          // 3. Delete agent knowledge assignments (respects FK)
+          const { error: knowledgeError } = await supabase
+            .from('pipeline_a_hybrid_agent_knowledge')
+            .delete()
+            .in('chunk_id', chunkIds);
+          
+          if (knowledgeError) {
+            console.error('[Provision Benchmark] Error deleting agent knowledge:', knowledgeError);
+          } else {
+            console.log('[Provision Benchmark] Deleted agent knowledge assignments');
+          }
+          
+          // 4. Delete chunks (respects FK)
+          const { error: chunksError } = await supabase
+            .from('pipeline_a_hybrid_chunks_raw')
+            .delete()
+            .in('id', chunkIds);
+          
+          if (chunksError) {
+            console.error('[Provision Benchmark] Error deleting chunks:', chunksError);
+          } else {
+            chunksDeletedCount = chunkIds.length;
+            console.log(`[Provision Benchmark] Deleted ${chunksDeletedCount} chunks`);
+          }
+        }
+      }
+      
+      // 5. Delete documents
+      const { error: documentsError } = await supabase
+        .from('pipeline_a_hybrid_documents')
+        .delete()
+        .in('id', docIds);
+      
+      if (documentsError) {
+        console.error('[Provision Benchmark] Error deleting documents:', documentsError);
+      } else {
+        console.log(`[Provision Benchmark] Deleted ${docIds.length} documents`);
+      }
+    }
+    
+    // 6. Delete benchmark_datasets entries for this suite
+    const { error: datasetsError, count } = await supabase
+      .from('benchmark_datasets')
+      .delete()
+      .eq('suite_category', suiteCategory)
+      .select('id', { count: 'exact', head: true });
+    
+    const datasetsDeleted = count || 0;
+    
+    if (datasetsError) {
+      console.error('[Provision Benchmark] Error deleting benchmark datasets:', datasetsError);
+    } else {
+      console.log(`[Provision Benchmark] Deleted ${datasetsDeleted} Q&A entries from benchmark_datasets`);
+    }
+    
+    return {
+      documentsDeleted: docIds.length,
+      chunksDeleted: chunksDeletedCount,
+      datasetsDeleted
+    };
+    
+  } catch (error) {
+    console.error('[Provision Benchmark] Cleanup failed:', error);
+    return { documentsDeleted: 0, chunksDeleted: 0, datasetsDeleted: 0 };
+  }
 }
 
 // ===== HELPER: Wrap PNG image in minimal PDF =====
