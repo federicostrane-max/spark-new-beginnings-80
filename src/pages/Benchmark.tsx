@@ -51,6 +51,7 @@ const SUITE_LABELS = {
   receipts: '🧾 Receipts (CORD)',
   science: '🔬 Science (QASPER)',
   narrative: '📖 Narrative (Deep Understanding)',
+  code: '💻 Code (GitHub)',
   safety: '🛡️ Safety (Adversarial)'
 };
 
@@ -71,6 +72,7 @@ export default function Benchmark() {
     receipts: true, 
     science: true,
     narrative: true,
+    code: true,
     safety: true 
   });
   const [sampleSize, setSampleSize] = useState(5);
@@ -651,6 +653,18 @@ export default function Benchmark() {
               />
               <Label htmlFor="narrative" className="font-normal cursor-pointer">
                 📖 Narrative (NarrativeQA) - Deep understanding
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="code" 
+                checked={provisionSuites.code}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, code: !!checked }))
+                }
+              />
+              <Label htmlFor="code" className="font-normal cursor-pointer">
+                💻 Code (GitHub) - Codice sorgente
               </Label>
             </div>
             <div className="flex items-center space-x-2">
