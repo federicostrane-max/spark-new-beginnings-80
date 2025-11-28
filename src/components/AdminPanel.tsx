@@ -113,7 +113,7 @@ export const AdminPanel = () => {
 
   return (
     <Tabs defaultValue="metrics" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-8">
+      <TabsList className="grid w-full grid-cols-9">
         <TabsTrigger value="metrics">Metriche</TabsTrigger>
         <TabsTrigger value="tools">Strumenti</TabsTrigger>
         <TabsTrigger value="logs">Log Processing</TabsTrigger>
@@ -122,6 +122,7 @@ export const AdminPanel = () => {
         <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
         <TabsTrigger value="airtop">Airtop.ai</TabsTrigger>
         <TabsTrigger value="docvqa">DocVQA Test</TabsTrigger>
+        <TabsTrigger value="benchmark">Benchmark</TabsTrigger>
       </TabsList>
 
       <TabsContent value="metrics">
@@ -350,6 +351,55 @@ export const AdminPanel = () => {
               className="w-full gap-2"
             >
               Apri Dataset DocVQA
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="benchmark">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              🧪 Benchmark Suite a 360°
+            </CardTitle>
+            <CardDescription>
+              Test automatizzati su Finance, Charts, General e Safety con provisioning automatico da GitHub
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Sistema di benchmark completo con auto-provisioning di dataset da GitHub, generazione automatica 
+                di file Markdown per FinQA e processing tramite Pipeline A-Hybrid.
+              </p>
+              <div className="mt-4 p-3 bg-muted/50 rounded-lg space-y-2">
+                <p className="text-sm font-medium">🎯 Suite Disponibili:</p>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  <li><strong>Finance (FinQA):</strong> Tabelle finanziarie con domande numeriche</li>
+                  <li><strong>Charts (ChartQA):</strong> Grafici e visualizzazioni dati (coming soon)</li>
+                  <li><strong>General (DocVQA):</strong> Documenti ibridi testo + immagini</li>
+                  <li><strong>Safety:</strong> Domande adversarial per testare robustezza</li>
+                </ul>
+              </div>
+              <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                <p className="text-sm font-medium text-blue-600">✨ Features:</p>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside mt-2">
+                  <li>Auto-download da GitHub (FinQA, ChartQA)</li>
+                  <li>Conversione automatica JSON → Markdown</li>
+                  <li>Processing diretto senza LlamaParse (zero costi API)</li>
+                  <li>Accuracy breakdown per categoria</li>
+                  <li>LLM Judge per valutazione automatica</li>
+                </ul>
+              </div>
+            </div>
+            
+            <Button 
+              onClick={() => navigate('/benchmark')}
+              className="w-full gap-2"
+            >
+              Apri Benchmark Dashboard
               <ExternalLink className="h-4 w-4" />
             </Button>
           </CardContent>
