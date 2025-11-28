@@ -51,59 +51,84 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Lower threshold to 0.3 for better recall (was 0.5 = 50% similarity)
-    // Step 1: Semantic search with embeddings
-    const { data: semanticResults, error: semanticError } = await supabase.rpc('match_documents', {
-      query_embedding: queryEmbedding,
-      p_agent_id: agentId || null,
-      match_threshold: 0.3,  // 30% similarity threshold
-      match_count: topK,
-    });
+    // ========== TRUE HYBRID SEARCH ==========
+    // Execute BOTH semantic and keyword searches in parallel (never skip keyword)
+    console.log('Executing True Hybrid Search (semantic + keyword in parallel)...');
     
-    console.log('Semantic search params:', { 
-      agentId, 
-      topK, 
-      threshold: 0.3,
-      hasEmbedding: !!queryEmbedding 
-    });
-
-    if (semanticError) {
-      console.error('Semantic search error:', semanticError);
-      throw new Error(`Database error: ${semanticError.message}`);
-    }
-
-    console.log(`Semantic search found ${semanticResults?.length || 0} matching documents`);
-
-    // Step 2: Keyword fallback with PostgreSQL FTS if semantic search returns 0 results
-    if (!semanticResults || semanticResults.length === 0) {
-      console.log('Semantic search returned 0 results, trying keyword fallback with PostgreSQL FTS...');
-      
-      const { data: keywordResults, error: keywordError } = await supabase.rpc('keyword_search_documents', {
+    const [semanticResponse, keywordResponse] = await Promise.all([
+      // Semantic search (vector similarity)
+      supabase.rpc('match_documents', {
+        query_embedding: queryEmbedding,
+        p_agent_id: agentId || null,
+        match_threshold: 0.3,
+        match_count: topK * 2, // Fetch more to allow for deduplication
+      }),
+      // Keyword search (PostgreSQL FTS)
+      supabase.rpc('keyword_search_documents', {
         search_query: query,
         p_agent_id: agentId,
-        match_count: topK,
+        match_count: topK * 2,
+      })
+    ]);
+
+    // Handle errors gracefully (non-blocking)
+    if (semanticResponse.error) {
+      console.error('Semantic search error:', semanticResponse.error);
+    }
+    if (keywordResponse.error) {
+      console.error('Keyword search error:', keywordResponse.error);
+    }
+
+    const semanticResults = semanticResponse.data || [];
+    const keywordResults = keywordResponse.data || [];
+
+    console.log(`Semantic search found: ${semanticResults.length} chunks`);
+    console.log(`Keyword search found: ${keywordResults.length} chunks`);
+
+    // Step 2: Merge and deduplicate by chunk ID
+    const mergedMap = new Map();
+
+    // Add semantic results first
+    for (const chunk of semanticResults) {
+      mergedMap.set(chunk.id, {
+        ...chunk,
+        search_type: 'semantic',
+        semantic_score: chunk.similarity,
+        keyword_score: null,
       });
-      
-      if (keywordError) {
-        console.error('Keyword search error:', keywordError);
-        // Non-blocking error: continue with empty results
+    }
+
+    // Add or merge keyword results
+    for (const chunk of keywordResults) {
+      if (mergedMap.has(chunk.id)) {
+        // Chunk found by BOTH searches - mark as 'hybrid'
+        const existing = mergedMap.get(chunk.id);
+        existing.search_type = 'hybrid';
+        existing.keyword_score = chunk.similarity; // FTS ts_rank score
       } else {
-        console.log(`Keyword fallback found ${keywordResults?.length || 0} documents`);
-        
-        if (keywordResults && keywordResults.length > 0) {
-          return new Response(
-            JSON.stringify(keywordResults),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+        // Chunk found ONLY by keyword search
+        mergedMap.set(chunk.id, {
+          ...chunk,
+          search_type: 'keyword',
+          semantic_score: null,
+          keyword_score: chunk.similarity,
+        });
       }
     }
 
-    // Return semantic results (or empty array)
-    const documents = semanticResults || [];
+    // Step 3: Convert to array and limit to topK
+    const combinedResults = Array.from(mergedMap.values()).slice(0, topK);
+
+    // Detailed logging for debugging
+    console.log(`True Hybrid Search: returning ${combinedResults.length} unique chunks`);
+    console.log('Search type breakdown:', {
+      semantic_only: combinedResults.filter(c => c.search_type === 'semantic').length,
+      keyword_only: combinedResults.filter(c => c.search_type === 'keyword').length,
+      hybrid: combinedResults.filter(c => c.search_type === 'hybrid').length,
+    });
 
     return new Response(
-      JSON.stringify(documents || []),
+      JSON.stringify(combinedResults),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
