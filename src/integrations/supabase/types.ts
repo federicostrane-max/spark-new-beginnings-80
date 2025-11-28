@@ -2227,6 +2227,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      keyword_search_documents: {
+        Args: { match_count?: number; p_agent_id: string; search_query: string }
+        Returns: {
+          category: string
+          chunk_type: string
+          content: string
+          document_name: string
+          id: string
+          pipeline_source: string
+          similarity: number
+        }[]
+      }
       log_operation_complete: {
         Args: {
           p_error_code?: string
