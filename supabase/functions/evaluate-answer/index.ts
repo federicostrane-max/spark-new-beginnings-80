@@ -74,12 +74,11 @@ Respond ONLY with valid JSON:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-5-mini',
+        model: 'google/gemini-2.5-flash',
         messages: [
           { role: 'system', content: 'You are a precise evaluation judge. Always respond with valid JSON only.' },
           { role: 'user', content: JUDGE_PROMPT }
-        ],
-        max_completion_tokens: 600
+        ]
       }),
     });
 
