@@ -24,12 +24,12 @@ export interface ChunkWithRecursiveRetrieval {
 }
 
 /**
- * Swap summary content with original content for atomic elements
+ * Swap summary content with original content (Small-to-Big Retrieval)
  * 
  * This is the core of Recursive Retrieval:
- * - If chunk is atomic (table/code) AND has original_content
- * - Return original_content instead of summary
- * - Otherwise return content as-is
+ * - If chunk has original_content (Parent Chunk), return it instead of summary (Child Chunk)
+ * - This ensures LLM receives full context (complete tables, long paragraphs) rather than summaries
+ * - Applies to ALL chunks with original_content, not just atomic elements
  * 
  * @param chunks - Retrieved chunks from semantic search
  * @returns Chunks with summaries replaced by original content where applicable
@@ -38,17 +38,17 @@ export function swapSummaryWithOriginal(
   chunks: ChunkWithRecursiveRetrieval[]
 ): ChunkWithRecursiveRetrieval[] {
   return chunks.map(chunk => {
-    // RECURSIVE RETRIEVAL SWAP
-    if (chunk.is_atomic && chunk.original_content) {
-      console.log(`[RecursiveRetriever] Swapping summary with original for chunk ${chunk.id} (${chunk.chunk_type})`);
+    // RECURSIVE RETRIEVAL SWAP - Always use Parent Chunk when available
+    if (chunk.original_content) {
+      console.log(`[RecursiveRetriever] ✅ Small-to-Big swap: chunk ${chunk.id} (${chunk.chunk_type})`);
       
       return {
         ...chunk,
-        content: chunk.original_content, // LLM gets full Markdown table
+        content: chunk.original_content, // LLM gets full content (Parent Chunk)
       };
     }
 
-    // Non-atomic or no original_content: return as-is
+    // No original_content: return Child Chunk as-is
     return chunk;
   });
 }
@@ -84,5 +84,5 @@ export function formatChunksForContext(
 export function countRecursiveSwaps(
   chunks: ChunkWithRecursiveRetrieval[]
 ): number {
-  return chunks.filter(chunk => chunk.is_atomic && chunk.original_content).length;
+  return chunks.filter(chunk => chunk.original_content).length;
 }
