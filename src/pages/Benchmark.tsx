@@ -45,9 +45,11 @@ const AGENT_SLUG = "book-serach-expert"; // Book Search Expert (Pipeline A-Hybri
 
 const SUITE_LABELS = {
   all: '🎯 Tutti i Test',
+  general: '📄 General (DocVQA)',
   finance: '📊 Finance (FinQA)',
   charts: '📈 Charts (ChartQA)',
-  general: '📄 Generale (DocVQA)',
+  receipts: '🧾 Receipts (CORD)',
+  science: '🔬 Science (QASPER)',
   safety: '🛡️ Safety (Adversarial)'
 };
 
@@ -61,7 +63,14 @@ export default function Benchmark() {
   const [selectedSuite, setSelectedSuite] = useState<string>('all');
   const [showProvisioning, setShowProvisioning] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
-  const [provisionSuites, setProvisionSuites] = useState({ finance: true, charts: false, safety: true });
+  const [provisionSuites, setProvisionSuites] = useState({ 
+    general: true, 
+    finance: true, 
+    charts: true, 
+    receipts: true, 
+    science: true, 
+    safety: true 
+  });
   const [sampleSize, setSampleSize] = useState(5);
 
   useEffect(() => {
@@ -528,6 +537,18 @@ export default function Benchmark() {
           <div className="space-y-4 py-4">
             <div className="flex items-center space-x-2">
               <Checkbox 
+                id="general" 
+                checked={provisionSuites.general}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, general: !!checked }))
+                }
+              />
+              <Label htmlFor="general" className="font-normal cursor-pointer">
+                📄 General (DocVQA) - Documenti generici
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
                 id="finance" 
                 checked={provisionSuites.finance}
                 onCheckedChange={(checked) => 
@@ -548,6 +569,30 @@ export default function Benchmark() {
               />
               <Label htmlFor="charts" className="font-normal cursor-pointer">
                 📈 Charts (ChartQA) - Grafici visivi
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="receipts" 
+                checked={provisionSuites.receipts}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, receipts: !!checked }))
+                }
+              />
+              <Label htmlFor="receipts" className="font-normal cursor-pointer">
+                🧾 Receipts (CORD) - Scontrini e fatture
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="science" 
+                checked={provisionSuites.science}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, science: !!checked }))
+                }
+              />
+              <Label htmlFor="science" className="font-normal cursor-pointer">
+                🔬 Science (QASPER) - Paper scientifici
               </Label>
             </div>
             <div className="flex items-center space-x-2">
@@ -603,7 +648,7 @@ export default function Benchmark() {
 
       {/* Stats per Suite */}
       {dataset.length > 0 && (
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-6 gap-2">
           {Object.entries(SUITE_LABELS).map(([suite, label]) => (
             <Card key={suite} className={selectedSuite === suite ? 'ring-2 ring-primary' : ''}>
               <CardHeader className="pb-2">
