@@ -804,6 +804,39 @@ export type Database = {
         }
         Relationships: []
       }
+      benchmark_suites: {
+        Row: {
+          capabilities: Json | null
+          created_at: string | null
+          description: string | null
+          name: string
+          slug: string
+          source_type: string | null
+          source_url: string | null
+          target_personas: Json | null
+        }
+        Insert: {
+          capabilities?: Json | null
+          created_at?: string | null
+          description?: string | null
+          name: string
+          slug: string
+          source_type?: string | null
+          source_url?: string | null
+          target_personas?: Json | null
+        }
+        Update: {
+          capabilities?: Json | null
+          created_at?: string | null
+          description?: string | null
+          name?: string
+          slug?: string
+          source_type?: string | null
+          source_url?: string | null
+          target_personas?: Json | null
+        }
+        Relationships: []
+      }
       edge_function_execution_logs: {
         Row: {
           agent_id: string | null
