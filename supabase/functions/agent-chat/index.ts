@@ -2353,15 +2353,15 @@ Deno.serve(async (req) => {
         if (error) {
           // Handle race condition: another request created the conversation
           if (error.code === '23505') { // Unique constraint violation
-            console.log('⚠️ Race condition detected, fetching existing conversation...');
+            console.log('⚠️ Race condition detected, fetching existing conversation by ID...');
             const { data: raceConv, error: raceError } = await supabase
               .from('agent_conversations')
               .select('*')
-              .eq('user_id', user.id)
-              .eq('agent_id', agent.id)
-              .single();
+              .eq('id', conversationId)
+              .maybeSingle();
 
             if (raceError) throw raceError;
+            if (!raceConv) throw new Error('Race condition: conversation was not created');
             conversation = raceConv;
             console.log('♻️ Retrieved conversation after race condition:', conversation.id);
           } else {
