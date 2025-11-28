@@ -15,6 +15,15 @@ serve(async (req) => {
   try {
     const { query, agentId, topK = 5 } = await req.json();
     
+    // ========== DIAGNOSTIC LOGGING ==========
+    console.log('[DEBUG] Received agentId:', agentId);
+    console.log('[DEBUG] agentId type:', typeof agentId);
+    console.log('[DEBUG] agentId === null:', agentId === null);
+    console.log('[DEBUG] agentId === undefined:', agentId === undefined);
+    console.log('[DEBUG] Query:', query);
+    console.log('[DEBUG] topK:', topK);
+    // ========================================
+    
     if (!query) {
       throw new Error('No query provided');
     }
