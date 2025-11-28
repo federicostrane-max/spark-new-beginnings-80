@@ -3435,6 +3435,17 @@ The system has automatically executed a search based on your proposed query and 
           
           try {
             // ============================================================================
+            // DETECT DOCUMENT-SPECIFIC QUERY (before search)
+            // ============================================================================
+            const targetDocument = extractDocumentNameFromQuery(message);
+            const isDocumentSpecificQuery = targetDocument !== null;
+            
+            if (isDocumentSpecificQuery) {
+              console.log(`🎯 [DOC-QUERY] Detected document-specific query for: "${targetDocument}"`);
+              console.log(`🎯 [DOC-QUERY] Will use higher topK to ensure document is found`);
+            }
+            
+            // ============================================================================
             // STEP 1: QUERY DECOMPOSITION
             // ============================================================================
             const decomposedQueries = await decomposeQueryWithLLM(message);
@@ -3446,9 +3457,12 @@ The system has automatically executed a search based on your proposed query and 
             let documents: any[] = [];
             let queryBreakdown: Record<string, number> = {};
             
+            // Use higher topK for document-specific queries to increase recall
+            const topK = isDocumentSpecificQuery ? 50 : 10;
+            
             if (decomposedQueries.length === 1) {
               // Early exit optimization: single query, use existing logic
-              console.log('⚡ [OPTIMIZATION] Single query detected, using direct search');
+              console.log(`⚡ [OPTIMIZATION] Single query detected, using direct search with topK=${topK}`);
               
               const { data: searchData, error: searchError } = await supabase.functions.invoke(
                 'semantic-search',
@@ -3456,7 +3470,7 @@ The system has automatically executed a search based on your proposed query and 
                   body: {
                     query: decomposedQueries[0],
                     agentId: agent.id,
-                    topK: 10
+                    topK: topK
                   }
                 }
               );
@@ -3490,20 +3504,28 @@ The system has automatically executed a search based on your proposed query and 
             // ============================================================================
             // DOCUMENT-SPECIFIC FILTERING (for benchmark/explicit document queries)
             // ============================================================================
-            const targetDocument = extractDocumentNameFromQuery(message);
+            // targetDocument already declared at the beginning of try block
+            let originalDocuments: any[] = [];
             
             if (targetDocument) {
+              originalDocuments = [...documents]; // Backup dei risultati originali
               const unfilteredCount = documents.length;
+              
               documents = documents.filter((chunk: any) => 
                 chunk.document_name === targetDocument
               );
               
               console.log(`📋 [DOC-FILTER] Filtered for document "${targetDocument}": ${unfilteredCount} → ${documents.length} chunks`);
               
-              // Fallback: se nessun chunk trovato per il documento target, usa tutti i risultati
+              // Fallback: se semantic search non ha trovato il documento specificato,
+              // dobbiamo aumentare il topK per cercare più in profondità
               if (documents.length === 0) {
-                console.log(`⚠️ [DOC-FILTER] No chunks found for "${targetDocument}", falling back to all results`);
-                documents = []; // Nessun chunk dal documento specificato, ritorna vuoto per forzare risposta onesta
+                console.log(`⚠️ [DOC-FILTER] No chunks found for "${targetDocument}" in top ${unfilteredCount} results`);
+                console.log(`⚠️ [DOC-FILTER] This means semantic similarity is too low - document may not match query`);
+                
+                // Mantieni tutti i risultati originali per permettere all'agente di rispondere
+                // anche se il documento specifico non è stato trovato
+                documents = originalDocuments;
               }
             }
             
