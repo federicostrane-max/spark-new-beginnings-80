@@ -143,25 +143,34 @@ export default function Benchmark() {
   };
 
   const runBenchmark = async () => {
-    setIsRunning(true);
-    setProgress(0);
-    const newResults: BenchmarkResult[] = [];
-    
-    // Generate unique run_id for this benchmark execution
-    const runId = crypto.randomUUID();
-    console.log(`🎯 [BENCHMARK] Starting run ${runId}`);
-    toast.info(`Benchmark Run ID: ${runId.substring(0, 8)}...`);
+    try {
+      setIsRunning(true);
+      setProgress(0);
+      const newResults: BenchmarkResult[] = [];
+      
+      // Generate unique run_id for this benchmark execution
+      const runId = crypto.randomUUID();
+      console.log(`🎯 [BENCHMARK] Starting run ${runId}`);
+      toast.info(`Benchmark Run ID: ${runId.substring(0, 8)}...`);
 
-    // Filter dataset by selected suite while preserving original indices
-    const filteredDatasetWithIndex = dataset
-      .map((entry, originalIndex) => ({ entry, originalIndex }))
-      .filter(item => selectedSuite === 'all' || item.entry.suite_category === selectedSuite);
-    
-    if (filteredDatasetWithIndex.length === 0) {
-      toast.error('Nessun documento trovato per la suite selezionata');
-      setIsRunning(false);
-      return;
-    }
+      // Filter dataset by selected suite while preserving original indices
+      const filteredDatasetWithIndex = dataset
+        .map((entry, originalIndex) => ({ entry, originalIndex }))
+        .filter(item => selectedSuite === 'all' || item.entry.suite_category === selectedSuite);
+      
+      // Diagnostic logging
+      console.log('[Benchmark] Configuration:', {
+        selectedSuite,
+        totalDatasetLength: dataset.length,
+        filteredDatasetLength: filteredDatasetWithIndex.length,
+        agentSlug: AGENT_SLUG
+      });
+      
+      if (filteredDatasetWithIndex.length === 0) {
+        toast.error('Nessun documento trovato per la suite selezionata');
+        setIsRunning(false);
+        return;
+      }
 
     for (let i = 0; i < filteredDatasetWithIndex.length; i++) {
       const { entry, originalIndex } = filteredDatasetWithIndex[i];
@@ -352,9 +361,15 @@ export default function Benchmark() {
       setProgress(((i + 1) / filteredDatasetWithIndex.length) * 100);
     }
 
-    setIsRunning(false);
-    setCurrentDoc(null);
-    toast.success(`Benchmark completato! Run ID: ${runId.substring(0, 8)}...`);
+      setIsRunning(false);
+      setCurrentDoc(null);
+      toast.success(`Benchmark completato! Run ID: ${runId.substring(0, 8)}...`);
+    } catch (error: any) {
+      console.error('[Benchmark] Critical error in runBenchmark:', error);
+      toast.error(`Errore critico nel benchmark: ${error.message}`);
+      setIsRunning(false);
+      setCurrentDoc(null);
+    }
   };
 
   // Filter results by selected suite
