@@ -112,6 +112,36 @@ serve(async (req) => {
           };
           
           console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from Markdown`);
+        } else if (doc.source_type === 'image') {
+          // IMAGE PATH: Claude Vision direct (bypass LlamaParse)
+          console.log(`[Pipeline A-Hybrid Process] Processing image document: ${doc.file_name}`);
+          const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
+          
+          const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+          if (!anthropicKey) {
+            throw new Error('ANTHROPIC_API_KEY required for image processing');
+          }
+          
+          // Import describeImageWithClaude
+          const { describeImageWithClaude } = await import("../_shared/visionEnhancer.ts");
+          
+          console.log('[Pipeline A-Hybrid Process] Calling Claude Vision for chart description');
+          const imageDescription = await describeImageWithClaude(pdfBuffer, anthropicKey, doc.file_name);
+          console.log(`[Pipeline A-Hybrid Process] Claude returned ${imageDescription.length} chars description`);
+          
+          // Generate chunks from description
+          console.log('[Pipeline A-Hybrid Process] Parsing image description into chunks');
+          const parseResult = await parseMarkdownElements(imageDescription, doc.file_name);
+          chunks = parseResult.baseNodes;
+          
+          metadata = {
+            source_type: 'image',
+            processing_method: 'claude_vision_direct',
+            description_length: imageDescription.length,
+            chunks_generated: chunks.length
+          };
+          
+          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from image description`);
         } else {
           // PDF PATH: Existing LlamaParse + Vision Enhancement flow
           const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());

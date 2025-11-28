@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, fileData, fileSize, folder } = await req.json();
+    const { fileName, fileData, fileSize, folder, source_type } = await req.json();
 
     if (!fileName || !fileData) {
       return new Response(
@@ -53,7 +53,7 @@ serve(async (req) => {
         storage_bucket: 'pipeline-a-uploads',
         file_size_bytes: fileSize,
         folder: folder || null,
-        source_type: 'pdf',
+        source_type: source_type || 'pdf',
         status: 'ingested',
         processing_metadata: {
           ingested_at: new Date().toISOString(),

@@ -260,3 +260,116 @@ ${visionText}
 
   return originalSuperDoc + enhancedSection;
 }
+
+// ============= FUNCTION 4: CLAUDE VISION FOR IMAGE-ONLY DOCUMENTS =============
+
+/**
+ * Analyzes image-only documents (charts, graphs) using Claude Vision to generate structured descriptions
+ * Bypasses LlamaParse entirely for source_type='image' documents
+ * @param pdfBuffer Raw PDF file buffer containing the image
+ * @param anthropicKey Anthropic API key
+ * @param fileName Document filename for logging
+ */
+export async function describeImageWithClaude(
+  pdfBuffer: Uint8Array,
+  anthropicKey: string,
+  fileName: string
+): Promise<string> {
+  console.log(`[Image Description] Processing image document: ${fileName}`);
+  console.log(`[Image Description] PDF buffer size: ${pdfBuffer.length} bytes`);
+
+  try {
+    const base64Pdf = encodeBase64(pdfBuffer);
+    console.log(`[Image Description] PDF encoded to base64: ${base64Pdf.length} chars`);
+    
+    const structuredPrompt = `Analizza questo grafico/chart e produci una descrizione COMPLETA e STRUTTURATA in formato Markdown.
+
+FORMATO RICHIESTO:
+## Tipo di Grafico
+[bar chart / line chart / pie chart / scatter plot / table / mixed chart / etc.]
+
+## Titolo
+[titolo del grafico se visibile, altrimenti "Non specificato"]
+
+## Assi
+- **Asse X**: [descrizione con tutte le etichette visibili]
+- **Asse Y**: [descrizione con unità di misura]
+
+## Dati Chiave
+[Elenca TUTTI i valori numerici visibili nel grafico in formato tabellare Markdown]
+
+Esempio:
+| Categoria | Valore | Note |
+|-----------|--------|------|
+| Q1 2022   | 145.3  | Peak |
+| Q2 2022   | 132.7  | -    |
+
+## Trend e Osservazioni
+[Descrivi trend principali, massimi, minimi, pattern, anomalie]
+
+## Legenda
+[Se presente, elenca tutti gli elementi della legenda con i loro colori/simboli]
+
+## Note Aggiuntive
+[Annotazioni, note a piè di pagina, watermark, copyright visibili]
+
+ISTRUZIONI CRITICHE:
+1. Estrai TUTTI i numeri e valori visibili con MASSIMA PRECISIONE
+2. Mantieni l'ordine cronologico/logico dei dati
+3. Se le etichette sono parzialmente illeggibili, indicale come "[illeggibile]"
+4. Usa formato Markdown per tabelle e liste
+5. Sii completo ma conciso - ogni dato deve essere verificabile nell'immagine`;
+
+    console.log('[Image Description] Calling Claude API with native PDF...');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25', // Native PDF support
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: base64Pdf
+              }
+            },
+            {
+              type: 'text',
+              text: structuredPrompt
+            }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Image Description] Claude API error ${response.status}:`, errorText);
+      throw new Error(`Claude API failed: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    const description = result.content?.[0]?.text;
+    
+    if (!description) {
+      throw new Error('Claude returned empty description');
+    }
+
+    console.log(`[Image Description] Claude description successful: ${description.length} characters`);
+    return description;
+
+  } catch (error) {
+    console.error('[Image Description] Exception in describeImageWithClaude:', error);
+    throw error;
+  }
+}
