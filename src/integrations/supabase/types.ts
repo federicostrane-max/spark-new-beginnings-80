@@ -700,6 +700,54 @@ export type Database = {
           },
         ]
       }
+      benchmark_results: {
+        Row: {
+          agent_response: string | null
+          correct: boolean | null
+          created_at: string | null
+          error: string | null
+          ground_truth: string
+          id: string
+          pdf_file: string
+          question: string
+          reason: string | null
+          response_time_ms: number | null
+          retrieval_metadata: Json | null
+          run_id: string
+          status: string
+        }
+        Insert: {
+          agent_response?: string | null
+          correct?: boolean | null
+          created_at?: string | null
+          error?: string | null
+          ground_truth: string
+          id?: string
+          pdf_file: string
+          question: string
+          reason?: string | null
+          response_time_ms?: number | null
+          retrieval_metadata?: Json | null
+          run_id: string
+          status: string
+        }
+        Update: {
+          agent_response?: string | null
+          correct?: boolean | null
+          created_at?: string | null
+          error?: string | null
+          ground_truth?: string
+          id?: string
+          pdf_file?: string
+          question?: string
+          reason?: string | null
+          response_time_ms?: number | null
+          retrieval_metadata?: Json | null
+          run_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       edge_function_execution_logs: {
         Row: {
           agent_id: string | null

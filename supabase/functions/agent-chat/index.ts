@@ -231,6 +231,19 @@ async function parallelSemanticSearch(
     let uniqueDocs = Array.from(chunkMap.values())
       .sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
     
+    // 📊 [BENCHMARK LOGGING] Log retrieval details for analysis
+    console.log(`📊 [RETRIEVAL-STATS] Query Breakdown:`, JSON.stringify(queryBreakdown, null, 2));
+    console.log(`📊 [RETRIEVAL-STATS] Total unique chunks: ${uniqueDocs.length}`);
+    if (uniqueDocs.length > 0) {
+      const topChunks = uniqueDocs.slice(0, 5);
+      console.log(`📊 [RETRIEVAL-STATS] Top 5 chunks:`, topChunks.map(d => ({
+        document: d.document_name,
+        similarity: d.similarity?.toFixed(3),
+        category: d.category,
+        search_type: d.search_type
+      })));
+    }
+    
     // SAFETY CAP: rispetta rigorosamente MAX_TOTAL_CHUNKS
     if (uniqueDocs.length > DECOMPOSITION_CONFIG.MAX_TOTAL_CHUNKS) {
       console.log(`⚠️ [SAFETY-CAP] Limiting ${uniqueDocs.length} chunks to ${DECOMPOSITION_CONFIG.MAX_TOTAL_CHUNKS}`);
@@ -289,7 +302,7 @@ function generateQueryVariants(originalTopic: string): string[] {
 const DECOMPOSITION_CONFIG = {
   MODEL: 'google/gemini-2.5-flash',  // LLM veloce per decomposizione
   MAX_QUERIES: 10,                    // Massimo query decomposte
-  TOP_K_PER_QUERY: 5,                 // Chunk per query (adattivo)
+  TOP_K_PER_QUERY: 15,                // INCREASED: 5→15 per maggior recall (Benchmark tuning)
   MAX_TOTAL_CHUNKS: 25,               // Limite finale dopo merge
   TIMEOUT_MS: 5000,                   // Timeout per chiamata LLM
   MIN_MESSAGE_LENGTH: 30              // Sotto questa lunghezza, skip decomposizione
