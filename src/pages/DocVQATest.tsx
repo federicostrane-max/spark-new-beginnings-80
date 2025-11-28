@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Copy, CheckCircle2, XCircle, FileText } from "lucide-react";
+import { ArrowLeft, Copy, CheckCircle2, XCircle, FileText, PlayCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Table,
@@ -118,6 +118,16 @@ export default function DocVQATest() {
               <li>Copia la domanda dalla tabella sotto (click sull'icona Copia)</li>
               <li>Chiedi all'agente e confronta la risposta con quella attesa</li>
             </ol>
+          </div>
+          <div className="mt-4">
+            <Button 
+              onClick={() => navigate('/benchmark')}
+              className="w-full gap-2"
+              size="lg"
+            >
+              <PlayCircle className="h-5 w-5" />
+              🧪 Avvia Benchmark Automatico sui 20 Documenti
+            </Button>
           </div>
         </CardContent>
       </Card>
