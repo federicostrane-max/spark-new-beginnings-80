@@ -9,13 +9,13 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10;
 
-function buildEmbeddingInput(chunk: any): string {
-  let embeddingText = '';
+function buildEmbeddingInput(chunk: any, fileName: string): string {
+  let embeddingText = `Document: ${fileName}\n\n`;
   
   if (chunk.heading_hierarchy && Array.isArray(chunk.heading_hierarchy) && chunk.heading_hierarchy.length > 0) {
     const headings = chunk.heading_hierarchy.map((h: any) => h.text || '').filter(Boolean);
     if (headings.length > 0) {
-      embeddingText = headings.join(' > ') + '\n\n';
+      embeddingText += headings.join(' > ') + '\n\n';
     }
   }
   
@@ -70,10 +70,13 @@ serve(async (req) => {
       }
     }
 
-    // Fetch pending chunks
+    // Fetch pending chunks with document file_name via JOIN
     let query = supabase
       .from('pipeline_a_hybrid_chunks_raw')
-      .select('*')
+      .select(`
+        *,
+        pipeline_a_hybrid_documents!inner(file_name)
+      `)
       .eq('embedding_status', 'pending')
       .order('created_at', { ascending: true });
 
@@ -106,7 +109,8 @@ serve(async (req) => {
           .update({ embedding_status: 'processing' })
           .eq('id', chunk.id);
 
-        const embeddingInput = buildEmbeddingInput(chunk);
+        const fileName = chunk.pipeline_a_hybrid_documents?.file_name || 'Unknown';
+        const embeddingInput = buildEmbeddingInput(chunk, fileName);
         const result = await generateEmbedding(embeddingInput, openaiKey);
 
         await supabase
