@@ -444,7 +444,8 @@ serve(async (req) => {
       console.log(`[Provision Benchmark] Cleaned up Science: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
-        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=allenai/qasper&config=default&split=test&offset=0&length=${sampleSize}`;
+        // QASPER uses 'train' split, not 'test'
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=allenai/qasper&config=default&split=train&offset=0&length=${sampleSize}`;
         const response = await fetch(rowsUrl);
         if (!response.ok) throw new Error(`Failed to fetch QASPER: ${response.statusText}`);
         
@@ -529,17 +530,19 @@ serve(async (req) => {
       console.log(`[Provision Benchmark] Cleaned up Narrative: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
-        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=deepmind/narrativeqa&config=default&split=test&offset=0&length=${sampleSize}`;
+        // NarrativeQA uses 'train' split (test set has no answers)
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=deepmind/narrativeqa&config=default&split=train&offset=0&length=${sampleSize}`;
         const response = await fetch(rowsUrl);
         if (!response.ok) throw new Error(`Failed to fetch NarrativeQA: ${response.statusText}`);
         
         const data = await response.json();
         console.log(`[Provision Benchmark] Fetched ${data.rows.length} NarrativeQA entries`);
         
-        // Step 1: Convert all summaries to markdown
+        // Step 1: Convert all story texts to markdown
         const markdownDocs = data.rows.map((row: any, i: number) => {
-          const summary = row.row.document?.summary || row.row.summary || '';
-          if (!summary) throw new Error(`No summary found in NarrativeQA entry ${i}`);
+          // Use full story text (document.text), NOT just summary (which is too short)
+          const storyText = row.row.document?.text || row.row.document_plaintext || '';
+          if (!storyText) throw new Error(`No story text found in NarrativeQA entry ${i}`);
           
           const markdown = convertNarrativeQAToMarkdown(row.row, i);
           const fileName = `narrativeqa_${String(i + 1).padStart(3, '0')}`;
@@ -823,11 +826,20 @@ function extractQASPERAnswer(answers: any[]): string {
 // ===== HELPER: Convert NarrativeQA to Markdown =====
 function convertNarrativeQAToMarkdown(entry: any, index: number): string {
   const title = entry.document?.title || entry.title || `Story ${index + 1}`;
+  
+  // FIX: Use full story text (document.text), NOT summary (which is ~50 words vs. full story ~2000+ words)
+  const storyText = entry.document?.text || entry.document_plaintext || '';
   const summary = entry.document?.summary || entry.summary || '';
   
   let markdown = `# ${title}\n\n`;
-  markdown += `## Story Summary\n\n`;
-  markdown += summary + '\n\n';
+  
+  // Include summary for context if available
+  if (summary) {
+    markdown += `## Summary\n\n${summary}\n\n`;
+  }
+  
+  // Include full story text for deep understanding
+  markdown += `## Full Story\n\n${storyText}\n\n`;
   markdown += `<!-- Question: ${entry.question} -->\n`;
   
   return markdown;
