@@ -69,11 +69,7 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     const githubToken = Deno.env.get('GITHUB_TOKEN');
-    if (!githubToken) {
-      throw new Error('GITHUB_TOKEN not configured');
-    }
-
-    console.log('[Pipeline A GitHub] Starting ingestion:', { repoUrl, importAllOrgRepos });
+    console.log('[Pipeline A GitHub] Starting ingestion:', { repoUrl, importAllOrgRepos, hasToken: !!githubToken });
 
     // Handle organization-wide import
     if (importAllOrgRepos) {
@@ -157,19 +153,41 @@ serve(async (req) => {
 
     console.log(`[Pipeline A GitHub] Fetching tree from ${owner}/${repo}@${branch}`);
 
-    // Fetch repository tree
-    const treeResponse = await fetch(
+    // Fetch repository tree - Try public access first, fallback to token if needed
+    let treeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
       {
         headers: {
-          'Authorization': `token ${githubToken}`,
           'Accept': 'application/vnd.github.v3+json',
         },
       }
     );
 
+    // If public access fails (404/403), retry with token for private repos
+    if (!treeResponse.ok && githubToken) {
+      console.log(`[Pipeline A GitHub] Public access failed (${treeResponse.status}), retrying with token...`);
+      treeResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+        {
+          headers: {
+            'Authorization': `token ${githubToken}`,
+            'Accept': 'application/vnd.github.v3+json',
+          },
+        }
+      );
+    }
+
     if (!treeResponse.ok) {
-      throw new Error(`Failed to fetch repository tree: ${treeResponse.statusText}`);
+      const errorBody = await treeResponse.text();
+      console.error(`[Pipeline A GitHub] GitHub API Error:`, {
+        status: treeResponse.status,
+        statusText: treeResponse.statusText,
+        body: errorBody,
+        repo: `${owner}/${repo}`,
+        branch,
+        hasToken: !!githubToken,
+      });
+      throw new Error(`Failed to fetch repository tree: ${treeResponse.status} ${treeResponse.statusText} - ${errorBody}`);
     }
 
     const treeData = await treeResponse.json();
@@ -233,9 +251,15 @@ serve(async (req) => {
           // AMPHIBIOUS LOGIC: Text vs Binary
           if (isTextFile(fileName)) {
             // TEXT FILE: Fetch as text, store in full_text
-            const contentResponse = await fetch(rawUrl, {
-              headers: { 'Authorization': `token ${githubToken}` },
-            });
+            // Try public access first, fallback to token if needed
+            let contentResponse = await fetch(rawUrl);
+
+            if (!contentResponse.ok && githubToken) {
+              console.log(`[Pipeline A GitHub] Public content fetch failed for ${fileName}, retrying with token...`);
+              contentResponse = await fetch(rawUrl, {
+                headers: { 'Authorization': `token ${githubToken}` },
+              });
+            }
 
             if (!contentResponse.ok) {
               throw new Error(`Failed to fetch ${file.path}: ${contentResponse.statusText}`);
@@ -277,9 +301,15 @@ serve(async (req) => {
             filesIngested++;
           } else if (isPdfFile(fileName)) {
             // PDF FILE: Download, upload to storage, process with LlamaParse
-            const binaryResponse = await fetch(rawUrl, {
-              headers: { 'Authorization': `token ${githubToken}` },
-            });
+            // Try public access first, fallback to token if needed
+            let binaryResponse = await fetch(rawUrl);
+
+            if (!binaryResponse.ok && githubToken) {
+              console.log(`[Pipeline A GitHub] Public binary fetch failed for ${fileName}, retrying with token...`);
+              binaryResponse = await fetch(rawUrl, {
+                headers: { 'Authorization': `token ${githubToken}` },
+              });
+            }
 
             if (!binaryResponse.ok) {
               throw new Error(`Failed to fetch ${file.path}: ${binaryResponse.statusText}`);
