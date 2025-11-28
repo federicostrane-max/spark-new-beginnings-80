@@ -31,13 +31,13 @@ serve(async (req) => {
     const mdFileName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
     const filePath = folder ? `${folder}/${mdFileName}` : mdFileName;
 
-    // Upload markdown to storage
+    // Upload markdown to storage (upsert=true allows re-provisioning)
     const markdownBlob = new Blob([markdownContent], { type: 'text/markdown' });
     const { error: uploadError } = await supabase.storage
       .from('pipeline-a-uploads')
       .upload(filePath, markdownBlob, {
         contentType: 'text/markdown',
-        upsert: false
+        upsert: true
       });
 
     if (uploadError) {
@@ -45,6 +45,34 @@ serve(async (req) => {
     }
 
     console.log('[Pipeline A-Hybrid Ingest Markdown] Uploaded to storage:', filePath);
+
+    // Delete existing document with same file_name (allows re-provisioning)
+    const { data: existingDoc } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id')
+      .eq('file_name', mdFileName)
+      .maybeSingle();
+
+    if (existingDoc) {
+      console.log('[Pipeline A-Hybrid Ingest Markdown] Deleting existing document:', existingDoc.id);
+      // Delete associated chunks first
+      await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .delete()
+        .eq('document_id', existingDoc.id);
+      
+      // Delete agent knowledge links
+      await supabase
+        .from('pipeline_a_hybrid_agent_knowledge')
+        .delete()
+        .eq('chunk_id', existingDoc.id);
+      
+      // Delete document
+      await supabase
+        .from('pipeline_a_hybrid_documents')
+        .delete()
+        .eq('id', existingDoc.id);
+    }
 
     // Insert document record with source_type='markdown'
     const { data: document, error: insertError } = await supabase
