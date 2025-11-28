@@ -261,6 +261,34 @@ ${visionText}
   return originalSuperDoc + enhancedSection;
 }
 
+// ============= HELPER: DETECT IMAGE TYPE FROM MAGIC BYTES =============
+
+/**
+ * Detects image type from magic bytes in file buffer
+ * @param buffer File buffer to analyze
+ * @returns Object with format ('png', 'jpeg', or 'pdf') and media_type for Claude API
+ */
+function detectImageType(buffer: Uint8Array): { format: string; media_type: string } {
+  // PNG: magic bytes 0x89 0x50 0x4E 0x47 (89 P N G)
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+    return { format: 'png', media_type: 'image/png' };
+  }
+  
+  // JPEG: magic bytes 0xFF 0xD8 0xFF
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return { format: 'jpeg', media_type: 'image/jpeg' };
+  }
+  
+  // PDF: magic bytes %PDF (0x25 0x50 0x44 0x46)
+  if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return { format: 'pdf', media_type: 'application/pdf' };
+  }
+  
+  // Default fallback (assume JPEG if unknown)
+  console.warn('[detectImageType] Unknown format, defaulting to JPEG');
+  return { format: 'jpeg', media_type: 'image/jpeg' };
+}
+
 // ============= FUNCTION 4: CLAUDE VISION FOR IMAGE-ONLY DOCUMENTS =============
 
 /**
@@ -279,11 +307,9 @@ export async function describeImageWithClaude(
   console.log(`[Image Description] File buffer size: ${fileBuffer.length} bytes`);
 
   try {
-    // Detect file format: PNG (magic bytes 0x89 0x50 'PNG') vs PDF
-    const isPNG = fileName.toLowerCase().endsWith('.png') || 
-                  (fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50);
-    
-    console.log(`[Image Description] Detected format: ${isPNG ? 'PNG' : 'PDF'}`);
+    // Detect file format using magic bytes
+    const { format, media_type } = detectImageType(fileBuffer);
+    console.log(`[Image Description] Detected format via magic bytes: ${format} (${media_type})`);
     
     const base64Data = encodeBase64(fileBuffer);
     console.log(`[Image Description] File encoded to base64: ${base64Data.length} chars`);
@@ -326,16 +352,16 @@ ISTRUZIONI CRITICHE:
 4. Usa formato Markdown per tabelle e liste
 5. Sii completo ma conciso - ogni dato deve essere verificabile nell'immagine`;
 
-    console.log(`[Image Description] Calling Claude API with ${isPNG ? 'PNG image' : 'native PDF'}...`);
+    console.log(`[Image Description] Calling Claude API with ${format === 'pdf' ? 'native PDF' : `${format.toUpperCase()} image`}...`);
     
     // Build content array based on file format
-    const content = isPNG 
+    const content = format === 'pdf'
       ? [
           {
-            type: 'image' as const,
+            type: 'document' as const,
             source: {
               type: 'base64' as const,
-              media_type: 'image/png' as const,
+              media_type: 'application/pdf' as const,
               data: base64Data
             }
           },
@@ -346,10 +372,10 @@ ISTRUZIONI CRITICHE:
         ]
       : [
           {
-            type: 'document' as const,
+            type: 'image' as const,
             source: {
               type: 'base64' as const,
-              media_type: 'application/pdf' as const,
+              media_type: media_type as 'image/png' | 'image/jpeg',
               data: base64Data
             }
           },
@@ -366,8 +392,8 @@ ISTRUZIONI CRITICHE:
       'content-type': 'application/json'
     };
     
-    if (!isPNG) {
-      headers['anthropic-beta'] = 'pdfs-2024-09-25'; // Native PDF support (not needed for PNG)
+    if (format === 'pdf') {
+      headers['anthropic-beta'] = 'pdfs-2024-09-25'; // Native PDF support (not needed for images)
     }
     
     const response = await fetch('https://api.anthropic.com/v1/messages', {
