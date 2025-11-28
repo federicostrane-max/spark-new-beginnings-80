@@ -2296,15 +2296,35 @@ Deno.serve(async (req) => {
     // Get or create conversation
     let conversation;
     if (conversationId) {
-      const { data, error } = await supabase
+      // Check if conversation with this ID exists
+      const { data: existingConv } = await supabase
         .from('agent_conversations')
         .select('*')
         .eq('id', conversationId)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
-      conversation = data;
+      if (existingConv) {
+        // Conversation exists, reuse it
+        conversation = existingConv;
+        console.log('♻️ Reusing conversation with provided ID:', conversation.id);
+      } else {
+        // Conversation doesn't exist, create it with the provided ID
+        console.log('🆕 Creating new conversation with provided ID:', conversationId);
+        const { data, error } = await supabase
+          .from('agent_conversations')
+          .insert({
+            id: conversationId,
+            user_id: user.id,
+            agent_id: agent.id,
+            title: message.substring(0, 100)
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        conversation = data;
+      }
     } else {
       // Step 1: Try to find existing conversation for this user+agent
       const { data: existingConv } = await supabase
