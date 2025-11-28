@@ -59,7 +59,7 @@ export default function Benchmark() {
       // Initialize results
       const initialResults: BenchmarkResult[] = data.map(entry => ({
         pdf_file: entry.pdf_file,
-        question: entry.qa_pairs[0].question.it,
+        question: entry.qa_pairs[0].question.en,
         groundTruth: entry.qa_pairs[0].answer,
         status: 'pending'
       }));
@@ -82,7 +82,7 @@ export default function Benchmark() {
 
     for (let i = 0; i < dataset.length; i++) {
       const entry = dataset[i];
-      const question = entry.qa_pairs[0].question.it;
+      const question = entry.qa_pairs[0].question.en;
       const groundTruth = entry.qa_pairs[0].answer;
 
       setCurrentDoc({ index: i, file: entry.pdf_file, question });
