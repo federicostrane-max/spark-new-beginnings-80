@@ -61,6 +61,7 @@ serve(async (req) => {
       charts: { success: 0, failed: 0, documents: [] as any[] },
       receipts: { success: 0, failed: 0, documents: [] as any[] },
       science: { success: 0, failed: 0, documents: [] as any[] },
+      narrative: { success: 0, failed: 0, documents: [] as any[] },
       safety: { success: 0, failed: 0, documents: [] as any[] }
     };
 
@@ -520,7 +521,93 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 6: Safety Suite (Adversarial) =====
+    // ===== PHASE 6: NarrativeQA (Narrative Understanding) - BATCH PROCESSING =====
+    if (suites.narrative) {
+      console.log('[Provision Benchmark] Processing NarrativeQA suite - BATCH MODE...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'narrative', 'benchmark_narrative');
+      console.log(`[Provision Benchmark] Cleaned up Narrative: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=deepmind/narrativeqa&config=default&split=test&offset=0&length=${sampleSize}`;
+        const response = await fetch(rowsUrl);
+        if (!response.ok) throw new Error(`Failed to fetch NarrativeQA: ${response.statusText}`);
+        
+        const data = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${data.rows.length} NarrativeQA entries`);
+        
+        // Step 1: Convert all summaries to markdown
+        const markdownDocs = data.rows.map((row: any, i: number) => {
+          const summary = row.row.document?.summary || row.row.summary || '';
+          if (!summary) throw new Error(`No summary found in NarrativeQA entry ${i}`);
+          
+          const markdown = convertNarrativeQAToMarkdown(row.row, i);
+          const fileName = `narrativeqa_${String(i + 1).padStart(3, '0')}`;
+          
+          const question = row.row.question;
+          const answer = Array.isArray(row.row.answers) ? row.row.answers[0]?.text || row.row.answers[0] : row.row.answers;
+          
+          return {
+            fileName,
+            markdown,
+            question,
+            groundTruth: answer,
+            metadata: row.row
+          };
+        });
+        
+        // Step 2: Ingest all documents in parallel
+        const ingestPromises = markdownDocs.map((doc: any) =>
+          supabase.functions.invoke('pipeline-a-hybrid-ingest-markdown', {
+            body: { fileName: doc.fileName, markdownContent: doc.markdown, folder: 'benchmark_narrative' }
+          })
+        );
+        
+        const ingestResults = await Promise.all(ingestPromises);
+        console.log(`[Provision Benchmark] Ingested ${ingestResults.length} NarrativeQA documents in parallel`);
+        
+        // Step 3: Insert Q&A pairs immediately
+        for (let i = 0; i < markdownDocs.length; i++) {
+          const doc = markdownDocs[i];
+          const result = ingestResults[i];
+          
+          if (result.error || !result.data?.documentId) {
+            console.error(`[Provision Benchmark] NarrativeQA ${i + 1} ingest failed:`, result.error);
+            results.narrative.failed++;
+            continue;
+          }
+          
+          const { error: insertError } = await supabase
+            .from('benchmark_datasets')
+            .insert({
+              file_name: `${doc.fileName}.md`,
+              storage_path: `benchmark_narrative/${doc.fileName}.md`,
+              suite_category: 'narrative',
+              question: doc.question,
+              ground_truth: doc.groundTruth,
+              source_repo: 'deepmind/narrativeqa',
+              source_metadata: doc.metadata,
+              document_id: result.data.documentId,
+              provisioned_at: new Date().toISOString()
+            });
+          
+          if (insertError) {
+            console.error(`[Provision Benchmark] NarrativeQA ${i + 1} Q&A insert failed:`, insertError);
+            results.narrative.failed++;
+          } else {
+            results.narrative.success++;
+            results.narrative.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
+          }
+        }
+        
+        console.log(`[Provision Benchmark] NarrativeQA suite complete: ${results.narrative.success} success, ${results.narrative.failed} failed`);
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] NarrativeQA suite failed:', suiteError);
+      }
+    }
+
+    // ===== PHASE 7: Safety Suite (Adversarial) =====
     if (suites.safety) {
       console.log('[Provision Benchmark] Processing Safety suite...');
       
@@ -581,7 +668,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         results,
-        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.safety.success} safety tests. Documents will be ready in ~30-60s.`
+        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.safety.success} safety tests. Documents will be ready in ~30-60s.`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -733,10 +820,23 @@ function extractQASPERAnswer(answers: any[]): string {
   return "Unanswerable";
 }
 
+// ===== HELPER: Convert NarrativeQA to Markdown =====
+function convertNarrativeQAToMarkdown(entry: any, index: number): string {
+  const title = entry.document?.title || entry.title || `Story ${index + 1}`;
+  const summary = entry.document?.summary || entry.summary || '';
+  
+  let markdown = `# ${title}\n\n`;
+  markdown += `## Story Summary\n\n`;
+  markdown += summary + '\n\n';
+  markdown += `<!-- Question: ${entry.question} -->\n`;
+  
+  return markdown;
+}
+
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'safety',
+  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);
