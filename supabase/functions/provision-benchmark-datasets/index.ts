@@ -729,7 +729,7 @@ serve(async (req) => {
       console.log(`[Provision Benchmark] Cleaned up Code: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
-        const repoUrl = 'https://github.com/alexreardon/tiny-invariant';
+        const repoUrl = 'alexreardon/tiny-invariant';
         const branch = 'main';
         
         // Invoke pipeline-a-ingest-github to import the repository
