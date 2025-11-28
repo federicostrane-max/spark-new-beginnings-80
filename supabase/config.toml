@@ -184,3 +184,6 @@ verify_jwt = false
 [functions.test-llamaparse-layout]
 verify_jwt = false
 timeout = 300
+
+[functions.evaluate-answer]
+verify_jwt = true

@@ -17,6 +17,7 @@ const Admin = lazy(() => import("./pages/Admin"));
 const UpdateChePrompt = lazy(() => import("./pages/UpdateChePrompt"));
 const UpdateDocumentFinderPrompt = lazy(() => import("./pages/UpdateDocumentFinderPrompt"));
 const DocVQATest = lazy(() => import("./pages/DocVQATest"));
+const Benchmark = lazy(() => import("./pages/Benchmark"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 
@@ -106,6 +107,14 @@ const App = () => {
                     element={
                       <ProtectedRoute>
                         <DocVQATest />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/benchmark"
+                    element={
+                      <ProtectedRoute>
+                        <Benchmark />
                       </ProtectedRoute>
                     }
                   />
