@@ -79,7 +79,7 @@ Respond ONLY with valid JSON:
           { role: 'system', content: 'You are a precise evaluation judge. Always respond with valid JSON only.' },
           { role: 'user', content: JUDGE_PROMPT }
         ],
-        max_completion_tokens: 300
+        max_completion_tokens: 600
       }),
     });
 
