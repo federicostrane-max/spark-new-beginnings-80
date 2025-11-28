@@ -152,19 +152,19 @@ export default function Benchmark() {
     console.log(`🎯 [BENCHMARK] Starting run ${runId}`);
     toast.info(`Benchmark Run ID: ${runId.substring(0, 8)}...`);
 
-    // Filter dataset by selected suite
-    const filteredDataset = selectedSuite === 'all' 
-      ? dataset 
-      : dataset.filter(entry => entry.suite_category === selectedSuite);
+    // Filter dataset by selected suite while preserving original indices
+    const filteredDatasetWithIndex = dataset
+      .map((entry, originalIndex) => ({ entry, originalIndex }))
+      .filter(item => selectedSuite === 'all' || item.entry.suite_category === selectedSuite);
     
-    if (filteredDataset.length === 0) {
+    if (filteredDatasetWithIndex.length === 0) {
       toast.error('Nessun documento trovato per la suite selezionata');
       setIsRunning(false);
       return;
     }
 
-    for (let i = 0; i < filteredDataset.length; i++) {
-      const entry = filteredDataset[i];
+    for (let i = 0; i < filteredDatasetWithIndex.length; i++) {
+      const { entry, originalIndex } = filteredDatasetWithIndex[i];
       
       // Detect format (benchmark_datasets vs legacy)
       const isNewFormat = 'file_name' in entry;
@@ -174,7 +174,7 @@ export default function Benchmark() {
       
       const question = `Regarding document '${fileName}': ${questionText}`;
 
-      setCurrentDoc({ index: i, file: fileName, question });
+      setCurrentDoc({ index: originalIndex, file: fileName, question });
       
       const result: BenchmarkResult = {
         pdf_file: fileName,
@@ -186,7 +186,7 @@ export default function Benchmark() {
       // Update UI with running status
       setResults(prev => {
         const updated = [...prev];
-        updated[i] = result;
+        updated[originalIndex] = result;
         return updated;
       });
 
@@ -206,7 +206,7 @@ export default function Benchmark() {
           newResults.push(result);
           setResults(prev => {
             const updated = [...prev];
-            updated[i] = result;
+            updated[originalIndex] = result;
             return updated;
           });
           
@@ -229,7 +229,7 @@ export default function Benchmark() {
           newResults.push(result);
           setResults(prev => {
             const updated = [...prev];
-            updated[i] = result;
+            updated[originalIndex] = result;
             return updated;
           });
           
@@ -315,10 +315,10 @@ export default function Benchmark() {
       // Update results and progress
       setResults(prev => {
         const updated = [...prev];
-        updated[i] = result;
+        updated[originalIndex] = result;
         return updated;
       });
-      setProgress(((i + 1) / filteredDataset.length) * 100);
+      setProgress(((i + 1) / filteredDatasetWithIndex.length) * 100);
     }
 
     setIsRunning(false);
