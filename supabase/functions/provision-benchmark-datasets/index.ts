@@ -730,7 +730,7 @@ serve(async (req) => {
       
       try {
         const repoUrl = 'alexreardon/tiny-invariant';
-        const branch = 'main';
+        const branch = 'auto'; // Let pipeline auto-detect default branch
         
         // Invoke pipeline-a-ingest-github to import the repository
         console.log('[Provision Benchmark] Invoking pipeline-a-ingest-github for tiny-invariant...');

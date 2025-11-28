@@ -58,6 +58,35 @@ function sanitizeTextContent(content: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ''); // Remove control characters
 }
 
+// Helper function to get default branch from repository
+async function getDefaultBranch(owner: string, repo: string, githubToken?: string): Promise<string> {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': GITHUB_USER_AGENT,
+  };
+  if (githubToken) {
+    headers['Authorization'] = `token ${githubToken}`;
+  }
+  
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}`,
+      { headers }
+    );
+    
+    if (!response.ok) {
+      console.log(`[Pipeline A GitHub] Could not fetch repo info (${response.status}), defaulting to 'main'`);
+      return 'main';
+    }
+    
+    const repoData = await response.json();
+    return repoData.default_branch || 'main';
+  } catch (error) {
+    console.log(`[Pipeline A GitHub] Error fetching repo info, defaulting to 'main':`, error);
+    return 'main';
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -154,11 +183,18 @@ serve(async (req) => {
       throw new Error('Invalid repository URL format. Expected: owner/repo');
     }
 
-    console.log(`[Pipeline A GitHub] Fetching tree from ${owner}/${repo}@${branch}`);
+    // If no branch specified or 'auto', auto-detect default branch
+    let effectiveBranch = branch;
+    if (!branch || branch === 'auto') {
+      effectiveBranch = await getDefaultBranch(owner, repo, githubToken);
+      console.log(`[Pipeline A GitHub] Auto-detected default branch: ${effectiveBranch}`);
+    }
+
+    console.log(`[Pipeline A GitHub] Fetching tree from ${owner}/${repo}@${effectiveBranch}`);
 
     // Fetch repository tree - Try public access first, fallback to token if needed
     let treeResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${effectiveBranch}?recursive=1`,
       {
         headers: {
           'Accept': 'application/vnd.github.v3+json',
@@ -171,7 +207,7 @@ serve(async (req) => {
     if (!treeResponse.ok && githubToken) {
       console.log(`[Pipeline A GitHub] Public access failed (${treeResponse.status}), retrying with token...`);
       treeResponse = await fetch(
-        `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+        `https://api.github.com/repos/${owner}/${repo}/git/trees/${effectiveBranch}?recursive=1`,
         {
           headers: {
             'Authorization': `token ${githubToken}`,
@@ -189,7 +225,7 @@ serve(async (req) => {
         statusText: treeResponse.statusText,
         body: errorBody,
         repo: `${owner}/${repo}`,
-        branch,
+        branch: effectiveBranch,
         hasToken: !!githubToken,
       });
       throw new Error(`Failed to fetch repository tree: ${treeResponse.status} ${treeResponse.statusText} - ${errorBody}`);
@@ -230,7 +266,7 @@ serve(async (req) => {
       for (const file of batch) {
         try {
           const fileName = file.path.split('/').pop() || file.path;
-          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${file.path}`;
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${effectiveBranch}/${file.path}`;
 
           console.log(`[Pipeline A GitHub] Processing: ${file.path}`);
 
