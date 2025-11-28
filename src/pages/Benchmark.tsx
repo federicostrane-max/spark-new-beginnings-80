@@ -523,10 +523,9 @@ export default function Benchmark() {
                 onCheckedChange={(checked) => 
                   setProvisionSuites(prev => ({ ...prev, charts: !!checked }))
                 }
-                disabled
               />
-              <Label htmlFor="charts" className="font-normal cursor-pointer text-muted-foreground">
-                📈 Charts (ChartQA) - Coming soon
+              <Label htmlFor="charts" className="font-normal cursor-pointer">
+                📈 Charts (ChartQA) - Grafici visivi
               </Label>
             </div>
             <div className="flex items-center space-x-2">
