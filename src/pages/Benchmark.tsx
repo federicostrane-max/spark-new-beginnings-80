@@ -185,6 +185,8 @@ export default function Benchmark() {
         });
 
         if (evalError) throw evalError;
+        if (!evaluation) throw new Error('No evaluation data returned from judge');
+        if (evaluation.error) throw new Error(`Judge error: ${evaluation.error}`);
 
         result.correct = evaluation.correct;
         result.reason = evaluation.reason;
