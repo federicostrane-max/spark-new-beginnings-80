@@ -260,9 +260,40 @@ export default function Benchmark() {
 
         if (agentError) throw agentError;
         
-        const agentResponse = agentData?.response || '';
+        // Diagnostic logging to see full response structure
+        console.log('[Benchmark] Agent response structure:', JSON.stringify(agentData, null, 2));
+        
+        // Handle multiple possible response field names
+        const agentResponse = agentData?.response || agentData?.message || agentData?.reply || agentData?.content || '';
+        
+        if (!agentResponse) {
+          console.error('[Benchmark] Empty agent response! Full data:', agentData);
+          result.status = 'error';
+          result.error = 'Agent returned empty response';
+          result.responseTimeMs = Date.now() - startTime;
+          newResults.push(result);
+          setResults(prev => {
+            const updated = [...prev];
+            updated[originalIndex] = result;
+            return updated;
+          });
+          
+          await supabase.from('benchmark_results').insert({
+            run_id: runId,
+            pdf_file: fileName,
+            question,
+            ground_truth: groundTruth,
+            status: 'failed',
+            error: 'Agent returned empty response',
+            response_time_ms: result.responseTimeMs
+          });
+          
+          continue;
+        }
+        
         result.agentResponse = agentResponse;
         result.responseTimeMs = Date.now() - startTime;
+        console.log('[Benchmark] Extracted response:', agentResponse);
 
         // 3. Evaluate with LLM Judge
         const { data: evaluation, error: evalError } = await supabase.functions.invoke('evaluate-answer', {
