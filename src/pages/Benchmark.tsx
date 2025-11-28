@@ -49,7 +49,7 @@ const SUITE_LABELS = {
   finance: '📊 Finance (FinQA)',
   charts: '📈 Charts (ChartQA)',
   receipts: '🧾 Receipts (CORD)',
-  science: '🔬 Science (QASPER)',
+  // science: '🔬 Science (QASPER)', // Temporarily disabled - Hugging Face URL not found
   safety: '🛡️ Safety (Adversarial)'
 };
 
@@ -68,7 +68,7 @@ export default function Benchmark() {
     finance: true, 
     charts: true, 
     receipts: true, 
-    science: true, 
+    // science: true, // Temporarily disabled - Hugging Face URL not found
     safety: true 
   });
   const [sampleSize, setSampleSize] = useState(5);
@@ -583,7 +583,8 @@ export default function Benchmark() {
                 🧾 Receipts (CORD) - Scontrini e fatture
               </Label>
             </div>
-            <div className="flex items-center space-x-2">
+            {/* Science suite temporarily disabled - Hugging Face URL not found */}
+            {/* <div className="flex items-center space-x-2">
               <Checkbox 
                 id="science" 
                 checked={provisionSuites.science}
@@ -594,7 +595,7 @@ export default function Benchmark() {
               <Label htmlFor="science" className="font-normal cursor-pointer">
                 🔬 Science (QASPER) - Paper scientifici
               </Label>
-            </div>
+            </div> */}
             <div className="flex items-center space-x-2">
               <Checkbox 
                 id="safety" 
