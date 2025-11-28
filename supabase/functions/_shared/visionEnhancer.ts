@@ -271,16 +271,22 @@ ${visionText}
  * @param fileName Document filename for logging
  */
 export async function describeImageWithClaude(
-  pdfBuffer: Uint8Array,
+  fileBuffer: Uint8Array,
   anthropicKey: string,
   fileName: string
 ): Promise<string> {
   console.log(`[Image Description] Processing image document: ${fileName}`);
-  console.log(`[Image Description] PDF buffer size: ${pdfBuffer.length} bytes`);
+  console.log(`[Image Description] File buffer size: ${fileBuffer.length} bytes`);
 
   try {
-    const base64Pdf = encodeBase64(pdfBuffer);
-    console.log(`[Image Description] PDF encoded to base64: ${base64Pdf.length} chars`);
+    // Detect file format: PNG (magic bytes 0x89 0x50 'PNG') vs PDF
+    const isPNG = fileName.toLowerCase().endsWith('.png') || 
+                  (fileBuffer[0] === 0x89 && fileBuffer[1] === 0x50);
+    
+    console.log(`[Image Description] Detected format: ${isPNG ? 'PNG' : 'PDF'}`);
+    
+    const base64Data = encodeBase64(fileBuffer);
+    console.log(`[Image Description] File encoded to base64: ${base64Data.length} chars`);
     
     const structuredPrompt = `Analizza questo grafico/chart e produci una descrizione COMPLETA e STRUTTURATA in formato Markdown.
 
@@ -320,34 +326,59 @@ ISTRUZIONI CRITICHE:
 4. Usa formato Markdown per tabelle e liste
 5. Sii completo ma conciso - ogni dato deve essere verificabile nell'immagine`;
 
-    console.log('[Image Description] Calling Claude API with native PDF...');
+    console.log(`[Image Description] Calling Claude API with ${isPNG ? 'PNG image' : 'native PDF'}...`);
+    
+    // Build content array based on file format
+    const content = isPNG 
+      ? [
+          {
+            type: 'image' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: 'image/png' as const,
+              data: base64Data
+            }
+          },
+          {
+            type: 'text' as const,
+            text: structuredPrompt
+          }
+        ]
+      : [
+          {
+            type: 'document' as const,
+            source: {
+              type: 'base64' as const,
+              media_type: 'application/pdf' as const,
+              data: base64Data
+            }
+          },
+          {
+            type: 'text' as const,
+            text: structuredPrompt
+          }
+        ];
+    
+    // Build headers (beta header only for PDF)
+    const headers: Record<string, string> = {
+      'x-api-key': anthropicKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json'
+    };
+    
+    if (!isPNG) {
+      headers['anthropic-beta'] = 'pdfs-2024-09-25'; // Native PDF support (not needed for PNG)
+    }
+    
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'pdfs-2024-09-25', // Native PDF support
-        'content-type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4096,
         messages: [{
           role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: base64Pdf
-              }
-            },
-            {
-              type: 'text',
-              text: structuredPrompt
-            }
-          ]
+          content
         }]
       })
     });

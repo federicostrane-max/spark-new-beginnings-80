@@ -28,14 +28,20 @@ serve(async (req) => {
     console.log(`[Pipeline A-Hybrid Ingest] Starting PDF ingestion: ${fileName}`);
 
     // Decode base64 to binary
-    const pdfBuffer = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
+    const fileBuffer = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
+
+    // Detect content type based on file extension or source_type
+    const isPNG = fileName.toLowerCase().endsWith('.png') || source_type === 'image';
+    const contentType = isPNG ? 'image/png' : 'application/pdf';
+    
+    console.log(`[Pipeline A-Hybrid Ingest] Uploading file as: ${contentType}`);
 
     // Upload to storage
     const filePath = `${crypto.randomUUID()}/${fileName}`;
     const { error: uploadError } = await supabase.storage
       .from('pipeline-a-uploads')
-      .upload(filePath, pdfBuffer, {
-        contentType: 'application/pdf',
+      .upload(filePath, fileBuffer, {
+        contentType,
         upsert: false
       });
 

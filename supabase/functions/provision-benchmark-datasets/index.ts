@@ -163,20 +163,19 @@ serve(async (req) => {
             const pngBuffer = await pngResponse.arrayBuffer();
             console.log(`[Provision Benchmark] Downloaded PNG ${imgName} (${pngBuffer.byteLength} bytes)`);
 
-            // Wrap PNG in PDF
-            const pdfBuffer = await wrapImageInPDF(new Uint8Array(pngBuffer));
-            const fileName = `chartqa_${String(i + 1).padStart(3, '0')}.pdf`;
+            // Use PNG directly (no PDF wrapper needed)
+            const fileName = `chartqa_${String(i + 1).padStart(3, '0')}.png`;
 
-            // Ingest via PDF endpoint with source_type='image'
+            // Ingest PNG directly with source_type='image'
             const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
               'pipeline-a-hybrid-ingest-pdf',
               { 
                 body: { 
                   fileName,
-                  fileData: btoa(String.fromCharCode(...new Uint8Array(pdfBuffer))),
-                  fileSize: pdfBuffer.byteLength,
+                  fileData: btoa(String.fromCharCode(...new Uint8Array(pngBuffer))),
+                  fileSize: pngBuffer.byteLength,
                   folder: 'benchmark_charts',
-                  source_type: 'image'  // ✅ IMAGE-FIRST PATH
+                  source_type: 'image'  // ✅ IMAGE-FIRST PATH - PNG direct
                 } 
               }
             );
@@ -523,52 +522,3 @@ async function cleanupExistingSuite(
   }
 }
 
-// ===== HELPER: Wrap PNG image in minimal PDF =====
-async function wrapImageInPDF(pngBytes: Uint8Array): Promise<ArrayBuffer> {
-  // Minimal PDF structure to embed a PNG image
-  // Using basic PDF 1.4 format with JPEG/PNG image support
-  
-  const width = 800;  // Standard width for chart display
-  const height = 600; // Standard height
-  
-  // Create basic PDF structure
-  const pdfContent = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /Resources 4 0 R /MediaBox [0 0 ${width} ${height}] /Contents 5 0 R >>
-endobj
-4 0 obj
-<< /XObject << /Im1 6 0 R >> >>
-endobj
-5 0 obj
-<< /Length 44 >>
-stream
-q
-${width} 0 0 ${height} 0 0 cm
-/Im1 Do
-Q
-endstream
-endobj
-6 0 obj
-<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${pngBytes.length} >>
-stream
-`;
-
-  // Convert to UTF-8 bytes
-  const headerBytes = new TextEncoder().encode(pdfContent);
-  
-  // Combine header + PNG data + footer
-  const footerBytes = new TextEncoder().encode('\nendstream\nendobj\nxref\n0 7\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000230 00000 n\n0000000279 00000 n\n0000000371 00000 n\ntrailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n' + String(headerBytes.length + pngBytes.length + 100) + '\n%%EOF\n');
-  
-  const pdfBytes = new Uint8Array(headerBytes.length + pngBytes.length + footerBytes.length);
-  pdfBytes.set(headerBytes, 0);
-  pdfBytes.set(pngBytes, headerBytes.length);
-  pdfBytes.set(footerBytes, headerBytes.length + pngBytes.length);
-  
-  return pdfBytes.buffer;
-}
