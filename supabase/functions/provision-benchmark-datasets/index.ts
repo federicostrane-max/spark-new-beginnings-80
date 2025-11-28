@@ -125,10 +125,97 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 2: ChartQA (Charts Suite) - PLACEHOLDER =====
+    // ===== PHASE 2: ChartQA (Charts Suite) =====
     if (suites.charts) {
-      console.log('[Provision Benchmark] ChartQA suite not yet implemented - coming soon');
-      // TODO: Implement ChartQA download + PNG-to-PDF conversion
+      console.log('[Provision Benchmark] Processing ChartQA suite...');
+      try {
+        const chartqaUrl = 'https://raw.githubusercontent.com/vis-nlp/ChartQA/main/ChartQA%20Dataset/test/test_human.json';
+        const headers: any = { 'Accept': 'application/json' };
+        if (githubToken) headers['Authorization'] = `token ${githubToken}`;
+
+        const response = await fetch(chartqaUrl, { headers });
+        if (!response.ok) throw new Error(`Failed to fetch ChartQA: ${response.statusText}`);
+        
+        const chartqaData = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${chartqaData.length} ChartQA entries`);
+
+        // Process first N entries
+        const sampled = chartqaData.slice(0, sampleSize);
+        
+        for (let i = 0; i < sampled.length; i++) {
+          const entry = sampled[i];
+          try {
+            const imgName = entry.imgname;
+            const pngUrl = `https://raw.githubusercontent.com/vis-nlp/ChartQA/main/ChartQA%20Dataset/test/png/${imgName}`;
+            
+            // Download PNG
+            const pngResponse = await fetch(pngUrl, { headers });
+            if (!pngResponse.ok) throw new Error(`Failed to fetch PNG ${imgName}: ${pngResponse.statusText}`);
+            
+            const pngBuffer = await pngResponse.arrayBuffer();
+            console.log(`[Provision Benchmark] Downloaded PNG ${imgName} (${pngBuffer.byteLength} bytes)`);
+
+            // Wrap PNG in PDF
+            const pdfBuffer = await wrapImageInPDF(new Uint8Array(pngBuffer));
+            const fileName = `chartqa_${String(i + 1).padStart(3, '0')}.pdf`;
+
+            // Ingest via PDF endpoint
+            const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
+              'pipeline-a-hybrid-ingest-pdf',
+              { 
+                body: { 
+                  fileName,
+                  fileData: btoa(String.fromCharCode(...new Uint8Array(pdfBuffer))),
+                  fileSize: pdfBuffer.byteLength,
+                  folder: 'benchmark_charts'
+                } 
+              }
+            );
+
+            if (ingestError) throw ingestError;
+            if (!ingestData?.documentId) throw new Error('No document ID returned from ingest');
+
+            console.log(`[Provision Benchmark] Ingested ChartQA ${i + 1}/${sampled.length}:`, ingestData.documentId);
+
+            // Wait for document to be ready
+            const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
+            if (!isReady) {
+              console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
+            } else {
+              // Assign chunks to benchmark agent
+              const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
+              console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
+            }
+
+            // Save Q&A to benchmark_datasets
+            const { error: insertError } = await supabase
+              .from('benchmark_datasets')
+              .insert({
+                file_name: fileName,
+                storage_path: `benchmark_charts/${fileName}`,
+                suite_category: 'charts',
+                question: entry.query,
+                ground_truth: entry.label,
+                source_repo: 'vis-nlp/ChartQA',
+                source_metadata: entry,
+                document_id: ingestData.documentId,
+                provisioned_at: new Date().toISOString()
+              });
+
+            if (insertError) throw insertError;
+
+            results.charts.success++;
+            results.charts.documents.push({ fileName, documentId: ingestData.documentId });
+
+          } catch (entryError) {
+            console.error(`[Provision Benchmark] Failed to process ChartQA entry ${i}:`, entryError);
+            results.charts.failed++;
+          }
+        }
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] ChartQA suite failed:', suiteError);
+      }
     }
 
     // ===== PHASE 3: Safety Suite (Adversarial) =====
@@ -306,4 +393,54 @@ async function assignDocumentToAgent(
   }
 
   return chunks.length;
+}
+
+// ===== HELPER: Wrap PNG image in minimal PDF =====
+async function wrapImageInPDF(pngBytes: Uint8Array): Promise<ArrayBuffer> {
+  // Minimal PDF structure to embed a PNG image
+  // Using basic PDF 1.4 format with JPEG/PNG image support
+  
+  const width = 800;  // Standard width for chart display
+  const height = 600; // Standard height
+  
+  // Create basic PDF structure
+  const pdfContent = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources 4 0 R /MediaBox [0 0 ${width} ${height}] /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /XObject << /Im1 6 0 R >> >>
+endobj
+5 0 obj
+<< /Length 44 >>
+stream
+q
+${width} 0 0 ${height} 0 0 cm
+/Im1 Do
+Q
+endstream
+endobj
+6 0 obj
+<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length ${pngBytes.length} >>
+stream
+`;
+
+  // Convert to UTF-8 bytes
+  const headerBytes = new TextEncoder().encode(pdfContent);
+  
+  // Combine header + PNG data + footer
+  const footerBytes = new TextEncoder().encode('\nendstream\nendobj\nxref\n0 7\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\n0000000230 00000 n\n0000000279 00000 n\n0000000371 00000 n\ntrailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n' + String(headerBytes.length + pngBytes.length + 100) + '\n%%EOF\n');
+  
+  const pdfBytes = new Uint8Array(headerBytes.length + pngBytes.length + footerBytes.length);
+  pdfBytes.set(headerBytes, 0);
+  pdfBytes.set(pngBytes, headerBytes.length);
+  pdfBytes.set(footerBytes, headerBytes.length + pngBytes.length);
+  
+  return pdfBytes.buffer;
 }
