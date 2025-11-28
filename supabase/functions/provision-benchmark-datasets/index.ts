@@ -467,7 +467,9 @@ serve(async (req) => {
             if (Array.isArray(qas.question) && qas.question.length > 0) {
               // Parallel arrays: qas.question[0], qas.answers[0]
               question = qas.question[0];
-              answerObjects = qas.answers?.[0] || [];
+              // answers[0] is a single answer object, wrap it in array for extractQASPERAnswer
+              const answerData = qas.answers?.[0];
+              answerObjects = answerData ? [answerData] : [];
             }
             // Check if it's array of objects
             else if (Array.isArray(qas) && qas.length > 0) {
