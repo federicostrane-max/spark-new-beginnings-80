@@ -8,6 +8,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const GITHUB_USER_AGENT = 'Lovable-Pipeline-A-GitHub-Ingest/1.0';
+
 // Text file extensions that should be ingested as full_text (no LlamaParse needed)
 const TEXT_EXTENSIONS = [
   // Documentation
@@ -82,6 +84,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `token ${githubToken}`,
             'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': GITHUB_USER_AGENT,
           },
         }
       );
@@ -159,6 +162,7 @@ serve(async (req) => {
       {
         headers: {
           'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': GITHUB_USER_AGENT,
         },
       }
     );
@@ -172,6 +176,7 @@ serve(async (req) => {
           headers: {
             'Authorization': `token ${githubToken}`,
             'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': GITHUB_USER_AGENT,
           },
         }
       );
@@ -252,12 +257,19 @@ serve(async (req) => {
           if (isTextFile(fileName)) {
             // TEXT FILE: Fetch as text, store in full_text
             // Try public access first, fallback to token if needed
-            let contentResponse = await fetch(rawUrl);
+            let contentResponse = await fetch(rawUrl, {
+              headers: {
+                'User-Agent': GITHUB_USER_AGENT,
+              },
+            });
 
             if (!contentResponse.ok && githubToken) {
               console.log(`[Pipeline A GitHub] Public content fetch failed for ${fileName}, retrying with token...`);
               contentResponse = await fetch(rawUrl, {
-                headers: { 'Authorization': `token ${githubToken}` },
+                headers: { 
+                  'Authorization': `token ${githubToken}`,
+                  'User-Agent': GITHUB_USER_AGENT,
+                },
               });
             }
 
@@ -302,12 +314,19 @@ serve(async (req) => {
           } else if (isPdfFile(fileName)) {
             // PDF FILE: Download, upload to storage, process with LlamaParse
             // Try public access first, fallback to token if needed
-            let binaryResponse = await fetch(rawUrl);
+            let binaryResponse = await fetch(rawUrl, {
+              headers: {
+                'User-Agent': GITHUB_USER_AGENT,
+              },
+            });
 
             if (!binaryResponse.ok && githubToken) {
               console.log(`[Pipeline A GitHub] Public binary fetch failed for ${fileName}, retrying with token...`);
               binaryResponse = await fetch(rawUrl, {
-                headers: { 'Authorization': `token ${githubToken}` },
+                headers: { 
+                  'Authorization': `token ${githubToken}`,
+                  'User-Agent': GITHUB_USER_AGENT,
+                },
               });
             }
 
