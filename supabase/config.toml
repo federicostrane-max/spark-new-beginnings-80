@@ -159,11 +159,13 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.pipeline-a-hybrid-process-chunks]
-verify_jwt = true
+verify_jwt = false
+timeout = 600
 schedule = "*/10 * * * *"
 
 [functions.pipeline-a-hybrid-generate-embeddings]
-verify_jwt = true
+verify_jwt = false
+timeout = 600
 schedule = "*/5 * * * *"
 
 [functions.pipeline-a-hybrid-sync-agent]
