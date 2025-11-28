@@ -49,7 +49,8 @@ const SUITE_LABELS = {
   finance: '📊 Finance (FinQA)',
   charts: '📈 Charts (ChartQA)',
   receipts: '🧾 Receipts (CORD)',
-  // science: '🔬 Science (QASPER)', // Temporarily disabled - Hugging Face URL not found
+  science: '🔬 Science (QASPER)',
+  narrative: '📖 Narrative (Deep Understanding)',
   safety: '🛡️ Safety (Adversarial)'
 };
 
@@ -68,7 +69,8 @@ export default function Benchmark() {
     finance: true, 
     charts: true, 
     receipts: true, 
-    // science: true, // Temporarily disabled - Hugging Face URL not found
+    science: true,
+    narrative: true,
     safety: true 
   });
   const [sampleSize, setSampleSize] = useState(5);
@@ -358,12 +360,14 @@ export default function Benchmark() {
           result.responseTimeMs = Date.now() - startTime;
           console.log('[Benchmark] Extracted response:', agentResponse);
 
-          // 3. Evaluate with LLM Judge
+          // 3. Evaluate with LLM Judge (pass suiteCategory for conditional prompt selection)
+          const suiteCategory = isNewFormat ? entry.suite_category : 'general';
           const { data: evaluation, error: evalError } = await supabase.functions.invoke('evaluate-answer', {
             body: {
               question,
               agentResponse,
-              groundTruths: [groundTruth]
+              groundTruths: [groundTruth],
+              suiteCategory // NEW: enables REASONING_JUDGE_PROMPT for narrative/science
             }
           });
 
@@ -625,8 +629,7 @@ export default function Benchmark() {
                 🧾 Receipts (CORD) - Scontrini e fatture
               </Label>
             </div>
-            {/* Science suite temporarily disabled - Hugging Face URL not found */}
-            {/* <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2">
               <Checkbox 
                 id="science" 
                 checked={provisionSuites.science}
@@ -637,7 +640,19 @@ export default function Benchmark() {
               <Label htmlFor="science" className="font-normal cursor-pointer">
                 🔬 Science (QASPER) - Paper scientifici
               </Label>
-            </div> */}
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="narrative" 
+                checked={provisionSuites.narrative}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, narrative: !!checked }))
+                }
+              />
+              <Label htmlFor="narrative" className="font-normal cursor-pointer">
+                📖 Narrative (NarrativeQA) - Deep understanding
+              </Label>
+            </div>
             <div className="flex items-center space-x-2">
               <Checkbox 
                 id="safety" 

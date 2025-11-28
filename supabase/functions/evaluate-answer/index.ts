@@ -10,6 +10,7 @@ interface EvaluationRequest {
   question: string;
   agentResponse: string;
   groundTruths: string[];
+  suiteCategory?: string;
 }
 
 interface EvaluationResult {
@@ -37,7 +38,7 @@ serve(async (req) => {
   }
 
   try {
-    const { question, agentResponse, groundTruths }: EvaluationRequest = await req.json();
+    const { question, agentResponse, groundTruths, suiteCategory }: EvaluationRequest = await req.json();
     
     if (!question || !agentResponse || !groundTruths || groundTruths.length === 0) {
       throw new Error('Missing required fields: question, agentResponse, groundTruths');
@@ -48,7 +49,11 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    const JUDGE_PROMPT = `You are an impartial judge evaluating QA accuracy.
+    // Determine if this is a reasoning-based suite (narrative, science)
+    const isReasoningSuite = suiteCategory === 'narrative' || suiteCategory === 'science';
+
+    // FACTUAL_JUDGE_PROMPT: For precise factual data (dates, numbers, names)
+    const FACTUAL_JUDGE_PROMPT = `You are an impartial judge evaluating QA accuracy.
 
 Question: ${question}
 Ground Truth(s): ${groundTruths.join(' OR ')}
@@ -66,6 +71,29 @@ EVALUATION RULES:
 
 Respond ONLY with valid JSON:
 {"correct": boolean, "reason": "brief explanation in italiano"}`;
+
+    // REASONING_JUDGE_PROMPT: For deep understanding and synthesis (narrative, science)
+    const REASONING_JUDGE_PROMPT = `You are evaluating REASONING-BASED answers that require synthesis and understanding.
+
+Question: ${question}
+Ground Truth: ${groundTruths.join(' OR ')}
+Candidate Answer: ${agentResponse}
+
+EVALUATION RULES FOR REASONING:
+1. The answer does NOT need to match word-for-word with Ground Truth
+2. Evaluate if the Candidate captures the CORE CONCEPT and CORRECT LOGIC expressed in Ground Truth
+3. Accept paraphrasing, different wording, and additional context that enriches the answer
+4. If Ground Truth says "Yes, because X" and Candidate says "The method works due to X" → CORRECT
+5. Focus on: understanding of narrative/scientific concepts, cause-effect relationships, logical inference
+6. Minor factual errors in peripheral details are acceptable if the main reasoning is sound
+7. Semantic equivalence is more important than lexical similarity
+8. If the candidate demonstrates understanding of the underlying concept even with different expression → CORRECT
+
+Respond ONLY with valid JSON:
+{"correct": boolean, "reason": "brief explanation in italiano"}`;
+
+    // Select appropriate prompt based on suite category
+    const JUDGE_PROMPT = isReasoningSuite ? REASONING_JUDGE_PROMPT : FACTUAL_JUDGE_PROMPT;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
