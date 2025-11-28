@@ -457,19 +457,41 @@ serve(async (req) => {
           const markdown = convertQASPERToMarkdown(row.row);
           const fileName = `qasper_${String(i + 1).padStart(3, '0')}`;
           
-          const qa = row.row.qas && row.row.qas.length > 0 ? row.row.qas[0] : null;
-          if (!qa) throw new Error(`No Q&A found in QASPER paper ${i}`);
+          // QASPER qas can be parallel arrays OR array of objects
+          const qas = row.row.qas;
+          let question: string | null = null;
+          let answerObjects: any[] = [];
           
-          const answer = extractQASPERAnswer(qa.answers || []);
+          if (qas) {
+            // Check if it's parallel arrays structure
+            if (Array.isArray(qas.question) && qas.question.length > 0) {
+              // Parallel arrays: qas.question[0], qas.answers[0]
+              question = qas.question[0];
+              answerObjects = qas.answers?.[0] || [];
+            }
+            // Check if it's array of objects
+            else if (Array.isArray(qas) && qas.length > 0) {
+              // Array of objects: qas[0].question, qas[0].answers
+              question = qas[0].question;
+              answerObjects = qas[0].answers || [];
+            }
+          }
+          
+          if (!question) {
+            console.warn(`[Provision Benchmark] No Q&A found in QASPER paper ${i}, skipping`);
+            return null;
+          }
+          
+          const answer = extractQASPERAnswer(answerObjects);
           
           return {
             fileName,
             markdown,
-            question: qa.question,
+            question,
             groundTruth: answer,
             metadata: row.row
           };
-        });
+        }).filter(Boolean); // Remove nulls
         
         // Step 2: Ingest all documents in parallel
         const ingestPromises = markdownDocs.map((doc: any) =>
@@ -851,10 +873,12 @@ function convertQASPERToMarkdown(paper: any): string {
 // ===== HELPER: Extract answer from QASPER answers array =====
 function extractQASPERAnswer(answers: any[]): string {
   for (const answerObj of answers || []) {
+    // API returns { answer: { free_form_answer, ... } } structure
     const ans = answerObj.answer || answerObj;
     if (ans.free_form_answer) return ans.free_form_answer;
     if (ans.extractive_spans?.length) return ans.extractive_spans.join(', ');
-    if (ans.yes_no !== null && ans.yes_no !== undefined) return ans.yes_no ? 'Yes' : 'No';
+    if (typeof ans.yes_no === 'boolean') return ans.yes_no ? 'Yes' : 'No';
+    if (ans.unanswerable === true) return "Unanswerable";
   }
   return "Unanswerable";
 }
