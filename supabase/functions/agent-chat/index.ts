@@ -3437,11 +3437,11 @@ The system has automatically executed a search based on your proposed query and 
             // ============================================================================
             // DETECT DOCUMENT-SPECIFIC QUERY (before search)
             // ============================================================================
-            const targetDocument = extractDocumentNameFromQuery(message);
-            const isDocumentSpecificQuery = targetDocument !== null;
+            const specifiedDocumentName = extractDocumentNameFromQuery(message);
+            const isDocumentSpecificQuery = specifiedDocumentName !== null;
             
             if (isDocumentSpecificQuery) {
-              console.log(`🎯 [DOC-QUERY] Detected document-specific query for: "${targetDocument}"`);
+              console.log(`🎯 [DOC-QUERY] Detected document-specific query for: "${specifiedDocumentName}"`);
               console.log(`🎯 [DOC-QUERY] Will use higher topK to ensure document is found`);
             }
             
@@ -3504,23 +3504,23 @@ The system has automatically executed a search based on your proposed query and 
             // ============================================================================
             // DOCUMENT-SPECIFIC FILTERING (for benchmark/explicit document queries)
             // ============================================================================
-            // targetDocument already declared at the beginning of try block
+            // specifiedDocumentName already declared at the beginning of try block
             let originalDocuments: any[] = [];
             
-            if (targetDocument) {
+            if (specifiedDocumentName) {
               originalDocuments = [...documents]; // Backup dei risultati originali
               const unfilteredCount = documents.length;
               
               documents = documents.filter((chunk: any) => 
-                chunk.document_name === targetDocument
+                chunk.document_name === specifiedDocumentName
               );
               
-              console.log(`📋 [DOC-FILTER] Filtered for document "${targetDocument}": ${unfilteredCount} → ${documents.length} chunks`);
+              console.log(`📋 [DOC-FILTER] Filtered for document "${specifiedDocumentName}": ${unfilteredCount} → ${documents.length} chunks`);
               
               // Fallback: se semantic search non ha trovato il documento specificato,
               // dobbiamo aumentare il topK per cercare più in profondità
               if (documents.length === 0) {
-                console.log(`⚠️ [DOC-FILTER] No chunks found for "${targetDocument}" in top ${unfilteredCount} results`);
+                console.log(`⚠️ [DOC-FILTER] No chunks found for "${specifiedDocumentName}" in top ${unfilteredCount} results`);
                 console.log(`⚠️ [DOC-FILTER] This means semantic similarity is too low - document may not match query`);
                 
                 // Mantieni tutti i risultati originali per permettere all'agente di rispondere
