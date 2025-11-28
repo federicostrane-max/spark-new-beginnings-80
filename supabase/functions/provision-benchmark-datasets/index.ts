@@ -31,7 +31,7 @@ serve(async (req) => {
 
     if (!suites || typeof suites !== 'object') {
       return new Response(
-        JSON.stringify({ error: 'suites object required (e.g., {finance: true, charts: false})' }),
+        JSON.stringify({ error: 'suites object required (e.g., {general: true, finance: true})' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -44,16 +44,111 @@ serve(async (req) => {
     console.log('[Provision Benchmark] Starting provisioning:', suites, 'sampleSize:', sampleSize);
 
     const results = {
+      general: { success: 0, failed: 0, documents: [] as any[] },
       finance: { success: 0, failed: 0, documents: [] as any[] },
       charts: { success: 0, failed: 0, documents: [] as any[] },
+      receipts: { success: 0, failed: 0, documents: [] as any[] },
+      science: { success: 0, failed: 0, documents: [] as any[] },
       safety: { success: 0, failed: 0, documents: [] as any[] }
     };
 
-    // ===== PHASE 1: FinQA (Finance Suite) =====
+    // ===== PHASE 1: General (DocVQA) - CLEAN SLATE =====
+    if (suites.general) {
+      console.log('[Provision Benchmark] Processing General (DocVQA) suite - CLEAN SLATE...');
+      
+      // Cleanup existing suite
+      const cleanup = await cleanupExistingSuite(supabase, 'general', 'benchmark_general');
+      console.log(`[Provision Benchmark] Cleaned up General: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      // Cleanup legacy DocVQA documents (doc_00XX.pdf)
+      await cleanupLegacyDocVQA(supabase);
+      
+      try {
+        // Fetch from Hugging Face Dataset Viewer API
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=lmms-lab/DocVQA&config=DocVQA&split=validation&offset=0&length=${sampleSize}`;
+        const response = await fetch(rowsUrl);
+        if (!response.ok) throw new Error(`Failed to fetch DocVQA: ${response.statusText}`);
+        
+        const data = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${data.rows.length} DocVQA entries`);
+        
+        for (let i = 0; i < data.rows.length; i++) {
+          const row = data.rows[i].row;
+          try {
+            const imageUrl = row.image?.src;
+            if (!imageUrl) throw new Error(`No image URL for row ${i}`);
+            
+            // Download image
+            const imgResponse = await fetch(imageUrl);
+            const imgBuffer = await imgResponse.arrayBuffer();
+            
+            const fileName = `docvqa_${String(i + 1).padStart(3, '0')}.png`;
+            
+            // Ingest via image pipeline (Claude Vision)
+            const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
+              'pipeline-a-hybrid-ingest-pdf',
+              { 
+                body: { 
+                  fileName,
+                  fileData: btoa(String.fromCharCode(...new Uint8Array(imgBuffer))),
+                  fileSize: imgBuffer.byteLength,
+                  folder: 'benchmark_general',
+                  source_type: 'image'
+                } 
+              }
+            );
+
+            if (ingestError) throw ingestError;
+            if (!ingestData?.documentId) throw new Error('No document ID returned from ingest');
+
+            console.log(`[Provision Benchmark] Ingested DocVQA ${i + 1}/${data.rows.length}:`, ingestData.documentId);
+
+            // Wait for document to be ready
+            const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
+            if (!isReady) {
+              console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
+            } else {
+              // Assign chunks to benchmark agent
+              const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
+              console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
+            }
+
+            // Save Q&A to benchmark_datasets (first answer from array)
+            const groundTruth = Array.isArray(row.answers) ? row.answers[0] : row.answers;
+            const { error: insertError } = await supabase
+              .from('benchmark_datasets')
+              .insert({
+                file_name: fileName,
+                storage_path: `benchmark_general/${fileName}`,
+                suite_category: 'general',
+                question: row.question,
+                ground_truth: groundTruth,
+                source_repo: 'lmms-lab/DocVQA',
+                source_metadata: row,
+                document_id: ingestData.documentId,
+                provisioned_at: new Date().toISOString()
+              });
+
+            if (insertError) throw insertError;
+
+            results.general.success++;
+            results.general.documents.push({ fileName, documentId: ingestData.documentId });
+
+          } catch (entryError) {
+            console.error(`[Provision Benchmark] Failed to process DocVQA entry ${i}:`, entryError);
+            results.general.failed++;
+          }
+        }
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] General (DocVQA) suite failed:', suiteError);
+      }
+    }
+
+    // ===== PHASE 2: FinQA (Finance Suite) =====
     if (suites.finance) {
       console.log('[Provision Benchmark] Processing FinQA suite...');
       
-      // ✅ Cleanup existing suite before provisioning
       const cleanup = await cleanupExistingSuite(supabase, 'finance', 'benchmark_finance');
       console.log(`[Provision Benchmark] Cleaned up Finance: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       try {
@@ -67,17 +162,14 @@ serve(async (req) => {
         const finqaData = await response.json();
         console.log(`[Provision Benchmark] Fetched ${finqaData.length} FinQA entries`);
 
-        // Process first N entries
         const sampled = finqaData.slice(0, sampleSize);
         
         for (let i = 0; i < sampled.length; i++) {
           const entry = sampled[i];
           try {
-            // Generate Markdown from FinQA JSON
             const markdown = convertFinQAToMarkdown(entry, i);
             const fileName = `finqa_${String(i + 1).padStart(3, '0')}`;
 
-            // Ingest via markdown endpoint
             const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
               'pipeline-a-hybrid-ingest-markdown',
               { body: { fileName, markdownContent: markdown, folder: 'benchmark_finance' } }
@@ -88,17 +180,14 @@ serve(async (req) => {
 
             console.log(`[Provision Benchmark] Ingested FinQA ${i + 1}/${sampled.length}:`, ingestData.documentId);
 
-            // Wait for document to be ready (polling with 60s timeout)
             const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
             if (!isReady) {
               console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
             } else {
-              // Assign chunks to benchmark agent
               const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
               console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
             }
 
-            // Save Q&A to benchmark_datasets
             const { error: insertError } = await supabase
               .from('benchmark_datasets')
               .insert({
@@ -129,11 +218,10 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 2: ChartQA (Charts Suite) =====
+    // ===== PHASE 3: ChartQA (Charts Suite) =====
     if (suites.charts) {
       console.log('[Provision Benchmark] Processing ChartQA suite...');
       
-      // ✅ Cleanup existing suite before provisioning
       const cleanup = await cleanupExistingSuite(supabase, 'charts', 'benchmark_charts');
       console.log(`[Provision Benchmark] Cleaned up Charts: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       try {
@@ -147,7 +235,6 @@ serve(async (req) => {
         const chartqaData = await response.json();
         console.log(`[Provision Benchmark] Fetched ${chartqaData.length} ChartQA entries`);
 
-        // Process first N entries
         const sampled = chartqaData.slice(0, sampleSize);
         
         for (let i = 0; i < sampled.length; i++) {
@@ -156,17 +243,14 @@ serve(async (req) => {
             const imgName = entry.imgname;
             const pngUrl = `https://raw.githubusercontent.com/vis-nlp/ChartQA/main/ChartQA%20Dataset/test/png/${imgName}`;
             
-            // Download PNG
             const pngResponse = await fetch(pngUrl, { headers });
             if (!pngResponse.ok) throw new Error(`Failed to fetch PNG ${imgName}: ${pngResponse.statusText}`);
             
             const pngBuffer = await pngResponse.arrayBuffer();
             console.log(`[Provision Benchmark] Downloaded PNG ${imgName} (${pngBuffer.byteLength} bytes)`);
 
-            // Use PNG directly (no PDF wrapper needed)
             const fileName = `chartqa_${String(i + 1).padStart(3, '0')}.png`;
 
-            // Ingest PNG directly with source_type='image'
             const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
               'pipeline-a-hybrid-ingest-pdf',
               { 
@@ -175,7 +259,7 @@ serve(async (req) => {
                   fileData: btoa(String.fromCharCode(...new Uint8Array(pngBuffer))),
                   fileSize: pngBuffer.byteLength,
                   folder: 'benchmark_charts',
-                  source_type: 'image'  // ✅ IMAGE-FIRST PATH - PNG direct
+                  source_type: 'image'
                 } 
               }
             );
@@ -185,17 +269,14 @@ serve(async (req) => {
 
             console.log(`[Provision Benchmark] Ingested ChartQA ${i + 1}/${sampled.length}:`, ingestData.documentId);
 
-            // Wait for document to be ready
             const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
             if (!isReady) {
               console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
             } else {
-              // Assign chunks to benchmark agent
               const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
               console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
             }
 
-            // Save Q&A to benchmark_datasets
             const { error: insertError } = await supabase
               .from('benchmark_datasets')
               .insert({
@@ -226,11 +307,176 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 3: Safety Suite (Adversarial) =====
+    // ===== PHASE 4: Receipts (CORD) =====
+    if (suites.receipts) {
+      console.log('[Provision Benchmark] Processing Receipts (CORD) suite...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'receipts', 'benchmark_receipts');
+      console.log(`[Provision Benchmark] Cleaned up Receipts: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=naver-clova-ix/cord-v2&config=default&split=test&offset=0&length=${sampleSize}`;
+        const response = await fetch(rowsUrl);
+        if (!response.ok) throw new Error(`Failed to fetch CORD: ${response.statusText}`);
+        
+        const data = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${data.rows.length} CORD entries`);
+        
+        for (let i = 0; i < data.rows.length; i++) {
+          const row = data.rows[i].row;
+          try {
+            const imageUrl = row.image?.src;
+            if (!imageUrl) throw new Error(`No image URL for CORD row ${i}`);
+            
+            const groundTruth = JSON.parse(row.ground_truth);
+            
+            // Download image
+            const imgResponse = await fetch(imageUrl);
+            const imgBuffer = await imgResponse.arrayBuffer();
+            
+            const fileName = `cord_${String(i + 1).padStart(3, '0')}.png`;
+            
+            // Ingest via image pipeline
+            const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
+              'pipeline-a-hybrid-ingest-pdf',
+              { 
+                body: { 
+                  fileName,
+                  fileData: btoa(String.fromCharCode(...new Uint8Array(imgBuffer))),
+                  fileSize: imgBuffer.byteLength,
+                  folder: 'benchmark_receipts',
+                  source_type: 'image'
+                } 
+              }
+            );
+
+            if (ingestError) throw ingestError;
+            if (!ingestData?.documentId) throw new Error('No document ID returned from ingest');
+
+            console.log(`[Provision Benchmark] Ingested CORD ${i + 1}/${data.rows.length}:`, ingestData.documentId);
+
+            const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
+            if (!isReady) {
+              console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
+            } else {
+              const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
+              console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
+            }
+
+            // Generate Q&A from ground_truth
+            const qa = generateCORDQuestion(groundTruth);
+            
+            const { error: insertError } = await supabase
+              .from('benchmark_datasets')
+              .insert({
+                file_name: fileName,
+                storage_path: `benchmark_receipts/${fileName}`,
+                suite_category: 'receipts',
+                question: qa.question,
+                ground_truth: qa.answer,
+                source_repo: 'naver-clova-ix/cord-v2',
+                source_metadata: row,
+                document_id: ingestData.documentId,
+                provisioned_at: new Date().toISOString()
+              });
+
+            if (insertError) throw insertError;
+
+            results.receipts.success++;
+            results.receipts.documents.push({ fileName, documentId: ingestData.documentId });
+
+          } catch (entryError) {
+            console.error(`[Provision Benchmark] Failed to process CORD entry ${i}:`, entryError);
+            results.receipts.failed++;
+          }
+        }
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] Receipts (CORD) suite failed:', suiteError);
+      }
+    }
+
+    // ===== PHASE 5: Science (QASPER) =====
+    if (suites.science) {
+      console.log('[Provision Benchmark] Processing Science (QASPER) suite...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'science', 'benchmark_science');
+      console.log(`[Provision Benchmark] Cleaned up Science: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=allenai/qasper&config=default&split=test&offset=0&length=${sampleSize}`;
+        const response = await fetch(rowsUrl);
+        if (!response.ok) throw new Error(`Failed to fetch QASPER: ${response.statusText}`);
+        
+        const data = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${data.rows.length} QASPER entries`);
+        
+        for (let i = 0; i < data.rows.length; i++) {
+          const row = data.rows[i].row;
+          try {
+            // Convert paper to Markdown
+            const markdown = convertQASPERToMarkdown(row);
+            const fileName = `qasper_${String(i + 1).padStart(3, '0')}`;
+            
+            // Ingest via markdown pipeline
+            const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
+              'pipeline-a-hybrid-ingest-markdown',
+              { body: { fileName, markdownContent: markdown, folder: 'benchmark_science' } }
+            );
+
+            if (ingestError) throw ingestError;
+            if (!ingestData?.documentId) throw new Error('No document ID returned from ingest');
+
+            console.log(`[Provision Benchmark] Ingested QASPER ${i + 1}/${data.rows.length}:`, ingestData.documentId);
+
+            const isReady = await waitForDocumentReady(supabase, ingestData.documentId, 60);
+            if (!isReady) {
+              console.warn(`[Provision Benchmark] Document ${ingestData.documentId} not ready after 60s - skipping assignment`);
+            } else {
+              const assignedCount = await assignDocumentToAgent(supabase, ingestData.documentId, BENCHMARK_AGENT_ID);
+              console.log(`[Provision Benchmark] Assigned ${assignedCount} chunks to benchmark agent`);
+            }
+
+            // Extract Q&A from paper
+            const qa = row.qas && row.qas.length > 0 ? row.qas[0] : null;
+            if (!qa) throw new Error('No Q&A found in QASPER paper');
+            
+            const answer = extractQASPERAnswer(qa.answers || []);
+            
+            const { error: insertError } = await supabase
+              .from('benchmark_datasets')
+              .insert({
+                file_name: `${fileName}.md`,
+                storage_path: `benchmark_science/${fileName}.md`,
+                suite_category: 'science',
+                question: qa.question,
+                ground_truth: answer,
+                source_repo: 'allenai/qasper',
+                source_metadata: row,
+                document_id: ingestData.documentId,
+                provisioned_at: new Date().toISOString()
+              });
+
+            if (insertError) throw insertError;
+
+            results.science.success++;
+            results.science.documents.push({ fileName: `${fileName}.md`, documentId: ingestData.documentId });
+
+          } catch (entryError) {
+            console.error(`[Provision Benchmark] Failed to process QASPER entry ${i}:`, entryError);
+            results.science.failed++;
+          }
+        }
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] Science (QASPER) suite failed:', suiteError);
+      }
+    }
+
+    // ===== PHASE 6: Safety Suite (Adversarial) =====
     if (suites.safety) {
       console.log('[Provision Benchmark] Processing Safety suite...');
       
-      // ✅ Cleanup only benchmark_datasets (Safety has no documents)
       const { error: cleanupError } = await supabase
         .from('benchmark_datasets')
         .delete()
@@ -243,15 +489,15 @@ serve(async (req) => {
       }
       
       try {
-        // Generate adversarial tests for existing finance documents
-        const { data: financeDocuments } = await supabase
+        // Generate adversarial tests for documents from ALL suites
+        const { data: allDocuments } = await supabase
           .from('pipeline_a_hybrid_documents')
           .select('id, file_name')
-          .eq('folder', 'benchmark_finance')
-          .limit(sampleSize);
+          .or('folder.eq.benchmark_finance,folder.eq.benchmark_general,folder.eq.benchmark_charts,folder.eq.benchmark_receipts,folder.eq.benchmark_science')
+          .limit(sampleSize * 2);
 
-        if (financeDocuments && financeDocuments.length > 0) {
-          for (const doc of financeDocuments) {
+        if (allDocuments && allDocuments.length > 0) {
+          for (const doc of allDocuments) {
             // Add 2 random adversarial questions per document
             const selectedQuestions = ADVERSARIAL_QUESTIONS
               .sort(() => Math.random() - 0.5)
@@ -275,7 +521,7 @@ serve(async (req) => {
             }
           }
 
-          results.safety.documents = financeDocuments.map(d => ({ fileName: d.file_name, documentId: d.id }));
+          results.safety.documents = allDocuments.map(d => ({ fileName: d.file_name, documentId: d.id }));
         }
 
       } catch (safetyError) {
@@ -288,7 +534,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         results,
-        message: `Provisioned ${results.finance.success} finance + ${results.charts.success} charts + ${results.safety.success} safety tests`
+        message: `Provisioned ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.safety.success} safety tests`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -302,18 +548,69 @@ serve(async (req) => {
   }
 });
 
+// ===== HELPER: Cleanup legacy DocVQA documents =====
+async function cleanupLegacyDocVQA(supabase: any) {
+  console.log('[Provision Benchmark] Cleaning up legacy DocVQA documents (doc_00XX.pdf)...');
+  
+  try {
+    const { data: legacyDocs } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id')
+      .like('file_name', 'doc_00%.pdf');
+    
+    if (legacyDocs && legacyDocs.length > 0) {
+      const docIds = legacyDocs.map((d: any) => d.id);
+      console.log(`[Provision Benchmark] Found ${docIds.length} legacy DocVQA documents to cleanup`);
+      
+      // Get chunks
+      const { data: chunks } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id')
+        .in('document_id', docIds);
+      
+      if (chunks && chunks.length > 0) {
+        const chunkIds = chunks.map((c: any) => c.id);
+        
+        // Delete agent knowledge assignments
+        await supabase
+          .from('pipeline_a_hybrid_agent_knowledge')
+          .delete()
+          .in('chunk_id', chunkIds);
+        
+        // Delete chunks
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .delete()
+          .in('id', chunkIds);
+        
+        console.log(`[Provision Benchmark] Deleted ${chunkIds.length} legacy chunks`);
+      }
+      
+      // Delete documents
+      await supabase
+        .from('pipeline_a_hybrid_documents')
+        .delete()
+        .in('id', docIds);
+      
+      console.log(`[Provision Benchmark] Deleted ${docIds.length} legacy DocVQA documents`);
+    } else {
+      console.log('[Provision Benchmark] No legacy DocVQA documents found');
+    }
+  } catch (error) {
+    console.error('[Provision Benchmark] Failed to cleanup legacy DocVQA:', error);
+  }
+}
+
 // ===== HELPER: Convert FinQA JSON to Markdown =====
 function convertFinQAToMarkdown(entry: any, index: number): string {
   const { pre_text, post_text, table, qa } = entry;
   
   let markdown = `# Financial Report: finqa_${String(index + 1).padStart(3, '0')}\n\n`;
   
-  // Pre-text
   if (pre_text && pre_text.length > 0) {
     markdown += pre_text.join(' ') + '\n\n';
   }
   
-  // Table (convert array to Markdown table)
   if (table && table.length > 0) {
     const headers = table[0];
     markdown += '| ' + headers.join(' | ') + ' |\n';
@@ -325,16 +622,72 @@ function convertFinQAToMarkdown(entry: any, index: number): string {
     markdown += '\n';
   }
   
-  // Post-text
   if (post_text && post_text.length > 0) {
     markdown += post_text.join(' ') + '\n\n';
   }
   
-  // Add metadata comment (hidden from chunking but useful for debugging)
   markdown += `<!-- Question: ${qa.question} -->\n`;
   markdown += `<!-- Expected Answer: ${qa.exe_ans || qa.program_re} -->\n`;
   
   return markdown;
+}
+
+// ===== HELPER: Generate Q&A for CORD receipt =====
+function generateCORDQuestion(gt: any): { question: string; answer: string } {
+  const gtParse = gt.gt_parse;
+  
+  if (gtParse?.total?.total_price) {
+    return { 
+      question: "What is the total amount on this receipt?", 
+      answer: gtParse.total.total_price 
+    };
+  }
+  if (gtParse?.store?.name) {
+    return { 
+      question: "What is the store name?", 
+      answer: gtParse.store.name 
+    };
+  }
+  if (gtParse?.date?.date) {
+    return { 
+      question: "What is the date on this receipt?", 
+      answer: gtParse.date.date 
+    };
+  }
+  
+  return { 
+    question: "What information can you extract from this receipt?", 
+    answer: JSON.stringify(gtParse).substring(0, 200) 
+  };
+}
+
+// ===== HELPER: Convert QASPER paper to Markdown =====
+function convertQASPERToMarkdown(paper: any): string {
+  let md = `# ${paper.title || 'Scientific Paper'}\n\n`;
+  
+  if (paper.abstract) {
+    md += `## Abstract\n${paper.abstract}\n\n`;
+  }
+  
+  for (const section of paper.full_text || []) {
+    md += `## ${section.section_name || 'Section'}\n`;
+    for (const para of section.paragraphs || []) {
+      md += `${para}\n\n`;
+    }
+  }
+  
+  return md;
+}
+
+// ===== HELPER: Extract answer from QASPER answers array =====
+function extractQASPERAnswer(answers: any[]): string {
+  for (const answerObj of answers || []) {
+    const ans = answerObj.answer || answerObj;
+    if (ans.free_form_answer) return ans.free_form_answer;
+    if (ans.extractive_spans?.length) return ans.extractive_spans.join(', ');
+    if (ans.yes_no !== null && ans.yes_no !== undefined) return ans.yes_no ? 'Yes' : 'No';
+  }
+  return "Unanswerable";
 }
 
 // ===== HELPER: Wait for document to be ready =====
@@ -368,7 +721,6 @@ async function waitForDocumentReady(
       return false;
     }
 
-    // Poll every 2 seconds
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
 
@@ -382,7 +734,6 @@ async function assignDocumentToAgent(
   documentId: string,
   agentId: string
 ): Promise<number> {
-  // Get all ready chunks for this document
   const { data: chunks, error: chunksError } = await supabase
     .from('pipeline_a_hybrid_chunks_raw')
     .select('id')
@@ -396,7 +747,6 @@ async function assignDocumentToAgent(
 
   console.log(`[Provision Benchmark] Found ${chunks.length} ready chunks for document ${documentId}`);
 
-  // Upsert assignments to agent knowledge
   const assignments = chunks.map((chunk: any) => ({
     agent_id: agentId,
     chunk_id: chunk.id,
@@ -419,13 +769,12 @@ async function assignDocumentToAgent(
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'finance' | 'charts' | 'safety',
+  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'safety',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);
   
   try {
-    // 1. Get existing documents for this suite
     const { data: existingDocs, error: docsError } = await supabase
       .from('pipeline_a_hybrid_documents')
       .select('id')
@@ -442,7 +791,6 @@ async function cleanupExistingSuite(
     let chunksDeletedCount = 0;
     
     if (docIds.length > 0) {
-      // 2. Get chunks for these documents
       const { data: chunks, error: chunksQueryError } = await supabase
         .from('pipeline_a_hybrid_chunks_raw')
         .select('id')
@@ -455,7 +803,6 @@ async function cleanupExistingSuite(
         console.log(`[Provision Benchmark] Found ${chunkIds.length} chunks to cleanup`);
         
         if (chunkIds.length > 0) {
-          // 3. Delete agent knowledge assignments (respects FK)
           const { error: knowledgeError } = await supabase
             .from('pipeline_a_hybrid_agent_knowledge')
             .delete()
@@ -467,7 +814,6 @@ async function cleanupExistingSuite(
             console.log('[Provision Benchmark] Deleted agent knowledge assignments');
           }
           
-          // 4. Delete chunks (respects FK)
           const { error: chunksError } = await supabase
             .from('pipeline_a_hybrid_chunks_raw')
             .delete()
@@ -482,7 +828,6 @@ async function cleanupExistingSuite(
         }
       }
       
-      // 5. Delete documents
       const { error: documentsError } = await supabase
         .from('pipeline_a_hybrid_documents')
         .delete()
@@ -495,7 +840,6 @@ async function cleanupExistingSuite(
       }
     }
     
-    // 6. Delete benchmark_datasets entries for this suite
     const { error: datasetsError, count } = await supabase
       .from('benchmark_datasets')
       .delete()
@@ -521,4 +865,3 @@ async function cleanupExistingSuite(
     return { documentsDeleted: 0, chunksDeleted: 0, datasetsDeleted: 0 };
   }
 }
-
