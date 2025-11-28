@@ -55,6 +55,8 @@ serve(async (req) => {
     const embeddingData = await embeddingResponse.json();
     const queryEmbedding = embeddingData.data[0].embedding;
 
+    console.log('[DEBUG] Query embedding generated, length:', queryEmbedding?.length);
+
     // Search in knowledge base
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -64,21 +66,41 @@ serve(async (req) => {
     // Execute BOTH semantic and keyword searches in parallel (never skip keyword)
     console.log('Executing True Hybrid Search (semantic + keyword in parallel)...');
     
+    const semanticParams = {
+      query_embedding: queryEmbedding,
+      p_agent_id: agentId || null,
+      match_threshold: 0.1, // TEMPORARY: lowered from 0.3 for diagnostic
+      match_count: topK * 2,
+    };
+    const keywordParams = {
+      search_query: query,
+      p_agent_id: agentId,
+      match_count: topK * 2,
+    };
+    
+    console.log('[DEBUG] Semantic search params:', {
+      embedding_length: queryEmbedding?.length,
+      p_agent_id: semanticParams.p_agent_id,
+      match_threshold: semanticParams.match_threshold,
+      match_count: semanticParams.match_count
+    });
+    console.log('[DEBUG] Keyword search params:', keywordParams);
+    
     const [semanticResponse, keywordResponse] = await Promise.all([
-      // Semantic search (vector similarity)
-      supabase.rpc('match_documents', {
-        query_embedding: queryEmbedding,
-        p_agent_id: agentId || null,
-        match_threshold: 0.3,
-        match_count: topK * 2, // Fetch more to allow for deduplication
-      }),
-      // Keyword search (PostgreSQL FTS)
-      supabase.rpc('keyword_search_documents', {
-        search_query: query,
-        p_agent_id: agentId,
-        match_count: topK * 2,
-      })
+      supabase.rpc('match_documents', semanticParams),
+      supabase.rpc('keyword_search_documents', keywordParams)
     ]);
+
+    console.log('[DEBUG] Semantic response:', JSON.stringify({
+      data: semanticResponse.data,
+      error: semanticResponse.error,
+      count: semanticResponse.data?.length
+    }));
+    console.log('[DEBUG] Keyword response:', JSON.stringify({
+      data: keywordResponse.data,
+      error: keywordResponse.error,
+      count: keywordResponse.data?.length
+    }));
 
     // Handle errors gracefully (non-blocking)
     if (semanticResponse.error) {
