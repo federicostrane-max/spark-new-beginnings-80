@@ -444,8 +444,8 @@ serve(async (req) => {
       console.log(`[Provision Benchmark] Cleaned up Science: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
-        // QASPER uses 'train' split, not 'test'
-        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=allenai/qasper&config=default&split=train&offset=0&length=${sampleSize}`;
+        // QASPER uses 'train' split and 'qasper' config
+        const rowsUrl = `https://datasets-server.huggingface.co/rows?dataset=allenai/qasper&config=qasper&split=train&offset=0&length=${sampleSize}`;
         const response = await fetch(rowsUrl);
         if (!response.ok) throw new Error(`Failed to fetch QASPER: ${response.statusText}`);
         
