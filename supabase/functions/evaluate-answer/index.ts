@@ -90,9 +90,29 @@ Respond ONLY with valid JSON:
     }
 
     const data = await response.json();
+    console.log('Lovable AI response data:', JSON.stringify(data, null, 2));
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error('Invalid response structure from Lovable AI:', data);
+      throw new Error('Invalid response structure from LLM');
+    }
+    
     const judgeResponse = data.choices[0].message.content;
+    console.log('Judge response content:', judgeResponse);
+    
+    if (!judgeResponse || judgeResponse.trim() === '') {
+      console.error('Empty response from LLM judge');
+      throw new Error('Empty response from LLM judge');
+    }
     
     const cleanedJson = cleanJsonString(judgeResponse);
+    console.log('Cleaned JSON:', cleanedJson);
+    
+    if (!cleanedJson || cleanedJson.trim() === '') {
+      console.error('cleanJsonString returned empty string');
+      throw new Error('Failed to extract JSON from LLM response');
+    }
+    
     const evaluation: EvaluationResult = JSON.parse(cleanedJson);
 
     if (typeof evaluation.correct !== 'boolean' || !evaluation.reason) {
