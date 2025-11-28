@@ -159,7 +159,7 @@ serve(async (req) => {
             const pdfBuffer = await wrapImageInPDF(new Uint8Array(pngBuffer));
             const fileName = `chartqa_${String(i + 1).padStart(3, '0')}.pdf`;
 
-            // Ingest via PDF endpoint
+            // Ingest via PDF endpoint with source_type='image'
             const { data: ingestData, error: ingestError } = await supabase.functions.invoke(
               'pipeline-a-hybrid-ingest-pdf',
               { 
@@ -167,7 +167,8 @@ serve(async (req) => {
                   fileName,
                   fileData: btoa(String.fromCharCode(...new Uint8Array(pdfBuffer))),
                   fileSize: pdfBuffer.byteLength,
-                  folder: 'benchmark_charts'
+                  folder: 'benchmark_charts',
+                  source_type: 'image'  // ✅ IMAGE-FIRST PATH
                 } 
               }
             );
