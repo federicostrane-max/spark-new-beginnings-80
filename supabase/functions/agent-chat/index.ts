@@ -2306,23 +2306,19 @@ Deno.serve(async (req) => {
         console.log('♻️ Reusing existing conversation:', conversation.id);
       } else {
         // Step 2: Create new conversation with race condition handling
-        try {
-          const { data, error } = await supabase
-            .from('agent_conversations')
-            .insert({
-              user_id: user.id,
-              agent_id: agent.id,
-              title: message.substring(0, 100)
-            })
-            .select()
-            .single();
+        const { data, error } = await supabase
+          .from('agent_conversations')
+          .insert({
+            user_id: user.id,
+            agent_id: agent.id,
+            title: message.substring(0, 100)
+          })
+          .select()
+          .single();
 
-          if (error) throw error;
-          conversation = data;
-          console.log('🆕 Created new conversation:', conversation.id);
-        } catch (insertError: any) {
+        if (error) {
           // Handle race condition: another request created the conversation
-          if (insertError.code === '23505') { // Unique constraint violation
+          if (error.code === '23505') { // Unique constraint violation
             console.log('⚠️ Race condition detected, fetching existing conversation...');
             const { data: raceConv, error: raceError } = await supabase
               .from('agent_conversations')
@@ -2335,8 +2331,11 @@ Deno.serve(async (req) => {
             conversation = raceConv;
             console.log('♻️ Retrieved conversation after race condition:', conversation.id);
           } else {
-            throw insertError; // Re-throw non-race-condition errors
+            throw error; // Re-throw non-race-condition errors
           }
+        } else {
+          conversation = data;
+          console.log('🆕 Created new conversation:', conversation.id);
         }
       }
     }
