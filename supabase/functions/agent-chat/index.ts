@@ -2773,8 +2773,8 @@ Deno.serve(async (req) => {
         // Always accumulate content for potential non-streaming response
         try {
           const parsed = JSON.parse(data);
-          if (parsed.content) {
-            accumulatedResponse += parsed.content;
+          if (parsed.type === 'content' && parsed.text) {
+            accumulatedResponse += parsed.text;
           }
         } catch {
           // Ignore non-content SSE events
