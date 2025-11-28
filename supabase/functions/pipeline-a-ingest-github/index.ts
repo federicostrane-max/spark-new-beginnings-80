@@ -93,7 +93,7 @@ serve(async (req) => {
   }
 
   try {
-    const { repoUrl, branch = 'main', filePaths, importAllOrgRepos } = await req.json();
+    const { repoUrl, branch = 'main', filePaths, importAllOrgRepos, folder } = await req.json();
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -146,6 +146,7 @@ serve(async (req) => {
                 repoUrl: repoFullName,
                 branch: repo.default_branch || 'main',
                 importAllOrgRepos: false,
+                folder,
               },
             }
           );
@@ -329,6 +330,7 @@ serve(async (req) => {
                 status: 'ingested',
                 file_size_bytes: sanitizedContent.length,
                 storage_bucket: null,
+                folder: folder || null,
               })
               .select('id')
               .single();
@@ -399,6 +401,7 @@ serve(async (req) => {
                 status: 'ingested',
                 file_size_bytes: arrayBuffer.byteLength,
                 storage_bucket: 'pipeline-a-uploads',
+                folder: folder || null,
               })
               .select('id')
               .single();
