@@ -154,13 +154,19 @@ export default function Benchmark() {
 
     for (let i = 0; i < dataset.length; i++) {
       const entry = dataset[i];
-      const question = `Regarding document '${entry.pdf_file}': ${entry.qa_pairs[0].question.en}`;
-      const groundTruth = entry.qa_pairs[0].answer;
+      
+      // Detect format (benchmark_datasets vs legacy)
+      const isNewFormat = 'file_name' in entry;
+      const fileName = isNewFormat ? entry.file_name : entry.pdf_file;
+      const questionText = isNewFormat ? entry.question : entry.qa_pairs[0].question.en;
+      const groundTruth = isNewFormat ? entry.ground_truth : entry.qa_pairs[0].answer;
+      
+      const question = `Regarding document '${fileName}': ${questionText}`;
 
-      setCurrentDoc({ index: i, file: entry.pdf_file, question });
+      setCurrentDoc({ index: i, file: fileName, question });
       
       const result: BenchmarkResult = {
-        pdf_file: entry.pdf_file,
+        pdf_file: fileName,
         question,
         groundTruth,
         status: 'running'
@@ -178,7 +184,7 @@ export default function Benchmark() {
         const { data: doc, error: docError } = await supabase
           .from('pipeline_a_hybrid_documents')
           .select('id, status')
-          .eq('file_name', entry.pdf_file)
+          .eq('file_name', fileName)
           .maybeSingle();
 
         if (docError) throw docError;
@@ -196,7 +202,7 @@ export default function Benchmark() {
           // Save to database
           await supabase.from('benchmark_results').insert({
             run_id: runId,
-            pdf_file: entry.pdf_file,
+            pdf_file: fileName,
             question,
             ground_truth: groundTruth,
             status: 'missing',
@@ -219,7 +225,7 @@ export default function Benchmark() {
           // Save to database
           await supabase.from('benchmark_results').insert({
             run_id: runId,
-            pdf_file: entry.pdf_file,
+            pdf_file: fileName,
             question,
             ground_truth: groundTruth,
             status: 'not_ready',
@@ -268,7 +274,7 @@ export default function Benchmark() {
         // Save to database with retrieval metadata
         await supabase.from('benchmark_results').insert({
           run_id: runId,
-          pdf_file: entry.pdf_file,
+          pdf_file: fileName,
           question,
           ground_truth: groundTruth,
           agent_response: agentResponse,
@@ -287,7 +293,7 @@ export default function Benchmark() {
         // Save error to database
         await supabase.from('benchmark_results').insert({
           run_id: runId,
-          pdf_file: entry.pdf_file,
+          pdf_file: fileName,
           question,
           ground_truth: groundTruth,
           status: 'error',
