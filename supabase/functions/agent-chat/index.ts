@@ -2231,7 +2231,8 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream } = requestBody;
+    const enableStreaming = stream !== false; // Default to streaming unless explicitly disabled
     
     // Validate inputs
     validateMessageLength(message);
@@ -2751,6 +2752,7 @@ Deno.serve(async (req) => {
     }
 
     // Start streaming response with TransformStream for immediate flush
+    let accumulatedResponse = ''; // Store full response for non-streaming mode
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
@@ -2762,8 +2764,21 @@ Deno.serve(async (req) => {
         return;
       }
       try {
-        const chunk = encoder.encode(`data: ${data}\n\n`);
-        await writer.write(chunk);
+        // If streaming enabled, write to stream
+        if (enableStreaming) {
+          const chunk = encoder.encode(`data: ${data}\n\n`);
+          await writer.write(chunk);
+        }
+        
+        // Always accumulate content for potential non-streaming response
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.content) {
+            accumulatedResponse += parsed.content;
+          }
+        } catch {
+          // Ignore non-content SSE events
+        }
       } catch (error) {
         console.error('Error sending SSE data:', error);
         streamClosed = true;
@@ -2783,9 +2798,8 @@ Deno.serve(async (req) => {
       }
     };
     
-    // Wrap logic in async IIFE to use await
-    (async () => {
-
+    // Wrap logic in async function to support both streaming and non-streaming
+    const processRequest = async () => {
         let placeholderMsg: any = null; // Declare outside try block for catch access
 
         try {
@@ -5761,16 +5775,34 @@ ${knowledgeContext}${searchResultsContext}`;
           }
           await closeStream();
         }
-    })(); // Execute async IIFE
-
-    return new Response(readable, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    }; // End of processRequest function
+    
+    // If streaming mode, execute async and return stream immediately
+    if (enableStreaming) {
+      processRequest(); // Execute without await (fire and forget)
+      return new Response(readable, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    } else {
+      // If non-streaming mode, await completion and return JSON
+      await processRequest();
+      await closeStream(); // Ensure stream is closed
+      
+      return new Response(
+        JSON.stringify({ response: accumulatedResponse }),
+        { 
+          headers: { 
+            ...corsHeaders, 
+            'Content-Type': 'application/json' 
+          }
+        }
+      );
+    }
 
   } catch (error) {
     console.error('Error in agent-chat:', error);

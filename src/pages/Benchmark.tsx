@@ -130,18 +130,19 @@ export default function Benchmark() {
           continue;
         }
 
-        // 2. Send question to agent
+        // 2. Send question to agent (non-streaming mode)
         const startTime = Date.now();
         const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
           body: {
             agentSlug: AGENT_SLUG,
-            message: question
+            message: question,
+            stream: false // Disable streaming for benchmark
           }
         });
 
         if (agentError) throw agentError;
         
-        const agentResponse = agentData.response || '';
+        const agentResponse = agentData?.response || '';
         result.agentResponse = agentResponse;
         result.responseTimeMs = Date.now() - startTime;
 
