@@ -2292,18 +2292,53 @@ Deno.serve(async (req) => {
       if (error) throw error;
       conversation = data;
     } else {
-      const { data, error } = await supabase
+      // Step 1: Try to find existing conversation for this user+agent
+      const { data: existingConv } = await supabase
         .from('agent_conversations')
-        .insert({
-          user_id: user.id,
-          agent_id: agent.id,
-          title: message.substring(0, 100)
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('agent_id', agent.id)
+        .maybeSingle();
 
-      if (error) throw error;
-      conversation = data;
+      if (existingConv) {
+        // Reuse existing conversation
+        conversation = existingConv;
+        console.log('♻️ Reusing existing conversation:', conversation.id);
+      } else {
+        // Step 2: Create new conversation with race condition handling
+        try {
+          const { data, error } = await supabase
+            .from('agent_conversations')
+            .insert({
+              user_id: user.id,
+              agent_id: agent.id,
+              title: message.substring(0, 100)
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+          conversation = data;
+          console.log('🆕 Created new conversation:', conversation.id);
+        } catch (insertError: any) {
+          // Handle race condition: another request created the conversation
+          if (insertError.code === '23505') { // Unique constraint violation
+            console.log('⚠️ Race condition detected, fetching existing conversation...');
+            const { data: raceConv, error: raceError } = await supabase
+              .from('agent_conversations')
+              .select('*')
+              .eq('user_id', user.id)
+              .eq('agent_id', agent.id)
+              .single();
+
+            if (raceError) throw raceError;
+            conversation = raceConv;
+            console.log('♻️ Retrieved conversation after race condition:', conversation.id);
+          } else {
+            throw insertError; // Re-throw non-race-condition errors
+          }
+        }
+      }
     }
 
     // Process attachments and build context
