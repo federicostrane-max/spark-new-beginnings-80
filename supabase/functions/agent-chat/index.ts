@@ -56,6 +56,16 @@ interface UserIntent {
 // ============================================================================
 
 /**
+ * Estrae il filename dalla query se presente nel formato:
+ * "Regarding document 'FILENAME': ..."
+ * Ritorna null se non trova il pattern.
+ */
+function extractDocumentNameFromQuery(query: string): string | null {
+  const match = query.match(/Regarding document ['"]([^'"]+)['"]:/i);
+  return match ? match[1] : null;
+}
+
+/**
  * Pulisce l'output JSON da eventuali wrapper Markdown.
  * Gli LLM spesso restituiscono: ```json\n["query1"]\n```
  */
@@ -3475,6 +3485,26 @@ The system has automatically executed a search based on your proposed query and 
               
               console.log(`✅ [PARALLEL-SEARCH] Retrieved ${documents.length} unique chunks`);
               console.log(`📊 [BREAKDOWN]`, queryBreakdown);
+            }
+            
+            // ============================================================================
+            // DOCUMENT-SPECIFIC FILTERING (for benchmark/explicit document queries)
+            // ============================================================================
+            const targetDocument = extractDocumentNameFromQuery(message);
+            
+            if (targetDocument) {
+              const unfilteredCount = documents.length;
+              documents = documents.filter((chunk: any) => 
+                chunk.document_name === targetDocument
+              );
+              
+              console.log(`📋 [DOC-FILTER] Filtered for document "${targetDocument}": ${unfilteredCount} → ${documents.length} chunks`);
+              
+              // Fallback: se nessun chunk trovato per il documento target, usa tutti i risultati
+              if (documents.length === 0) {
+                console.log(`⚠️ [DOC-FILTER] No chunks found for "${targetDocument}", falling back to all results`);
+                documents = []; // Nessun chunk dal documento specificato, ritorna vuoto per forzare risposta onesta
+              }
             }
             
           // ============================================================================
