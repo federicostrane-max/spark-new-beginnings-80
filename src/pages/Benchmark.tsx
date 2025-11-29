@@ -506,27 +506,26 @@ export default function Benchmark() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate('/admin')}
-            className="gap-2"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 mr-2" />
             Indietro
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">🧪 Benchmark Suite a 360°</h1>
-            <p className="text-muted-foreground mt-1">
+            <h1 className="text-2xl md:text-3xl font-bold">🧪 Benchmark Suite a 360°</h1>
+            <p className="text-sm md:text-base text-muted-foreground mt-1">
               Test automatizzati su Finance, Charts, General e Safety
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Select value={selectedSuite} onValueChange={setSelectedSuite}>
-            <SelectTrigger className="w-[220px]">
+            <SelectTrigger className="w-full sm:w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -543,36 +542,39 @@ export default function Benchmark() {
               await loadDataset();
               toast.success('Dataset ricaricato');
             }}
+            size="sm"
             className="gap-2"
           >
             <RefreshCw className="h-4 w-4" />
-            Refresh
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
           <Button
             variant="outline"
             onClick={() => setShowProvisioning(true)}
+            size="sm"
             className="gap-2"
           >
             <Settings className="h-4 w-4" />
-            Configura Dataset
+            <span className="hidden sm:inline">Configura Dataset</span>
           </Button>
           <Button
             variant="outline"
             onClick={handleRegenerateTableEmbeddings}
             disabled={isRegenerating}
+            size="sm"
             className="gap-2"
           >
             <RefreshCw className={`h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`} />
-            {isRegenerating ? 'Rigenerando...' : 'Rigenera Embedding Tabelle'}
+            <span className="hidden md:inline">{isRegenerating ? 'Rigenerando...' : 'Rigenera Embedding Tabelle'}</span>
           </Button>
           <Button
             onClick={runBenchmark}
             disabled={isRunning || dataset.length === 0}
-            size="lg"
+            size="sm"
             className="gap-2"
           >
-            <PlayCircle className="h-5 w-5" />
-            {isRunning ? 'Benchmark In Corso...' : 'Avvia Benchmark'}
+            <PlayCircle className="h-4 w-4 md:h-5 md:w-5" />
+            {isRunning ? 'In Corso...' : 'Avvia'}
           </Button>
         </div>
       </div>
@@ -746,13 +748,13 @@ export default function Benchmark() {
         </Card>
       )}
 
-      {/* Stats per Suite */}
+      {/* Stats per Suite - Responsive Grid */}
       {dataset.length > 0 && (
-        <div className="grid grid-cols-6 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           {Object.entries(SUITE_LABELS).map(([suite, label]) => (
             <Card key={suite} className={selectedSuite === suite ? 'ring-2 ring-primary' : ''}>
               <CardHeader className="pb-2">
-                <CardDescription className="text-xs">{label}</CardDescription>
+                <CardDescription className="text-xs truncate">{label}</CardDescription>
                 <CardTitle className="text-2xl">{statsBySuite[suite]?.accuracy || 0}%</CardTitle>
               </CardHeader>
               <CardContent>
@@ -795,7 +797,7 @@ export default function Benchmark() {
         </div>
       )}
 
-      {/* Results Table */}
+      {/* Results Table - Responsive */}
       <Card>
         <CardHeader>
           <CardTitle>Risultati Dettagliati</CardTitle>
@@ -806,16 +808,16 @@ export default function Benchmark() {
             {results.filter(r => r.status === 'completed').length} test completati
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[150px]">PDF File</TableHead>
-                <TableHead>Domanda</TableHead>
-                <TableHead className="w-[120px]">Expected</TableHead>
-                <TableHead>Risposta Agente</TableHead>
-                <TableHead className="w-[120px]">Esito</TableHead>
-                <TableHead className="w-[80px]">Tempo</TableHead>
+                <TableHead className="min-w-[120px]">PDF File</TableHead>
+                <TableHead className="min-w-[200px]">Domanda</TableHead>
+                <TableHead className="min-w-[100px]">Expected</TableHead>
+                <TableHead className="min-w-[200px]">Risposta Agente</TableHead>
+                <TableHead className="min-w-[100px]">Esito</TableHead>
+                <TableHead className="min-w-[80px]">Tempo</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
