@@ -228,7 +228,17 @@ serve(async (req) => {
           const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
           const visualDescriptions = new Map<string, { type: string; description: string; page: number }>();
 
-          if (anthropicKey && jsonResult.rawJson?.pages) {
+          // 🛡️ MEMORY SAFEGUARD: Skip Visual Enrichment for large files (>10MB)
+          const FILE_SIZE_THRESHOLD_MB = 10;
+          const fileSizeBytes = doc.file_size_bytes || pdfBuffer.length;
+          const fileSizeMB = fileSizeBytes / (1024 * 1024);
+          const skipVisualEnrichment = fileSizeMB > FILE_SIZE_THRESHOLD_MB;
+
+          if (skipVisualEnrichment) {
+            console.log(`[Visual Enrichment] ⚠️ SKIPPED - File size ${fileSizeMB.toFixed(2)}MB exceeds ${FILE_SIZE_THRESHOLD_MB}MB threshold (memory safeguard)`);
+            traceReport.visual_enrichment.elements_found = 0;
+            traceReport.context_analysis.skipped_reason = `File size ${fileSizeMB.toFixed(2)}MB exceeds ${FILE_SIZE_THRESHOLD_MB}MB - Visual Enrichment skipped for memory safety`;
+          } else if (anthropicKey && jsonResult.rawJson?.pages) {
             console.log('[Visual Enrichment] Scanning for visual elements...');
             
             const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
@@ -305,13 +315,19 @@ serve(async (req) => {
           let issuesDetected: any[] = [];
           superDocumentToChunk = superDocument; // Preserva originale
 
-          const ocrIssues = detectOCRIssues(superDocument);
-          console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
-          
-          // Update trace report
-          traceReport.ocr_corrections.issues_detected = ocrIssues.length;
+           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction for large files too
+           if (skipVisualEnrichment) {
+             console.log(`[Vision Enhancement] OCR correction also skipped (file size safeguard)`);
+             traceReport.ocr_corrections.issues_detected = 0;
+             traceReport.ocr_corrections.corrections_applied = 0;
+           } else {
+            const ocrIssues = detectOCRIssues(superDocument);
+            console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
+            
+            // Update trace report
+            traceReport.ocr_corrections.issues_detected = ocrIssues.length;
 
-          if (ocrIssues.length > 0) {
+            if (ocrIssues.length > 0) {
             console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
             issuesDetected = ocrIssues;
             
@@ -387,11 +403,12 @@ serve(async (req) => {
                 console.warn('[Vision Enhancement] No vision API keys configured, using original document');
               }
             }
-          } else {
-            console.log('[Vision Enhancement] No OCR issues detected, using original document');
-          }
+           } else {
+             console.log('[Vision Enhancement] No OCR issues detected, using original document');
+           }
+         } // Close skipVisualEnrichment else branch
 
-          // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
+         // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
           console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
           const parseResult = await parseMarkdownElements(superDocumentToChunk, doc.file_name);
           chunks = parseResult.baseNodes;
