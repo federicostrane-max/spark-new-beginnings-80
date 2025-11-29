@@ -4,6 +4,7 @@ import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
 import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudePDF, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
+import { createTraceReport, finalizeTraceReport, type ProcessingTraceReport } from "../_shared/processingTraceReport.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -57,6 +58,9 @@ serve(async (req) => {
     let failedCount = 0;
 
     for (const doc of documents) {
+      const startTime = Date.now();
+      const traceReport = createTraceReport();
+      
       try {
         console.log(`[Pipeline A-Hybrid Process] Processing document: ${doc.file_name}`);
 
@@ -69,9 +73,14 @@ serve(async (req) => {
 
         if (existingChunks && existingChunks.length > 0) {
           console.log(`[Pipeline A-Hybrid Process] Document ${doc.id} already has chunks, skipping`);
+          traceReport.context_analysis.skipped_reason = 'Chunks already exist';
           await supabase
             .from('pipeline_a_hybrid_documents')
-            .update({ status: 'chunked', updated_at: new Date().toISOString() })
+            .update({ 
+              status: 'chunked', 
+              updated_at: new Date().toISOString(),
+              processing_metadata: { ...doc.processing_metadata, trace_report: finalizeTraceReport(traceReport, startTime) }
+            })
             .eq('id', doc.id);
           continue;
         }
@@ -111,6 +120,9 @@ serve(async (req) => {
             processing_method: 'direct_markdown_parse'
           };
           
+          // Update trace report
+          traceReport.context_analysis.skipped_reason = 'Markdown source - no PDF context analysis needed';
+          
           console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from Markdown`);
         } else if (doc.source_type === 'image') {
           // IMAGE PATH: Claude Vision direct (bypass LlamaParse)
@@ -140,6 +152,19 @@ serve(async (req) => {
             description_length: imageDescription.length,
             chunks_generated: chunks.length
           };
+          
+          // Update trace report
+          traceReport.context_analysis.skipped_reason = 'Image source - direct Claude Vision processing';
+          traceReport.visual_enrichment.elements_found = 1;
+          traceReport.visual_enrichment.elements_processed = 1;
+          traceReport.visual_enrichment.details.push({
+            name: doc.file_name,
+            type: 'chart_image',
+            page: 1,
+            chars_generated: imageDescription.length,
+            prompt_domain: 'general',
+            success: true
+          });
           
           console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from image description`);
         } else {
@@ -178,14 +203,25 @@ serve(async (req) => {
               const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
               documentContext = await analyzeDocumentContext(textSample, anthropicKey);
               
+              // Update trace report
+              traceReport.context_analysis = {
+                domain: documentContext.domain,
+                focus_elements: documentContext.focusElements || [],
+                terminology: documentContext.terminology || [],
+                verbosity: documentContext.verbosity,
+                analysis_model: 'claude-3-5-haiku-20241022'
+              };
+              
               console.log(`[Context Analyzer] ✓ Domain: ${documentContext.domain}`);
               console.log(`[Context Analyzer] ✓ Focus: ${documentContext.focusElements?.join(', ') || 'general'}`);
               console.log(`[Context Analyzer] ✓ Verbosity: ${documentContext.verbosity}`);
             } catch (err) {
               console.warn('[Context Analyzer] Failed, using general context:', err);
+              traceReport.context_analysis.skipped_reason = `Analysis failed: ${err}`;
             }
           } else {
             console.log('[Context Analyzer] Skipped (no Anthropic key or insufficient text)');
+            traceReport.context_analysis.skipped_reason = 'No Anthropic key or insufficient text';
           }
 
           // ===== FASE 2 & 3: CONTEXT-AWARE VISUAL ENRICHMENT =====
@@ -204,6 +240,7 @@ serve(async (req) => {
               for (const image of page.images) {
                 // Process only visual elements (not full-page screenshots)
                 if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
+                  traceReport.visual_enrichment.elements_found++;
                   console.log(`[Visual Enrichment] Processing ${image.type}: ${image.name} with ${documentContext.domain} context`);
                   
                   try {
@@ -225,9 +262,30 @@ serve(async (req) => {
                       page: page.page
                     });
                     
+                    // Update trace report
+                    traceReport.visual_enrichment.elements_processed++;
+                    traceReport.visual_enrichment.details.push({
+                      name: image.name,
+                      type: image.type,
+                      page: page.page,
+                      chars_generated: description.length,
+                      prompt_domain: documentContext.domain,
+                      success: true
+                    });
+                    
                     console.log(`[Visual Enrichment] ✓ ${image.name}: ${description.length} chars (${documentContext.domain} focused)`);
                   } catch (err) {
                     console.warn(`[Visual Enrichment] Failed for ${image.name}:`, err);
+                    traceReport.visual_enrichment.elements_failed++;
+                    traceReport.visual_enrichment.details.push({
+                      name: image.name,
+                      type: image.type,
+                      page: page.page,
+                      chars_generated: 0,
+                      prompt_domain: documentContext.domain,
+                      success: false,
+                      error: String(err)
+                    });
                   }
                 }
               }
@@ -249,10 +307,22 @@ serve(async (req) => {
 
           const ocrIssues = detectOCRIssues(superDocument);
           console.log(`[Vision Enhancement] Scanned for OCR issues: ${ocrIssues.length} found`);
+          
+          // Update trace report
+          traceReport.ocr_corrections.issues_detected = ocrIssues.length;
 
           if (ocrIssues.length > 0) {
             console.log(`[Vision Enhancement] Issues detected:`, ocrIssues.map(i => `${i.type}: "${i.pattern}"`));
             issuesDetected = ocrIssues;
+            
+            // Add to trace report
+            ocrIssues.forEach(issue => {
+              traceReport.ocr_corrections.details.push({
+                type: issue.type,
+                pattern: issue.pattern,
+                fixed: false  // Will be updated if correction succeeds
+              });
+            });
 
             // TRY CLAUDE PDF FIRST (native PDF support with contextual reasoning)
             const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -269,6 +339,12 @@ serve(async (req) => {
                   superDocumentToChunk = buildEnhancedSuperDocument(superDocument, claudeText, ocrIssues);
                   visionEnhancementUsed = true;
                   visionEngine = 'claude';
+                  
+                  // Update trace report
+                  traceReport.ocr_corrections.corrections_applied = ocrIssues.length;
+                  traceReport.ocr_corrections.engine_used = 'claude';
+                  traceReport.ocr_corrections.details.forEach(d => d.fixed = true);
+                  
                   console.log(`[Vision Enhancement] ✓ Claude PDF completed in ${Date.now() - claudeStartTime}ms, added ${claudeText.length} chars`);
                 }
               } catch (claudeError) {
@@ -293,6 +369,12 @@ serve(async (req) => {
                     superDocumentToChunk = buildEnhancedSuperDocument(superDocument, visionText, ocrIssues);
                     visionEnhancementUsed = true;
                     visionEngine = 'google';
+                    
+                    // Update trace report
+                    traceReport.ocr_corrections.corrections_applied = ocrIssues.length;
+                    traceReport.ocr_corrections.engine_used = 'google';
+                    traceReport.ocr_corrections.details.forEach(d => d.fixed = true);
+                    
                     console.log(`[Vision Enhancement] ✓ Google Vision enhancement, added ${visionText.length} chars`);
                   } else {
                     console.warn('[Vision Enhancement] Google Vision returned empty text');
@@ -329,6 +411,22 @@ serve(async (req) => {
 
         console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from reconstructed document`);
 
+        // Update chunking stats in trace report
+        const chunkSizes = chunks.map((c: any) => c.content.length);
+        traceReport.chunking_stats = {
+          total_chunks: chunks.length,
+          avg_chunk_size: Math.round(chunkSizes.reduce((sum, size) => sum + size, 0) / chunks.length),
+          min_chunk_size: Math.min(...chunkSizes),
+          max_chunk_size: Math.max(...chunkSizes),
+          strategy: 'small-to-big',
+          type_distribution: chunks.reduce((acc: Record<string, number>, c: any) => {
+            const type = c.chunk_type || 'text';
+            acc[type] = (acc[type] || 0) + 1;
+            return acc;
+          }, {}),
+          atomic_elements: chunks.filter((c: any) => c.is_atomic).length
+        };
+
         // Insert chunks in batches
         const chunkBatchSize = 50;
         for (let i = 0; i < chunks.length; i += chunkBatchSize) {
@@ -355,7 +453,27 @@ serve(async (req) => {
           }
         }
 
-        // Update document status
+        // Finalize trace report
+        const finalReport = finalizeTraceReport(traceReport, startTime);
+        console.log(`[Trace Report] Processing completed in ${finalReport.duration_ms}ms`);
+        
+        // Create Meta-Chunk for Self-Awareness
+        const metaChunk = {
+          document_id: doc.id,
+          chunk_index: -1,  // Special index for meta-chunk
+          content: finalReport.summary_markdown,
+          chunk_type: 'meta_report',
+          is_atomic: true,
+          embedding_status: 'skip'  // No embedding needed for meta-chunk
+        };
+        
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .insert(metaChunk);
+        
+        console.log(`[Trace Report] Meta-Chunk created for agent self-awareness`);
+
+        // Update document status with trace report
         await supabase
           .from('pipeline_a_hybrid_documents')
           .update({
@@ -365,7 +483,8 @@ serve(async (req) => {
             processed_at: new Date().toISOString(),
             processing_metadata: {
               ...doc.processing_metadata,
-              ...metadata
+              ...metadata,
+              trace_report: finalReport
             }
           })
           .eq('id', doc.id);
