@@ -442,6 +442,12 @@ export async function describeVisualElementContextAware(
   console.log(`[Visual Enrichment] Describing ${elementType} with ${context.domain} context`);
   
   try {
+    // 🔧 FIX: Detect image format dynamically (JPG/PNG/WebP) instead of hardcoding
+    const { format, media_type } = detectImageType(imageBuffer);
+    console.log(`[Visual Enrichment] Detected image format: ${format} (${media_type})`);
+    
+    const base64Image = encodeBase64(imageBuffer);
+    
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -459,8 +465,8 @@ export async function describeVisualElementContextAware(
               type: 'image', 
               source: { 
                 type: 'base64', 
-                media_type: 'image/png', 
-                data: btoa(String.fromCharCode(...imageBuffer))
+                media_type: media_type as 'image/png' | 'image/jpeg' | 'image/webp',
+                data: base64Image
               } 
             },
             { type: 'text', text: prompt }
