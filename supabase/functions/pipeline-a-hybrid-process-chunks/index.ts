@@ -318,9 +318,10 @@ serve(async (req) => {
           let issuesDetected: any[] = [];
           superDocumentToChunk = superDocument; // Initialize before OCR processing
 
-           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction for large files too
-           if (skipVisualEnrichment) {
-             console.log(`[Vision Enhancement] OCR correction also skipped (file size safeguard)`);
+           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction for large files OR if Visual Enrichment already processed
+           const skipOCRProcessing = skipVisualEnrichment || visualDescriptions.size > 0;
+           if (skipOCRProcessing) {
+             console.log(`[Vision Enhancement] OCR correction skipped (${skipVisualEnrichment ? 'file size safeguard' : 'Visual Enrichment already processed'})`);
              traceReport.ocr_corrections.issues_detected = 0;
              traceReport.ocr_corrections.corrections_applied = 0;
            } else {
