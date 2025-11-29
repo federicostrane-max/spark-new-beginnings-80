@@ -92,7 +92,8 @@ serve(async (req) => {
       science: { success: 0, failed: 0, documents: [] as any[] },
       narrative: { success: 0, failed: 0, documents: [] as any[] },
       safety: { success: 0, failed: 0, documents: [] as any[] },
-      code: { success: 0, failed: 0, documents: [] as any[] }
+      code: { success: 0, failed: 0, documents: [] as any[] },
+      hybrid: { success: 0, failed: 0, documents: [] as any[] }
     };
 
     // ===== PHASE 1: General (DocVQA) - BATCH PROCESSING =====
@@ -797,11 +798,115 @@ serve(async (req) => {
       }
     }
 
+    // ===== PHASE 9: Hybrid PDF Suite (ArXiv Scientific Papers) =====
+    if (suites.hybrid) {
+      console.log('[Provision Benchmark] Processing Hybrid PDF suite (ArXiv)...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'hybrid', 'benchmark_hybrid');
+      console.log(`[Provision Benchmark] Cleaned up Hybrid: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        // Query ArXiv for cs.AI papers (has visual content like graphs/tables)
+        const arxivUrl = `https://export.arxiv.org/api/query?search_query=cat:cs.CV+OR+cat:cs.AI&sortBy=submittedDate&sortOrder=descending&start=0&max_results=${sampleSize}`;
+        
+        console.log('[Provision Benchmark] Fetching ArXiv papers...');
+        const response = await fetch(arxivUrl);
+        if (!response.ok) throw new Error(`Failed to fetch ArXiv: ${response.statusText}`);
+        
+        const xmlText = await response.text();
+        
+        // Parse XML response to extract PDF links and metadata
+        const entries = parseArXivXML(xmlText);
+        console.log(`[Provision Benchmark] Fetched ${entries.length} ArXiv papers`);
+        
+        // Step 1: Download all PDFs in parallel
+        const pdfPromises = entries.map(async (entry: any, i: number) => {
+          const pdfUrl = entry.pdfUrl;
+          
+          console.log(`[Provision Benchmark] Downloading PDF ${i + 1}/${entries.length}: ${pdfUrl}`);
+          const pdfResponse = await fetch(pdfUrl);
+          if (!pdfResponse.ok) throw new Error(`Failed to download PDF ${pdfUrl}: ${pdfResponse.statusText}`);
+          
+          const pdfBuffer = await pdfResponse.arrayBuffer();
+          const fileName = `arxiv_${String(i + 1).padStart(3, '0')}.pdf`;
+          
+          // Generate Q&A targeting visual elements
+          const qa = generateVisualQA(entry, i);
+          
+          return {
+            fileName,
+            pdfBuffer,
+            question: qa.question,
+            groundTruth: qa.answer,
+            metadata: entry
+          };
+        });
+        
+        const pdfs = await Promise.all(pdfPromises);
+        console.log(`[Provision Benchmark] Downloaded ${pdfs.length} ArXiv PDFs`);
+        
+        // Step 2: Ingest all PDFs in parallel as REAL PDFs (activates LlamaParse + Visual Enrichment)
+        const ingestPromises = pdfs.map(pdf =>
+          supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
+            body: {
+              fileName: pdf.fileName,
+              fileData: arrayBufferToBase64(pdf.pdfBuffer),
+              fileSize: pdf.pdfBuffer.byteLength,
+              folder: 'benchmark_hybrid',
+              source_type: 'pdf'  // CRITICAL: Real PDF, not image
+            }
+          })
+        );
+        
+        const ingestResults = await Promise.all(ingestPromises);
+        console.log(`[Provision Benchmark] Ingested ${ingestResults.length} Hybrid PDFs in parallel`);
+        
+        // Step 3: Insert Q&A pairs immediately
+        for (let i = 0; i < pdfs.length; i++) {
+          const pdf = pdfs[i];
+          const result = ingestResults[i];
+          
+          if (result.error || !result.data?.documentId) {
+            console.error(`[Provision Benchmark] Hybrid PDF ${i + 1} ingest failed:`, result.error);
+            results.hybrid.failed++;
+            continue;
+          }
+          
+          const { error: insertError } = await supabase
+            .from('benchmark_datasets')
+            .insert({
+              file_name: pdf.fileName,
+              storage_path: `benchmark_hybrid/${pdf.fileName}`,
+              suite_category: 'hybrid',
+              question: pdf.question,
+              ground_truth: pdf.groundTruth,
+              source_repo: 'arxiv.org',
+              source_metadata: pdf.metadata,
+              document_id: result.data.documentId,
+              provisioned_at: new Date().toISOString()
+            });
+          
+          if (insertError) {
+            console.error(`[Provision Benchmark] Hybrid PDF ${i + 1} Q&A insert failed:`, insertError);
+            results.hybrid.failed++;
+          } else {
+            results.hybrid.success++;
+            results.hybrid.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
+          }
+        }
+        
+        console.log(`[Provision Benchmark] Hybrid PDF suite complete: ${results.hybrid.success} success, ${results.hybrid.failed} failed`);
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] Hybrid PDF suite failed:', suiteError);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         results,
-        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety tests. Documents will be ready in ~30-60s.`
+        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety + ${results.hybrid.success} hybrid tests. Documents will be ready in ~30-60s.`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -814,6 +919,80 @@ serve(async (req) => {
     );
   }
 });
+
+// ===== HELPER: Parse ArXiv XML Response =====
+function parseArXivXML(xmlText: string): any[] {
+  const entries: any[] = [];
+  
+  // Simple regex-based XML parsing (ArXiv XML is predictable)
+  const entryMatches = xmlText.matchAll(/<entry>([\s\S]*?)<\/entry>/g);
+  
+  for (const match of entryMatches) {
+    const entryXml = match[1];
+    
+    // Extract ID
+    const idMatch = entryXml.match(/<id>(.*?)<\/id>/);
+    const id = idMatch ? idMatch[1] : '';
+    
+    // Extract title
+    const titleMatch = entryXml.match(/<title>(.*?)<\/title>/);
+    const title = titleMatch ? titleMatch[1].replace(/\s+/g, ' ').trim() : '';
+    
+    // Extract abstract
+    const summaryMatch = entryXml.match(/<summary>([\s\S]*?)<\/summary>/);
+    const abstract = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
+    
+    // Extract PDF link
+    const pdfLinkMatch = entryXml.match(/<link[^>]*title="pdf"[^>]*href="([^"]+)"/);
+    const pdfUrl = pdfLinkMatch ? pdfLinkMatch[1] : '';
+    
+    if (pdfUrl) {
+      entries.push({
+        id,
+        title,
+        abstract,
+        pdfUrl
+      });
+    }
+  }
+  
+  return entries;
+}
+
+// ===== HELPER: Generate Visual Q&A for Hybrid PDFs =====
+function generateVisualQA(entry: any, index: number): { question: string; answer: string } {
+  // Generate questions targeting visual elements in scientific papers
+  const visualQuestions = [
+    {
+      question: "What is the main trend or pattern shown in the first figure or chart?",
+      answer: "Based on visual analysis in the document" // Generic answer - will be graded by LLM Judge
+    },
+    {
+      question: "What are the key numerical results presented in the tables?",
+      answer: "Based on tabular data in the document"
+    },
+    {
+      question: "What methodology diagram or architecture is presented?",
+      answer: "Based on visual diagrams in the document"
+    },
+    {
+      question: "What comparison is shown in the visual elements?",
+      answer: "Based on comparative charts/graphs in the document"
+    },
+    {
+      question: "What performance metrics are visualized?",
+      answer: "Based on performance visualization in the document"
+    }
+  ];
+  
+  // Select question based on paper index (cycle through questions)
+  const selectedQ = visualQuestions[index % visualQuestions.length];
+  
+  return {
+    question: `${selectedQ.question}`,
+    answer: selectedQ.answer
+  };
+}
 
 // ===== HELPER: Cleanup legacy DocVQA documents =====
 async function cleanupLegacyDocVQA(supabase: any) {
@@ -1016,7 +1195,7 @@ function convertNarrativeQAToMarkdown(entry: any, index: number): string {
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code',
+  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code' | 'hybrid',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);
