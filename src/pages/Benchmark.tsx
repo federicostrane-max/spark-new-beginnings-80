@@ -681,6 +681,18 @@ export default function Benchmark() {
                 🛡️ Safety - Domande adversarial
               </Label>
             </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="hybrid" 
+                checked={provisionSuites.hybrid}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, hybrid: !!checked }))
+                }
+              />
+              <Label htmlFor="hybrid" className="font-normal cursor-pointer">
+                🔬 Hybrid PDF (ArXiv) - Test Visual Enrichment
+              </Label>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="sampleSize">Sample Size per Suite</Label>
               <Input 
