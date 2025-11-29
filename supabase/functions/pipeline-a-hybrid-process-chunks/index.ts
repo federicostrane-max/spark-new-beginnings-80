@@ -228,17 +228,10 @@ serve(async (req) => {
           const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
           const visualDescriptions = new Map<string, { type: string; description: string; page: number }>();
 
-          // 🛡️ MEMORY SAFEGUARD: Skip Visual Enrichment for large files (>10MB)
-          const FILE_SIZE_THRESHOLD_MB = 10;
-          const fileSizeBytes = doc.file_size_bytes || pdfBuffer.length;
-          const fileSizeMB = fileSizeBytes / (1024 * 1024);
-          const skipVisualEnrichment = fileSizeMB > FILE_SIZE_THRESHOLD_MB;
+          // 🛡️ MEMORY SAFEGUARD: Skip individual images if too large (>5MB per image)
+          const IMAGE_SIZE_THRESHOLD_MB = 5;
 
-          if (skipVisualEnrichment) {
-            console.log(`[Visual Enrichment] ⚠️ SKIPPED - File size ${fileSizeMB.toFixed(2)}MB exceeds ${FILE_SIZE_THRESHOLD_MB}MB threshold (memory safeguard)`);
-            traceReport.visual_enrichment.elements_found = 0;
-            traceReport.context_analysis.skipped_reason = `File size ${fileSizeMB.toFixed(2)}MB exceeds ${FILE_SIZE_THRESHOLD_MB}MB - Visual Enrichment skipped for memory safety`;
-          } else if (anthropicKey && jsonResult.rawJson?.pages) {
+          if (anthropicKey && jsonResult.rawJson?.pages) {
             console.log('[Visual Enrichment] Scanning for visual elements...');
             
             const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
@@ -256,6 +249,14 @@ serve(async (req) => {
                   try {
                     // 1. Download image from LlamaParse
                     let imageBuffer = await downloadJobImage(jsonResult.jobId, image.name, llamaCloudKey);
+                    
+                    // 🛡️ Check individual image size
+                    const imageSizeMB = imageBuffer.length / (1024 * 1024);
+                    if (imageSizeMB > IMAGE_SIZE_THRESHOLD_MB) {
+                      console.log(`[Visual Enrichment] ⚠️ SKIPPED ${image.name} - Image size ${imageSizeMB.toFixed(2)}MB exceeds ${IMAGE_SIZE_THRESHOLD_MB}MB threshold`);
+                      imageBuffer = null as any;
+                      continue;
+                    }
                     
                     // 2. Describe with context-awareness (Director-informed!)
                     const description = await describeVisualElementContextAware(
@@ -318,10 +319,10 @@ serve(async (req) => {
           let issuesDetected: any[] = [];
           superDocumentToChunk = superDocument; // Initialize before OCR processing
 
-           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction for large files OR if Visual Enrichment already processed
-           const skipOCRProcessing = skipVisualEnrichment || visualDescriptions.size > 0;
+           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction if Visual Enrichment already processed images
+           const skipOCRProcessing = visualDescriptions.size > 0;
            if (skipOCRProcessing) {
-             console.log(`[Vision Enhancement] OCR correction skipped (${skipVisualEnrichment ? 'file size safeguard' : 'Visual Enrichment already processed'})`);
+             console.log(`[Vision Enhancement] OCR correction skipped - Visual Enrichment already processed ${visualDescriptions.size} elements`);
              traceReport.ocr_corrections.issues_detected = 0;
              traceReport.ocr_corrections.corrections_applied = 0;
            } else {
