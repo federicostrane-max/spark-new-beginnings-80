@@ -65,32 +65,32 @@ const CODE_QA_QUESTIONS = [
 // TradingView Pro dataset for Trading Suite (hardcoded)
 const TRADING_BENCHMARK_DATA = [
   {
-    file_name: "tv_btc_setup.png",
-    image_url: "https://s3.tradingview.com/x/Xp7V6X3V_mid.png", 
+    file_name: "tv_moving_averages.png",
+    image_url: "https://upload.wikimedia.org/wikipedia/commons/0/0f/Analisi_tecnica_media_mobile_semplice.png", 
     suite_category: "trading",
     question: "Analizza la configurazione delle medie mobili (Moving Averages) sul grafico. Qual è la relazione tra la media veloce e quella lenta?",
     ground_truth: "Il grafico mostra un trend definito dalle medie mobili. Tipicamente, se la media veloce (es. EMA 8) è sopra la media lenta (es. SMA 50), il trend è rialzista. Cerca incroci (Golden Cross/Death Cross) se visibili."
   },
   {
     file_name: "tv_support_resistance.png",
-    image_url: "https://s3.tradingview.com/w/W4848484_mid.png", 
+    image_url: "https://upload.wikimedia.org/wikipedia/commons/8/8f/20150613-Resistance_Support.png", 
     suite_category: "trading",
     question: "Identifica i livelli chiave di supporto o resistenza orizzontali e il pattern grafico formato dalle candele.",
     ground_truth: "Il grafico mostra un pattern di inversione (come Testa e Spalle). Le linee orizzontali indicano la 'Neckline' o livelli di supporto statico che il prezzo ha testato."
   },
   {
-    file_name: "tv_indicators_obv.png",
-    image_url: "https://www.investopedia.com/thmb/O_1zX-1_1_1_1/1500x0/filters:no_upscale():max_bytes(150000):strip_icc()/OnBalanceVolume1-5c48d9c046e0fb00010996c0.png",
-    suite_category: "trading",
-    question: "Osserva il pannello inferiore (oscillatore/indicatore). Qual è il nome dell'indicatore e cosa suggerisce il suo andamento rispetto al prezzo?",
-    ground_truth: "Il pannello inferiore mostra l'OBV (On Balance Volume). L'analisi deve confermare se l'OBV sta salendo insieme al prezzo (conferma del trend) o se mostra una divergenza."
-  },
-  {
-    file_name: "tv_bollinger.png",
-    image_url: "https://a.c-dn.net/c/content/igcom/en_EN/ig-financial-markets/market-news-and-analysis/trading-strategies/2019/04/17/how-to-trade-the-head-and-shoulders-pattern/_jcr_content/content-par/textimage_1802936746/image.img.png/1555495227748.png",
+    file_name: "tv_head_shoulders.png",
+    image_url: "https://upload.wikimedia.org/wikipedia/commons/2/2c/H_and_s_top_new.jpg",
     suite_category: "trading",
     question: "Identifica il pattern grafico formato dalle candele di prezzo e descrivi la sua implicazione tipica.",
     ground_truth: "Il grafico mostra un pattern 'Head and Shoulders' (Testa e Spalle). È un pattern di inversione ribassista (bearish reversal) che tipicamente segna la fine di un trend rialzista."
+  },
+  {
+    file_name: "tv_rsi_indicator.png",
+    image_url: "https://upload.wikimedia.org/wikipedia/commons/c/ce/Analisi_tecnica_rsi.png",
+    suite_category: "trading",
+    question: "Osserva il pannello inferiore (oscillatore/indicatore). Qual è il nome dell'indicatore e cosa suggerisce il suo andamento rispetto al prezzo?",
+    ground_truth: "Il pannello inferiore mostra l'RSI (Relative Strength Index). L'analisi deve confermare se l'RSI sta salendo insieme al prezzo (conferma del trend) o se mostra una divergenza."
   }
 ];
 
