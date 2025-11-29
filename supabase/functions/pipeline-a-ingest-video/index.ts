@@ -54,13 +54,21 @@ Analizza questo video e genera un documento Markdown strutturato che contenga:
 Inizia l'analisi:
 `;
 
-// Director Prompt per analisi preliminare del dominio
+// Director Prompt per analisi preliminare del dominio (AGGIORNATO - Domain-Aware)
 const DIRECTOR_PROMPT = `
 Sei un analista esperto che prepara istruzioni per un'altra IA.
 
 COMPITO: Analizza rapidamente questo video per capire:
 
-1. DOMINIO: L'argomento preciso (trading, programmazione, cucina, fitness, etc.)
+1. DOMINIO: Classifica il video in UNA delle seguenti categorie:
+   - **trading**: Grafici finanziari, candlestick, indicatori tecnici (SMA, EMA, RSI, MACD)
+   - **architecture**: Video immobiliari, home tour, cantieri, planimetrie, rendering 3D
+   - **medical**: Tutorial chirurgici, anatomia, valori diagnostici, procedure cliniche
+   - **legal**: Deposizioni video, analisi contratti, documenti legali, firme
+   - **finance**: Report finanziari animati, bilanci, presentazioni earnings, dati aziendali
+   - **coding**: Programmazione, tutorial IDE, debugging, spiegazioni algoritmi
+   - **diy**: Tutorial fai-da-te, ricette, fitness, hobby
+   - **general**: Contenuto generico non specializzato
 
 2. ELEMENTI VISIVI CRITICI: Quali dettagli visivi sono essenziali per la comprensione?
    - Se ci sono grafici: quali metriche/indicatori mostrano?
@@ -69,32 +77,35 @@ COMPITO: Analizza rapidamente questo video per capire:
    - Se ci sono dimostrazioni fisiche: quali movimenti/posture sono importanti?
 
 3. CALIBRAZIONE VERBOSITÀ:
-   - Se identifichi un video TECNICO (es. trading, coding, analisi dati): 
+   - Se identifichi un video TECNICO (es. trading, coding, analisi dati, medical, legal): 
      sii ESTREMAMENTE pedante sui dettagli (valori numerici esatti, sintassi precisa, timestamp di ogni variazione)
    - Se identifichi un video DISCORSIVO/VLOG (es. interviste, presentazioni, tutorial generici):
      focalizzati sui concetti chiave e salta i dettagli minori
 
 OUTPUT RICHIESTO:
-Genera un System Prompt ottimizzato (max 500 parole) che istruisca un'altra IA 
+Inizia SEMPRE la risposta con:
+DETECTED_DOMAIN: [nome_dominio]
+
+Poi genera un System Prompt ottimizzato (max 500 parole) che istruisca un'altra IA 
 a estrarre i dettagli specifici di QUESTO video. Il prompt deve:
-- Specificare il ruolo esperto appropriato (es. "Agisci come trader professionista...")
+- Specificare il ruolo esperto appropriato (es. "Agisci come trader professionista...", "Agisci come architetto...")
 - Elencare esattamente quali dati numerici/visivi estrarre
 - Indicare come formattare tabelle/grafici specifici del dominio
 - Includere terminologia tecnica del settore
 - Specificare il livello di dettaglio appropriato (pedante vs concettuale)
 
-Rispondi SOLO con il System Prompt, senza preamboli o spiegazioni.
+Rispondi con DETECTED_DOMAIN seguito dal System Prompt personalizzato.
 `;
 
-// Funzione che INIETTA direttamente istruzioni specifiche nel prompt dell'Analyst
-// Questa funzione modifica il prompt DOPO che il Director l'ha generato,
-// ma PRIMA che l'Analyst lo riceva per l'analisi del video
-function enhanceAnalystPrompt(basePrompt: string): string {
-  const tradingEnhancement = `
+// Domain-specific enhancements per video (ispirato a visionEnhancer.ts)
+const VIDEO_DOMAIN_ENHANCEMENTS: Record<string, string> = {
+  'trading': `
 
 === ISTRUZIONI CRITICHE PER GRAFICI DI TRADING/FINANZIARI ===
 
-**SE IL VIDEO CONTIENE GRAFICI DI PREZZI CON INDICATORI TECNICI (SMA, EMA, Bande di Bollinger, etc.):**
+**Usa lo stesso rigore della suite TradingView Pro.**
+
+**SE IL VIDEO CONTIENE GRAFICI DI PREZZI CON INDICATORI TECNICI (SMA, EMA, Bande di Bollinger, RSI, MACD):**
 
 DEVI ESTRARRE **OGNI SINGOLO PUNTO** in cui il prezzo tocca o incrocia un indicatore tecnico.
 
@@ -104,34 +115,169 @@ Per OGNI touch point, specifica:
 1. **Timestamp esatto**: [MM:SS]
 2. **Prezzo esatto** al momento del tocco (es. €1.2345, $50.75, etc.)
 3. **Indicatore coinvolto** (es. "SMA 20", "EMA 50", "Banda di Bollinger superiore")
-4. **Direzione del tocco**:
-   - "Price touching from above" (prezzo che scende e tocca l'indicatore dall'alto)
-   - "Price touching from below" (prezzo che sale e tocca l'indicatore dal basso)
-5. **Tipo di evento**:
-   - "Bounce" (rimbalzo sull'indicatore)
-   - "Breakout" (rottura dell'indicatore)
-   - "Cross" (attraversamento)
+4. **Direzione del tocco**: "from above" / "from below"
+5. **Tipo di evento**: "Bounce" / "Breakout" / "Cross"
 
-**FORMATO RICHIESTO per sezioni touch points:**
+**FORMATO RICHIESTO:**
 ## [MM:SS] Touch Point Analysis
 - [MM:SS] Price €X.XXXX touching [INDICATORE] from [above/below] → [Bounce/Breakout/Cross]
 
-**ESEMPIO:**
-## [03:45] SMA 50 Touch Points
-- [03:45] Price €1.0823 touching SMA 50 from below → Bounce
-- [07:12] Price €1.0891 touching EMA 20 from above → Breakout
-- [12:30] Price €1.0765 touching Bollinger Band (lower) from above → Bounce
+**Descrivi anche pattern di prezzo visibili** (Head & Shoulders, Double Top, Support/Resistance levels).
 
-**IMPERATIVO:** 
-- Non saltare NESSUN touch point visibile nel grafico
-- Usa heading ## o ### per ogni sezione di analisi
-- NON usare mai testo in grassetto per titoli di sezione
-- Anche tocchi che sembrano "minori" devono essere documentati con precisione assoluta
+=== FINE ISTRUZIONI TRADING ===
+`,
 
-=== FINE ISTRUZIONI CRITICHE ===
-`;
+  'architecture': `
 
-  return basePrompt + tradingEnhancement;
+=== ISTRUZIONI CRITICHE PER VIDEO IMMOBILIARI/ARCHITETTONICI ===
+
+**Descrivi il video come un Architetto o Agente Immobiliare esperto.**
+
+STRUTTURA OBBLIGATORIA:
+1. **Elenco Stanze Sequenziale**: Per ogni stanza mostrata, crea una sezione:
+   ## [MM:SS] Nome Stanza (es. Salone, Cucina, Bagno Principale)
+   - Dimensioni stimate (se visibili/menzionate)
+   - Materiali: pavimenti (parquet, piastrelle, marmo), infissi (legno, PVC, alluminio)
+   - Luminosità: naturale/artificiale, esposizione (Nord/Sud/Est/Ovest se deducibile)
+   - Condizioni: stato di manutenzione, eventuali lavori necessari
+   - Layout: disposizione mobili, aperture, collegamenti con altre stanze
+
+2. **Planimetrie/Rendering**: Se mostrate nel video:
+   - Trascrivi tutte le misure visibili
+   - Nota la disposizione delle stanze
+   - Identifica metratura totale se indicata
+
+3. **Esterni**: Giardino, terrazzo, garage, posto auto
+
+OUTPUT: Markdown strutturato per ogni ambiente, come un capitolato tecnico.
+
+=== FINE ISTRUZIONI ARCHITECTURE ===
+`,
+
+  'medical': `
+
+=== ISTRUZIONI CRITICHE PER VIDEO MEDICI/CLINICI ===
+
+**Descrivi il video con rigore clinico da professionista sanitario.**
+
+ESTRAI CON PRECISIONE:
+1. **Procedure**: Nome della procedura, fasi sequenziali, strumentario utilizzato
+2. **Anatomia**: Strutture anatomiche mostrate, con terminologia medica corretta
+3. **Valori Diagnostici**: 
+   - TUTTI i numeri mostrati (pressione, frequenza, saturazione, etc.)
+   - Range di riferimento se indicati
+   - Anomalie rispetto ai valori normali
+4. **Farmaci/Dosaggi**: Se menzionati, trascrivi esattamente
+5. **Immagini Diagnostiche**: Descrivi TAC, risonanze, ecografie con precisione
+
+VERBOSITÀ: MASSIMA - ogni valore numerico è potenzialmente critico.
+
+=== FINE ISTRUZIONI MEDICAL ===
+`,
+
+  'legal': `
+
+=== ISTRUZIONI CRITICHE PER VIDEO LEGALI ===
+
+**Analizza come un Avvocato o Consulente Legale.**
+
+ESTRAI CON PRECISIONE:
+1. **Identificazione Parti**: Nomi completi, ruoli, rappresentanti legali
+2. **Riferimenti Documentali**: 
+   - Numeri di protocollo, date, riferimenti a leggi/articoli
+   - Citazioni testuali di clausole importanti
+3. **Timeline**: Cronologia esatta degli eventi discussi
+4. **Deposizioni**: Se video di deposizione:
+   - Domande e risposte chiave
+   - Timestamp di affermazioni rilevanti
+5. **Documenti Mostrati**: Trascrivi titoli, date, firme visibili
+
+FORMATO: Struttura adatta a uso forense con timestamp precisi.
+
+=== FINE ISTRUZIONI LEGAL ===
+`,
+
+  'finance': `
+
+=== ISTRUZIONI CRITICHE PER VIDEO FINANZIARI ===
+
+**Analizza come un Analista Finanziario senior.**
+
+ESTRAI CON PRECISIONE:
+1. **Metriche Chiave**:
+   - Revenue, EBITDA, Net Income, EPS
+   - Variazioni YoY, QoQ
+   - Margini (lordo, operativo, netto)
+2. **Tabelle Finanziarie**: Converti SEMPRE in Markdown:
+   | Metrica | Q1 2024 | Q1 2023 | Variazione |
+   |---------|---------|---------|------------|
+3. **Grafici**: Descrivi trend, punti di flesso, proiezioni
+4. **Guidance**: Previsioni future, target, range indicati
+5. **Rischi/Opportunità**: Note del management
+
+VERBOSITÀ: MASSIMA per numeri, MEDIA per commenti qualitativi.
+
+=== FINE ISTRUZIONI FINANCE ===
+`,
+
+  'coding': `
+
+=== ISTRUZIONI PER VIDEO DI PROGRAMMAZIONE ===
+- Identifica linguaggio/framework
+- Estrai TUTTO il codice mostrato in code blocks con sintassi corretta
+- Nota errori, warning, output console
+- Documenta shortcuts/comandi usati
+
+=== FINE ISTRUZIONI CODING ===
+`,
+
+  'diy': `
+
+=== ISTRUZIONI PER VIDEO TUTORIAL/DIY ===
+- Lista materiali/ingredienti con quantità
+- Passi sequenziali numerati
+- Note su tempi e temperature (se cucina)
+- Consigli e trucchi menzionati
+
+=== FINE ISTRUZIONI DIY ===
+`,
+};
+
+// Funzione che INIETTA direttamente istruzioni specifiche nel prompt dell'Analyst
+// AGGIORNATA per supportare TUTTI i domini rilevati dal Director
+function enhanceAnalystPrompt(basePrompt: string, detectedDomain?: string): string {
+  // Se il Director ha specificato un dominio, usalo
+  // Altrimenti, cerca di dedurlo dal prompt stesso
+  let domain = detectedDomain?.toLowerCase() || 'general';
+  
+  // Fallback: cerca keywords nel prompt se dominio non specificato
+  if (!detectedDomain) {
+    const promptLower = basePrompt.toLowerCase();
+    if (promptLower.includes('trading') || promptLower.includes('candlestick') || promptLower.includes('sma')) {
+      domain = 'trading';
+    } else if (promptLower.includes('immobile') || promptLower.includes('stanza') || promptLower.includes('planimetria')) {
+      domain = 'architecture';
+    } else if (promptLower.includes('medic') || promptLower.includes('chirurg') || promptLower.includes('anatomia')) {
+      domain = 'medical';
+    } else if (promptLower.includes('legal') || promptLower.includes('contratto') || promptLower.includes('deposizione')) {
+      domain = 'legal';
+    } else if (promptLower.includes('revenue') || promptLower.includes('ebitda') || promptLower.includes('bilancio')) {
+      domain = 'finance';
+    } else if (promptLower.includes('codice') || promptLower.includes('programming') || promptLower.includes('debug')) {
+      domain = 'coding';
+    }
+  }
+  
+  console.log(`[enhanceAnalystPrompt] Detected domain: ${domain}`);
+  
+  const enhancement = VIDEO_DOMAIN_ENHANCEMENTS[domain] || '';
+  
+  if (!enhancement) {
+    console.log(`[enhanceAnalystPrompt] No specific enhancement for domain: ${domain}`);
+    return basePrompt;
+  }
+  
+  return basePrompt + '\n\n' + enhancement;
 }
 
 serve(async (req) => {
@@ -248,6 +394,7 @@ serve(async (req) => {
     console.log('[Video Ingest] FASE 4a: Director - Analyzing domain...');
 
     let customPrompt: string | null = null;
+    let detectedDomain: string | undefined; // NUOVO: scope esterno per uso globale
 
     try {
       const directorResponse = await fetch(
@@ -273,7 +420,13 @@ serve(async (req) => {
       const directorData = await directorResponse.json();
       customPrompt = directorData.candidates?.[0]?.content?.parts?.[0]?.text;
 
+      // NUOVO: Estrai il dominio dal response del Director
       if (customPrompt) {
+        const domainMatch = customPrompt.match(/DETECTED_DOMAIN:\s*(\w+)/i);
+        if (domainMatch) {
+          detectedDomain = domainMatch[1].toLowerCase();
+          console.log(`[Video Ingest] Director detected domain: ${detectedDomain}`);
+        }
         console.log(`[Video Ingest] Director generated ${customPrompt.length} char custom prompt`);
         console.log(`[Video Ingest] Custom Prompt Preview: ${customPrompt.substring(0, 300)}...`);
       } else {
@@ -285,10 +438,14 @@ serve(async (req) => {
 
     // === ENHANCEMENT: Inietta istruzioni specifiche nel prompt ===
     // Questa fase modifica il prompt DOPO il Director ma PRIMA dell'Analyst
+    // AGGIORNATO: passa il dominio rilevato a enhanceAnalystPrompt
     const basePrompt = customPrompt || VIDEO_TO_MARKDOWN_PROMPT;
-    const enhancedPrompt = enhanceAnalystPrompt(basePrompt);
+    const enhancedPrompt = enhanceAnalystPrompt(basePrompt, detectedDomain);
     
     console.log(`[Video Ingest] Prompt enhanced: ${basePrompt.length} → ${enhancedPrompt.length} chars`);
+    if (detectedDomain) {
+      console.log(`[Video Ingest] Domain-specific enhancement applied for: ${detectedDomain}`);
+    }
 
     // === FASE 4b: THE ANALYST - Estrazione Dati ===
     console.log('[Video Ingest] FASE 4b: Analyst - Extracting with enhanced prompt...');
@@ -360,11 +517,13 @@ Inizia l'analisi dettagliata:`
         full_text: markdownContent,
         status: 'ingested',
         processing_metadata: {
-          processing_version: '2.0-director-analyst',
+          processing_version: '2.1-domain-aware',
+          detected_domain: detectedDomain || 'general', // NUOVO: tracciabilità dominio
           director_prompt_generated: !!customPrompt,
           director_prompt_length: customPrompt?.length || 0,
           director_prompt_preview: customPrompt?.substring(0, 500) || null,
           analyst_prompt_type: customPrompt ? 'dynamic' : 'static_fallback',
+          domain_enhancement_applied: !!VIDEO_DOMAIN_ENHANCEMENTS[detectedDomain || ''],
           model_used: 'gemini-2.0-flash',
           phases_completed: ['director', 'analyst'],
         }
