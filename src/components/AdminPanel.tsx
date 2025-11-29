@@ -7,6 +7,7 @@ import { Loader2, RefreshCw, Database, CheckCircle, XCircle, FileText, ExternalL
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ProcessingLogs } from "./ProcessingLogs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { OperationsDashboard } from "./OperationsDashboard";
 import { FilterPromptEditor } from "./FilterPromptEditor";
 import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
@@ -37,6 +38,19 @@ export const AdminPanel = () => {
   const [summary, setSummary] = useState<BatchSummary | null>(null);
   const [stuckCount, setStuckCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [activeTab, setActiveTab] = useState("metrics");
+
+  const tabs = [
+    { value: "metrics", label: "Metriche" },
+    { value: "tools", label: "Strumenti" },
+    { value: "logs", label: "Log Processing" },
+    { value: "operations", label: "Operazioni" },
+    { value: "filter-prompt", label: "Filter Prompt" },
+    { value: "alignment-prompt", label: "Alignment Prompt" },
+    { value: "airtop", label: "Airtop.ai" },
+    { value: "docvqa", label: "DocVQA Test" },
+    { value: "benchmark", label: "Benchmark" },
+  ];
 
   const fetchStuckCount = async () => {
     setLoadingCount(true);
@@ -112,17 +126,30 @@ export const AdminPanel = () => {
   };
 
   return (
-    <Tabs defaultValue="metrics" className="w-full max-w-4xl mx-auto mt-8">
-      <TabsList className="grid w-full grid-cols-9">
-        <TabsTrigger value="metrics">Metriche</TabsTrigger>
-        <TabsTrigger value="tools">Strumenti</TabsTrigger>
-        <TabsTrigger value="logs">Log Processing</TabsTrigger>
-        <TabsTrigger value="operations">Operazioni</TabsTrigger>
-        <TabsTrigger value="filter-prompt">Filter Prompt</TabsTrigger>
-        <TabsTrigger value="alignment-prompt">Alignment Prompt</TabsTrigger>
-        <TabsTrigger value="airtop">Airtop.ai</TabsTrigger>
-        <TabsTrigger value="docvqa">DocVQA Test</TabsTrigger>
-        <TabsTrigger value="benchmark">Benchmark</TabsTrigger>
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full max-w-4xl mx-auto mt-8">
+      {/* Mobile: Dropdown Select */}
+      <div className="md:hidden mb-4">
+        <Select value={activeTab} onValueChange={setActiveTab}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {tabs.map((tab) => (
+              <SelectItem key={tab.value} value={tab.value}>
+                {tab.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Desktop: Horizontal Tabs */}
+      <TabsList className="hidden md:grid w-full grid-cols-9">
+        {tabs.map((tab) => (
+          <TabsTrigger key={tab.value} value={tab.value}>
+            {tab.label}
+          </TabsTrigger>
+        ))}
       </TabsList>
 
       <TabsContent value="metrics">
