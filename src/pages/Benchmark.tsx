@@ -52,7 +52,8 @@ const SUITE_LABELS = {
   science: '🔬 Science (QASPER)',
   narrative: '📖 Narrative (Deep Understanding)',
   code: '💻 Code (GitHub)',
-  safety: '🛡️ Safety (Adversarial)'
+  safety: '🛡️ Safety (Adversarial)',
+  hybrid: '🔬 Hybrid PDF (Visual Test)'
 };
 
 export default function Benchmark() {
@@ -73,7 +74,8 @@ export default function Benchmark() {
     science: true,
     narrative: true,
     code: true,
-    safety: true 
+    safety: true,
+    hybrid: true 
   });
   const [sampleSize, setSampleSize] = useState(5);
   const [isRegenerating, setIsRegenerating] = useState(false);
