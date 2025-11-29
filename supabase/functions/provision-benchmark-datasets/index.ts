@@ -62,6 +62,38 @@ const CODE_QA_QUESTIONS = [
   }
 ];
 
+// TradingView Pro dataset for Trading Suite (hardcoded)
+const TRADING_BENCHMARK_DATA = [
+  {
+    file_name: "tv_btc_setup.png",
+    image_url: "https://s3.tradingview.com/x/Xp7V6X3V_mid.png", 
+    suite_category: "trading",
+    question: "Analizza la configurazione delle medie mobili (Moving Averages) sul grafico. Qual è la relazione tra la media veloce e quella lenta?",
+    ground_truth: "Il grafico mostra un trend definito dalle medie mobili. Tipicamente, se la media veloce (es. EMA 8) è sopra la media lenta (es. SMA 50), il trend è rialzista. Cerca incroci (Golden Cross/Death Cross) se visibili."
+  },
+  {
+    file_name: "tv_support_resistance.png",
+    image_url: "https://s3.tradingview.com/w/W4848484_mid.png", 
+    suite_category: "trading",
+    question: "Identifica i livelli chiave di supporto o resistenza orizzontali e il pattern grafico formato dalle candele.",
+    ground_truth: "Il grafico mostra un pattern di inversione (come Testa e Spalle). Le linee orizzontali indicano la 'Neckline' o livelli di supporto statico che il prezzo ha testato."
+  },
+  {
+    file_name: "tv_indicators_obv.png",
+    image_url: "https://www.investopedia.com/thmb/O_1zX-1_1_1_1/1500x0/filters:no_upscale():max_bytes(150000):strip_icc()/OnBalanceVolume1-5c48d9c046e0fb00010996c0.png",
+    suite_category: "trading",
+    question: "Osserva il pannello inferiore (oscillatore/indicatore). Qual è il nome dell'indicatore e cosa suggerisce il suo andamento rispetto al prezzo?",
+    ground_truth: "Il pannello inferiore mostra l'OBV (On Balance Volume). L'analisi deve confermare se l'OBV sta salendo insieme al prezzo (conferma del trend) o se mostra una divergenza."
+  },
+  {
+    file_name: "tv_bollinger.png",
+    image_url: "https://a.c-dn.net/c/content/igcom/en_EN/ig-financial-markets/market-news-and-analysis/trading-strategies/2019/04/17/how-to-trade-the-head-and-shoulders-pattern/_jcr_content/content-par/textimage_1802936746/image.img.png/1555495227748.png",
+    suite_category: "trading",
+    question: "Identifica il pattern grafico formato dalle candele di prezzo e descrivi la sua implicazione tipica.",
+    ground_truth: "Il grafico mostra un pattern 'Head and Shoulders' (Testa e Spalle). È un pattern di inversione ribassista (bearish reversal) che tipicamente segna la fine di un trend rialzista."
+  }
+];
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -93,7 +125,8 @@ serve(async (req) => {
       narrative: { success: 0, failed: 0, documents: [] as any[] },
       safety: { success: 0, failed: 0, documents: [] as any[] },
       code: { success: 0, failed: 0, documents: [] as any[] },
-      hybrid: { success: 0, failed: 0, documents: [] as any[] }
+      hybrid: { success: 0, failed: 0, documents: [] as any[] },
+      trading: { success: 0, failed: 0, documents: [] as any[] }
     };
 
     // ===== PHASE 1: General (DocVQA) - BATCH PROCESSING =====
@@ -940,11 +973,97 @@ serve(async (req) => {
       }
     }
 
+    // ===== PHASE 10: TradingView Pro Suite - BATCH PROCESSING =====
+    if (suites.trading) {
+      console.log('[Provision Benchmark] Processing TradingView Pro suite...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'trading', 'benchmark_trading');
+      console.log(`[Provision Benchmark] Cleaned up Trading: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        // Step 1: Download all trading chart images
+        const imagePromises = TRADING_BENCHMARK_DATA.map(async (entry, i) => {
+          console.log(`[Provision Benchmark] Downloading trading image ${i + 1}/${TRADING_BENCHMARK_DATA.length}: ${entry.file_name}`);
+          
+          const imgResponse = await fetch(entry.image_url);
+          if (!imgResponse.ok) throw new Error(`Failed to fetch ${entry.image_url}: ${imgResponse.statusText}`);
+          
+          const imgBuffer = await imgResponse.arrayBuffer();
+          
+          return {
+            fileName: entry.file_name,
+            imgBuffer,
+            question: entry.question,
+            groundTruth: entry.ground_truth,
+            metadata: { source_url: entry.image_url, suite: 'trading' }
+          };
+        });
+        
+        const images = await Promise.all(imagePromises);
+        console.log(`[Provision Benchmark] Downloaded ${images.length} TradingView images`);
+        
+        // Step 2: Ingest all images as source_type='image'
+        const ingestPromises = images.map(img =>
+          supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
+            body: {
+              fileName: img.fileName,
+              fileData: arrayBufferToBase64(img.imgBuffer),
+              fileSize: img.imgBuffer.byteLength,
+              folder: 'benchmark_trading',
+              source_type: 'image'  // CRITICAL: triggers Claude Vision analysis
+            }
+          })
+        );
+        
+        const ingestResults = await Promise.all(ingestPromises);
+        console.log(`[Provision Benchmark] Ingested ${ingestResults.length} trading documents`);
+        
+        // Step 3: Insert Q&A pairs
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          const result = ingestResults[i];
+          
+          if (result.error || !result.data?.documentId) {
+            console.error(`[Provision Benchmark] Trading ${i + 1} ingest failed:`, result.error);
+            results.trading.failed++;
+            continue;
+          }
+          
+          const { error: insertError } = await supabase
+            .from('benchmark_datasets')
+            .insert({
+              file_name: img.fileName,
+              storage_path: `benchmark_trading/${img.fileName}`,
+              suite_category: 'trading',
+              question: img.question,
+              ground_truth: img.groundTruth,
+              source_repo: 'tradingview.com',
+              source_metadata: img.metadata,
+              document_id: result.data.documentId,
+              provisioned_at: new Date().toISOString()
+            });
+          
+          if (insertError) {
+            console.error(`[Provision Benchmark] Trading ${i + 1} Q&A insert failed:`, insertError);
+            results.trading.failed++;
+          } else {
+            results.trading.success++;
+            results.trading.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
+          }
+        }
+        
+        console.log(`[Provision Benchmark] TradingView Pro suite complete: ${results.trading.success} success, ${results.trading.failed} failed`);
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] TradingView Pro suite EXCEPTION:', suiteError);
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         results,
-        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety + ${results.hybrid.success} hybrid tests. Documents will be ready in ~30-60s.`
+        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety + ${results.hybrid.success} hybrid + ${results.trading.success} trading tests. Documents will be ready in ~30-60s.`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -1233,7 +1352,7 @@ function convertNarrativeQAToMarkdown(entry: any, index: number): string {
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code' | 'hybrid',
+  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code' | 'hybrid' | 'trading',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);

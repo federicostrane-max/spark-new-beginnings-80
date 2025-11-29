@@ -332,6 +332,43 @@ FOCUS SPECIFICO PER TRADING/FINANZA:
 - Nota volumi se visibili
 VERBOSITÀ: MASSIMA - ogni numero conta`,
 
+    'trading_view_pro': `
+ANALISI PROFESSIONALE SCREENSHOT TRADINGVIEW:
+
+1. LEGENDA DATI (Top-Left Corner):
+   - Trascrivi ESATTAMENTE tutti i valori nei box informativi
+   - Formato: "EMA 8: [valore]", "SMA 50: [valore]", "Vol: [valore]"
+   - Questi sono i dati PIÙ PRECISI disponibili
+
+2. STRUTTURA PREZZO E CANDELE:
+   - Tipo candele: Verdi (Bullish) o Rosse (Bearish)
+   - Ultima candela: descrivi corpo, wick superiore/inferiore
+   - Pattern riconoscibili: Doji, Hammer, Engulfing, Morning Star, etc.
+
+3. INDICATORI OVERLAY (Sul grafico principale):
+   - Identifica OGNI linea colorata (Medie Mobili, Bollinger Bands)
+   - Posizione rispetto al prezzo: sopra/sotto/attraversamento
+   - Interazioni: touch points, crossover, supporto dinamico
+
+4. DISEGNI UTENTE E LIVELLI:
+   - Linee orizzontali: livelli di Supporto/Resistenza
+   - Linee oblique: trendlines, canali
+   - LEGGI I PREZZI dall'asse Y destro con precisione decimale
+
+5. SOTTO-GRAFICI (Pannelli Inferiori):
+   - Nome indicatore (RSI, MACD, OBV, Volume)
+   - Trend della linea/istogramma (crescente/decrescente)
+   - Livelli chiave (RSI 30/70, zero line MACD)
+   - Divergenze rispetto al prezzo
+
+6. TERMINOLOGIA OBBLIGATORIA:
+   - Usa: Breakout, Divergenza, Consolidamento, Pullback
+   - Specifica: Golden Cross, Death Cross se visibili
+   - Pattern: Head and Shoulders, Double Top/Bottom, Triangle
+
+OUTPUT: Markdown strutturato con TUTTI i valori numerici estratti.
+PRECISIONE: Ogni numero deve essere trascritto esattamente come appare.`,
+
     'finance': `
 FOCUS SPECIFICO PER FINANZA:
 - Estrai TUTTI i valori numerici con unità di misura
