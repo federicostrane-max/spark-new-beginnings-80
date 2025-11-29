@@ -298,6 +298,159 @@ function detectImageType(buffer: Uint8Array): { format: string; media_type: stri
  * @param anthropicKey Anthropic API key
  * @param fileName Document filename for logging
  */
+// ============= FUNCTION 5: CONTEXT-AWARE VISUAL ENRICHMENT =============
+
+/**
+ * Genera prompt contestualizzato per Claude Vision basato sul dominio del documento
+ * Replica il pattern enhanceAnalystPrompt usato per i video
+ */
+export function buildContextAwareVisualPrompt(
+  context: any, // DocumentContext from contextAnalyzer
+  elementType: string  // 'layout_table' | 'layout_picture' | 'layout_keyValueRegion'
+): string {
+  
+  // Base prompt per tipo elemento
+  const basePrompts: Record<string, string> = {
+    'layout_table': 'Analizza questa TABELLA.',
+    'layout_picture': 'Analizza questo GRAFICO/FIGURA.',
+    'layout_keyValueRegion': 'Analizza questa regione chiave-valore.',
+  };
+  
+  // Domain-specific enhancements (come enhanceAnalystPrompt per video)
+  const domainEnhancements: Record<string, string> = {
+    'trading': `
+FOCUS SPECIFICO PER TRADING/FINANZA:
+- Identifica OGNI candlestick pattern visibile (doji, hammer, engulfing, etc.)
+- Estrai TUTTI i livelli di prezzo visibili con precisione decimale
+- Documenta OGNI interazione prezzo-indicatore:
+  * Timestamp/posizione nel grafico
+  * Prezzo esatto al punto di contatto
+  * Tipo di indicatore (SMA, EMA, Bollinger, etc.)
+  * Direzione (touch from above/below)
+  * Risultato (bounce, breakout, cross)
+- Identifica supporti e resistenze con livelli esatti
+- Nota volumi se visibili
+VERBOSITÀ: MASSIMA - ogni numero conta`,
+
+    'finance': `
+FOCUS SPECIFICO PER FINANZA:
+- Estrai TUTTI i valori numerici con unità di misura
+- Identifica trend (crescente, decrescente, stabile)
+- Nota percentuali, variazioni, confronti anno su anno
+- Documenta legenda e assi con precisione
+VERBOSITÀ: ALTA - i numeri sono critici`,
+
+    'architecture': `
+FOCUS SPECIFICO PER ARCHITETTURA:
+- Identifica ogni stanza/ambiente con dimensioni
+- Nota orientamento (Nord/Sud/Est/Ovest) se indicato
+- Estrai quote e misure in metri/piedi
+- Identifica materiali se specificati
+- Nota scale, proporzioni, rapporti
+VERBOSITÀ: ALTA per misure, MEDIA per descrizioni`,
+
+    'medical': `
+FOCUS SPECIFICO PER MEDICINA:
+- Estrai TUTTI i valori diagnostici con unità
+- Nota range di riferimento se presenti
+- Identifica anomalie rispetto ai range normali
+- Documenta terminologia medica esatta
+VERBOSITÀ: MASSIMA - precisione critica`,
+
+    'legal': `
+FOCUS SPECIFICO PER DOCUMENTI LEGALI:
+- Estrai date, numeri di protocollo, riferimenti
+- Identifica parti coinvolte
+- Nota clausole chiave
+- Documenta firme e timbri se visibili
+VERBOSITÀ: ALTA per riferimenti, MEDIA per contenuto`,
+  };
+  
+  const basePrompt = basePrompts[elementType] || basePrompts['layout_picture'];
+  const domainEnhancement = domainEnhancements[context.domain] || '';
+  
+  // Costruisci prompt finale
+  return `
+CONTESTO DOCUMENTO: ${context.domain?.toUpperCase() || 'GENERAL'}
+Terminologia attesa: ${context.terminology?.join(', ') || 'generale'}
+
+${basePrompt}
+
+${domainEnhancement}
+
+ELEMENTI DA CERCARE SPECIFICATAMENTE:
+${context.focusElements?.map((e: string) => `- ${e}`).join('\n') || '- Contenuto generale'}
+
+OUTPUT RICHIESTO:
+- Markdown strutturato
+- Tabelle in formato |...|...|
+- Ogni valore numerico con precisione massima
+- Se un elemento richiesto NON è presente, dichiaralo esplicitamente
+`;
+}
+
+/**
+ * Descrivi elemento visivo con context-awareness
+ * Usa il contesto del documento per generare prompt mirati
+ */
+export async function describeVisualElementContextAware(
+  imageBuffer: Uint8Array,
+  elementType: string,
+  context: any, // DocumentContext
+  anthropicKey: string
+): Promise<string> {
+  
+  const prompt = buildContextAwareVisualPrompt(context, elementType);
+  
+  console.log(`[Visual Enrichment] Describing ${elementType} with ${context.domain} context`);
+  
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: [
+            { 
+              type: 'image', 
+              source: { 
+                type: 'base64', 
+                media_type: 'image/png', 
+                data: btoa(String.fromCharCode(...imageBuffer))
+              } 
+            },
+            { type: 'text', text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Claude API failed: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    const description = result.content?.[0]?.text || '[Descrizione non disponibile]';
+    
+    console.log(`[Visual Enrichment] Description generated: ${description.length} chars`);
+    return description;
+
+  } catch (error) {
+    console.error('[Visual Enrichment] Error in describeVisualElementContextAware:', error);
+    throw error;
+  }
+}
+
+// ============= FUNCTION 4: CLAUDE VISION FOR IMAGE-ONLY DOCUMENTS =============
+
 export async function describeImageWithClaude(
   fileBuffer: Uint8Array,
   anthropicKey: string,

@@ -335,3 +335,38 @@ export async function extractMarkdownFromPDF(
     status: 'SUCCESS',
   };
 }
+
+/**
+ * Download extracted image from LlamaParse job
+ * Used for Context-Aware Visual Enrichment
+ * @param jobId - LlamaParse job ID
+ * @param imageName - Image name from pages[].images[].name
+ * @param apiKey - LlamaParse API key
+ * @returns Image as Uint8Array
+ */
+export async function downloadJobImage(
+  jobId: string,
+  imageName: string,
+  apiKey: string
+): Promise<Uint8Array> {
+  console.log(`[LlamaParse] Downloading image: ${imageName} from job ${jobId}`);
+  
+  return retryWithBackoff(async () => {
+    const response = await fetch(
+      `${LLAMAPARSE_API_BASE}/job/${jobId}/result/image/${imageName}`,
+      {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to download image ${imageName}: ${response.status} - ${errorText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    console.log(`[LlamaParse] Downloaded image: ${imageName} (${arrayBuffer.byteLength} bytes)`);
+    
+    return new Uint8Array(arrayBuffer);
+  }, 3, 1000, 'LlamaParse downloadImage');
+}
