@@ -12,11 +12,11 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, fileData, fileSize, folder, source_type } = await req.json();
+    const { fileName, fileData, fileSize, folder, source_type, storageUrl } = await req.json();
 
-    if (!fileName || !fileData) {
+    if (!fileName || (!fileData && !storageUrl)) {
       return new Response(
-        JSON.stringify({ error: 'fileName and fileData are required' }),
+        JSON.stringify({ error: 'fileName and either fileData or storageUrl are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -27,8 +27,21 @@ serve(async (req) => {
 
     console.log(`[Pipeline A-Hybrid Ingest] Starting PDF ingestion: ${fileName}`);
 
-    // Decode base64 to binary
-    const fileBuffer = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
+    // Get file buffer: either from base64 or from storage URL
+    let fileBuffer: Uint8Array;
+    if (storageUrl) {
+      console.log(`[Pipeline A-Hybrid Ingest] Fetching file from storage URL: ${storageUrl}`);
+      const response = await fetch(storageUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch from storage: ${response.statusText}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      fileBuffer = new Uint8Array(arrayBuffer);
+      console.log(`[Pipeline A-Hybrid Ingest] Fetched ${fileBuffer.byteLength} bytes from storage`);
+    } else {
+      // Decode base64 to binary (legacy path)
+      fileBuffer = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
+    }
 
     // Detect content type based on file extension or source_type
     const isPNG = fileName.toLowerCase().endsWith('.png') || source_type === 'image';

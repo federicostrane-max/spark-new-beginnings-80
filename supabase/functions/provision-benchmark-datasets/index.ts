@@ -852,19 +852,42 @@ serve(async (req) => {
         const pdfs = await Promise.all(pdfPromises);
         console.log(`[Provision Benchmark] Downloaded ${pdfs.length} ArXiv PDFs`);
         
-        // Step 2: Ingest PDFs SEQUENTIALLY to avoid WORKER_LIMIT (each PDF triggers full LlamaParse + embeddings chain)
+        // Step 2: Upload PDFs to storage FIRST, then ingest via storage URL (avoids memory limits)
         const ingestResults = [];
         for (let i = 0; i < pdfs.length; i++) {
           const pdf = pdfs[i];
-          console.log(`[Provision Benchmark] Ingesting Hybrid PDF ${i + 1}/${pdfs.length}: ${pdf.fileName}`);
+          console.log(`[Provision Benchmark] Uploading Hybrid PDF ${i + 1}/${pdfs.length} to storage: ${pdf.fileName}`);
           
+          // Upload directly to storage
+          const storagePath = `benchmark_hybrid/${crypto.randomUUID()}/${pdf.fileName}`;
+          const { error: uploadError } = await supabase.storage
+            .from('pipeline-a-uploads')
+            .upload(storagePath, pdf.pdfBuffer, {
+              contentType: 'application/pdf',
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error(`[Provision Benchmark] Storage upload failed for ${pdf.fileName}:`, uploadError);
+            results.hybrid.failed++;
+            continue;
+          }
+          
+          // Get public URL
+          const { data: urlData } = supabase.storage
+            .from('pipeline-a-uploads')
+            .getPublicUrl(storagePath);
+          
+          console.log(`[Provision Benchmark] Ingesting via storage URL: ${urlData.publicUrl}`);
+          
+          // Ingest via storage URL (no base64 in memory)
           const result = await supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
             body: {
               fileName: pdf.fileName,
-              fileData: arrayBufferToBase64(pdf.pdfBuffer),
+              storageUrl: urlData.publicUrl,
               fileSize: pdf.pdfBuffer.byteLength,
               folder: 'benchmark_hybrid',
-              source_type: 'pdf'  // CRITICAL: Real PDF, not image
+              source_type: 'pdf'
             }
           });
           
