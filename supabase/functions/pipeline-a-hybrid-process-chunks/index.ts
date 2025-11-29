@@ -316,7 +316,7 @@ serve(async (req) => {
           let visionEnhancementUsed = false;
           let visionEngine: 'claude' | 'google' | null = null;
           let issuesDetected: any[] = [];
-          superDocumentToChunk = superDocument; // Preserva originale
+          superDocumentToChunk = superDocument; // Initialize before OCR processing
 
            // 🛡️ MEMORY SAFEGUARD: Skip OCR correction for large files too
            if (skipVisualEnrichment) {
