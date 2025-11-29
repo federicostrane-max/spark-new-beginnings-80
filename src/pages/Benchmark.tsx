@@ -800,51 +800,53 @@ export default function Benchmark() {
       {/* Results Table - Responsive */}
       <Card>
         <CardHeader>
-          <CardTitle>Risultati Dettagliati</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-xl md:text-2xl">Risultati Dettagliati</CardTitle>
+          <CardDescription className="text-xs md:text-sm">
             {stats.missing > 0 && `${stats.missing} documenti non presenti • `}
             {stats.notReady > 0 && `${stats.notReady} documenti in elaborazione • `}
             {stats.errors > 0 && `${stats.errors} errori • `}
             {results.filter(r => r.status === 'completed').length} test completati
           </CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="min-w-[120px]">PDF File</TableHead>
-                <TableHead className="min-w-[200px]">Domanda</TableHead>
-                <TableHead className="min-w-[100px]">Expected</TableHead>
-                <TableHead className="min-w-[200px]">Risposta Agente</TableHead>
-                <TableHead className="min-w-[100px]">Esito</TableHead>
-                <TableHead className="min-w-[80px]">Tempo</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredResults.map((result, idx) => (
-                <TableRow key={idx}>
-                  <TableCell className="font-mono text-xs">{result.pdf_file}</TableCell>
-                  <TableCell className="max-w-[200px] truncate text-sm" title={result.question}>
-                    {result.question}
-                  </TableCell>
-                  <TableCell className="font-medium text-xs">{result.groundTruth}</TableCell>
-                  <TableCell className="max-w-[300px] truncate text-sm" title={result.agentResponse || result.error}>
-                    {result.agentResponse ? (
-                      <span>{result.agentResponse}</span>
-                    ) : result.error ? (
-                      <span className="text-red-600">{result.error}</span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>{getStatusBadge(result)}</TableCell>
-                  <TableCell className="text-sm">
-                    {result.responseTimeMs ? `${(result.responseTimeMs / 1000).toFixed(1)}s` : '-'}
-                  </TableCell>
+        <CardContent className="overflow-x-auto -mx-2 md:mx-0">
+          <div className="inline-block min-w-full align-middle">
+            <Table className="min-w-[800px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[100px] md:min-w-[120px] text-xs md:text-sm">PDF File</TableHead>
+                  <TableHead className="min-w-[150px] md:min-w-[200px] text-xs md:text-sm">Domanda</TableHead>
+                  <TableHead className="min-w-[80px] md:min-w-[100px] text-xs md:text-sm">Expected</TableHead>
+                  <TableHead className="min-w-[150px] md:min-w-[200px] text-xs md:text-sm">Risposta Agente</TableHead>
+                  <TableHead className="min-w-[80px] md:min-w-[100px] text-xs md:text-sm">Esito</TableHead>
+                  <TableHead className="min-w-[60px] md:min-w-[80px] text-xs md:text-sm">Tempo</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredResults.map((result, idx) => (
+                  <TableRow key={idx}>
+                    <TableCell className="font-mono text-[10px] md:text-xs whitespace-nowrap">{result.pdf_file}</TableCell>
+                    <TableCell className="max-w-[150px] md:max-w-[200px] truncate text-xs md:text-sm" title={result.question}>
+                      {result.question}
+                    </TableCell>
+                    <TableCell className="font-medium text-[10px] md:text-xs">{result.groundTruth}</TableCell>
+                    <TableCell className="max-w-[150px] md:max-w-[300px] truncate text-xs md:text-sm" title={result.agentResponse || result.error}>
+                      {result.agentResponse ? (
+                        <span>{result.agentResponse}</span>
+                      ) : result.error ? (
+                        <span className="text-red-600">{result.error}</span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{getStatusBadge(result)}</TableCell>
+                    <TableCell className="text-xs md:text-sm whitespace-nowrap">
+                      {result.responseTimeMs ? `${(result.responseTimeMs / 1000).toFixed(1)}s` : '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
