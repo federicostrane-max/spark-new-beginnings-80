@@ -228,8 +228,8 @@ serve(async (req) => {
           const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
           const visualDescriptions = new Map<string, { type: string; description: string; page: number }>();
 
-          // 🛡️ MEMORY SAFEGUARD: Skip Visual Enrichment for large files (>15MB)
-          const FILE_SIZE_THRESHOLD_MB = 15;
+          // 🛡️ MEMORY SAFEGUARD: Skip Visual Enrichment for large files (>10MB)
+          const FILE_SIZE_THRESHOLD_MB = 10;
           const fileSizeBytes = doc.file_size_bytes || pdfBuffer.length;
           const fileSizeMB = fileSizeBytes / (1024 * 1024);
           const skipVisualEnrichment = fileSizeMB > FILE_SIZE_THRESHOLD_MB;
