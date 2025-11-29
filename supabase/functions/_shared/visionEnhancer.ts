@@ -481,7 +481,10 @@ export async function describeVisualElementContextAware(
     return description;
 
   } catch (error) {
-    console.error('[Visual Enrichment] Error in describeVisualElementContextAware:', error);
+    // LOGGING MIGLIORATO: specifica tipo errore e dettagli
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Visual Enrichment] FAILED for element type ${elementType}:`, errorMsg);
+    console.error(`[Visual Enrichment] Domain: ${context.domain}, Image size: ${imageBuffer.length} bytes`);
     throw error;
   }
 }
