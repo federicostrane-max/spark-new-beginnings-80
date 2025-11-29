@@ -143,7 +143,7 @@ serve(async (req) => {
           
           console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from image description`);
         } else {
-          // PDF PATH: Existing LlamaParse + Vision Enhancement flow
+          // PDF PATH: LlamaParse + Context-Aware Visual Enrichment
           const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
 
           // Extract JSON with layout from LlamaParse
@@ -159,7 +159,89 @@ serve(async (req) => {
           console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
           console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
 
-          // ===== VISION ENHANCEMENT LAYER =====
+          // ===== FASE 1: CONTEXT ANALYZER (Director for PDF) =====
+          console.log('[Context Analyzer] Starting document context analysis...');
+          const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+          
+          let documentContext: any = {
+            domain: 'general',
+            focusElements: [],
+            terminology: [],
+            verbosity: 'conceptual'
+          };
+
+          if (anthropicKey && superDocument.length > 100) {
+            try {
+              // Extract text sample for context analysis (first 2000 chars)
+              const textSample = superDocument.substring(0, 2000);
+              
+              const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
+              documentContext = await analyzeDocumentContext(textSample, anthropicKey);
+              
+              console.log(`[Context Analyzer] ✓ Domain: ${documentContext.domain}`);
+              console.log(`[Context Analyzer] ✓ Focus: ${documentContext.focusElements?.join(', ') || 'general'}`);
+              console.log(`[Context Analyzer] ✓ Verbosity: ${documentContext.verbosity}`);
+            } catch (err) {
+              console.warn('[Context Analyzer] Failed, using general context:', err);
+            }
+          } else {
+            console.log('[Context Analyzer] Skipped (no Anthropic key or insufficient text)');
+          }
+
+          // ===== FASE 2 & 3: CONTEXT-AWARE VISUAL ENRICHMENT =====
+          const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
+          const visualDescriptions = new Map<string, { type: string; description: string; page: number }>();
+
+          if (anthropicKey && jsonResult.rawJson?.pages) {
+            console.log('[Visual Enrichment] Scanning for visual elements...');
+            
+            const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
+            const { describeVisualElementContextAware } = await import("../_shared/visionEnhancer.ts");
+            
+            for (const page of jsonResult.rawJson.pages) {
+              if (!page.images || page.images.length === 0) continue;
+              
+              for (const image of page.images) {
+                // Process only visual elements (not full-page screenshots)
+                if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
+                  console.log(`[Visual Enrichment] Processing ${image.type}: ${image.name} with ${documentContext.domain} context`);
+                  
+                  try {
+                    // 1. Download image from LlamaParse
+                    const imageBuffer = await downloadJobImage(jsonResult.jobId, image.name, llamaCloudKey);
+                    
+                    // 2. Describe with context-awareness (Director-informed!)
+                    const description = await describeVisualElementContextAware(
+                      imageBuffer,
+                      image.type,
+                      documentContext,  // Context del Director!
+                      anthropicKey
+                    );
+                    
+                    // 3. Store description for Super-Document integration
+                    visualDescriptions.set(image.name, {
+                      type: image.type,
+                      description,
+                      page: page.page
+                    });
+                    
+                    console.log(`[Visual Enrichment] ✓ ${image.name}: ${description.length} chars (${documentContext.domain} focused)`);
+                  } catch (err) {
+                    console.warn(`[Visual Enrichment] Failed for ${image.name}:`, err);
+                  }
+                }
+              }
+            }
+            
+            console.log(`[Visual Enrichment] Completed: ${visualDescriptions.size} visual elements enriched`);
+          } else {
+            console.log('[Visual Enrichment] Skipped (no Anthropic key or no images)');
+          }
+
+          // TODO: Integrate visualDescriptions into Super-Document
+          // For now, continue with existing Vision Enhancement Layer for OCR issues
+          
+          // ===== VISION ENHANCEMENT LAYER (OCR Issues) =====
           let visionEnhancementUsed = false;
           let visionEngine: 'claude' | 'google' | null = null;
           let issuesDetected: any[] = [];
