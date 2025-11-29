@@ -44,17 +44,65 @@ Rispondi SOLO con il JSON, senza preamboli.
 `;
 
 /**
+ * Rilevamento rapido dominio 'trading_view_pro' basato su keyword
+ * Bypassa l'analisi LLM se keywords specifiche sono presenti
+ */
+function detectTradingViewPro(textSample: string, fileName?: string): boolean {
+  const tradingKeywords = [
+    'tradingview', 'btc', 'usd', 'candlestick', 'ema', 'sma', 
+    'rsi', 'obv', 'macd', 'bollinger', 'support', 'resistance',
+    'breakout', 'divergence', 'golden cross', 'death cross',
+    'bullish', 'bearish', 'chart', 'indicator', 'oscillator'
+  ];
+  
+  const textLower = textSample.toLowerCase();
+  const fileNameLower = (fileName || '').toLowerCase();
+  
+  // Check filename for trading indicators
+  if (fileNameLower.includes('tv_') || fileNameLower.includes('trading')) {
+    return true;
+  }
+  
+  // Count keyword matches
+  const matchCount = tradingKeywords.filter(kw => 
+    textLower.includes(kw) || fileNameLower.includes(kw)
+  ).length;
+  
+  return matchCount >= 2; // At least 2 keywords = trading context
+}
+
+/**
  * Analizza il contesto del documento per calibrare l'analisi visiva
  * @param textSample Primi 2000 caratteri del documento
  * @param anthropicKey Anthropic API key
+ * @param fileName Nome del file (opzionale) per early detection
  * @returns Contesto del documento (dominio, elementi focus, terminologia, verbosità)
  */
 export async function analyzeDocumentContext(
   textSample: string,
-  anthropicKey: string
+  anthropicKey: string,
+  fileName?: string
 ): Promise<DocumentContext> {
   console.log('[Context Analyzer] Analyzing document domain...');
   console.log(`[Context Analyzer] Text sample: ${textSample.length} chars`);
+
+  // EARLY DETECTION: TradingView Pro
+  if (detectTradingViewPro(textSample, fileName)) {
+    console.log('[Context Analyzer] TradingView Pro detected via keywords!');
+    return {
+      domain: 'trading_view_pro',
+      focusElements: [
+        'candlestick patterns', 'moving averages', 'support/resistance levels',
+        'indicator values', 'oscillator readings', 'price action', 'volume'
+      ],
+      terminology: [
+        'EMA', 'SMA', 'RSI', 'MACD', 'OBV', 'Bollinger Bands',
+        'Golden Cross', 'Death Cross', 'Breakout', 'Divergence',
+        'Support', 'Resistance', 'Neckline', 'Head and Shoulders'
+      ],
+      verbosity: 'pedantic'
+    };
+  }
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {

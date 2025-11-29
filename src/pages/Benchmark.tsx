@@ -53,7 +53,8 @@ const SUITE_LABELS = {
   narrative: '📖 Narrative (Deep Understanding)',
   code: '💻 Code (GitHub)',
   safety: '🛡️ Safety (Adversarial)',
-  hybrid: '🔬 Hybrid PDF (Visual Test)'
+  hybrid: '🔬 Hybrid PDF (Visual Test)',
+  trading: '📊 TradingView Pro'
 };
 
 export default function Benchmark() {
@@ -75,7 +76,8 @@ export default function Benchmark() {
     narrative: true,
     code: true,
     safety: true,
-    hybrid: true 
+    hybrid: true,
+    trading: true
   });
   const [sampleSize, setSampleSize] = useState(5);
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -691,6 +693,18 @@ export default function Benchmark() {
               />
               <Label htmlFor="hybrid" className="font-normal cursor-pointer">
                 🔬 Hybrid PDF (ArXiv) - Test Visual Enrichment
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="trading" 
+                checked={provisionSuites.trading}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, trading: !!checked }))
+                }
+              />
+              <Label htmlFor="trading" className="font-normal cursor-pointer">
+                📊 TradingView Pro - Financial Charts Analysis
               </Label>
             </div>
             <div className="space-y-2">
