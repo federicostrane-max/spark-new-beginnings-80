@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BATCH_SIZE = 10;
+const DEFAULT_BATCH_SIZE = 500; // Increased for faster bulk processing
 
 /**
  * Generate semantic summary for table chunks using Gemini Flash
@@ -108,14 +108,15 @@ serve(async (req) => {
   }
 
   try {
-    const { documentId } = await req.json().catch(() => ({}));
+    const { documentId, batchSize } = await req.json().catch(() => ({}));
+    const effectiveBatchSize = batchSize || DEFAULT_BATCH_SIZE;
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const openaiKey = Deno.env.get('OPENAI_API_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log('[Pipeline A-Hybrid Embeddings] Starting embedding generation');
+    console.log(`[Pipeline A-Hybrid Embeddings] Starting embedding generation (batch size: ${effectiveBatchSize})`);
 
     // Status reconciliation
     const { data: stuckDocs } = await supabase
@@ -162,7 +163,7 @@ serve(async (req) => {
     if (documentId) {
       query = query.eq('document_id', documentId);
     } else {
-      query = query.limit(BATCH_SIZE);
+      query = query.limit(effectiveBatchSize);
     }
 
     const { data: chunks, error: fetchError } = await query;
