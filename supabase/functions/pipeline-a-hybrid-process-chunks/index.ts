@@ -237,75 +237,134 @@ serve(async (req) => {
             const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
             const { describeVisualElementContextAware } = await import("../_shared/visionEnhancer.ts");
             
+            // 🚀 STEP 1: Collect all images to process
+            const imagesToProcess: Array<{
+              imageName: string;
+              type: string;
+              jobId: string;
+              pageNumber: number;
+            }> = [];
+
             for (const page of jsonResult.rawJson.pages) {
               if (!page.images || page.images.length === 0) continue;
               
               for (const image of page.images) {
-                // Process only visual elements (not full-page screenshots)
                 if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
                   traceReport.visual_enrichment.elements_found++;
-                  console.log(`[Visual Enrichment] Processing ${image.type}: ${image.name} with ${documentContext.domain} context`);
+                  imagesToProcess.push({
+                    imageName: image.name,
+                    type: image.type,
+                    jobId: jsonResult.jobId,
+                    pageNumber: page.page
+                  });
+                }
+              }
+            }
+
+            console.log(`[Visual Enrichment] Found ${imagesToProcess.length} images to process`);
+
+            // 🚀 STEP 2: Process images in batches of 5 (parallel within batch, sequential between batches)
+            const BATCH_SIZE = 5;
+            for (let i = 0; i < imagesToProcess.length; i += BATCH_SIZE) {
+              const batch = imagesToProcess.slice(i, i + BATCH_SIZE);
+              const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+              const totalBatches = Math.ceil(imagesToProcess.length / BATCH_SIZE);
+              
+              console.log(`[Visual Enrichment] 🚀 Processing batch ${batchNum}/${totalBatches} (${batch.length} images in parallel)`);
+
+              // Process all images in this batch concurrently
+              const batchPromises = batch.map(async (imageInfo) => {
+                try {
+                  console.log(`  → Processing ${imageInfo.type}: ${imageInfo.imageName}`);
+
+                  // 1. Download image from LlamaParse
+                  let imageBuffer = await downloadJobImage(imageInfo.jobId, imageInfo.imageName, llamaCloudKey);
                   
-                  try {
-                    // 1. Download image from LlamaParse
-                    let imageBuffer = await downloadJobImage(jsonResult.jobId, image.name, llamaCloudKey);
-                    
-                    // 🛡️ Check individual image size
-                    const imageSizeMB = imageBuffer.length / (1024 * 1024);
-                    if (imageSizeMB > IMAGE_SIZE_THRESHOLD_MB) {
-                      console.log(`[Visual Enrichment] ⚠️ SKIPPED ${image.name} - Image size ${imageSizeMB.toFixed(2)}MB exceeds ${IMAGE_SIZE_THRESHOLD_MB}MB threshold`);
-                      imageBuffer = null as any;
-                      continue;
-                    }
-                    
-                    // 2. Describe with context-awareness (Director-informed!)
-                    const description = await describeVisualElementContextAware(
-                      imageBuffer,
-                      image.type,
-                      documentContext,  // Context del Director!
-                      anthropicKey
-                    );
-                    
-                    // 🧹 MEMORY: Release buffer immediately after use
-                    imageBuffer = null as any;
-                    
-                    // 3. Store description for Super-Document integration
-                    visualDescriptions.set(image.name, {
-                      type: image.type,
-                      description,
-                      page: page.page
+                  // 🛡️ Check individual image size
+                  const imageSizeMB = imageBuffer.length / (1024 * 1024);
+                  if (imageSizeMB > IMAGE_SIZE_THRESHOLD_MB) {
+                    console.log(`  ⚠️ SKIPPED ${imageInfo.imageName} - Size ${imageSizeMB.toFixed(2)}MB exceeds ${IMAGE_SIZE_THRESHOLD_MB}MB`);
+                    traceReport.visual_enrichment.elements_failed++;
+                    traceReport.visual_enrichment.details.push({
+                      name: imageInfo.imageName,
+                      type: imageInfo.type,
+                      page: imageInfo.pageNumber,
+                      chars_generated: 0,
+                      prompt_domain: documentContext.domain,
+                      success: false,
+                      error: `Image size ${imageSizeMB.toFixed(2)}MB exceeds threshold`
                     });
-                    
-                    // Update trace report
+                    return null;
+                  }
+                  
+                  // 2. Describe with context-awareness (Director-informed!)
+                  const description = await describeVisualElementContextAware(
+                    imageBuffer,
+                    imageInfo.type,
+                    documentContext,
+                    anthropicKey
+                  );
+                  
+                  // 🧹 MEMORY: Release buffer immediately
+                  imageBuffer = null as any;
+
+                  if (description) {
                     traceReport.visual_enrichment.elements_processed++;
                     traceReport.visual_enrichment.details.push({
-                      name: image.name,
-                      type: image.type,
-                      page: page.page,
+                      name: imageInfo.imageName,
+                      type: imageInfo.type,
+                      page: imageInfo.pageNumber,
                       chars_generated: description.length,
                       prompt_domain: documentContext.domain,
                       success: true
                     });
                     
-                    console.log(`[Visual Enrichment] ✓ ${image.name}: ${description.length} chars (${documentContext.domain} focused)`);
-                  } catch (err) {
-                    console.warn(`[Visual Enrichment] Failed for ${image.name}:`, err);
-                    traceReport.visual_enrichment.elements_failed++;
-                    traceReport.visual_enrichment.details.push({
-                      name: image.name,
-                      type: image.type,
-                      page: page.page,
-                      chars_generated: 0,
-                      prompt_domain: documentContext.domain,
-                      success: false,
-                      error: String(err)
-                    });
+                    console.log(`  ✓ ${imageInfo.imageName}: ${description.length} chars (${documentContext.domain})`);
+                    
+                    return {
+                      imageName: imageInfo.imageName,
+                      type: imageInfo.type,
+                      description,
+                      page: imageInfo.pageNumber
+                    };
                   }
+
+                  return null;
+                } catch (error: any) {
+                  console.error(`  ✗ ${imageInfo.imageName} failed:`, error.message);
+                  traceReport.visual_enrichment.elements_failed++;
+                  traceReport.visual_enrichment.details.push({
+                    name: imageInfo.imageName,
+                    type: imageInfo.type,
+                    page: imageInfo.pageNumber,
+                    chars_generated: 0,
+                    prompt_domain: documentContext.domain,
+                    success: false,
+                    error: String(error)
+                  });
+                  return null;
+                }
+              });
+
+              // ⏳ Wait for all images in this batch to complete
+              const results = await Promise.all(batchPromises);
+
+              // Store successful results in visualDescriptions
+              for (const result of results) {
+                if (result) {
+                  visualDescriptions.set(result.imageName, {
+                    type: result.type,
+                    description: result.description,
+                    page: result.page
+                  });
                 }
               }
+
+              const successCount = results.filter(r => r !== null).length;
+              console.log(`[Visual Enrichment] Batch ${batchNum} complete: ${successCount}/${batch.length} successful`);
             }
             
-            console.log(`[Visual Enrichment] Completed: ${visualDescriptions.size} visual elements enriched`);
+            console.log(`[Visual Enrichment] ✅ Completed: ${visualDescriptions.size} visual elements enriched`);
           } else {
             console.log('[Visual Enrichment] Skipped (no Anthropic key or no images)');
           }
