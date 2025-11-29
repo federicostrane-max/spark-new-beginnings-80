@@ -808,16 +808,23 @@ serve(async (req) => {
       try {
         // Query ArXiv for cs.AI papers (has visual content like graphs/tables)
         const arxivUrl = `https://export.arxiv.org/api/query?search_query=cat:cs.CV+OR+cat:cs.AI&sortBy=submittedDate&sortOrder=descending&start=0&max_results=${sampleSize}`;
+        console.log('[Provision Benchmark] ArXiv URL constructed:', arxivUrl);
         
         console.log('[Provision Benchmark] Fetching ArXiv papers...');
         const response = await fetch(arxivUrl);
+        console.log('[Provision Benchmark] ArXiv response received:', response.status, response.statusText);
         if (!response.ok) throw new Error(`Failed to fetch ArXiv: ${response.statusText}`);
         
         const xmlText = await response.text();
+        console.log('[Provision Benchmark] ArXiv XML received, length:', xmlText.length);
         
         // Parse XML response to extract PDF links and metadata
         const entries = parseArXivXML(xmlText);
-        console.log(`[Provision Benchmark] Fetched ${entries.length} ArXiv papers`);
+        console.log(`[Provision Benchmark] Parsed ${entries.length} ArXiv papers from XML`);
+        
+        if (entries.length === 0) {
+          console.warn('[Provision Benchmark] WARNING: No ArXiv entries found. XML preview:', xmlText.substring(0, 500));
+        }
         
         // Step 1: Download all PDFs in parallel
         const pdfPromises = entries.map(async (entry: any, i: number) => {
@@ -898,7 +905,9 @@ serve(async (req) => {
         console.log(`[Provision Benchmark] Hybrid PDF suite complete: ${results.hybrid.success} success, ${results.hybrid.failed} failed`);
 
       } catch (suiteError) {
-        console.error('[Provision Benchmark] Hybrid PDF suite failed:', suiteError);
+        console.error('[Provision Benchmark] Hybrid PDF suite EXCEPTION:', suiteError);
+        console.error('[Provision Benchmark] Error details:', suiteError instanceof Error ? suiteError.message : String(suiteError));
+        console.error('[Provision Benchmark] Stack trace:', suiteError instanceof Error ? suiteError.stack : 'No stack');
       }
     }
 
