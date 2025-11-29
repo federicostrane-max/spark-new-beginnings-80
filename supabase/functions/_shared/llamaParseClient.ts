@@ -121,10 +121,10 @@ export async function uploadToLlamaParse(
 export async function pollJobUntilComplete(
   jobId: string,
   apiKey: string,
-  maxAttempts: number = 60,
+  maxAttempts: number = 120, // AUMENTATO: 120 attempts × 2s = 4 minuti (era 60 = 2min)
   pollInterval: number = 2000
 ): Promise<LlamaParseJobStatus> {
-  console.log(`[LlamaParse] Polling job ${jobId}...`);
+  console.log(`[LlamaParse] Polling job ${jobId} (max ${maxAttempts} attempts, ${(maxAttempts * pollInterval / 1000).toFixed(0)}s timeout)...`);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Retry with backoff ONLY for network/5xx errors, NOT for PENDING status
