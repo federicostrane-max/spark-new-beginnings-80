@@ -486,7 +486,7 @@ serve(async (req) => {
           content: finalReport.summary_markdown,
           chunk_type: 'meta_report',
           is_atomic: true,
-          embedding_status: 'skip'  // No embedding needed for meta-chunk
+          embedding_status: 'ready'  // Mark as ready to bypass embedding (chunk_index=-1 filtered)
         };
         
         await supabase
