@@ -746,15 +746,7 @@ export type Database = {
           storage_path?: string | null
           suite_category?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "benchmark_datasets_document_id_fkey"
-            columns: ["document_id"]
-            isOneToOne: false
-            referencedRelation: "pipeline_a_hybrid_documents"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       benchmark_results: {
         Row: {
