@@ -852,9 +852,13 @@ serve(async (req) => {
         const pdfs = await Promise.all(pdfPromises);
         console.log(`[Provision Benchmark] Downloaded ${pdfs.length} ArXiv PDFs`);
         
-        // Step 2: Ingest all PDFs in parallel as REAL PDFs (activates LlamaParse + Visual Enrichment)
-        const ingestPromises = pdfs.map(pdf =>
-          supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
+        // Step 2: Ingest PDFs SEQUENTIALLY to avoid WORKER_LIMIT (each PDF triggers full LlamaParse + embeddings chain)
+        const ingestResults = [];
+        for (let i = 0; i < pdfs.length; i++) {
+          const pdf = pdfs[i];
+          console.log(`[Provision Benchmark] Ingesting Hybrid PDF ${i + 1}/${pdfs.length}: ${pdf.fileName}`);
+          
+          const result = await supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
             body: {
               fileName: pdf.fileName,
               fileData: arrayBufferToBase64(pdf.pdfBuffer),
@@ -862,11 +866,13 @@ serve(async (req) => {
               folder: 'benchmark_hybrid',
               source_type: 'pdf'  // CRITICAL: Real PDF, not image
             }
-          })
-        );
+          });
+          
+          ingestResults.push(result);
+          console.log(`[Provision Benchmark] Hybrid PDF ${i + 1}/${pdfs.length} ingested successfully`);
+        }
         
-        const ingestResults = await Promise.all(ingestPromises);
-        console.log(`[Provision Benchmark] Ingested ${ingestResults.length} Hybrid PDFs in parallel`);
+        console.log(`[Provision Benchmark] All ${ingestResults.length} Hybrid PDFs ingested sequentially`);
         
         // Step 3: Insert Q&A pairs immediately
         for (let i = 0; i < pdfs.length; i++) {
