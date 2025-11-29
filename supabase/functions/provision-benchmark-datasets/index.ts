@@ -951,8 +951,8 @@ function parseArXivXML(xmlText: string): any[] {
     const summaryMatch = entryXml.match(/<summary>([\s\S]*?)<\/summary>/);
     const abstract = summaryMatch ? summaryMatch[1].replace(/\s+/g, ' ').trim() : '';
     
-    // Extract PDF link
-    const pdfLinkMatch = entryXml.match(/<link[^>]*title="pdf"[^>]*href="([^"]+)"/);
+    // Extract PDF link - match href and title in any order
+    const pdfLinkMatch = entryXml.match(/<link[^>]*href="([^"]+)"[^>]*title="pdf"/);
     const pdfUrl = pdfLinkMatch ? pdfLinkMatch[1] : '';
     
     if (pdfUrl) {

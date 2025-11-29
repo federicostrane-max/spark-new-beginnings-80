@@ -195,9 +195,13 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.provision-benchmark-datasets]
-verify_jwt = true
+verify_jwt = false
 timeout = 600
 
 [functions.regenerate-table-embeddings]
 verify_jwt = true
 timeout = 600
+
+[functions.test-arxiv-api]
+verify_jwt = false
+timeout = 60
