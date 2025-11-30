@@ -119,6 +119,7 @@ serve(async (req) => {
     const results = {
       general: { success: 0, failed: 0, documents: [] as any[] },
       finance: { success: 0, failed: 0, documents: [] as any[] },
+      financebench: { success: 0, failed: 0, documents: [] as any[] },
       charts: { success: 0, failed: 0, documents: [] as any[] },
       receipts: { success: 0, failed: 0, documents: [] as any[] },
       science: { success: 0, failed: 0, documents: [] as any[] },
@@ -1059,11 +1060,164 @@ serve(async (req) => {
       }
     }
 
+    // ===== PHASE 11: FinanceBench (Complex 10-K Reports) - BATCH PROCESSING =====
+    if (suites.financebench) {
+      console.log('[Provision Benchmark] Processing FinanceBench suite (Complex 10-K Reports)...');
+      
+      const cleanup = await cleanupExistingSuite(supabase, 'financebench', 'benchmark_financebench');
+      console.log(`[Provision Benchmark] Cleaned up FinanceBench: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      
+      try {
+        // Fetch FinanceBench dataset from GitHub
+        const dataUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.json';
+        const headers: any = { 'Accept': 'application/json' };
+        if (githubToken) headers['Authorization'] = `token ${githubToken}`;
+
+        const response = await fetch(dataUrl, { headers });
+        if (!response.ok) throw new Error(`Failed to fetch FinanceBench: ${response.statusText}`);
+        
+        const financebenchData = await response.json();
+        console.log(`[Provision Benchmark] Fetched ${financebenchData.length} FinanceBench entries`);
+
+        // Sample documents (limit to sampleSize)
+        const sampled = financebenchData.slice(0, sampleSize);
+        
+        // Step 1: Download PDFs sequentially (10-K reports are large, ~5-20MB each)
+        const pdfs: any[] = [];
+        for (let i = 0; i < sampled.length; i++) {
+          const entry = sampled[i];
+          console.log(`[Provision Benchmark] Downloading FinanceBench PDF ${i + 1}/${sampled.length}: ${entry.doc_name}`);
+          
+          const pdfUrl = entry.doc_link;
+          if (!pdfUrl) {
+            console.warn(`[Provision Benchmark] No PDF URL for entry ${i + 1}, skipping`);
+            results.financebench.failed++;
+            continue;
+          }
+          
+          try {
+            const pdfResponse = await fetch(pdfUrl);
+            if (!pdfResponse.ok) throw new Error(`Failed to fetch PDF: ${pdfResponse.statusText}`);
+            
+            const pdfBuffer = await pdfResponse.arrayBuffer();
+            const fileName = `financebench_${String(i + 1).padStart(3, '0')}_${entry.company}.pdf`;
+            
+            pdfs.push({
+              fileName,
+              pdfBuffer,
+              question: entry.question,
+              groundTruth: entry.answer,
+              metadata: {
+                company: entry.company,
+                year: entry.year,
+                doc_name: entry.doc_name,
+                doc_link: entry.doc_link,
+                evidence: entry.evidence,
+                question_type: entry.question_type
+              }
+            });
+            
+            console.log(`[Provision Benchmark] Downloaded ${fileName} (${(pdfBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+          } catch (pdfError) {
+            console.error(`[Provision Benchmark] Failed to download PDF for entry ${i + 1}:`, pdfError);
+            results.financebench.failed++;
+          }
+        }
+        
+        console.log(`[Provision Benchmark] Downloaded ${pdfs.length} FinanceBench PDFs`);
+        
+        // Step 2: Ingest all documents sequentially (large PDFs, avoid parallel overload)
+        const ingestResults: any[] = [];
+        for (let i = 0; i < pdfs.length; i++) {
+          const pdf = pdfs[i];
+          console.log(`[Provision Benchmark] Ingesting FinanceBench PDF ${i + 1}/${pdfs.length}: ${pdf.fileName}`);
+          
+          // Upload to storage first (avoid base64 memory explosion)
+          const storagePath = `benchmark_financebench/${pdf.fileName}`;
+          const { error: uploadError } = await supabase.storage
+            .from('pipeline-a-uploads')
+            .upload(storagePath, pdf.pdfBuffer, {
+              contentType: 'application/pdf',
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error(`[Provision Benchmark] Storage upload failed for ${pdf.fileName}:`, uploadError);
+            results.financebench.failed++;
+            continue;
+          }
+          
+          // Get public URL
+          const { data: urlData } = supabase.storage
+            .from('pipeline-a-uploads')
+            .getPublicUrl(storagePath);
+          
+          console.log(`[Provision Benchmark] Ingesting via storage URL: ${urlData.publicUrl}`);
+          
+          // Ingest via storage URL
+          const result = await supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
+            body: {
+              fileName: pdf.fileName,
+              storageUrl: urlData.publicUrl,
+              fileSize: pdf.pdfBuffer.byteLength,
+              folder: 'benchmark_financebench',
+              source_type: 'pdf'
+            }
+          });
+          
+          ingestResults.push(result);
+          console.log(`[Provision Benchmark] FinanceBench PDF ${i + 1}/${pdfs.length} ingested successfully`);
+        }
+        
+        console.log(`[Provision Benchmark] All ${ingestResults.length} FinanceBench PDFs ingested sequentially`);
+        
+        // Step 3: Insert Q&A pairs immediately
+        for (let i = 0; i < pdfs.length; i++) {
+          const pdf = pdfs[i];
+          const result = ingestResults[i];
+          
+          if (result.error || !result.data?.documentId) {
+            console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} ingest failed:`, result.error);
+            results.financebench.failed++;
+            continue;
+          }
+          
+          const { error: insertError } = await supabase
+            .from('benchmark_datasets')
+            .insert({
+              file_name: pdf.fileName,
+              storage_path: `benchmark_financebench/${pdf.fileName}`,
+              suite_category: 'financebench',
+              question: pdf.question,
+              ground_truth: pdf.groundTruth,
+              source_repo: 'patronus-ai/financebench',
+              source_metadata: pdf.metadata,
+              document_id: result.data.documentId,
+              provisioned_at: new Date().toISOString()
+            });
+          
+          if (insertError) {
+            console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} Q&A insert failed:`, insertError);
+            results.financebench.failed++;
+          } else {
+            results.financebench.success++;
+            results.financebench.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
+          }
+        }
+        
+        console.log(`[Provision Benchmark] FinanceBench suite complete: ${results.financebench.success} success, ${results.financebench.failed} failed`);
+
+      } catch (suiteError) {
+        console.error('[Provision Benchmark] FinanceBench suite EXCEPTION:', suiteError);
+        console.error('[Provision Benchmark] Error details:', suiteError instanceof Error ? suiteError.message : String(suiteError));
+      }
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         results,
-        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety + ${results.hybrid.success} hybrid + ${results.trading.success} trading tests. Documents will be ready in ~30-60s.`
+        message: `BATCH provisioning complete: ${results.general.success} general + ${results.finance.success} finance + ${results.financebench.success} financebench + ${results.charts.success} charts + ${results.receipts.success} receipts + ${results.science.success} science + ${results.narrative.success} narrative + ${results.code.success} code + ${results.safety.success} safety + ${results.hybrid.success} hybrid + ${results.trading.success} trading tests. Documents will be ready in ~30-60s.`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -1352,7 +1506,7 @@ function convertNarrativeQAToMarkdown(entry: any, index: number): string {
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
 async function cleanupExistingSuite(
   supabase: any,
-  suiteCategory: 'general' | 'finance' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code' | 'hybrid' | 'trading',
+  suiteCategory: 'general' | 'finance' | 'financebench' | 'charts' | 'receipts' | 'science' | 'narrative' | 'safety' | 'code' | 'hybrid' | 'trading',
   folderName: string
 ): Promise<{ documentsDeleted: number; chunksDeleted: number; datasetsDeleted: number }> {
   console.log(`[Provision Benchmark] Cleaning up existing ${suiteCategory} suite from folder ${folderName}...`);

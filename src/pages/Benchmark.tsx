@@ -47,6 +47,7 @@ const SUITE_LABELS = {
   all: '🎯 Tutti i Test',
   general: '📄 General (DocVQA)',
   finance: '📊 Finance (FinQA)',
+  financebench: '💼 FinanceBench (10-K Reports)',
   charts: '📈 Charts (ChartQA)',
   receipts: '🧾 Receipts (CORD)',
   science: '🔬 Science (QASPER)',
@@ -69,7 +70,8 @@ export default function Benchmark() {
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [provisionSuites, setProvisionSuites] = useState({ 
     general: true, 
-    finance: true, 
+    finance: true,
+    financebench: true,
     charts: true, 
     receipts: true, 
     science: true,
@@ -611,6 +613,18 @@ export default function Benchmark() {
               />
               <Label htmlFor="finance" className="font-normal cursor-pointer">
                 📊 Finance (FinQA) - Tabelle finanziarie
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox 
+                id="financebench" 
+                checked={provisionSuites.financebench}
+                onCheckedChange={(checked) => 
+                  setProvisionSuites(prev => ({ ...prev, financebench: !!checked }))
+                }
+              />
+              <Label htmlFor="financebench" className="font-normal cursor-pointer">
+                💼 FinanceBench - 10-K Reports (Documenti Complessi)
               </Label>
             </div>
             <div className="flex items-center space-x-2">
