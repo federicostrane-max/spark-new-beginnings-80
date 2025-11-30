@@ -226,3 +226,8 @@ timeout = 300
 [functions.aggregate-document-batches]
 verify_jwt = false
 timeout = 60
+
+# ===== RECOVERY & MAINTENANCE =====
+[functions.recover-pending-visuals]
+verify_jwt = false
+timeout = 300
