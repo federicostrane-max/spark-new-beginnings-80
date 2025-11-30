@@ -1704,6 +1704,7 @@ export type Database = {
       }
       pipeline_a_hybrid_chunks_raw: {
         Row: {
+          batch_index: number | null
           chunk_index: number
           chunk_type: string | null
           content: string
@@ -1721,6 +1722,7 @@ export type Database = {
           summary: string | null
         }
         Insert: {
+          batch_index?: number | null
           chunk_index: number
           chunk_type?: string | null
           content: string
@@ -1738,6 +1740,7 @@ export type Database = {
           summary?: string | null
         }
         Update: {
+          batch_index?: number | null
           chunk_index?: number
           chunk_type?: string | null
           content?: string
@@ -2166,6 +2169,59 @@ export type Database = {
             columns: ["requirement_id"]
             isOneToOne: false
             referencedRelation: "agent_task_requirements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      processing_jobs: {
+        Row: {
+          batch_index: number
+          chunks_created: number | null
+          completed_at: string | null
+          created_at: string | null
+          document_id: string
+          error_message: string | null
+          id: string
+          input_file_path: string
+          page_end: number
+          page_start: number
+          status: string
+          total_batches: number
+        }
+        Insert: {
+          batch_index: number
+          chunks_created?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          document_id: string
+          error_message?: string | null
+          id?: string
+          input_file_path: string
+          page_end: number
+          page_start: number
+          status?: string
+          total_batches: number
+        }
+        Update: {
+          batch_index?: number
+          chunks_created?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          document_id?: string
+          error_message?: string | null
+          id?: string
+          input_file_path?: string
+          page_end?: number
+          page_start?: number
+          status?: string
+          total_batches?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "processing_jobs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_a_hybrid_documents"
             referencedColumns: ["id"]
           },
         ]
