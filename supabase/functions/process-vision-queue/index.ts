@@ -9,8 +9,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Process 5 images at a time to avoid timeouts
-const BATCH_SIZE = 5;
+// Process 25 images at a time - accelerated for large queues
+const BATCH_SIZE = 25;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
