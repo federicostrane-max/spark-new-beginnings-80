@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
@@ -181,6 +182,7 @@ serve(async (req) => {
           // Reconstruct document using hierarchical algorithm
           console.log('[Pipeline A-Hybrid Process] Reconstructing document with hierarchical reading order');
           const { superDocument, orderedElements, headingMap } = reconstructFromLlamaParse(jsonResult.rawJson);
+          let mutableSuperDocument = superDocument; // Make mutable for placeholder insertion
           console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
           console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
 
@@ -224,149 +226,90 @@ serve(async (req) => {
             traceReport.context_analysis.skipped_reason = 'No Anthropic key or insufficient text';
           }
 
-          // ===== FASE 2 & 3: CONTEXT-AWARE VISUAL ENRICHMENT =====
+          // ===== FASE 2 & 3: ASYNC VISUAL ENRICHMENT QUEUE =====
           const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
-          const visualDescriptions = new Map<string, { type: string; description: string; page: number }>();
-
-          // 🛡️ MEMORY SAFEGUARD: Skip individual images if too large (>5MB per image)
-          const IMAGE_SIZE_THRESHOLD_MB = 5;
+          const queuedImagePlaceholders: Array<{ imageName: string; queueId: string; page: number }> = [];
 
           if (anthropicKey && jsonResult.rawJson?.pages) {
-            console.log('[Visual Enrichment] Scanning for visual elements...');
+            console.log('[Visual Enrichment Queue] Scanning for visual elements to enqueue...');
             
             const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
-            const { describeVisualElementContextAware } = await import("../_shared/visionEnhancer.ts");
             
-            // 🚀 STEP 1: Collect all images to process
-            const imagesToProcess: Array<{
-              imageName: string;
-              type: string;
-              jobId: string;
-              pageNumber: number;
-            }> = [];
-
+            // 🚀 STEP 1: Collect and enqueue all images asynchronously
             for (const page of jsonResult.rawJson.pages) {
               if (!page.images || page.images.length === 0) continue;
               
               for (const image of page.images) {
                 if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
                   traceReport.visual_enrichment.elements_found++;
-                  imagesToProcess.push({
-                    imageName: image.name,
-                    type: image.type,
-                    jobId: jsonResult.jobId,
-                    pageNumber: page.page
-                  });
-                }
-              }
-            }
-
-            console.log(`[Visual Enrichment] Found ${imagesToProcess.length} images to process`);
-
-            // 🚀 STEP 2: Process images in batches of 5 (parallel within batch, sequential between batches)
-            const BATCH_SIZE = 5;
-            for (let i = 0; i < imagesToProcess.length; i += BATCH_SIZE) {
-              const batch = imagesToProcess.slice(i, i + BATCH_SIZE);
-              const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-              const totalBatches = Math.ceil(imagesToProcess.length / BATCH_SIZE);
-              
-              console.log(`[Visual Enrichment] 🚀 Processing batch ${batchNum}/${totalBatches} (${batch.length} images in parallel)`);
-
-              // Process all images in this batch concurrently
-              const batchPromises = batch.map(async (imageInfo) => {
-                try {
-                  console.log(`  → Processing ${imageInfo.type}: ${imageInfo.imageName}`);
-
-                  // 1. Download image from LlamaParse
-                  let imageBuffer = await downloadJobImage(imageInfo.jobId, imageInfo.imageName, llamaCloudKey);
                   
-                  // 🛡️ Check individual image size
-                  const imageSizeMB = imageBuffer.length / (1024 * 1024);
-                  if (imageSizeMB > IMAGE_SIZE_THRESHOLD_MB) {
-                    console.log(`  ⚠️ SKIPPED ${imageInfo.imageName} - Size ${imageSizeMB.toFixed(2)}MB exceeds ${IMAGE_SIZE_THRESHOLD_MB}MB`);
+                  try {
+                    // Download image from LlamaParse
+                    const imageBuffer = await downloadJobImage(jsonResult.jobId, image.name, llamaCloudKey);
+                    const imageSizeMB = imageBuffer.length / (1024 * 1024);
+                    
+                    // Skip if image too large
+                    if (imageSizeMB > 5) {
+                      console.log(`[Visual Queue] ⚠️ SKIPPED ${image.name} - Size ${imageSizeMB.toFixed(2)}MB exceeds 5MB`);
+                      traceReport.visual_enrichment.elements_failed++;
+                      continue;
+                    }
+                    
+                    // Encode image to base64
+                    const base64Image = encodeBase64(imageBuffer);
+                    
+                    // Insert into visual_enrichment_queue
+                    const { data: queueEntry, error: queueError } = await supabase
+                      .from('visual_enrichment_queue')
+                      .insert({
+                        document_id: doc.id,
+                        image_base64: base64Image,
+                        image_metadata: {
+                          image_name: image.name,
+                          type: image.type,
+                          page: page.page,
+                          llamaparse_job_id: jsonResult.jobId,
+                          document_context: documentContext
+                        },
+                        status: 'pending'
+                      })
+                      .select('id')
+                      .single();
+                    
+                    if (queueError) {
+                      console.error(`[Visual Queue] Failed to enqueue ${image.name}:`, queueError);
+                      traceReport.visual_enrichment.elements_failed++;
+                      continue;
+                    }
+                    
+                    // Store queue ID for placeholder insertion
+                    queuedImagePlaceholders.push({
+                      imageName: image.name,
+                      queueId: queueEntry.id,
+                      page: page.page
+                    });
+                    
+                    console.log(`[Visual Queue] ✓ Enqueued ${image.name} (queue_id: ${queueEntry.id})`);
+                    
+                  } catch (error: any) {
+                    console.error(`[Visual Queue] Error enqueueing ${image.name}:`, error);
                     traceReport.visual_enrichment.elements_failed++;
-                    traceReport.visual_enrichment.details.push({
-                      name: imageInfo.imageName,
-                      type: imageInfo.type,
-                      page: imageInfo.pageNumber,
-                      chars_generated: 0,
-                      prompt_domain: documentContext.domain,
-                      success: false,
-                      error: `Image size ${imageSizeMB.toFixed(2)}MB exceeds threshold`
-                    });
-                    return null;
                   }
-                  
-                  // 2. Describe with context-awareness (Director-informed!)
-                  const description = await describeVisualElementContextAware(
-                    imageBuffer,
-                    imageInfo.type,
-                    documentContext,
-                    anthropicKey
-                  );
-                  
-                  // 🧹 MEMORY: Release buffer immediately
-                  imageBuffer = null as any;
-
-                  if (description) {
-                    traceReport.visual_enrichment.elements_processed++;
-                    traceReport.visual_enrichment.details.push({
-                      name: imageInfo.imageName,
-                      type: imageInfo.type,
-                      page: imageInfo.pageNumber,
-                      chars_generated: description.length,
-                      prompt_domain: documentContext.domain,
-                      success: true
-                    });
-                    
-                    console.log(`  ✓ ${imageInfo.imageName}: ${description.length} chars (${documentContext.domain})`);
-                    
-                    return {
-                      imageName: imageInfo.imageName,
-                      type: imageInfo.type,
-                      description,
-                      page: imageInfo.pageNumber
-                    };
-                  }
-
-                  return null;
-                } catch (error: any) {
-                  console.error(`  ✗ ${imageInfo.imageName} failed:`, error.message);
-                  traceReport.visual_enrichment.elements_failed++;
-                  traceReport.visual_enrichment.details.push({
-                    name: imageInfo.imageName,
-                    type: imageInfo.type,
-                    page: imageInfo.pageNumber,
-                    chars_generated: 0,
-                    prompt_domain: documentContext.domain,
-                    success: false,
-                    error: String(error)
-                  });
-                  return null;
-                }
-              });
-
-              // ⏳ Wait for all images in this batch to complete
-              const results = await Promise.all(batchPromises);
-
-              // Store successful results in visualDescriptions
-              for (const result of results) {
-                if (result) {
-                  visualDescriptions.set(result.imageName, {
-                    type: result.type,
-                    description: result.description,
-                    page: result.page
-                  });
                 }
               }
-
-              const successCount = results.filter(r => r !== null).length;
-              console.log(`[Visual Enrichment] Batch ${batchNum} complete: ${successCount}/${batch.length} successful`);
             }
             
-            console.log(`[Visual Enrichment] ✅ Completed: ${visualDescriptions.size} visual elements enriched`);
+            console.log(`[Visual Enrichment Queue] ✅ Enqueued ${queuedImagePlaceholders.length} images for async processing`);
+            
+            // Insert placeholders into superDocument for each enqueued image
+            for (const placeholder of queuedImagePlaceholders) {
+              const placeholderText = `\n\n[VISUAL_ENRICHMENT_PENDING: ${placeholder.queueId}]\n(Image: ${placeholder.imageName}, Page: ${placeholder.page})\n\n`;
+              mutableSuperDocument += placeholderText;
+            }
+            
+            console.log(`[Visual Queue] Inserted ${queuedImagePlaceholders.length} placeholders into document`);
           } else {
-            console.log('[Visual Enrichment] Skipped (no Anthropic key or no images)');
+            console.log('[Visual Enrichment Queue] Skipped (no Anthropic key or no images)');
           }
 
           // TODO: Integrate visualDescriptions into Super-Document
@@ -376,12 +319,12 @@ serve(async (req) => {
           let visionEnhancementUsed = false;
           let visionEngine: 'claude' | 'google' | null = null;
           let issuesDetected: any[] = [];
-          superDocumentToChunk = superDocument; // Initialize before OCR processing
+          superDocumentToChunk = mutableSuperDocument; // Initialize before OCR processing
 
-           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction if Visual Enrichment already processed images
-           const skipOCRProcessing = visualDescriptions.size > 0;
+           // 🛡️ MEMORY SAFEGUARD: Skip OCR correction if Visual Enrichment Queue has items
+           const skipOCRProcessing = queuedImagePlaceholders.length > 0;
            if (skipOCRProcessing) {
-             console.log(`[Vision Enhancement] OCR correction skipped - Visual Enrichment already processed ${visualDescriptions.size} elements`);
+             console.log(`[Vision Enhancement] OCR correction skipped - Visual Enrichment Queue has ${queuedImagePlaceholders.length} pending items`);
              traceReport.ocr_corrections.issues_detected = 0;
              traceReport.ocr_corrections.corrections_applied = 0;
            } else {
