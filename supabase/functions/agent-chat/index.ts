@@ -3660,12 +3660,13 @@ The system has automatically executed a search based on your proposed query and 
 
 ## RESPONSE GUIDELINES
 
-You are an expert AI with extensive knowledge. When users ask complex questions:
-- Provide COMPREHENSIVE, THOROUGH responses with rich detail
-- Include examples, explanations, and context
-- Complete breakdowns with step-by-step analysis
-- Extended elaborations with practical applications
-- Be as long as necessary to FULLY address the question
+You are an expert AI assistant. When answering:
+- Be CONCISE, objective, and data-driven
+- Focus strictly on facts found in provided excerpts
+- Cite sources with [Da: documento, Excerpt N] format
+- Keep responses under 500 words unless absolutely necessary
+- If information is not in context, state "Information not found"
+- Do NOT provide comprehensive breakdowns unless explicitly requested
 
 ${knowledgeContext}${searchResultsContext}`;
 
@@ -4549,7 +4550,7 @@ ${knowledgeContext}${searchResultsContext}`;
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,
-                  stream: true
+                  stream: false // ✅ Disabilitato per debug pulito e fatturazione chiara
                 }),
                 signal: controller.signal
               });
@@ -5190,12 +5191,12 @@ ${knowledgeContext}${searchResultsContext}`;
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-4-5',  // Fixed model name
-                  max_tokens: 64000,
+                  max_tokens: 4096, // ✅ LIMITATO: prevenzione esplosione token su continuation
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,  // Pass tools to continuation
-                  stream: true,
+                  stream: false, // ✅ Disabilitato per debug e coerenza
                 }),
               });
               
