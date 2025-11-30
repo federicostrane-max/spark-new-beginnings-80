@@ -495,6 +495,48 @@ serve(async (req) => {
           }
         }
 
+        // ✅ ARCHITECTURAL FIX: Populate chunk_id in visual_enrichment_queue jobs
+        // Jobs were created with chunk_id NULL (before chunks existed)
+        // Now match placeholder queue_ids with actual chunk_ids
+        console.log('[Chunk-Job Linking] Matching placeholders with queue jobs...');
+        
+        const { data: createdChunks, error: fetchError } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id, content')
+          .eq('document_id', doc.id)
+          .like('content', '%[VISUAL_ENRICHMENT_PENDING:%');
+        
+        if (fetchError) {
+          console.error('[Chunk-Job Linking] Failed to fetch chunks with placeholders:', fetchError);
+        } else if (createdChunks && createdChunks.length > 0) {
+          let linkedCount = 0;
+          
+          for (const chunk of createdChunks) {
+            // Extract queue_id from placeholder: [VISUAL_ENRICHMENT_PENDING: queue_id]
+            const match = chunk.content.match(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/);
+            if (match && match[1]) {
+              const queueId = match[1];
+              
+              // Update job with chunk_id
+              const { error: updateError } = await supabase
+                .from('visual_enrichment_queue')
+                .update({ chunk_id: chunk.id })
+                .eq('id', queueId)
+                .eq('document_id', doc.id);
+              
+              if (updateError) {
+                console.error(`[Chunk-Job Linking] Failed to link chunk ${chunk.id} to job ${queueId}:`, updateError);
+              } else {
+                linkedCount++;
+              }
+            }
+          }
+          
+          console.log(`[Chunk-Job Linking] ✅ Linked ${linkedCount}/${createdChunks.length} chunks to their visual jobs`);
+        } else {
+          console.log('[Chunk-Job Linking] No placeholder chunks found');
+        }
+
         // Finalize trace report
         const finalReport = finalizeTraceReport(traceReport, startTime);
         console.log(`[Trace Report] Processing completed in ${finalReport.duration_ms}ms`);
