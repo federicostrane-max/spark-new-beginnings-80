@@ -11,6 +11,8 @@ const corsHeaders = {
 
 // Process 25 images at a time - accelerated for large queues
 const BATCH_SIZE = 25;
+// Maximum iterations to prevent infinite loops
+const MAX_ITERATIONS = 20;
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -31,29 +33,37 @@ serve(async (req) => {
       throw new Error('OPENAI_API_KEY required for embedding generation');
     }
 
-    console.log('[Process Vision Queue] Starting batch processing');
+    console.log('[Process Vision Queue] Starting continuous queue processing');
 
-    // Fetch pending queue items
-    const { data: queueItems, error: fetchError } = await supabase
-      .from('visual_enrichment_queue')
-      .select('*')
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(BATCH_SIZE);
+    let totalProcessed = 0;
+    let totalFailed = 0;
+    let iteration = 0;
 
-    if (fetchError) throw new Error(`Failed to fetch queue: ${fetchError.message}`);
-    if (!queueItems || queueItems.length === 0) {
-      console.log('[Process Vision Queue] No pending items');
-      return new Response(
-        JSON.stringify({ success: true, processed: 0, message: 'No items to process' }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    // Continuous loop: process until queue is empty or max iterations reached
+    while (iteration < MAX_ITERATIONS) {
+      iteration++;
+      console.log(`[Process Vision Queue] Iteration ${iteration}/${MAX_ITERATIONS}`);
 
-    console.log(`[Process Vision Queue] Processing ${queueItems.length} item(s)`);
+      // Fetch pending queue items
+      const { data: queueItems, error: fetchError } = await supabase
+        .from('visual_enrichment_queue')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(BATCH_SIZE);
 
-    let processedCount = 0;
-    let failedCount = 0;
+      if (fetchError) throw new Error(`Failed to fetch queue: ${fetchError.message}`);
+      
+      // Exit loop if no more pending items
+      if (!queueItems || queueItems.length === 0) {
+        console.log('[Process Vision Queue] Queue drained - no more pending items');
+        break;
+      }
+
+      console.log(`[Process Vision Queue] Processing batch of ${queueItems.length} item(s)`);
+
+      let processedCount = 0;
+      let failedCount = 0;
 
     for (const item of queueItems) {
       try {
@@ -204,14 +214,28 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[Process Vision Queue] Batch complete: ${processedCount} processed, ${failedCount} failed`);
+      totalProcessed += processedCount;
+      totalFailed += failedCount;
+      console.log(`[Process Vision Queue] Batch ${iteration} complete: ${processedCount} processed, ${failedCount} failed`);
+      console.log(`[Process Vision Queue] Total progress: ${totalProcessed} processed, ${totalFailed} failed`);
+
+      // Small delay between batches to avoid overwhelming the API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    if (iteration >= MAX_ITERATIONS) {
+      console.warn(`[Process Vision Queue] Reached maximum iterations (${MAX_ITERATIONS}). Stopping to prevent infinite loop.`);
+    }
+
+    console.log(`[Process Vision Queue] ✅ Final summary: ${totalProcessed} processed, ${totalFailed} failed across ${iteration} iteration(s)`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        processed: processedCount,
-        failed: failedCount,
-        message: `Processed ${processedCount} item(s), ${failedCount} failed`
+        processed: totalProcessed,
+        failed: totalFailed,
+        iterations: iteration,
+        message: `Processed ${totalProcessed} item(s), ${totalFailed} failed across ${iteration} batch(es)`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
