@@ -58,8 +58,9 @@ export function detectOCRIssues(text: string): OCRIssue[] {
 // ============= FUNCTION 2B: CLAUDE PDF WITH CONTEXTUAL REASONING =============
 
 /**
- * Enhances extracted text using Claude's native PDF support (Nov 2024 feature)
+ * Enhances extracted text using Claude's native PDF support (Nov 2024 feature) + RETRY AUTOMATICO
  * Eliminates the need for PDF-to-image conversion via Cloudmersive
+ * 🛡️ RESILIENZA: 3 retry automatici con backoff esponenziale su errori 500/502/503
  * @param pdfBuffer Raw PDF file buffer
  * @param anthropicKey Anthropic API key
  * @param ocrIssues Array of detected OCR issues to guide Claude's contextual reasoning
@@ -72,13 +73,12 @@ export async function enhanceWithClaudePDF(
   console.log('[Vision Enhancement] Using Claude native PDF support (no conversion needed)');
   console.log(`[Vision Enhancement] PDF buffer size: ${pdfBuffer.length} bytes, OCR issues: ${ocrIssues.length}`);
 
-  try {
-    const base64Pdf = encodeBase64(pdfBuffer);
-    console.log(`[Vision Enhancement] PDF encoded to base64: ${base64Pdf.length} chars`);
-    
-    const issuesList = ocrIssues.map(i => `- ${i.type}: "${i.pattern}"`).join('\n');
-    
-    const contextualPrompt = `Trascrivi TUTTO il testo visibile in questo documento con MASSIMA PRECISIONE.
+  const base64Pdf = encodeBase64(pdfBuffer);
+  console.log(`[Vision Enhancement] PDF encoded to base64: ${base64Pdf.length} chars`);
+  
+  const issuesList = ocrIssues.map(i => `- ${i.type}: "${i.pattern}"`).join('\n');
+  
+  const contextualPrompt = `Trascrivi TUTTO il testo visibile in questo documento con MASSIMA PRECISIONE.
 
 ATTENZIONE CRITICA - PROBLEMI OCR RILEVATI:
 L'OCR precedente ha estratto questi valori probabilmente errati:
@@ -100,6 +100,8 @@ ISTRUZIONI PER TESTO CORROTTO:
 OBIETTIVO: Produrre una trascrizione accurata dove le date ambigue 
 sono RISOLTE usando il contesto disponibile nel documento stesso.`;
 
+  // 🛡️ RESILIENZA: Wrapper con retry automatico
+  const callClaudeAPI = async (): Promise<string | null> => {
     console.log('[Vision Enhancement] Calling Claude API with native PDF...');
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -141,11 +143,23 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
     const result = await response.json();
     const extractedText = result.content?.[0]?.text;
     
-    console.log(`[Vision Enhancement] Claude PDF extraction successful: ${extractedText?.length || 0} characters`);
+    console.log(`[Vision Enhancement] ✓ Claude PDF extraction successful: ${extractedText?.length || 0} characters`);
     return extractedText || null;
+  };
+
+  try {
+    // 🛡️ RETRY con backoff esponenziale: 3 tentativi (0s, 1s, 2s+jitter, 4s+jitter)
+    const extractedText = await retryWithExponentialBackoff(
+      callClaudeAPI,
+      3, // maxRetries
+      1000, // baseDelayMs
+      'Claude PDF native extraction'
+    );
+    
+    return extractedText;
 
   } catch (error) {
-    console.error('[Vision Enhancement] Exception in enhanceWithClaudePDF:', error);
+    console.error('[Vision Enhancement] ✗ FINAL FAILURE in enhanceWithClaudePDF:', error);
     throw error;
   }
 }
@@ -427,8 +441,61 @@ OUTPUT RICHIESTO:
 }
 
 /**
- * Descrivi elemento visivo con context-awareness
+ * Utility: Retry con backoff esponenziale per errori transitori
+ * Riprova automaticamente su 500/502/503/429 con delay crescente
+ */
+async function retryWithExponentialBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 1000,
+  context = 'operation'
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      // Estrai status code dall'errore
+      const errorMsg = lastError.message.toLowerCase();
+      const isTransientError = 
+        errorMsg.includes('500') || 
+        errorMsg.includes('502') || 
+        errorMsg.includes('503') || 
+        errorMsg.includes('429') ||
+        errorMsg.includes('timeout') ||
+        errorMsg.includes('network');
+      
+      // Se non è errore transitorio, fallisci subito
+      if (!isTransientError) {
+        console.error(`[Retry] Non-transient error on ${context}, failing immediately:`, lastError.message);
+        throw lastError;
+      }
+      
+      // Se è l'ultimo tentativo, fallisci
+      if (attempt === maxRetries - 1) {
+        console.error(`[Retry] Max retries (${maxRetries}) reached for ${context}`);
+        throw lastError;
+      }
+      
+      // Calcola delay esponenziale con jitter
+      const delayMs = baseDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} failed for ${context}: ${lastError.message}`);
+      console.warn(`[Retry] Retrying in ${Math.round(delayMs)}ms...`);
+      
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  
+  throw lastError || new Error(`Retry failed after ${maxRetries} attempts`);
+}
+
+/**
+ * Descrivi elemento visivo con context-awareness + RETRY AUTOMATICO
  * Usa il contesto del documento per generare prompt mirati
+ * 🛡️ RESILIENZA: 3 retry automatici con backoff esponenziale su errori 500/502/503
  */
 export async function describeVisualElementContextAware(
   imageBuffer: Uint8Array,
@@ -441,13 +508,14 @@ export async function describeVisualElementContextAware(
   
   console.log(`[Visual Enrichment] Describing ${elementType} with ${context.domain} context`);
   
-  try {
-    // 🔧 FIX: Detect image format dynamically (JPG/PNG/WebP) instead of hardcoding
-    const { format, media_type } = detectImageType(imageBuffer);
-    console.log(`[Visual Enrichment] Detected image format: ${format} (${media_type})`);
-    
-    const base64Image = encodeBase64(imageBuffer);
-    
+  // 🔧 FIX: Detect image format una sola volta fuori dal retry loop
+  const { format, media_type } = detectImageType(imageBuffer);
+  console.log(`[Visual Enrichment] Detected image format: ${format} (${media_type})`);
+  
+  const base64Image = encodeBase64(imageBuffer);
+  
+  // 🛡️ RESILIENZA: Wrapper con retry automatico
+  const callClaudeAPI = async (): Promise<string> => {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -483,20 +551,36 @@ export async function describeVisualElementContextAware(
     const result = await response.json();
     const description = result.content?.[0]?.text || '[Descrizione non disponibile]';
     
-    console.log(`[Visual Enrichment] Description generated: ${description.length} chars`);
+    console.log(`[Visual Enrichment] ✓ Description generated: ${description.length} chars`);
+    return description;
+  };
+  
+  try {
+    // 🛡️ RETRY con backoff esponenziale: 3 tentativi (0s, 1s, 2s+jitter, 4s+jitter)
+    const description = await retryWithExponentialBackoff(
+      callClaudeAPI,
+      3, // maxRetries
+      1000, // baseDelayMs
+      `Claude Vision for ${elementType}`
+    );
+    
     return description;
 
   } catch (error) {
     // LOGGING MIGLIORATO: specifica tipo errore e dettagli
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[Visual Enrichment] FAILED for element type ${elementType}:`, errorMsg);
+    console.error(`[Visual Enrichment] ✗ FINAL FAILURE for element type ${elementType}:`, errorMsg);
     console.error(`[Visual Enrichment] Domain: ${context.domain}, Image size: ${imageBuffer.length} bytes`);
     throw error;
   }
 }
 
-// ============= FUNCTION 4: CLAUDE VISION FOR IMAGE-ONLY DOCUMENTS =============
+// ============= FUNCTION 4: CLAUDE VISION FOR IMAGE-ONLY DOCUMENTS + RETRY =============
 
+/**
+ * Describes image-only documents using Claude Vision + RETRY AUTOMATICO
+ * 🛡️ RESILIENZA: 3 retry automatici con backoff esponenziale su errori 500/502/503
+ */
 export async function describeImageWithClaude(
   fileBuffer: Uint8Array,
   anthropicKey: string,
@@ -505,15 +589,14 @@ export async function describeImageWithClaude(
   console.log(`[Image Description] Processing image document: ${fileName}`);
   console.log(`[Image Description] File buffer size: ${fileBuffer.length} bytes`);
 
-  try {
-    // Detect file format using magic bytes
-    const { format, media_type } = detectImageType(fileBuffer);
-    console.log(`[Image Description] Detected format via magic bytes: ${format} (${media_type})`);
-    
-    const base64Data = encodeBase64(fileBuffer);
-    console.log(`[Image Description] File encoded to base64: ${base64Data.length} chars`);
-    
-    const structuredPrompt = `Analizza questo grafico/chart e produci una descrizione COMPLETA e STRUTTURATA in formato Markdown.
+  // Detect file format using magic bytes (una sola volta, fuori dal retry loop)
+  const { format, media_type } = detectImageType(fileBuffer);
+  console.log(`[Image Description] Detected format via magic bytes: ${format} (${media_type})`);
+  
+  const base64Data = encodeBase64(fileBuffer);
+  console.log(`[Image Description] File encoded to base64: ${base64Data.length} chars`);
+  
+  const structuredPrompt = `Analizza questo grafico/chart e produci una descrizione COMPLETA e STRUTTURATA in formato Markdown.
 
 FORMATO RICHIESTO:
 ## Tipo di Grafico
@@ -551,50 +634,52 @@ ISTRUZIONI CRITICHE:
 4. Usa formato Markdown per tabelle e liste
 5. Sii completo ma conciso - ogni dato deve essere verificabile nell'immagine`;
 
-    console.log(`[Image Description] Calling Claude API with ${format === 'pdf' ? 'native PDF' : `${format.toUpperCase()} image`}...`);
-    
-    // Build content array based on file format
-    const content = format === 'pdf'
-      ? [
-          {
-            type: 'document' as const,
-            source: {
-              type: 'base64' as const,
-              media_type: 'application/pdf' as const,
-              data: base64Data
-            }
-          },
-          {
-            type: 'text' as const,
-            text: structuredPrompt
+  console.log(`[Image Description] Calling Claude API with ${format === 'pdf' ? 'native PDF' : `${format.toUpperCase()} image`}...`);
+  
+  // Build content array based on file format (una volta, fuori dal retry)
+  const content = format === 'pdf'
+    ? [
+        {
+          type: 'document' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: 'application/pdf' as const,
+            data: base64Data
           }
-        ]
-      : [
-          {
-            type: 'image' as const,
-            source: {
-              type: 'base64' as const,
-              media_type: media_type as 'image/png' | 'image/jpeg',
-              data: base64Data
-            }
-          },
-          {
-            type: 'text' as const,
-            text: structuredPrompt
+        },
+        {
+          type: 'text' as const,
+          text: structuredPrompt
+        }
+      ]
+    : [
+        {
+          type: 'image' as const,
+          source: {
+            type: 'base64' as const,
+            media_type: media_type as 'image/png' | 'image/jpeg',
+            data: base64Data
           }
-        ];
-    
-    // Build headers (beta header only for PDF)
-    const headers: Record<string, string> = {
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json'
-    };
-    
-    if (format === 'pdf') {
-      headers['anthropic-beta'] = 'pdfs-2024-09-25'; // Native PDF support (not needed for images)
-    }
-    
+        },
+        {
+          type: 'text' as const,
+          text: structuredPrompt
+        }
+      ];
+  
+  // Build headers (beta header only for PDF, una volta fuori dal retry)
+  const headers: Record<string, string> = {
+    'x-api-key': anthropicKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json'
+  };
+  
+  if (format === 'pdf') {
+    headers['anthropic-beta'] = 'pdfs-2024-09-25'; // Native PDF support (not needed for images)
+  }
+  
+  // 🛡️ RESILIENZA: Wrapper con retry automatico
+  const callClaudeAPI = async (): Promise<string> => {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers,
@@ -621,11 +706,23 @@ ISTRUZIONI CRITICHE:
       throw new Error('Claude returned empty description');
     }
 
-    console.log(`[Image Description] Claude description successful: ${description.length} characters`);
+    console.log(`[Image Description] ✓ Claude description successful: ${description.length} characters`);
+    return description;
+  };
+
+  try {
+    // 🛡️ RETRY con backoff esponenziale: 3 tentativi (0s, 1s, 2s+jitter, 4s+jitter)
+    const description = await retryWithExponentialBackoff(
+      callClaudeAPI,
+      3, // maxRetries
+      1000, // baseDelayMs
+      `Claude Image Description for ${fileName}`
+    );
+    
     return description;
 
   } catch (error) {
-    console.error('[Image Description] Exception in describeImageWithClaude:', error);
+    console.error('[Image Description] ✗ FINAL FAILURE in describeImageWithClaude:', error);
     throw error;
   }
 }
