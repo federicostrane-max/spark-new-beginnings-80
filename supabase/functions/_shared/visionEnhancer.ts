@@ -524,8 +524,8 @@ export async function describeVisualElementContextAware(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
+        model: 'claude-3-5-haiku-20241022', // 🔧 CHANGED: 12x cheaper output ($1.25/M vs $15/M)
+        max_tokens: 800, // 🔧 REDUCED: 4096 → 800 (prevents runaway token generation)
         messages: [{
           role: 'user',
           content: [
@@ -596,43 +596,15 @@ export async function describeImageWithClaude(
   const base64Data = encodeBase64(fileBuffer);
   console.log(`[Image Description] File encoded to base64: ${base64Data.length} chars`);
   
-  const structuredPrompt = `Analizza questo grafico/chart e produci una descrizione COMPLETA e STRUTTURATA in formato Markdown.
+  // 🔧 SIMPLIFIED PROMPT: Reduced verbosity to prevent token explosion
+  const structuredPrompt = `Describe this chart/graph concisely in Markdown format.
 
-FORMATO RICHIESTO:
-## Tipo di Grafico
-[bar chart / line chart / pie chart / scatter plot / table / mixed chart / etc.]
+Include:
+- Chart type
+- Key data points (top 5-10 values)
+- Main trend or pattern
 
-## Titolo
-[titolo del grafico se visibile, altrimenti "Non specificato"]
-
-## Assi
-- **Asse X**: [descrizione con tutte le etichette visibili]
-- **Asse Y**: [descrizione con unità di misura]
-
-## Dati Chiave
-[Elenca TUTTI i valori numerici visibili nel grafico in formato tabellare Markdown]
-
-Esempio:
-| Categoria | Valore | Note |
-|-----------|--------|------|
-| Q1 2022   | 145.3  | Peak |
-| Q2 2022   | 132.7  | -    |
-
-## Trend e Osservazioni
-[Descrivi trend principali, massimi, minimi, pattern, anomalie]
-
-## Legenda
-[Se presente, elenca tutti gli elementi della legenda con i loro colori/simboli]
-
-## Note Aggiuntive
-[Annotazioni, note a piè di pagina, watermark, copyright visibili]
-
-ISTRUZIONI CRITICHE:
-1. Estrai TUTTI i numeri e valori visibili con MASSIMA PRECISIONE
-2. Mantieni l'ordine cronologico/logico dei dati
-3. Se le etichette sono parzialmente illeggibili, indicale come "[illeggibile]"
-4. Usa formato Markdown per tabelle e liste
-5. Sii completo ma conciso - ogni dato deve essere verificabile nell'immagine`;
+Keep the description brief and factual. Use tables for numerical data when appropriate.`;
 
   console.log(`[Image Description] Calling Claude API with ${format === 'pdf' ? 'native PDF' : `${format.toUpperCase()} image`}...`);
   
@@ -684,8 +656,8 @@ ISTRUZIONI CRITICHE:
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
+        model: 'claude-3-5-haiku-20241022', // 🔧 CHANGED: 12x cheaper output ($1.25/M vs $15/M)
+        max_tokens: 800, // 🔧 REDUCED: 4096 → 800 (prevents runaway token generation)
         messages: [{
           role: 'user',
           content
