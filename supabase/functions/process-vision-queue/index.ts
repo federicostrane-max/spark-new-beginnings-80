@@ -115,15 +115,15 @@ serve(async (req) => {
           console.log(`[Vision Queue] Found ${chunksToUpdate.length} chunk(s) with placeholder`);
 
           for (const chunk of chunksToUpdate) {
-            // Replace placeholder with actual description
+            // Replace placeholder with actual description (newline optional for robustness)
             const updatedContent = chunk.content.replace(
-              new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n`, 'g'),
+              new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
               `\n\n${description}\n\n`
             );
             
             const updatedOriginalContent = chunk.original_content
               ? chunk.original_content.replace(
-                  new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n`, 'g'),
+                  new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
                   `\n\n${description}\n\n`
                 )
               : null;
