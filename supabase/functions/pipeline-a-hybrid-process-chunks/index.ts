@@ -7,6 +7,9 @@ import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownEleme
 import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudePDF, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
 import { createTraceReport, finalizeTraceReport, type ProcessingTraceReport } from "../_shared/processingTraceReport.ts";
 
+// Declare EdgeRuntime for background task support
+declare const EdgeRuntime: any;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -290,6 +293,19 @@ serve(async (req) => {
                     });
                     
                     console.log(`[Visual Queue] ✓ Enqueued ${image.name} (queue_id: ${queueEntry.id})`);
+                    
+                    // 🚀 EVENT-DRIVEN: Invoke worker immediately for this image
+                    try {
+                      EdgeRuntime.waitUntil(
+                        supabase.functions.invoke('process-vision-job', {
+                          body: { queueItemId: queueEntry.id }
+                        })
+                      );
+                      console.log(`[Visual Queue] → Worker invoked for queue_id: ${queueEntry.id}`);
+                    } catch (invokeError) {
+                      console.warn(`[Visual Queue] Failed to invoke worker for ${queueEntry.id}:`, invokeError);
+                      // Not critical - cron fallback will catch it
+                    }
                     
                   } catch (error: any) {
                     console.error(`[Visual Queue] Error enqueueing ${image.name}:`, error);
