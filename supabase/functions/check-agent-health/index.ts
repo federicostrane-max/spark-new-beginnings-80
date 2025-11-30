@@ -42,7 +42,6 @@ Deno.serve(async (req) => {
 
     console.log(`[check-agent-health] Checking health for agent: ${agentId}`);
 
-    // Use the optimized RPC function
     const { data: syncStatus, error: rpcError } = await supabase
       .rpc('get_agent_sync_status', { p_agent_id: agentId });
 
@@ -54,7 +53,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Calculate statistics
     const documents = syncStatus || [];
     const totalDocuments = documents.length;
     const syncedDocuments = documents.filter((d: any) => d.sync_status === 'completed').length;
