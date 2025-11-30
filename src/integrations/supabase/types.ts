@@ -2301,6 +2301,63 @@ export type Database = {
         }
         Relationships: []
       }
+      visual_enrichment_queue: {
+        Row: {
+          chunk_id: string | null
+          created_at: string
+          document_id: string
+          enrichment_text: string | null
+          error_message: string | null
+          id: string
+          image_base64: string | null
+          image_metadata: Json | null
+          processed_at: string | null
+          status: string
+          storage_path: string | null
+        }
+        Insert: {
+          chunk_id?: string | null
+          created_at?: string
+          document_id: string
+          enrichment_text?: string | null
+          error_message?: string | null
+          id?: string
+          image_base64?: string | null
+          image_metadata?: Json | null
+          processed_at?: string | null
+          status?: string
+          storage_path?: string | null
+        }
+        Update: {
+          chunk_id?: string | null
+          created_at?: string
+          document_id?: string
+          enrichment_text?: string | null
+          error_message?: string | null
+          id?: string
+          image_base64?: string | null
+          image_metadata?: Json | null
+          processed_at?: string | null
+          status?: string
+          storage_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visual_enrichment_queue_chunk_id_fkey"
+            columns: ["chunk_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_a_hybrid_chunks_raw"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visual_enrichment_queue_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_a_hybrid_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

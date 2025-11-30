@@ -172,6 +172,11 @@ schedule = "*/5 * * * *"
 verify_jwt = true
 timeout = 60
 
+[functions.process-vision-queue]
+verify_jwt = false
+timeout = 600
+schedule = "* * * * *"
+
 [functions.pipeline-a-ingest-video]
 verify_jwt = true
 timeout = 300
