@@ -213,3 +213,16 @@ timeout = 600
 [functions.test-arxiv-api]
 verify_jwt = false
 timeout = 60
+
+# ===== PARALLEL PDF PROCESSING (PHASE 2) =====
+[functions.split-pdf-into-batches]
+verify_jwt = false
+timeout = 300
+
+[functions.process-pdf-batch]
+verify_jwt = false
+timeout = 300
+
+[functions.aggregate-document-batches]
+verify_jwt = false
+timeout = 60

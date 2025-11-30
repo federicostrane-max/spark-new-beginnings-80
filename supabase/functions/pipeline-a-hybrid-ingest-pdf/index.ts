@@ -1,10 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+declare const EdgeRuntime: any;
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const BIG_FILE_THRESHOLD = 10 * 1024 * 1024; // 10MB
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -87,17 +91,38 @@ serve(async (req) => {
       throw new Error(`Database insert failed: ${insertError.message}`);
     }
 
-    console.log(`[Pipeline A-Hybrid Ingest] Document ingested: ${document.id}`);
+    console.log(`[Pipeline A-Hybrid Ingest] Document ingested: ${document.id}, size: ${fileBuffer.length} bytes`);
 
-    // Trigger processing asynchronously (event-driven)
-    try {
-      supabase.functions.invoke('pipeline-a-hybrid-process-chunks', {
-        body: { documentId: document.id }
-      }).then(() => {
-        console.log(`[Pipeline A-Hybrid Ingest] Triggered processing for document ${document.id}`);
-      });
-    } catch (invokeError) {
-      console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger processing (will be handled by cron):', invokeError);
+    // Check if file is large (> 10MB) - route to batch processing
+    if (fileBuffer.length > BIG_FILE_THRESHOLD) {
+      console.log(`[Pipeline A-Hybrid Ingest] ⚡ Large file detected (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB) - routing to batch processor`);
+      
+      try {
+        EdgeRuntime.waitUntil(
+          supabase.functions.invoke('split-pdf-into-batches', {
+            body: { documentId: document.id }
+          }).then(() => {
+            console.log(`[Pipeline A-Hybrid Ingest] Triggered batch splitting for document ${document.id}`);
+          })
+        );
+      } catch (invokeError) {
+        console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger batch splitting:', invokeError);
+      }
+    } else {
+      // Standard processing for normal-sized files
+      console.log(`[Pipeline A-Hybrid Ingest] Standard file (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB) - routing to direct processing`);
+      
+      try {
+        EdgeRuntime.waitUntil(
+          supabase.functions.invoke('pipeline-a-hybrid-process-chunks', {
+            body: { documentId: document.id }
+          }).then(() => {
+            console.log(`[Pipeline A-Hybrid Ingest] Triggered processing for document ${document.id}`);
+          })
+        );
+      } catch (invokeError) {
+        console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger processing (will be handled by cron):', invokeError);
+      }
     }
 
     return new Response(
