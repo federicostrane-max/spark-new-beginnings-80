@@ -4410,6 +4410,7 @@ ${knowledgeContext}${searchResultsContext}`;
                   model: openaiModel,
                   messages: openaiMessages,
                   temperature: 0.7,
+                  max_tokens: 4096, // 🔧 ADDED: explicit limit (was unlimited before)
                   tools: openaiTools,
                   tool_choice: "auto",
                   stream: true
@@ -4459,6 +4460,7 @@ ${knowledgeContext}${searchResultsContext}`;
                   model: openrouterModel,
                   messages: openrouterMessages,
                   temperature: 0.7,
+                  max_tokens: 4096, // 🔧 ADDED: explicit limit (was unlimited before)
                   tools: openrouterTools,
                   tool_choice: "auto",
                   stream: true
@@ -4542,7 +4544,7 @@ ${knowledgeContext}${searchResultsContext}`;
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-4-5',
-                  max_tokens: 64000,
+                  max_tokens: 4096, // 🔧 REDUCED: 64000 → 4096 (prevents $69 output cost explosions)
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
