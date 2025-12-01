@@ -2796,6 +2796,9 @@ Deno.serve(async (req) => {
 
     // Start streaming response with TransformStream for immediate flush
     let accumulatedResponse = ''; // Store full response for non-streaming mode
+    let finalRetrievalMetadata: any = null; // 📊 [BENCHMARK] Store metadata for non-streaming mode
+    let finalLlmProvider: string = ''; // 📊 [BENCHMARK] Store provider for non-streaming mode
+    let finalKnowledgeStats: any = null; // 📊 [BENCHMARK] Store knowledge stats for non-streaming mode
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
@@ -5769,6 +5772,11 @@ ${knowledgeContext}${searchResultsContext}`;
             decomposed_queries: decomposedQueries?.length > 1 ? decomposedQueries : undefined
           };
           
+          // 📊 [BENCHMARK] Store metadata for non-streaming mode access
+          finalRetrievalMetadata = retrievalMetadata;
+          finalLlmProvider = llmProvider;
+          finalKnowledgeStats = knowledgeStats;
+          
           await supabase
             .from('agent_messages')
             .update({ 
@@ -5902,7 +5910,14 @@ ${knowledgeContext}${searchResultsContext}`;
       await closeStream(); // Ensure stream is closed
       
       return new Response(
-        JSON.stringify({ response: accumulatedResponse }),
+        JSON.stringify({ 
+          response: accumulatedResponse,
+          llmProvider: finalLlmProvider,
+          metadata: {
+            retrieval_metadata: finalRetrievalMetadata,
+            knowledge_stats: finalKnowledgeStats
+          }
+        }),
         { 
           headers: { 
             ...corsHeaders, 
