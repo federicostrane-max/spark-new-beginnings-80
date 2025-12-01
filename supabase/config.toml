@@ -231,3 +231,7 @@ timeout = 60
 [functions.recover-pending-visuals]
 verify_jwt = false
 timeout = 300
+
+[functions.cleanup-pipeline-a-storage]
+verify_jwt = false
+timeout = 60

@@ -431,17 +431,26 @@ serve(async (req) => {
           // ===== FASE 2 & 3: ASYNC VISUAL ENRICHMENT QUEUE =====
           const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
           const queuedImagePlaceholders: Array<{ imageName: string; queueId: string; page: number }> = [];
+          const MAX_IMAGES_PER_DOCUMENT = 50; // 🛡️ ARCHITECTURAL FIX: Limit to prevent memory overflow
 
           if (anthropicKey && jsonResult.rawJson?.pages) {
             console.log('[Visual Enrichment Queue] Scanning for visual elements to enqueue...');
             
             const { downloadJobImage } = await import("../_shared/llamaParseClient.ts");
             
-            // 🚀 STEP 1: Collect and enqueue all images asynchronously
+            // 🚀 STEP 1: Collect and enqueue all images asynchronously (MAX 50)
+            let enqueuedCount = 0;
+            
             for (const page of jsonResult.rawJson.pages) {
               if (!page.images || page.images.length === 0) continue;
               
               for (const image of page.images) {
+                // 🛡️ STOP if we hit the limit
+                if (enqueuedCount >= MAX_IMAGES_PER_DOCUMENT) {
+                  console.log(`[Visual Queue] ⚠️ LIMIT REACHED: Stopped at ${MAX_IMAGES_PER_DOCUMENT} images to prevent timeout`);
+                  break;
+                }
+                
                 if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
                   traceReport.visual_enrichment.elements_found++;
                   
@@ -491,7 +500,8 @@ serve(async (req) => {
                       page: page.page
                     });
                     
-                    console.log(`[Visual Queue] ✓ Enqueued ${image.name} (queue_id: ${queueEntry.id})`);
+                    enqueuedCount++; // 🛡️ INCREMENT COUNTER
+                    console.log(`[Visual Queue] ✓ Enqueued ${image.name} (queue_id: ${queueEntry.id}) [${enqueuedCount}/${MAX_IMAGES_PER_DOCUMENT}]`);
                     
                     // 🚀 EVENT-DRIVEN: Invoke worker immediately for this image
                     try {
@@ -512,6 +522,9 @@ serve(async (req) => {
                   }
                 }
               }
+              
+              // 🛡️ BREAK outer loop if limit reached
+              if (enqueuedCount >= MAX_IMAGES_PER_DOCUMENT) break;
             }
             
             console.log(`[Visual Enrichment Queue] ✅ Enqueued ${queuedImagePlaceholders.length} images for async processing`);
