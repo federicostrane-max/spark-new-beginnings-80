@@ -4501,7 +4501,7 @@ ${knowledgeContext}${searchResultsContext}`;
               }));
               
               response = await fetch(
-                `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}&alt=sse`,
                 {
                   method: 'POST',
                   headers: {
@@ -4672,138 +4672,7 @@ ${knowledgeContext}${searchResultsContext}`;
               for (const line of lines) {
                 if (!line.trim() || line.startsWith(':')) continue;
                 
-                // 🔧 GOOGLE GEMINI: Bypass SSE filter - Google returns raw JSON, not SSE format
-                if (llmProvider === 'google' || llmProvider === 'google-gemini') {
-                  console.log(`📥 [REQ-${requestId}] [Google] Raw line (first 200 chars): ${line.slice(0, 200)}`);
-                  
-                  // Google returns newline-delimited JSON or array of objects like: [{...}]
-                  try {
-                    if (line.startsWith('[') || line.startsWith('{')) {
-                      const parsed = JSON.parse(line);
-                      chunkCount++;
-                      
-                      // Handle array format from streamGenerateContent
-                      const items = Array.isArray(parsed) ? parsed : [parsed];
-                      
-                      for (const item of items) {
-                        // Extract text content
-                        const text = item.candidates?.[0]?.content?.parts?.[0]?.text;
-                        if (text) {
-                          console.log(`✅ [REQ-${requestId}] [Google] Extracted text chunk: ${text.slice(0, 100)}...`);
-                          fullResponse += text;
-                          await sendSSE(JSON.stringify({ type: 'content', text }));
-                          
-                          // Progressive save every ~5000 chars
-                          if (fullResponse.length > 0 && fullResponse.length % 5000 < text.length) {
-                            await supabase
-                              .from('agent_messages')
-                              .update({ content: fullResponse, llm_provider: llmProvider })
-                              .eq('id', placeholderMsg.id);
-                            console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
-                          }
-                        }
-                        
-                        // Handle function calls - EXECUTE IMMEDIATELY
-                        const functionCall = item.candidates?.[0]?.content?.parts?.[0]?.functionCall;
-                        if (functionCall && functionCall.name) {
-                          toolUseName = functionCall.name;
-                          toolUseId = `gemini_${Date.now()}`;
-                          console.log(`🔧 [REQ-${requestId}] [Google] Function call: ${toolUseName}`);
-                          
-                          try {
-                            const toolInput = functionCall.args;
-                            
-                            // Execute tool using shared function (toolUseName is guaranteed non-null here)
-                            const { toolResult, responseText, newFullResponse } = await executeToolCall(
-                              toolUseName!, // ✅ Non-null assertion: we checked functionCall.name exists above
-                              toolInput,
-                              {
-                                agent,
-                                user,
-                                conversation,
-                                supabase,
-                                sendSSE,
-                                requestId,
-                                fullResponse,
-                                conversationState,
-                                req
-                              }
-                            );
-                            
-                            fullResponse = newFullResponse;
-                            
-                            // Continue streaming with tool result
-                            const continueResponse = await fetch(
-                              `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}`,
-                              {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  contents: [
-                                    ...geminiMessages,
-                                    {
-                                      role: 'model',
-                                      parts: [{ functionCall: { name: toolUseName, args: toolInput } }]
-                                    },
-                                    {
-                                      role: 'function',
-                                      parts: [{ functionResponse: { name: toolUseName, response: toolResult } }]
-                                    }
-                                  ],
-                                  tools: geminiTools,
-                                  generationConfig: {
-                                    temperature: 0.7,
-                                    maxOutputTokens: 1024
-                                  }
-                                })
-                              }
-                            );
-                            
-                            if (!continueResponse.ok) {
-                              throw new Error(`Google API error: ${continueResponse.status}`);
-                            }
-                            
-                            // Stream the continuation response
-                            const continueReader = continueResponse.body?.getReader();
-                            if (!continueReader) throw new Error('No response body from Google');
-                            
-                            let continueBuffer = '';
-                            while (true) {
-                              const { done, value } = await continueReader.read();
-                              if (done) break;
-                              
-                              continueBuffer += decoder.decode(value, { stream: true });
-                              const continueLines = continueBuffer.split('\n');
-                              continueBuffer = continueLines.pop() || '';
-                              
-                              for (const continueLine of continueLines) {
-                                if (!continueLine.trim()) continue;
-                                try {
-                                  const continueParsed = JSON.parse(continueLine);
-                                  const continueText = continueParsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                                  if (continueText) {
-                                    fullResponse += continueText;
-                                    await sendSSE(JSON.stringify({ type: 'content', text: continueText }));
-                                  }
-                                } catch (e) {
-                                  // Skip malformed JSON
-                                }
-                              }
-                            }
-                          } catch (toolError) {
-                            console.error(`❌ [REQ-${requestId}] [Google] Tool execution error:`, toolError);
-                          }
-                        }
-                      }
-                    }
-                  } catch (parseError) {
-                    console.warn(`⚠️ [REQ-${requestId}] [Google] Failed to parse line as JSON:`, parseError);
-                    // Skip malformed JSON chunks - common during streaming
-                  }
-                  continue; // Skip SSE parsing for Google
-                }
-                
-                // SSE format for other providers (Anthropic, OpenAI, DeepSeek, OpenRouter)
+                // SSE format for all providers (Anthropic, OpenAI, DeepSeek, OpenRouter, Google)
                 if (!line.startsWith('data: ')) continue;
 
                 const data = line.slice(6);
@@ -4820,6 +4689,126 @@ ${knowledgeContext}${searchResultsContext}`;
                   if (anthropicTimeout && chunkCount === 1) {
                     clearTimeout(anthropicTimeout);
                     console.log('✅ First chunk received, Anthropic timeout cleared');
+                  }
+                  
+                  // 🔧 GOOGLE GEMINI: Handle SSE format with alt=sse
+                  if (llmProvider === 'google' || llmProvider === 'google-gemini') {
+                    console.log(`📥 [REQ-${requestId}] [Google] SSE chunk ${chunkCount}`);
+                    
+                    // Extract text content
+                    const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                      console.log(`✅ [REQ-${requestId}] [Google] Text: ${text.slice(0, 100)}...`);
+                      fullResponse += text;
+                      await sendSSE(JSON.stringify({ type: 'content', text }));
+                      
+                      // Progressive save every ~5000 chars
+                      if (fullResponse.length > 0 && fullResponse.length % 5000 < text.length) {
+                        await supabase
+                          .from('agent_messages')
+                          .update({ content: fullResponse, llm_provider: llmProvider })
+                          .eq('id', placeholderMsg.id);
+                        console.log(`💾 [REQ-${requestId}] Progressive save: ${fullResponse.length} chars`);
+                      }
+                    }
+                    
+                    // Handle function calls - EXECUTE IMMEDIATELY
+                    const functionCall = parsed.candidates?.[0]?.content?.parts?.[0]?.functionCall;
+                    if (functionCall && functionCall.name) {
+                      toolUseName = functionCall.name;
+                      toolUseId = `gemini_${Date.now()}`;
+                      console.log(`🔧 [REQ-${requestId}] [Google] Function call: ${toolUseName}`);
+                      
+                      try {
+                        const toolInput = functionCall.args;
+                        
+                        // Execute tool using shared function
+                        const { toolResult, responseText, newFullResponse } = await executeToolCall(
+                          toolUseName!,
+                          toolInput,
+                          {
+                            agent,
+                            user,
+                            conversation,
+                            supabase,
+                            sendSSE,
+                            requestId,
+                            fullResponse,
+                            conversationState,
+                            req
+                          }
+                        );
+                        
+                        fullResponse = newFullResponse;
+                        
+                        // Continue streaming with tool result
+                        const continueResponse = await fetch(
+                          `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}&alt=sse`,
+                          {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              contents: [
+                                ...geminiMessages,
+                                {
+                                  role: 'model',
+                                  parts: [{ functionCall: { name: toolUseName, args: toolInput } }]
+                                },
+                                {
+                                  role: 'function',
+                                  parts: [{ functionResponse: { name: toolUseName, response: toolResult } }]
+                                }
+                              ],
+                              tools: geminiTools,
+                              generationConfig: {
+                                temperature: 0.7,
+                                maxOutputTokens: 1024
+                              }
+                            })
+                          }
+                        );
+                        
+                        if (!continueResponse.ok) {
+                          throw new Error(`Google API error: ${continueResponse.status}`);
+                        }
+                        
+                        // Stream the continuation response (also SSE format)
+                        const continueReader = continueResponse.body?.getReader();
+                        if (!continueReader) throw new Error('No response body from Google');
+                        
+                        let continueBuffer = '';
+                        while (true) {
+                          const { done, value } = await continueReader.read();
+                          if (done) break;
+                          
+                          continueBuffer += decoder.decode(value, { stream: true });
+                          const continueLines = continueBuffer.split('\n');
+                          continueBuffer = continueLines.pop() || '';
+                          
+                          for (const continueLine of continueLines) {
+                            if (!continueLine.trim() || continueLine.startsWith(':')) continue;
+                            if (!continueLine.startsWith('data: ')) continue;
+                            
+                            const continueData = continueLine.slice(6);
+                            if (continueData === '[DONE]') continue;
+                            
+                            try {
+                              const continueParsed = JSON.parse(continueData);
+                              const continueText = continueParsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                              if (continueText) {
+                                fullResponse += continueText;
+                                await sendSSE(JSON.stringify({ type: 'content', text: continueText }));
+                              }
+                            } catch (e) {
+                              // Skip malformed JSON
+                            }
+                          }
+                        }
+                      } catch (toolError) {
+                        console.error(`❌ [REQ-${requestId}] [Google] Tool execution error:`, toolError);
+                      }
+                    }
+                    continue; // Continue to next line
                   }
                   
                   // Log chunk details for debugging
