@@ -1068,20 +1068,43 @@ serve(async (req) => {
       console.log(`[Provision Benchmark] Cleaned up FinanceBench: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
-        // Fetch FinanceBench dataset from GitHub
-        const dataUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.jsonl';
+        // Fetch FinanceBench dataset from GitHub (two files: questions + document metadata)
         const headers: any = { 'Accept': 'application/json' };
         if (githubToken) headers['Authorization'] = `token ${githubToken}`;
 
-        const response = await fetch(dataUrl, { headers });
-        if (!response.ok) throw new Error(`Failed to fetch FinanceBench: ${response.statusText}`);
+        // 1. Fetch questions file
+        const questionsUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.jsonl';
+        const questionsResponse = await fetch(questionsUrl, { headers });
+        if (!questionsResponse.ok) throw new Error(`Failed to fetch FinanceBench questions: ${questionsResponse.statusText}`);
         
-        const textContent = await response.text();
-        const financebenchData = textContent
+        const questionsText = await questionsResponse.text();
+        const questionsData = questionsText
           .split('\n')
           .filter(line => line.trim())
           .map(line => JSON.parse(line));
-        console.log(`[Provision Benchmark] Fetched ${financebenchData.length} FinanceBench entries`);
+        
+        // 2. Fetch document metadata file (contains doc_link!)
+        const metaUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_document_information.jsonl';
+        const metaResponse = await fetch(metaUrl, { headers });
+        if (!metaResponse.ok) throw new Error(`Failed to fetch FinanceBench metadata: ${metaResponse.statusText}`);
+        
+        const metaText = await metaResponse.text();
+        const metaData = metaText
+          .split('\n')
+          .filter(line => line.trim())
+          .map(line => JSON.parse(line));
+        
+        // 3. Create lookup map by doc_name
+        const docLinkMap = new Map(metaData.map(m => [m.doc_name, m]));
+        
+        // 4. Merge questions with document metadata
+        const financebenchData = questionsData.map(q => ({
+          ...q,
+          ...docLinkMap.get(q.doc_name)  // Adds doc_link, company, sector, etc.
+        }));
+        
+        console.log(`[Provision Benchmark] Fetched ${questionsData.length} questions, ${metaData.length} doc metadata entries`);
+        console.log(`[Provision Benchmark] Merged: ${financebenchData.filter(d => d.doc_link).length} entries with PDF URLs`);
 
         // Sample documents (limit to sampleSize)
         const sampled = financebenchData.slice(0, sampleSize);
