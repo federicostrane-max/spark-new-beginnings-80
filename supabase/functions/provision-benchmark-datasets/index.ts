@@ -9,6 +9,74 @@ const corsHeaders = {
 // Benchmark agent ID (pipiline C tester)
 const BENCHMARK_AGENT_ID = 'bcca9289-0d7b-4e74-87f5-0f66ae93249c';
 
+// Helper function to assign chunks to benchmark agent (Pipeline A-Hybrid)
+async function assignChunksToAgent(supabase: any, documentId: string): Promise<number> {
+  // Fetch all ready chunk IDs for this document
+  const { data: chunks, error: fetchError } = await supabase
+    .from('pipeline_a_hybrid_chunks_raw')
+    .select('id')
+    .eq('document_id', documentId)
+    .eq('embedding_status', 'ready');
+  
+  if (fetchError || !chunks?.length) {
+    console.warn(`[Provision Benchmark] No ready chunks found for document ${documentId}`);
+    return 0;
+  }
+  
+  // Insert into pipeline_a_hybrid_agent_knowledge
+  const assignments = chunks.map((c: any) => ({
+    agent_id: BENCHMARK_AGENT_ID,
+    chunk_id: c.id,
+    is_active: true
+  }));
+  
+  const { error: upsertError } = await supabase
+    .from('pipeline_a_hybrid_agent_knowledge')
+    .upsert(assignments, { onConflict: 'agent_id,chunk_id' });
+  
+  if (upsertError) {
+    console.error(`[Provision Benchmark] Failed to assign chunks for document ${documentId}:`, upsertError);
+    return 0;
+  }
+  
+  console.log(`[Provision Benchmark] ✅ Assigned ${chunks.length} chunks to benchmark agent`);
+  return chunks.length;
+}
+
+// Helper function to assign chunks to benchmark agent (Pipeline A - for code suite)
+async function assignChunksToAgentPipelineA(supabase: any, documentId: string): Promise<number> {
+  // Fetch all ready chunk IDs for this document
+  const { data: chunks, error: fetchError } = await supabase
+    .from('pipeline_a_chunks_raw')
+    .select('id')
+    .eq('document_id', documentId)
+    .eq('embedding_status', 'ready');
+  
+  if (fetchError || !chunks?.length) {
+    console.warn(`[Provision Benchmark] No ready chunks found for Pipeline A document ${documentId}`);
+    return 0;
+  }
+  
+  // Insert into pipeline_a_agent_knowledge
+  const assignments = chunks.map((c: any) => ({
+    agent_id: BENCHMARK_AGENT_ID,
+    chunk_id: c.id,
+    is_active: true
+  }));
+  
+  const { error: upsertError } = await supabase
+    .from('pipeline_a_agent_knowledge')
+    .upsert(assignments, { onConflict: 'agent_id,chunk_id' });
+  
+  if (upsertError) {
+    console.error(`[Provision Benchmark] Failed to assign Pipeline A chunks for document ${documentId}:`, upsertError);
+    return 0;
+  }
+  
+  console.log(`[Provision Benchmark] ✅ Assigned ${chunks.length} Pipeline A chunks to benchmark agent`);
+  return chunks.length;
+}
+
 // Helper function to convert ArrayBuffer to base64 in chunks (prevents stack overflow)
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -214,6 +282,8 @@ serve(async (req) => {
           } else {
             results.general.success++;
             results.general.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -294,6 +364,8 @@ serve(async (req) => {
           } else {
             results.finance.success++;
             results.finance.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -394,6 +466,8 @@ serve(async (req) => {
           } else {
             results.charts.success++;
             results.charts.documents.push({ fileName: png.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -491,6 +565,8 @@ serve(async (req) => {
           } else {
             results.receipts.success++;
             results.receipts.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -601,6 +677,8 @@ serve(async (req) => {
           } else {
             results.science.success++;
             results.science.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -689,6 +767,8 @@ serve(async (req) => {
           } else {
             results.narrative.success++;
             results.narrative.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -816,6 +896,8 @@ serve(async (req) => {
               results.code.failed++;
             } else {
               results.code.success++;
+              // Auto-assign Pipeline A chunks to benchmark agent
+              await assignChunksToAgentPipelineA(supabase, matchingDoc.id);
             }
           }
           
@@ -962,6 +1044,8 @@ serve(async (req) => {
           } else {
             results.hybrid.success++;
             results.hybrid.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -1050,6 +1134,8 @@ serve(async (req) => {
           } else {
             results.trading.success++;
             results.trading.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
@@ -1229,6 +1315,8 @@ serve(async (req) => {
           } else {
             results.financebench.success++;
             results.financebench.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
+            // Auto-assign chunks to benchmark agent
+            await assignChunksToAgent(supabase, result.data.documentId);
           }
         }
         
