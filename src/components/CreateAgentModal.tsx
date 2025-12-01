@@ -23,6 +23,20 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// Helper function to get default model for each provider
+const getDefaultModelForProvider = (provider: string): string => {
+  switch (provider) {
+    case 'deepseek': return 'deepseek-reasoner'; // Most powerful
+    case 'google': return 'google/gemini-2.5-flash';
+    case 'anthropic': return 'claude-sonnet-4-20250514';
+    case 'openai': return 'gpt-4o';
+    case 'mistral': return 'mistral-large-latest';
+    case 'x-ai': return 'grok-2-latest';
+    case 'openrouter': return 'deepseek/deepseek-chat';
+    default: return '';
+  }
+};
+
 interface Agent {
   id: string;
   name: string;
@@ -63,8 +77,10 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       setName(editingAgent.name);
       setDescription(editingAgent.description);
       setSystemPrompt(editingAgent.system_prompt);
-      setLlmProvider(editingAgent.llm_provider || "anthropic");
-      setAiModel(editingAgent.ai_model || "");
+      const provider = editingAgent.llm_provider || "anthropic";
+      setLlmProvider(provider);
+      const defaultModel = getDefaultModelForProvider(provider);
+      setAiModel(editingAgent.ai_model || defaultModel);
       previousPromptRef.current = editingAgent.system_prompt;
     } else if (!open) {
       // Reset quando il modale si chiude
@@ -77,6 +93,14 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
       previousPromptRef.current = "";
     }
   }, [open]);
+
+  // Auto-set default model when provider changes
+  useEffect(() => {
+    if (llmProvider && (!aiModel || aiModel === '')) {
+      const defaultModel = getDefaultModelForProvider(llmProvider);
+      setAiModel(defaultModel);
+    }
+  }, [llmProvider]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +137,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             name,
             description,
             llm_provider: llmProvider,
-            ai_model: aiModel || null,
+            ai_model: aiModel || getDefaultModelForProvider(llmProvider),
           })
           .eq("id", editingAgent.id)
           .select()
@@ -202,7 +226,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             description,
             system_prompt: systemPrompt,
             llm_provider: llmProvider,
-            ai_model: aiModel || null,
+            ai_model: aiModel || getDefaultModelForProvider(llmProvider),
             avatar: null,
             active: true,
             user_id: user.id
