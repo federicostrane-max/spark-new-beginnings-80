@@ -32,22 +32,51 @@ serve(async (req) => {
 
     console.log('[Pipeline A-Hybrid Process] Starting chunk processing');
 
-    // Fetch documents
-    let query = supabase
-      .from('pipeline_a_hybrid_documents')
-      .select('*')
-      .eq('status', 'ingested')
-      .order('created_at', { ascending: true });
-
+    // Fetch documents to process (new OR stuck-resumable)
+    let documents: any[] = [];
+    
     if (documentId) {
-      query = query.eq('id', documentId).limit(1);
+      // Event-driven mode: fetch specific document
+      const { data: singleDoc, error: fetchError } = await supabase
+        .from('pipeline_a_hybrid_documents')
+        .select('*')
+        .eq('id', documentId)
+        .single();
+      
+      if (fetchError) throw new Error(`Failed to fetch document: ${fetchError.message}`);
+      if (singleDoc) documents = [singleDoc];
     } else {
-      query = query.limit(BATCH_SIZE);
+      // Batch mode: fetch new documents AND stuck documents to resume
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      
+      // 1. New documents (ingested status)
+      const { data: newDocs } = await supabase
+        .from('pipeline_a_hybrid_documents')
+        .select('*')
+        .eq('status', 'ingested')
+        .order('created_at', { ascending: true })
+        .limit(BATCH_SIZE);
+      
+      if (newDocs) documents.push(...newDocs);
+      
+      // 2. Stuck documents to resume (processing with job_id, not recently updated)
+      if (documents.length < BATCH_SIZE) {
+        const { data: stuckDocs } = await supabase
+          .from('pipeline_a_hybrid_documents')
+          .select('*')
+          .eq('status', 'processing')
+          .not('llamaparse_job_id', 'is', null)
+          .lt('updated_at', twoMinutesAgo)
+          .order('updated_at', { ascending: true })
+          .limit(BATCH_SIZE - documents.length);
+        
+        if (stuckDocs) {
+          console.log(`[Pipeline A-Hybrid Process] 🔄 Found ${stuckDocs.length} stuck document(s) to resume`);
+          documents.push(...stuckDocs);
+        }
+      }
     }
 
-    const { data: documents, error: fetchError } = await query;
-
-    if (fetchError) throw new Error(`Failed to fetch documents: ${fetchError.message}`);
     if (!documents || documents.length === 0) {
       console.log('[Pipeline A-Hybrid Process] No documents to process');
       return new Response(
