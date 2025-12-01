@@ -3430,6 +3430,9 @@ The system has automatically executed a search based on your proposed query and 
             documents_used: 0
           };
           let videoDocumentsAvailable: any[] = [];
+          let documents: any[] = [];
+          let queryBreakdown: Record<string, number> = {};
+          let decomposedQueries: string[] = [];
           
           console.log(`🔍 [AUTO-SEARCH] Starting Query Decomposition for: "${message}"`);
           
@@ -3448,14 +3451,12 @@ The system has automatically executed a search based on your proposed query and 
             // ============================================================================
             // STEP 1: QUERY DECOMPOSITION
             // ============================================================================
-            const decomposedQueries = await decomposeQueryWithLLM(message);
+            decomposedQueries = await decomposeQueryWithLLM(message);
             console.log(`🧩 [DECOMPOSITION] Extracted ${decomposedQueries.length} queries:`, decomposedQueries);
             
             // ============================================================================
             // STEP 2: PARALLEL RETRIEVAL (or single search if only 1 query)
             // ============================================================================
-            let documents: any[] = [];
-            let queryBreakdown: Record<string, number> = {};
             
             // Use higher topK for document-specific queries to increase recall
             const topK = isDocumentSpecificQuery ? 50 : 10;
@@ -5754,6 +5755,20 @@ ${knowledgeContext}${searchResultsContext}`;
           // Final update to DB with complete metadata
           const sourceReliability = hasKnowledgeContext ? 'high' : (toolsUsed.length > 0 ? 'medium' : 'low');
           
+          // 📊 [BENCHMARK] Construct enriched retrieval metadata for analysis
+          const retrievalMetadata = {
+            chunks_retrieved: documents?.length || 0,
+            top_similarities: documents?.slice(0, 5).map((d: any) => ({
+              document: d.document_name,
+              similarity: d.similarity,
+              category: d.category,
+              search_type: d.search_type
+            })) || [],
+            search_type: documents?.[0]?.search_type || 'semantic',
+            query_breakdown: Object.keys(queryBreakdown || {}).length > 0 ? queryBreakdown : undefined,
+            decomposed_queries: decomposedQueries?.length > 1 ? decomposedQueries : undefined
+          };
+          
           await supabase
             .from('agent_messages')
             .update({ 
@@ -5764,7 +5779,8 @@ ${knowledgeContext}${searchResultsContext}`;
                 knowledge_stats: knowledgeStats,
                 tools_used: toolsUsed,
                 source_reliability: sourceReliability,
-                video_documents_available: videoDocumentsAvailable.length > 0 ? videoDocumentsAvailable : undefined
+                video_documents_available: videoDocumentsAvailable.length > 0 ? videoDocumentsAvailable : undefined,
+                retrieval_metadata: retrievalMetadata
               }
             })
             .eq('id', placeholderMsg.id);
@@ -5834,7 +5850,11 @@ ${knowledgeContext}${searchResultsContext}`;
           await sendSSE(JSON.stringify({ 
             type: 'complete', 
             conversationId: conversation.id,
-            llmProvider: llmProvider  // Send provider info to client
+            llmProvider: llmProvider,  // Send provider info to client
+            metadata: {
+              retrieval_metadata: retrievalMetadata,
+              knowledge_stats: knowledgeStats
+            }
           }));
           
           await closeStream();

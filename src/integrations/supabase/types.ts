@@ -763,6 +763,7 @@ export type Database = {
           retrieval_metadata: Json | null
           run_id: string
           status: string
+          suite_category: string | null
         }
         Insert: {
           agent_response?: string | null
@@ -778,6 +779,7 @@ export type Database = {
           retrieval_metadata?: Json | null
           run_id: string
           status: string
+          suite_category?: string | null
         }
         Update: {
           agent_response?: string | null
@@ -793,6 +795,7 @@ export type Database = {
           retrieval_metadata?: Json | null
           run_id?: string
           status?: string
+          suite_category?: string | null
         }
         Relationships: []
       }

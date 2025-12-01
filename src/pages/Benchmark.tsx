@@ -399,7 +399,8 @@ export default function Benchmark() {
             reason: evaluation.reason,
             response_time_ms: result.responseTimeMs,
             status: 'completed',
-            retrieval_metadata: agentData?.metadata || {}
+            suite_category: selectedSuite,
+            retrieval_metadata: agentData?.metadata?.retrieval_metadata || agentData?.metadata || {}
           });
 
         } catch (error: any) {
@@ -414,7 +415,8 @@ export default function Benchmark() {
             question,
             ground_truth: groundTruth,
             status: 'error',
-            error: error.message
+            error: error.message,
+            suite_category: selectedSuite
           });
         }
 
