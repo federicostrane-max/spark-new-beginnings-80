@@ -524,8 +524,8 @@ export async function describeVisualElementContextAware(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048, // 🛡️ Safety limit to prevent runaway generation
+        model: 'claude-3-5-haiku-20241022', // 🏎️→🛵 Haiku economico invece di Sonnet Ferrari
+        max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 2048
         messages: [{
           role: 'user',
           content: [
@@ -656,8 +656,8 @@ Keep the description brief and factual. Use tables for numerical data when appro
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048, // 🛡️ Safety limit to prevent runaway generation
+        model: 'claude-3-5-haiku-20241022', // 🏎️→🛵 Haiku economico invece di Sonnet Ferrari
+        max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 2048
         messages: [{
           role: 'user',
           content
