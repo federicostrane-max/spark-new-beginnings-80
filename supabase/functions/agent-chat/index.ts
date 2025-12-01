@@ -1,3 +1,5 @@
+// FORCE_DEPLOY_v3: 2025-01-31T20:08:00Z - Fix Google Gemini SSE streaming (second attempt)
+// Previous deploy did not propagate - forcing fresh build
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
