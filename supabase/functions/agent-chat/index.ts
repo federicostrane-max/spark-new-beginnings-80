@@ -4473,9 +4473,9 @@ ${knowledgeContext}${searchResultsContext}`;
                 signal: controller.signal
               });
               
-            } else if (llmProvider === 'google-gemini') {
+            } else if (llmProvider === 'google' || llmProvider === 'google-gemini') {
               // Google Gemini implementation
-              geminiModel = 'gemini-2.0-flash-exp';
+              geminiModel = aiModel ? aiModel.replace('google/', '') : 'gemini-2.0-flash-exp';
               console.log('🚀 ROUTING TO GOOGLE GEMINI');
               console.log(`   Model: ${geminiModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
@@ -4927,7 +4927,7 @@ ${knowledgeContext}${searchResultsContext}`;
                   }
                   
                   // Handle Google Gemini streaming format
-                  if (llmProvider === 'google-gemini') {
+                  if (llmProvider === 'google' || llmProvider === 'google-gemini') {
                     // Gemini uses a different format - not SSE, but newline-delimited JSON
                     const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (text) {
@@ -5562,7 +5562,7 @@ ${knowledgeContext}${searchResultsContext}`;
           }
           
           // ===== GOOGLE GEMINI CONTINUATION =====
-          if (needsToolResultContinuation && llmProvider === 'google-gemini') {
+          if (needsToolResultContinuation && (llmProvider === 'google' || llmProvider === 'google-gemini')) {
             console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Gemini...`);
             console.log(`   Current geminiMessages length: ${geminiMessages.length}`);
             
