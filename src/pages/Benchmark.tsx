@@ -83,9 +83,13 @@ export default function Benchmark() {
   });
   const [sampleSize, setSampleSize] = useState(5);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [availableRuns, setAvailableRuns] = useState<Array<{ run_id: string; created_at: string; total: number }>>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [isLoadingHistorical, setIsLoadingHistorical] = useState(false);
 
   useEffect(() => {
     loadDataset();
+    loadAvailableRuns();
   }, []);
 
   const handleRegenerateTableEmbeddings = async () => {
@@ -120,6 +124,85 @@ export default function Benchmark() {
     }
   };
 
+  const loadAvailableRuns = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('benchmark_results')
+        .select('run_id, created_at')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Group by run_id and get metadata
+      const runsMap = new Map<string, { run_id: string; created_at: string; total: number }>();
+      data?.forEach(row => {
+        if (!runsMap.has(row.run_id)) {
+          runsMap.set(row.run_id, {
+            run_id: row.run_id,
+            created_at: row.created_at,
+            total: 1
+          });
+        } else {
+          const existing = runsMap.get(row.run_id)!;
+          existing.total++;
+        }
+      });
+
+      const runs = Array.from(runsMap.values());
+      setAvailableRuns(runs);
+    } catch (error) {
+      console.error('Error loading runs:', error);
+    }
+  };
+
+  const loadHistoricalResults = async (runId: string) => {
+    setIsLoadingHistorical(true);
+    try {
+      const { data, error } = await supabase
+        .from('benchmark_results')
+        .select('*')
+        .eq('run_id', runId);
+
+      if (error) throw error;
+
+      // Merge with dataset to preserve structure
+      const mergedResults: BenchmarkResult[] = dataset.map(entry => {
+        const dbResult = data?.find(r => r.pdf_file === entry.file_name && r.question.includes(entry.question));
+        if (dbResult) {
+          return {
+            pdf_file: dbResult.pdf_file,
+            question: dbResult.question,
+            groundTruth: dbResult.ground_truth,
+            agentResponse: dbResult.agent_response || undefined,
+            correct: dbResult.correct || undefined,
+            reason: dbResult.reason || undefined,
+            responseTimeMs: dbResult.response_time_ms || undefined,
+            status: dbResult.status === 'completed' ? 'completed' : 
+                    dbResult.status === 'missing' ? 'missing' :
+                    dbResult.status === 'not_ready' ? 'not_ready' :
+                    dbResult.status === 'error' ? 'error' : 'pending',
+            error: dbResult.error || undefined
+          };
+        }
+        return {
+          pdf_file: entry.file_name,
+          question: `Regarding document '${entry.file_name}': ${entry.question}`,
+          groundTruth: entry.ground_truth,
+          status: 'pending'
+        };
+      });
+
+      setResults(mergedResults);
+      setSelectedRunId(runId);
+      toast.success(`Caricato run storico: ${runId.substring(0, 8)}...`);
+    } catch (error) {
+      console.error('Error loading historical results:', error);
+      toast.error('Errore caricamento risultati storici');
+    } finally {
+      setIsLoadingHistorical(false);
+    }
+  };
+
   const loadDataset = async () => {
     try {
       // 🔧 FIX: Reset state before loading to prevent stale data
@@ -147,6 +230,12 @@ export default function Benchmark() {
           status: 'pending'
         }));
         setResults(initialResults);
+
+        // 🔧 AUTO-LOAD: Load latest completed run if exists
+        if (availableRuns.length > 0) {
+          const latestRun = availableRuns[0];
+          await loadHistoricalResults(latestRun.run_id);
+        }
       } else {
         // Fallback to legacy JSON if no database entries
         const response = await fetch('/data/docvqa-annotations.json');
@@ -431,6 +520,8 @@ export default function Benchmark() {
 
       setIsRunning(false);
       setCurrentDoc(null);
+      setSelectedRunId(runId);
+      await loadAvailableRuns(); // Refresh available runs list
       toast.success(`Benchmark completato! Run ID: ${runId.substring(0, 8)}...`);
     } catch (error: any) {
       console.error('[Benchmark] Critical error in runBenchmark:', error);
@@ -538,12 +629,47 @@ export default function Benchmark() {
               ))}
             </SelectContent>
           </Select>
+          
+          {/* Historical Run Selector */}
+          <Select 
+            value={selectedRunId || 'new'} 
+            onValueChange={(value) => {
+              if (value === 'new') {
+                setSelectedRunId(null);
+                loadDataset();
+              } else {
+                loadHistoricalResults(value);
+              }
+            }}
+            disabled={isLoadingHistorical}
+          >
+            <SelectTrigger className="w-full sm:w-[280px]">
+              <SelectValue placeholder="Seleziona Run..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="new">🆕 Nuovo Benchmark</SelectItem>
+              {availableRuns.map(run => (
+                <SelectItem key={run.run_id} value={run.run_id}>
+                  📊 {new Date(run.created_at).toLocaleString('it-IT')} ({run.total} test)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {selectedRunId && (
+            <Badge variant="outline" className="gap-2 px-3 py-1.5">
+              Run: {selectedRunId.substring(0, 8)}...
+            </Badge>
+          )}
+
           <Button
             variant="outline"
             onClick={async () => {
               setResults([]);
               setDataset([]);
+              setSelectedRunId(null);
               await loadDataset();
+              await loadAvailableRuns();
               toast.success('Dataset ricaricato');
             }}
             size="sm"
@@ -573,7 +699,7 @@ export default function Benchmark() {
           </Button>
           <Button
             onClick={runBenchmark}
-            disabled={isRunning || dataset.length === 0}
+            disabled={isRunning || dataset.length === 0 || selectedRunId !== null}
             size="sm"
             className="gap-2"
           >
