@@ -77,6 +77,62 @@ async function assignChunksToAgentPipelineA(supabase: any, documentId: string): 
   return chunks.length;
 }
 
+// Helper function to wait for Pipeline A-Hybrid document to be ready
+async function waitForDocumentReady(supabase: any, documentId: string, timeoutMs = 120000): Promise<boolean> {
+  const startTime = Date.now();
+  console.log(`[Provision Benchmark] ⏳ Waiting for document ${documentId} to be ready...`);
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const { data: doc } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('status')
+      .eq('id', documentId)
+      .single();
+    
+    if (doc?.status === 'ready') {
+      console.log(`[Provision Benchmark] ✅ Document ${documentId} is ready`);
+      return true;
+    }
+    if (doc?.status === 'failed') {
+      console.error(`[Provision Benchmark] ❌ Document ${documentId} failed processing`);
+      return false;
+    }
+    
+    await new Promise(r => setTimeout(r, 3000)); // 3 sec poll
+  }
+  
+  console.warn(`[Provision Benchmark] ⏰ Document ${documentId} timeout after ${timeoutMs}ms`);
+  return false;
+}
+
+// Helper function to wait for Pipeline A document to be ready
+async function waitForDocumentReadyPipelineA(supabase: any, documentId: string, timeoutMs = 120000): Promise<boolean> {
+  const startTime = Date.now();
+  console.log(`[Provision Benchmark] ⏳ Waiting for Pipeline A document ${documentId} to be ready...`);
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const { data: doc } = await supabase
+      .from('pipeline_a_documents')
+      .select('status')
+      .eq('id', documentId)
+      .single();
+    
+    if (doc?.status === 'ready') {
+      console.log(`[Provision Benchmark] ✅ Pipeline A document ${documentId} is ready`);
+      return true;
+    }
+    if (doc?.status === 'failed') {
+      console.error(`[Provision Benchmark] ❌ Pipeline A document ${documentId} failed processing`);
+      return false;
+    }
+    
+    await new Promise(r => setTimeout(r, 3000)); // 3 sec poll
+  }
+  
+  console.warn(`[Provision Benchmark] ⏰ Pipeline A document ${documentId} timeout after ${timeoutMs}ms`);
+  return false;
+}
+
 // Helper function to convert ArrayBuffer to base64 in chunks (prevents stack overflow)
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -282,8 +338,15 @@ serve(async (req) => {
           } else {
             results.general.success++;
             results.general.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] DocVQA ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] DocVQA ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -364,8 +427,15 @@ serve(async (req) => {
           } else {
             results.finance.success++;
             results.finance.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] FinQA ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] FinQA ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -466,8 +536,15 @@ serve(async (req) => {
           } else {
             results.charts.success++;
             results.charts.documents.push({ fileName: png.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] ChartQA ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] ChartQA ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -565,8 +642,15 @@ serve(async (req) => {
           } else {
             results.receipts.success++;
             results.receipts.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] CORD ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] CORD ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -677,8 +761,15 @@ serve(async (req) => {
           } else {
             results.science.success++;
             results.science.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] QASPER ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] QASPER ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -767,8 +858,15 @@ serve(async (req) => {
           } else {
             results.narrative.success++;
             results.narrative.documents.push({ fileName: `${doc.fileName}.md`, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] NarrativeQA ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] NarrativeQA ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -896,8 +994,15 @@ serve(async (req) => {
               results.code.failed++;
             } else {
               results.code.success++;
-              // Auto-assign Pipeline A chunks to benchmark agent
-              await assignChunksToAgentPipelineA(supabase, matchingDoc.id);
+              
+              // Auto-assign Pipeline A chunks to benchmark agent (wait for ready first)
+              const isReady = await waitForDocumentReadyPipelineA(supabase, matchingDoc.id);
+              if (isReady) {
+                const assigned = await assignChunksToAgentPipelineA(supabase, matchingDoc.id);
+                console.log(`[Provision Benchmark] Code Q&A: assigned ${assigned} chunks`);
+              } else {
+                console.warn(`[Provision Benchmark] Code document not ready, skipping assignment`);
+              }
             }
           }
           
@@ -1044,8 +1149,15 @@ serve(async (req) => {
           } else {
             results.hybrid.success++;
             results.hybrid.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] Hybrid PDF ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] Hybrid PDF ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -1134,8 +1246,15 @@ serve(async (req) => {
           } else {
             results.trading.success++;
             results.trading.documents.push({ fileName: img.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] Trading ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] Trading ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
@@ -1315,8 +1434,15 @@ serve(async (req) => {
           } else {
             results.financebench.success++;
             results.financebench.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
-            // Auto-assign chunks to benchmark agent
-            await assignChunksToAgent(supabase, result.data.documentId);
+            
+            // Auto-assign chunks to benchmark agent (wait for ready first)
+            const isReady = await waitForDocumentReady(supabase, result.data.documentId);
+            if (isReady) {
+              const assigned = await assignChunksToAgent(supabase, result.data.documentId);
+              console.log(`[Provision Benchmark] FinanceBench ${i + 1}: assigned ${assigned} chunks`);
+            } else {
+              console.warn(`[Provision Benchmark] FinanceBench ${i + 1}: document not ready, skipping assignment`);
+            }
           }
         }
         
