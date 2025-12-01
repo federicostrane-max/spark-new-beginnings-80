@@ -139,30 +139,150 @@ serve(async (req) => {
           throw new Error(`Failed to download file: ${downloadError?.message || 'No data'}`);
         }
 
+        // ===== PHASE 0: CONTEXT ANALYZER (COMMON TO ALL SOURCE TYPES) =====
+        console.log('[Context Analyzer] Starting document context analysis...');
+        const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+        
+        let documentContext: any = {
+          domain: 'general',
+          focusElements: [],
+          terminology: [],
+          verbosity: 'conceptual'
+        };
+
+        // Extract text sample for context analysis
+        let textSample = '';
+        if (doc.source_type === 'markdown') {
+          const markdownText = await fileData.text();
+          textSample = markdownText.substring(0, 2000);
+        } else if (doc.source_type === 'pdf') {
+          // PDF: analyze after reconstruction (done later in PDF block)
+          textSample = ''; // Will be set later
+        } else if (doc.source_type === 'image') {
+          textSample = ''; // Images have no text for context
+        }
+
+        if (anthropicKey && textSample.length > 100) {
+          try {
+            const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
+            documentContext = await analyzeDocumentContext(textSample, anthropicKey, doc.file_name);
+            
+            traceReport.context_analysis = {
+              domain: documentContext.domain,
+              focus_elements: documentContext.focusElements || [],
+              terminology: documentContext.terminology || [],
+              verbosity: documentContext.verbosity,
+              analysis_model: 'claude-3-5-haiku-20241022'
+            };
+            
+            console.log(`[Context Analyzer] ✓ Domain: ${documentContext.domain}`);
+            console.log(`[Context Analyzer] ✓ Focus: ${documentContext.focusElements?.join(', ') || 'general'}`);
+            console.log(`[Context Analyzer] ✓ Verbosity: ${documentContext.verbosity}`);
+          } catch (err) {
+            console.warn('[Context Analyzer] Failed, using general context:', err);
+            traceReport.context_analysis.skipped_reason = `Analysis failed: ${err}`;
+          }
+        } else if (doc.source_type !== 'pdf') {
+          console.log('[Context Analyzer] Skipped (no Anthropic key or insufficient text)');
+          traceReport.context_analysis.skipped_reason = 'No Anthropic key or insufficient text';
+        }
+
         // ===== FORK BASED ON SOURCE_TYPE =====
         let superDocumentToChunk: string;
         let chunks: any[];
         let metadata: any = {};
 
         if (doc.source_type === 'markdown') {
-          // MARKDOWN PATH: Skip LlamaParse, parse directly
+          // MARKDOWN PATH: Context-aware with embedded image enrichment
           console.log(`[Pipeline A-Hybrid Process] Processing Markdown file: ${doc.file_name}`);
-          const markdownContent = await fileData.text();
+          let markdownContent = await fileData.text();
           
-          console.log('[Pipeline A-Hybrid Process] Parsing Markdown elements directly');
+          // Helper: detect embedded images
+          function detectEmbeddedImages(markdown: string): Array<{alt: string; url: string; position: number}> {
+            const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+            const images: Array<{alt: string; url: string; position: number}> = [];
+            let match;
+            while ((match = imageRegex.exec(markdown)) !== null) {
+              images.push({ alt: match[1], url: match[2], position: match.index });
+            }
+            return images;
+          }
+          
+          const embeddedImages = detectEmbeddedImages(markdownContent);
+          console.log(`[Markdown Visual Enrichment] Found ${embeddedImages.length} embedded image(s)`);
+          
+          if (embeddedImages.length > 0 && anthropicKey) {
+            traceReport.visual_enrichment.elements_found = embeddedImages.length;
+            
+            const { describeVisualElementContextAware } = await import("../_shared/visionEnhancer.ts");
+            
+            for (const img of embeddedImages) {
+              try {
+                console.log(`[Markdown Visual Enrichment] Fetching and describing: ${img.url}`);
+                
+                // Fetch image from URL
+                const imageResponse = await fetch(img.url);
+                if (!imageResponse.ok) {
+                  console.warn(`[Markdown Visual Enrichment] Failed to fetch ${img.url}: ${imageResponse.status}`);
+                  traceReport.visual_enrichment.elements_failed++;
+                  continue;
+                }
+                
+                const imageBuffer = new Uint8Array(await imageResponse.arrayBuffer());
+                
+                // Context-aware description
+                const description = await describeVisualElementContextAware(
+                  imageBuffer,
+                  'embedded_image',
+                  documentContext,
+                  anthropicKey
+                );
+                
+                // Replace image reference with description
+                const imageMarkdown = `![${img.alt}](${img.url})`;
+                const enrichedMarkdown = `\n\n**${img.alt || 'Figure'}:**\n${description}\n\n`;
+                markdownContent = markdownContent.replace(imageMarkdown, enrichedMarkdown);
+                
+                traceReport.visual_enrichment.elements_processed++;
+                traceReport.visual_enrichment.details.push({
+                  name: img.url,
+                  type: 'embedded_image',
+                  page: 0,
+                  chars_generated: description.length,
+                  prompt_domain: documentContext.domain,
+                  success: true
+                });
+                
+                console.log(`[Markdown Visual Enrichment] ✓ Enriched ${img.url} (${description.length} chars)`);
+              } catch (err) {
+                console.warn(`[Markdown Visual Enrichment] Failed to process ${img.url}:`, err);
+                traceReport.visual_enrichment.elements_failed++;
+                traceReport.visual_enrichment.details.push({
+                  name: img.url,
+                  type: 'embedded_image',
+                  page: 0,
+                  chars_generated: 0,
+                  prompt_domain: documentContext.domain,
+                  success: false,
+                  error: String(err)
+                });
+              }
+            }
+          }
+          
+          console.log('[Pipeline A-Hybrid Process] Parsing enriched Markdown elements');
           const parseResult = await parseMarkdownElements(markdownContent, lovableApiKey);
           chunks = parseResult.baseNodes;
           
           metadata = {
             source_type: 'markdown',
             chunks_generated: chunks.length,
-            processing_method: 'direct_markdown_parse'
+            processing_method: embeddedImages.length > 0 ? 'markdown_with_visual_enrichment' : 'direct_markdown_parse',
+            embedded_images_found: embeddedImages.length,
+            embedded_images_enriched: traceReport.visual_enrichment.elements_processed
           };
           
-          // Update trace report
-          traceReport.context_analysis.skipped_reason = 'Markdown source - no PDF context analysis needed';
-          
-          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from Markdown`);
+          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from Markdown (${embeddedImages.length} images enriched)`);
         } else if (doc.source_type === 'image') {
           // IMAGE PATH: Claude Vision direct (bypass LlamaParse)
           console.log(`[Pipeline A-Hybrid Process] Processing image document: ${doc.file_name}`);
@@ -281,44 +401,31 @@ serve(async (req) => {
           console.log(`[Pipeline A-Hybrid Process] Reconstruction completed: ${orderedElements.length} elements ordered, ${headingMap?.size || 0} headings mapped`);
           console.log(`[Pipeline A-Hybrid Process] Super-document length: ${superDocument.length} characters`);
 
-          // ===== FASE 1: CONTEXT ANALYZER (Director for PDF) =====
-          console.log('[Context Analyzer] Starting document context analysis...');
-          const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-          
-          let documentContext: any = {
-            domain: 'general',
-            focusElements: [],
-            terminology: [],
-            verbosity: 'conceptual'
-          };
-
-          if (anthropicKey && superDocument.length > 100) {
-            try {
-              // Extract text sample for context analysis (first 2000 chars)
-              const textSample = superDocument.substring(0, 2000);
-              
-              const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
-              documentContext = await analyzeDocumentContext(textSample, anthropicKey);
-              
-              // Update trace report
-              traceReport.context_analysis = {
-                domain: documentContext.domain,
-                focus_elements: documentContext.focusElements || [],
-                terminology: documentContext.terminology || [],
-                verbosity: documentContext.verbosity,
-                analysis_model: 'claude-3-5-haiku-20241022'
-              };
-              
-              console.log(`[Context Analyzer] ✓ Domain: ${documentContext.domain}`);
-              console.log(`[Context Analyzer] ✓ Focus: ${documentContext.focusElements?.join(', ') || 'general'}`);
-              console.log(`[Context Analyzer] ✓ Verbosity: ${documentContext.verbosity}`);
-            } catch (err) {
-              console.warn('[Context Analyzer] Failed, using general context:', err);
-              traceReport.context_analysis.skipped_reason = `Analysis failed: ${err}`;
+          // ===== FASE 1: CONTEXT ANALYZER for PDF (reuse or analyze if not done) =====
+          if (!documentContext.domain || documentContext.domain === 'general') {
+            console.log('[Context Analyzer] Analyzing PDF context...');
+            
+            if (anthropicKey && superDocument.length > 100) {
+              try {
+                const textSample = superDocument.substring(0, 2000);
+                const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
+                documentContext = await analyzeDocumentContext(textSample, anthropicKey, doc.file_name);
+                
+                traceReport.context_analysis = {
+                  domain: documentContext.domain,
+                  focus_elements: documentContext.focusElements || [],
+                  terminology: documentContext.terminology || [],
+                  verbosity: documentContext.verbosity,
+                  analysis_model: 'claude-3-5-haiku-20241022'
+                };
+                
+                console.log(`[Context Analyzer] ✓ Domain: ${documentContext.domain}`);
+                console.log(`[Context Analyzer] ✓ Focus: ${documentContext.focusElements?.join(', ') || 'general'}`);
+              } catch (err) {
+                console.warn('[Context Analyzer] Failed, using general context:', err);
+                traceReport.context_analysis.skipped_reason = `Analysis failed: ${err}`;
+              }
             }
-          } else {
-            console.log('[Context Analyzer] Skipped (no Anthropic key or insufficient text)');
-            traceReport.context_analysis.skipped_reason = 'No Anthropic key or insufficient text';
           }
 
           // ===== FASE 2 & 3: ASYNC VISUAL ENRICHMENT QUEUE =====
