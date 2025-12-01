@@ -27,7 +27,7 @@ import {
 const getDefaultModelForProvider = (provider: string): string => {
   switch (provider) {
     case 'deepseek': return 'deepseek-reasoner'; // Most powerful
-    case 'google': return 'google/gemini-2.5-flash';
+    case 'google': return 'google/gemini-3-pro-preview';
     case 'anthropic': return 'claude-sonnet-4-20250514';
     case 'openai': return 'gpt-4o';
     case 'mistral': return 'mistral-large-latest';
@@ -63,6 +63,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
   const [systemPrompt, setSystemPrompt] = useState("");
   const [llmProvider, setLlmProvider] = useState("anthropic");
   const [aiModel, setAiModel] = useState<string>("");
+  const [prevProvider, setPrevProvider] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -96,11 +97,20 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
   // Auto-set default model when provider changes
   useEffect(() => {
-    if (llmProvider && (!aiModel || aiModel === '')) {
-      const defaultModel = getDefaultModelForProvider(llmProvider);
-      setAiModel(defaultModel);
+    if (llmProvider) {
+      // Se il provider è cambiato, aggiorna il modello al default del nuovo provider
+      if (prevProvider && prevProvider !== llmProvider) {
+        const defaultModel = getDefaultModelForProvider(llmProvider);
+        setAiModel(defaultModel);
+      }
+      // Se non c'è modello, imposta il default
+      else if (!aiModel || aiModel === '') {
+        const defaultModel = getDefaultModelForProvider(llmProvider);
+        setAiModel(defaultModel);
+      }
+      setPrevProvider(llmProvider);
     }
-  }, [llmProvider]);
+  }, [llmProvider, prevProvider, aiModel]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
