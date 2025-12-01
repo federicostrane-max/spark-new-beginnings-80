@@ -304,6 +304,51 @@ export async function extractJsonWithLayout(
 }
 
 /**
+ * Resilient PDF to JSON extraction with immediate job ID persistence
+ * Allows saving job ID BEFORE polling starts (critical for timeout recovery)
+ * @param pdfBuffer - PDF file as Uint8Array
+ * @param fileName - Original file name
+ * @param apiKey - LlamaParse API key
+ * @param onJobCreated - Optional callback executed immediately after job creation
+ * @returns JSON content with layout and job ID
+ */
+export async function extractJsonWithLayoutAndCallback(
+  pdfBuffer: Uint8Array,
+  fileName: string,
+  apiKey: string,
+  onJobCreated?: (jobId: string) => Promise<void>
+): Promise<LlamaParseJsonResult> {
+  // Step 1: Upload PDF (otteniamo subito il Job ID)
+  const jobId = await uploadToLlamaParseJson(pdfBuffer, fileName, apiKey);
+  console.log(`[LlamaParse] Upload successful, job_id: ${jobId}`);
+
+  // ✅ CRITICAL: Persist job ID IMMEDIATELY via callback (before polling)
+  if (onJobCreated) {
+    console.log(`[LlamaParse] Executing persistence callback for ${jobId}...`);
+    await onJobCreated(jobId);
+    console.log(`[LlamaParse] Persistence callback completed`);
+  }
+
+  // Step 2: Poll until complete (questa fase può andare in timeout, ma l'ID è salvo)
+  console.log(`[LlamaParse] Starting polling for ${jobId}...`);
+  const jobStatus = await pollJobUntilComplete(jobId, apiKey);
+
+  // Step 3: Extract JSON
+  let rawJson: any;
+  if (jobStatus.result) {
+    rawJson = jobStatus.result;
+  } else {
+    rawJson = await getJsonResult(jobId, apiKey);
+  }
+
+  return {
+    jobId,
+    rawJson,
+    status: 'SUCCESS',
+  };
+}
+
+/**
  * Complete PDF to Markdown extraction workflow
  * @param pdfBuffer - PDF file as Uint8Array
  * @param fileName - Original file name

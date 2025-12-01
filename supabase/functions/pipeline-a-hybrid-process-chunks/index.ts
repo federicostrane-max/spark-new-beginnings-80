@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
-import { extractJsonWithLayout } from "../_shared/llamaParseClient.ts";
+import { extractJsonWithLayoutAndCallback, pollJobUntilComplete, getJsonResult, type LlamaParseJsonResult } from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
 import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudePDF, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
@@ -175,11 +175,68 @@ serve(async (req) => {
           // PDF PATH: LlamaParse + Context-Aware Visual Enrichment
           const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
 
-          // Extract JSON with layout from LlamaParse
+          // ===== LOGICA RESUME POLLING + PERSISTENZA IMMEDIATA =====
           console.log(`[Pipeline A-Hybrid Process] Starting LlamaParse for ${doc.file_name}, size: ${pdfBuffer.length} bytes`);
-          const startTime = Date.now();
-          const jsonResult = await extractJsonWithLayout(pdfBuffer, doc.file_name, llamaCloudKey);
-          console.log(`[Pipeline A-Hybrid Process] LlamaParse completed in ${Date.now() - startTime}ms, jobId: ${jsonResult.jobId}`);
+          const llamaStartTime = Date.now();
+
+          let jsonResult: LlamaParseJsonResult;
+
+          if (doc.llamaparse_job_id) {
+            // RESUME MODE: Il documento ha già un Job ID (probabile timeout precedente)
+            console.log(`[Pipeline A-Hybrid Process] 🔄 RESUMING existing LlamaParse job: ${doc.llamaparse_job_id}`);
+
+            try {
+              // Tentiamo di riprendere il polling sul job esistente
+              const jobStatus = await pollJobUntilComplete(doc.llamaparse_job_id, llamaCloudKey);
+
+              let rawJson: any;
+              if (jobStatus.result) {
+                rawJson = jobStatus.result;
+              } else {
+                rawJson = await getJsonResult(doc.llamaparse_job_id, llamaCloudKey);
+              }
+
+              jsonResult = {
+                jobId: doc.llamaparse_job_id,
+                rawJson,
+                status: 'SUCCESS'
+              };
+              console.log(`[Pipeline A-Hybrid Process] ✅ Resume successful for job ${doc.llamaparse_job_id} in ${Date.now() - llamaStartTime}ms`);
+
+            } catch (resumeError) {
+              console.warn(`[Pipeline A-Hybrid Process] ⚠️ Resume failed for ${doc.llamaparse_job_id}, creating new job:`, resumeError);
+              
+              // Fallback: Se il vecchio job è scaduto/invalido, ne creiamo uno nuovo
+              jsonResult = await extractJsonWithLayoutAndCallback(
+                pdfBuffer, 
+                doc.file_name, 
+                llamaCloudKey,
+                async (jobId: string) => {
+                  console.log(`[Pipeline A-Hybrid Process] 💾 Persisting NEW llamaparse_job_id (fallback): ${jobId}`);
+                  await supabase
+                    .from('pipeline_a_hybrid_documents')
+                    .update({ llamaparse_job_id: jobId })
+                    .eq('id', doc.id);
+                }
+              );
+            }
+          } else {
+            // NEW MODE: Primo tentativo - crea nuovo job con persistenza immediata
+            jsonResult = await extractJsonWithLayoutAndCallback(
+              pdfBuffer, 
+              doc.file_name, 
+              llamaCloudKey,
+              async (jobId: string) => {
+                console.log(`[Pipeline A-Hybrid Process] 💾 Persisting NEW llamaparse_job_id: ${jobId}`);
+                await supabase
+                  .from('pipeline_a_hybrid_documents')
+                  .update({ llamaparse_job_id: jobId })
+                  .eq('id', doc.id);
+              }
+            );
+          }
+
+          console.log(`[Pipeline A-Hybrid Process] LlamaParse completed in ${Date.now() - llamaStartTime}ms, jobId: ${jsonResult.jobId}`);
           console.log(`[Pipeline A-Hybrid Process] Raw JSON has ${jsonResult.rawJson?.items?.length || 0} items, ${jsonResult.rawJson?.layout?.length || 0} layout elements`);
 
           // Reconstruct document using hierarchical algorithm
