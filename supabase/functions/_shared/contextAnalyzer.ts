@@ -113,7 +113,7 @@ export async function analyzeDocumentContext(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022', // Fast model for quick analysis
+        model: 'claude-haiku-4-5-20251001', // Fast model for quick analysis - Claude 4.5 family
         max_tokens: 1024,
         messages: [{
           role: 'user',
