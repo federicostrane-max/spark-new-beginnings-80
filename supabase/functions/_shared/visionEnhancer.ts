@@ -113,7 +113,7 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
+        max_tokens: 2048, // 🛡️ Safety limit to prevent runaway generation
         messages: [{
           role: 'user',
           content: [
