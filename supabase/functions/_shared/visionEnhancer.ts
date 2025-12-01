@@ -112,7 +112,7 @@ sono RISOLTE usando il contesto disponibile nel documento stesso.`;
         'content-type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022', // 🏎️→🛵 Haiku economico invece di Sonnet Ferrari
+        model: 'claude-haiku-4-5-20251001', // 🏎️→🛵 Haiku 4.5 economico invece di Sonnet Ferrari
         max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 4096
         messages: [{
           role: 'user',
@@ -524,7 +524,7 @@ export async function describeVisualElementContextAware(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022', // 🏎️→🛵 Haiku economico invece di Sonnet Ferrari
+        model: 'claude-haiku-4-5-20251001', // 🏎️→🛵 Haiku 4.5 economico invece di Sonnet Ferrari
         max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 2048
         messages: [{
           role: 'user',
@@ -656,7 +656,7 @@ Keep the description brief and factual. Use tables for numerical data when appro
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022', // 🏎️→🛵 Haiku economico invece di Sonnet Ferrari
+        model: 'claude-haiku-4-5-20251001', // 🏎️→🛵 Haiku 4.5 economico invece di Sonnet Ferrari
         max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 2048
         messages: [{
           role: 'user',
