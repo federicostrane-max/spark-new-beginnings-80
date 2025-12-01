@@ -4550,7 +4550,7 @@ ${knowledgeContext}${searchResultsContext}`;
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,
-                  stream: false // ✅ Disabilitato per debug pulito e fatturazione chiara
+                  stream: true // ✅ Riabilitato per compatibilità con parser SSE
                 }),
                 signal: controller.signal
               });
