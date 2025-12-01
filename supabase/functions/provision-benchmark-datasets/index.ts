@@ -1069,14 +1069,18 @@ serve(async (req) => {
       
       try {
         // Fetch FinanceBench dataset from GitHub
-        const dataUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.json';
+        const dataUrl = 'https://raw.githubusercontent.com/patronus-ai/financebench/main/data/financebench_open_source.jsonl';
         const headers: any = { 'Accept': 'application/json' };
         if (githubToken) headers['Authorization'] = `token ${githubToken}`;
 
         const response = await fetch(dataUrl, { headers });
         if (!response.ok) throw new Error(`Failed to fetch FinanceBench: ${response.statusText}`);
         
-        const financebenchData = await response.json();
+        const textContent = await response.text();
+        const financebenchData = textContent
+          .split('\n')
+          .filter(line => line.trim())
+          .map(line => JSON.parse(line));
         console.log(`[Provision Benchmark] Fetched ${financebenchData.length} FinanceBench entries`);
 
         // Sample documents (limit to sampleSize)
