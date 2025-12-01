@@ -42,8 +42,24 @@ Deno.serve(async (req) => {
 
     console.log(`[check-agent-health] Checking health for agent: ${agentId}`);
 
-    const { data: syncStatus, error: rpcError } = await supabase
-      .rpc('get_agent_sync_status', { p_agent_id: agentId });
+    // Add 5-second timeout to prevent hanging requests
+    const rpcPromise = supabase.rpc('get_agent_sync_status', { p_agent_id: agentId });
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('RPC timeout after 5 seconds')), 5000)
+    );
+
+    let syncStatus, rpcError;
+    try {
+      const result = await Promise.race([rpcPromise, timeoutPromise]);
+      syncStatus = (result as any).data;
+      rpcError = (result as any).error;
+    } catch (timeoutError) {
+      console.error('[check-agent-health] RPC timeout:', timeoutError);
+      return new Response(
+        JSON.stringify({ error: 'Agent health check timed out' }),
+        { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     if (rpcError) {
       console.error('[check-agent-health] RPC error:', rpcError);
