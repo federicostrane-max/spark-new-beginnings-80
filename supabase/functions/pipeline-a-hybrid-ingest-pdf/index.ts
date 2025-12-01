@@ -8,7 +8,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BIG_FILE_THRESHOLD = 10 * 1024 * 1024; // 10MB
+const BIG_FILE_THRESHOLD = 1 * 1024 * 1024; // 1MB - dense PDFs (10-K reports) are small but complex
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {

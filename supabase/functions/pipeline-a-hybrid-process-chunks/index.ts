@@ -81,6 +81,24 @@ serve(async (req) => {
           documents.push(...stuckDocs);
         }
       }
+      
+      // 3. Zombie documents (processing but never got job_id, stuck > 5 minutes)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      if (documents.length < BATCH_SIZE) {
+        const { data: zombieDocs } = await supabase
+          .from('pipeline_a_hybrid_documents')
+          .select('*')
+          .eq('status', 'processing')
+          .is('llamaparse_job_id', null)
+          .lt('updated_at', fiveMinutesAgo)
+          .order('updated_at', { ascending: true })
+          .limit(BATCH_SIZE - documents.length);
+        
+        if (zombieDocs && zombieDocs.length > 0) {
+          console.log(`[Pipeline A-Hybrid Process] 🧟 Found ${zombieDocs.length} zombie document(s) - timeout before job_id`);
+          documents.push(...zombieDocs);
+        }
+      }
     }
 
     if (!documents || documents.length === 0) {
