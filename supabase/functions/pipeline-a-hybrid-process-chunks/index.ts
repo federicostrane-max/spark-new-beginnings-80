@@ -28,6 +28,12 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const llamaCloudKey = Deno.env.get('LLAMA_CLOUD_API_KEY')!;
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    
+    if (!lovableApiKey) {
+      throw new Error('LOVABLE_API_KEY not configured');
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     console.log('[Pipeline A-Hybrid Process] Starting chunk processing');
@@ -144,7 +150,7 @@ serve(async (req) => {
           const markdownContent = await fileData.text();
           
           console.log('[Pipeline A-Hybrid Process] Parsing Markdown elements directly');
-          const parseResult = await parseMarkdownElements(markdownContent, doc.file_name);
+          const parseResult = await parseMarkdownElements(markdownContent, lovableApiKey);
           chunks = parseResult.baseNodes;
           
           metadata = {
@@ -176,7 +182,7 @@ serve(async (req) => {
           
           // Generate chunks from description
           console.log('[Pipeline A-Hybrid Process] Parsing image description into chunks');
-          const parseResult = await parseMarkdownElements(imageDescription, doc.file_name);
+          const parseResult = await parseMarkdownElements(imageDescription, lovableApiKey);
           chunks = parseResult.baseNodes;
           
           metadata = {
@@ -519,9 +525,9 @@ serve(async (req) => {
          
          // 🧹 MEMORY: pdfBuffer no longer needed after Vision Enhancement - eligible for GC
 
-         // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
+          // Parse reconstructed document into chunks (using enhanced doc if Vision was used)
           console.log('[Pipeline A-Hybrid Process] Chunking reconstructed document');
-          const parseResult = await parseMarkdownElements(superDocumentToChunk, doc.file_name);
+          const parseResult = await parseMarkdownElements(superDocumentToChunk, lovableApiKey);
           chunks = parseResult.baseNodes;
 
           metadata = {
