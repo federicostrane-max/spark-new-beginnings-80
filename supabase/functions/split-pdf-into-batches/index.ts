@@ -102,7 +102,7 @@ serve(async (req) => {
         .from('pipeline-a-uploads')
         .upload(batchFilePath, batchPdfBytes, {
           contentType: 'application/pdf',
-          upsert: false
+          upsert: true  // Allow re-processing by overwriting existing batches
         });
 
       if (uploadError) {
