@@ -225,6 +225,45 @@ serve(async (req) => {
       }
     }
 
+    // ===== CHUNK-JOB LINKING: Match placeholders with queue jobs =====
+    console.log('[Process Batch] Linking chunks to visual enrichment jobs...');
+
+    const { data: createdChunks, error: fetchError } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id, content')
+      .eq('document_id', job.document_id)
+      .eq('batch_index', job.batch_index)
+      .like('content', '%[VISUAL_ENRICHMENT_PENDING:%');
+
+    if (fetchError) {
+      console.error('[Process Batch] Failed to fetch chunks with placeholders:', fetchError);
+    } else if (createdChunks && createdChunks.length > 0) {
+      let linkedCount = 0;
+      
+      for (const chunk of createdChunks) {
+        const match = chunk.content.match(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/);
+        if (match && match[1]) {
+          const queueId = match[1];
+          
+          const { error: updateError } = await supabase
+            .from('visual_enrichment_queue')
+            .update({ chunk_id: chunk.id })
+            .eq('id', queueId)
+            .eq('document_id', job.document_id);
+          
+          if (updateError) {
+            console.error(`[Process Batch] Failed to link chunk ${chunk.id} to job ${queueId}:`, updateError);
+          } else {
+            linkedCount++;
+          }
+        }
+      }
+      
+      console.log(`[Process Batch] ✅ Linked ${linkedCount}/${createdChunks.length} chunks to their visual jobs`);
+    } else {
+      console.log('[Process Batch] No chunks with visual placeholders to link');
+    }
+
     // Update job status
     await supabase
       .from('processing_jobs')
