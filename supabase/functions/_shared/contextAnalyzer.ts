@@ -12,35 +12,43 @@ export interface DocumentContext {
 }
 
 const CONTEXT_ANALYZER_PROMPT = `
-Sei un analista esperto che prepara istruzioni per l'analisi visiva di documenti.
+You are an expert analyst preparing instructions for visual document analysis.
 
-COMPITO: Analizza questo estratto di testo per determinare:
+TASK: Analyze this text excerpt to determine:
 
-1. DOMINIO: L'argomento preciso del documento
-   Esempi: trading, finanza, architettura, ingegneria, medicina, legale, scientifico, etc.
+1. DOMAIN: The precise document subject matter
+   IMPORTANT - You MUST return one of these EXACT English values:
+   - "finance" (for 10-K reports, annual reports, balance sheets, income statements, financial statements)
+   - "trading" (for trading charts, candlestick analysis, technical indicators)
+   - "architecture" (for building plans, floor plans, architectural drawings)
+   - "medical" (for medical reports, diagnostics, lab results)
+   - "legal" (for contracts, legal documents, agreements)
+   - "science" (for scientific papers, research documents)
+   - "general" (if none of the above clearly applies)
 
-2. ELEMENTI VISIVI CRITICI: Se il documento contiene grafici/tabelle/figure, 
-   quali dettagli visivi saranno essenziali?
-   - Trading/Finanza: candlestick patterns, indicatori tecnici (SMA, EMA, RSI), livelli di prezzo
-   - Architettura: dimensioni stanze, orientamento, materiali, scale
-   - Medicina: valori diagnostici, referti, anatomia
-   - Ingegneria: misure tecniche, tolleranze, specifiche
+2. VISUAL ELEMENTS: If the document contains charts/tables/figures,
+   which visual details will be essential?
+   - Finance: financial tables, revenue figures, balance sheet items, year-over-year comparisons
+   - Trading: candlestick patterns, technical indicators (SMA, EMA, RSI), price levels
+   - Architecture: room dimensions, orientation, materials, scale
+   - Medical: diagnostic values, reports, anatomy
+   - Engineering: technical measurements, tolerances, specifications
 
-3. TERMINOLOGIA: Quali termini tecnici sono usati nel documento?
+3. TERMINOLOGY: Which technical terms are used in the document?
 
-4. CALIBRAZIONE VERBOSITÀ:
-   - PEDANTIC: Per documenti tecnici dove ogni numero/valore conta
-   - CONCEPTUAL: Per documenti discorsivi dove contano i concetti
+4. VERBOSITY CALIBRATION:
+   - PEDANTIC: For technical documents where every number/value matters
+   - CONCEPTUAL: For discursive documents where concepts matter
 
 OUTPUT (JSON):
 {
-  "domain": "nome_dominio",
-  "focusElements": ["elemento1", "elemento2", ...],
-  "terminology": ["termine1", "termine2", ...],
+  "domain": "one_of_the_exact_values_listed_above",
+  "focusElements": ["element1", "element2", ...],
+  "terminology": ["term1", "term2", ...],
   "verbosity": "pedantic" | "conceptual"
 }
 
-Rispondi SOLO con il JSON, senza preamboli.
+Respond ONLY with the JSON, no preamble.
 `;
 
 /**
@@ -135,7 +143,32 @@ export async function analyzeDocumentContext(
     
     const context = JSON.parse(cleanJson);
     
-    console.log(`[Context Analyzer] Domain detected: ${context.domain}`);
+    // NORMALIZE DOMAIN: Map variants to standard English keys
+    const domainNormalization: Record<string, string> = {
+      'finanza': 'finance',
+      'financial': 'finance',
+      'finanziario': 'finance',
+      'contabilità': 'finance',
+      'accounting': 'finance',
+      'trading_view_pro': 'trading_view_pro',
+      'trading': 'trading',
+      'architettura': 'architecture',
+      'architectural': 'architecture',
+      'medicina': 'medical',
+      'medico': 'medical',
+      'healthcare': 'medical',
+      'legale': 'legal',
+      'contracts': 'legal',
+      'scientifico': 'science',
+      'scientific': 'science',
+      'research': 'science',
+      'scienza': 'science',
+    };
+    
+    const rawDomain = (context.domain || 'general').toLowerCase().trim();
+    context.domain = domainNormalization[rawDomain] || rawDomain;
+    
+    console.log(`[Context Analyzer] Domain detected: ${context.domain} (raw: ${rawDomain})`);
     console.log(`[Context Analyzer] Focus elements: ${context.focusElements?.join(', ') || 'none'}`);
     console.log(`[Context Analyzer] Verbosity: ${context.verbosity || 'conceptual'}`);
     
