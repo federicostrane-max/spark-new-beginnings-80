@@ -218,7 +218,7 @@ export default function Benchmark() {
     }
   };
 
-  const loadDataset = async () => {
+  const loadDataset = async (skipAutoLoad: boolean = false) => {
     try {
       // 🔧 FIX: Reset state before loading to prevent stale data
       setResults([]);
@@ -246,8 +246,8 @@ export default function Benchmark() {
         }));
         setResults(initialResults);
 
-        // 🔧 AUTO-LOAD: Load latest completed run if exists
-        if (availableRuns.length > 0) {
+        // 🔧 AUTO-LOAD: Load latest completed run if exists (skip when user explicitly selects "Nuovo Benchmark")
+        if (!skipAutoLoad && availableRuns.length > 0) {
           const latestRun = availableRuns[0];
           await loadHistoricalResults(latestRun.run_id);
         }
@@ -651,7 +651,7 @@ export default function Benchmark() {
             onValueChange={(value) => {
               if (value === 'new') {
                 setSelectedRunId(null);
-                loadDataset();
+                loadDataset(true);
               } else {
                 loadHistoricalResults(value);
               }
@@ -683,7 +683,7 @@ export default function Benchmark() {
               setResults([]);
               setDataset([]);
               setSelectedRunId(null);
-              await loadDataset();
+              await loadDataset(true);
               await loadAvailableRuns();
               toast.success('Dataset ricaricato');
             }}
