@@ -60,12 +60,17 @@ serve(async (req) => {
       // Decode base64 image
       const imageBuffer = Uint8Array.from(atob(queueItem.image_base64), c => c.charCodeAt(0));
 
+      // Extract page number from metadata for RAG
+      const metadata = queueItem.image_metadata || {};
+      const pageNumber = metadata.page;
+
       // Call Vision API with context-aware prompt
       const enrichmentText = await describeVisualElementContextAware(
         imageBuffer,
-        queueItem.element_type,
-        queueItem.document_context || {},
-        anthropicKey
+        queueItem.element_type || metadata.type || 'layout_picture',
+        queueItem.document_context || metadata.document_context || {},
+        anthropicKey,
+        pageNumber  // Pass page number for RAG metadata
       );
 
       // Update queue item with result

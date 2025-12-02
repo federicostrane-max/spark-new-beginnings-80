@@ -320,14 +320,16 @@ function detectImageType(buffer: Uint8Array): { format: string; media_type: stri
  */
 export function buildContextAwareVisualPrompt(
   context: any, // DocumentContext from contextAnalyzer
-  elementType: string  // 'layout_table' | 'layout_picture' | 'layout_keyValueRegion'
+  elementType: string,  // 'layout_table' | 'layout_picture' | 'layout_keyValueRegion'
+  pageNumber?: number  // Optional page number for RAG metadata
 ): string {
   
   // Base prompt per tipo elemento
   const basePrompts: Record<string, string> = {
-    'layout_table': 'Analizza questa TABELLA.',
-    'layout_picture': 'Analizza questo GRAFICO/FIGURA.',
-    'layout_keyValueRegion': 'Analizza questa regione chiave-valore.',
+    'layout_table': 'Analyze this TABLE.',
+    'layout_picture': 'Analyze this CHART/FIGURE.',
+    'layout_keyValueRegion': 'Analyze this key-value region.',
+    'embedded_image': 'Analyze this embedded image.',
   };
   
   // Domain-specific enhancements (come enhanceAnalystPrompt per video)
@@ -383,13 +385,29 @@ ANALISI PROFESSIONALE SCREENSHOT TRADINGVIEW:
 OUTPUT: Markdown strutturato con TUTTI i valori numerici estratti.
 PRECISIONE: Ogni numero deve essere trascritto esattamente come appare.`,
 
-    'finance': `
-FOCUS SPECIFICO PER FINANZA:
-- Estrai TUTTI i valori numerici con unità di misura
-- Identifica trend (crescente, decrescente, stabile)
-- Nota percentuali, variazioni, confronti anno su anno
-- Documenta legenda e assi con precisione
-VERBOSITÀ: ALTA - i numeri sono critici`,
+    'finance': `MODE: DENSE DATA SERIALIZATION
+TARGET: Financial Reports (10-K, Balance Sheets, Income Statements)
+
+REQUIRED OUTPUT FORMAT:
+[TYPE] {Table / Chart / Text / Infographic}
+[TITLE] {Exact title found in image}
+[PAGE] {Use page number from METADATA below, or "unknown"}
+[CONTEXT] {Time period, Currency units (e.g., $ Millions), Company Name}
+[DATA]
+For financial statements with multiple year columns, USE MARKDOWN TABLE FORMAT:
+|                | 2017    | 2018    | YoY %   |
+|----------------|---------|---------|---------|
+| Revenue        | 31,657  | 32,765  | +3.5%   |
+
+EXTRACT ALL ROWS containing numerical values.
+Omit ONLY decorative separator lines or empty whitespace.
+[NOTE] {Any footnotes or asterisks attached to data}
+[INSIGHTS] {Max 1-2 sentences on visible trends, optional}
+
+CONSTRAINTS:
+- No conversational filler ("The table shows...", "We can observe...").
+- Pure data transcription only.
+- Preserve exact number formatting from source.`,
 
     'architecture': `
 FOCUS SPECIFICO PER ARCHITETTURA:
@@ -420,23 +438,19 @@ VERBOSITÀ: ALTA per riferimenti, MEDIA per contenuto`,
   const basePrompt = basePrompts[elementType] || basePrompts['layout_picture'];
   const domainEnhancement = domainEnhancements[context.domain] || '';
   
-  // Costruisci prompt finale
+  // Costruisci prompt finale - ALL ENGLISH for RAG consistency
   return `
-CONTESTO DOCUMENTO: ${context.domain?.toUpperCase() || 'GENERAL'}
-Terminologia attesa: ${context.terminology?.join(', ') || 'generale'}
+DOCUMENT CONTEXT: ${context.domain?.toUpperCase() || 'GENERAL'}
+Expected terminology: ${context.terminology?.join(', ') || 'general'}
 
 ${basePrompt}
 
 ${domainEnhancement}
 
-ELEMENTI DA CERCARE SPECIFICATAMENTE:
-${context.focusElements?.map((e: string) => `- ${e}`).join('\n') || '- Contenuto generale'}
+SPECIFIC ELEMENTS TO EXTRACT:
+${context.focusElements?.map((e: string) => `- ${e}`).join('\n') || '- General content'}
 
-OUTPUT RICHIESTO:
-- Markdown strutturato
-- Tabelle in formato |...|...|
-- Ogni valore numerico con precisione massima
-- Se un elemento richiesto NON è presente, dichiaralo esplicitamente
+[METADATA] Source page: ${pageNumber || 'unknown'}
 `;
 }
 
@@ -501,18 +515,30 @@ export async function describeVisualElementContextAware(
   imageBuffer: Uint8Array,
   elementType: string,
   context: any, // DocumentContext
-  anthropicKey: string
+  anthropicKey: string,
+  pageNumber?: number  // Optional page number for RAG metadata
 ): Promise<string> {
   
-  const prompt = buildContextAwareVisualPrompt(context, elementType);
+  const prompt = buildContextAwareVisualPrompt(context, elementType, pageNumber);
   
-  console.log(`[Visual Enrichment] Describing ${elementType} with ${context.domain} context`);
+  console.log(`[Visual Enrichment] Describing ${elementType} with ${context.domain} context, page: ${pageNumber || 'unknown'}`);
   
   // 🔧 FIX: Detect image format una sola volta fuori dal retry loop
   const { format, media_type } = detectImageType(imageBuffer);
   console.log(`[Visual Enrichment] Detected image format: ${format} (${media_type})`);
   
   const base64Image = encodeBase64(imageBuffer);
+  
+  // RAG-optimized system prompt for high-precision data extraction
+  const ragSystemPrompt = `You are a High-Precision Data Extraction Engine for RAG systems.
+Your output will be indexed in a vector database.
+Your goal is NOT to explain the image to a human, but to TRANSCRIBE data for a machine.
+
+RULES:
+1. Absolute numerical precision (e.g., "1,234.5", not "1.2k").
+2. Preservation of Structure: Use Markdown Tables for matrix data, "Key: Value" for lists.
+3. Density: No fluff words. Zero hallucination.
+4. If image is blurry/empty, return only: [ERROR] Unreadable`;
   
   // 🛡️ RESILIENZA: Wrapper con retry automatico
   const callClaudeAPI = async (): Promise<string> => {
@@ -524,8 +550,10 @@ export async function describeVisualElementContextAware(
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', // 🏎️→🛵 Haiku 4.5 economico invece di Sonnet Ferrari
-        max_tokens: 1024, // 🛡️ Freno di sicurezza: max 1024 token invece di 2048
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,  // Increased for dense data serialization
+        temperature: 0.1,  // Low temperature for precision
+        system: ragSystemPrompt,  // RAG-optimized system prompt
         messages: [{
           role: 'user',
           content: [
@@ -549,7 +577,7 @@ export async function describeVisualElementContextAware(
     }
 
     const result = await response.json();
-    const description = result.content?.[0]?.text || '[Descrizione non disponibile]';
+    const description = result.content?.[0]?.text || '[ERROR] No description generated';
     
     console.log(`[Visual Enrichment] ✓ Description generated: ${description.length} chars`);
     return description;

@@ -248,12 +248,13 @@ serve(async (req) => {
                 
                 const imageBuffer = new Uint8Array(await imageResponse.arrayBuffer());
                 
-                // Context-aware description
+                // Context-aware description (no page number for embedded markdown images)
                 const description = await describeVisualElementContextAware(
                   imageBuffer,
                   'embedded_image',
                   documentContext,
-                  anthropicKey
+                  anthropicKey,
+                  undefined  // Page number not available for embedded markdown images
                 );
                 
                 // Replace image reference with description
