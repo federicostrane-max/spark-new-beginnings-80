@@ -68,6 +68,10 @@ EVALUATION RULES:
 5. Accept SEMANTIC EQUIVALENCE for names and identifiers:
    (e.g., "T.F. Riehl" = "Riehl, T.F." = "Riehl T.F." = "Thomas F. Riehl")
 6. Numbers can have different formatting: "499150498" = "499-150-498" = "499 150 498"
+7. NUMERICAL TOLERANCE: For financial values, accept answers that represent the same underlying number:
+   - More precise answers are CORRECT: "$8.738B" is correct when ground truth is "$8.70B"
+   - Unit conversions are equivalent: "$1,577 million" = "$1.577 billion"
+   - Rounding differences under 1% are acceptable when ground truth appears rounded (ends in .0, .00, etc.)
 
 Respond ONLY with valid JSON:
 {"correct": boolean, "reason": "brief explanation in italiano"}`;
