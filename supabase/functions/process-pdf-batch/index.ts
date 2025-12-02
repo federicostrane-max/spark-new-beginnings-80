@@ -239,10 +239,14 @@ serve(async (req) => {
       console.error('[Process Batch] Failed to fetch chunks with placeholders:', fetchError);
     } else if (createdChunks && createdChunks.length > 0) {
       let linkedCount = 0;
+      let totalPlaceholders = 0;
       
       for (const chunk of createdChunks) {
-        const match = chunk.content.match(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/);
-        if (match && match[1]) {
+        // FIX: Use matchAll() to capture ALL placeholders in a chunk, not just the first one
+        const matches = [...chunk.content.matchAll(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/g)];
+        totalPlaceholders += matches.length;
+        
+        for (const match of matches) {
           const queueId = match[1];
           
           const { error: updateError } = await supabase
@@ -259,7 +263,7 @@ serve(async (req) => {
         }
       }
       
-      console.log(`[Process Batch] ✅ Linked ${linkedCount}/${createdChunks.length} chunks to their visual jobs`);
+      console.log(`[Process Batch] ✅ Linked ${linkedCount}/${totalPlaceholders} visual jobs across ${createdChunks.length} chunks`);
     } else {
       console.log('[Process Batch] No chunks with visual placeholders to link');
     }
