@@ -228,6 +228,11 @@ timeout = 300
 verify_jwt = false
 timeout = 300
 
+[functions.process-batch-jobs-queue]
+verify_jwt = false
+timeout = 300
+schedule = "* * * * *"
+
 [functions.aggregate-document-batches]
 verify_jwt = false
 timeout = 60

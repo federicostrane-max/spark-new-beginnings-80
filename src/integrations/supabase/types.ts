@@ -2188,8 +2188,10 @@ export type Database = {
           input_file_path: string
           page_end: number
           page_start: number
+          retry_count: number | null
           status: string
           total_batches: number
+          updated_at: string | null
         }
         Insert: {
           batch_index: number
@@ -2202,8 +2204,10 @@ export type Database = {
           input_file_path: string
           page_end: number
           page_start: number
+          retry_count?: number | null
           status?: string
           total_batches: number
+          updated_at?: string | null
         }
         Update: {
           batch_index?: number
@@ -2216,8 +2220,10 @@ export type Database = {
           input_file_path?: string
           page_end?: number
           page_start?: number
+          retry_count?: number | null
           status?: string
           total_batches?: number
+          updated_at?: string | null
         }
         Relationships: [
           {

@@ -130,14 +130,7 @@ serve(async (req) => {
         throw new Error(`Job creation failed: ${jobError?.message}`);
       }
 
-      // Invoke worker immediately (event-driven)
-      EdgeRuntime.waitUntil(
-        supabase.functions.invoke('process-pdf-batch', {
-          body: { jobId: job.id }
-        }).then(() => {
-          console.log(`[Split PDF] Triggered worker for batch ${batchIndex}, job ${job.id}`);
-        })
-      );
+      console.log(`[Split PDF] Created job ${job.id} for batch ${batchIndex} - worker will process via cron`);
     }
 
     console.log(`[Split PDF] Successfully created ${totalBatches} batches for document ${documentId}`);
