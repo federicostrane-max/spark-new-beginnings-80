@@ -88,6 +88,11 @@ verify_jwt = true
 [functions.process-pdf-queue]
 verify_jwt = true
 
+[functions.assign-benchmark-chunks]
+verify_jwt = false
+timeout = 60
+schedule = "*/5 * * * *"
+
 # ===== PIPELINE B: New Document Processing System =====
 # Completely independent from existing pipeline
 
