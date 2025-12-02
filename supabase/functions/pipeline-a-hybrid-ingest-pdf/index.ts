@@ -8,7 +8,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BIG_FILE_THRESHOLD = 1 * 1024 * 1024; // 1MB - dense PDFs (10-K reports) are small but complex
+// ===== UNIFIED ASYNC PIPELINE =====
+// ALL PDFs go through batch processing (no size-based bifurcation)
+// Markdown/Image files still use direct processing
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -29,7 +31,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log(`[Pipeline A-Hybrid Ingest] Starting PDF ingestion: ${fileName}`);
+    console.log(`[Pipeline A-Hybrid Ingest] Starting ingestion: ${fileName}`);
 
     // Get file buffer: either from base64 or from storage URL
     let fileBuffer: Uint8Array;
@@ -49,9 +51,11 @@ serve(async (req) => {
 
     // Detect content type based on file extension or source_type
     const isPNG = fileName.toLowerCase().endsWith('.png') || source_type === 'image';
-    const contentType = isPNG ? 'image/png' : 'application/pdf';
+    const isMarkdown = fileName.toLowerCase().endsWith('.md') || source_type === 'markdown';
+    const isPDF = fileName.toLowerCase().endsWith('.pdf') || (!isPNG && !isMarkdown);
+    const contentType = isPNG ? 'image/png' : isMarkdown ? 'text/markdown' : 'application/pdf';
     
-    console.log(`[Pipeline A-Hybrid Ingest] Uploading file as: ${contentType}`);
+    console.log(`[Pipeline A-Hybrid Ingest] Detected type: ${contentType}, isPDF: ${isPDF}`);
 
     // Upload to storage
     const filePath = `${crypto.randomUUID()}/${fileName}`;
@@ -76,7 +80,7 @@ serve(async (req) => {
         storage_bucket: 'pipeline-a-uploads',
         file_size_bytes: fileSize,
         folder: folder || null,
-        source_type: source_type || 'pdf',
+        source_type: source_type || (isPDF ? 'pdf' : isPNG ? 'image' : 'markdown'),
         status: 'ingested',
         processing_metadata: {
           ingested_at: new Date().toISOString(),
@@ -91,11 +95,12 @@ serve(async (req) => {
       throw new Error(`Database insert failed: ${insertError.message}`);
     }
 
-    console.log(`[Pipeline A-Hybrid Ingest] Document ingested: ${document.id}, size: ${fileBuffer.length} bytes`);
+    console.log(`[Pipeline A-Hybrid Ingest] Document ingested: ${document.id}`);
 
-    // Check if file is large (> 10MB) - route to batch processing
-    if (fileBuffer.length > BIG_FILE_THRESHOLD) {
-      console.log(`[Pipeline A-Hybrid Ingest] ⚡ Large file detected (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB) - routing to batch processor`);
+    // ===== UNIFIED ROUTING BY CONTENT TYPE (NOT SIZE) =====
+    if (isPDF) {
+      // 🔥 ALL PDFs go through batch pipeline (unified path)
+      console.log(`[Pipeline A-Hybrid Ingest] ⚡ PDF detected - routing to UNIFIED BATCH PIPELINE`);
       
       try {
         EdgeRuntime.waitUntil(
@@ -109,19 +114,19 @@ serve(async (req) => {
         console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger batch splitting:', invokeError);
       }
     } else {
-      // Standard processing for normal-sized files
-      console.log(`[Pipeline A-Hybrid Ingest] Standard file (${(fileBuffer.length / 1024 / 1024).toFixed(2)}MB) - routing to direct processing`);
+      // Markdown/Image files use direct processing (lightweight, no batch needed)
+      console.log(`[Pipeline A-Hybrid Ingest] Non-PDF file (${contentType}) - routing to direct processing`);
       
       try {
         EdgeRuntime.waitUntil(
           supabase.functions.invoke('pipeline-a-hybrid-process-chunks', {
             body: { documentId: document.id }
           }).then(() => {
-            console.log(`[Pipeline A-Hybrid Ingest] Triggered processing for document ${document.id}`);
+            console.log(`[Pipeline A-Hybrid Ingest] Triggered direct processing for document ${document.id}`);
           })
         );
       } catch (invokeError) {
-        console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger processing (will be handled by cron):', invokeError);
+        console.warn('[Pipeline A-Hybrid Ingest] Failed to trigger processing:', invokeError);
       }
     }
 
@@ -130,6 +135,7 @@ serve(async (req) => {
         success: true,
         documentId: document.id,
         fileName: document.file_name,
+        processingPath: isPDF ? 'unified-batch' : 'direct',
         message: 'Document ingested successfully, processing started'
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
