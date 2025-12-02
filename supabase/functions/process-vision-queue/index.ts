@@ -70,10 +70,14 @@ serve(async (req) => {
         console.log(`[Vision Queue] Processing queue item ${item.id}`);
 
         // Update status to processing
-        await supabase
+        const { error: processingUpdateError } = await supabase
           .from('visual_enrichment_queue')
           .update({ status: 'processing' })
           .eq('id', item.id);
+
+        if (processingUpdateError) {
+          throw new Error(`Failed to update queue status to processing: ${processingUpdateError.message}`);
+        }
 
         // Decode base64 image
         const imageBuffer = decodeBase64(item.image_base64);
@@ -100,7 +104,7 @@ serve(async (req) => {
         console.log(`[Vision Queue] ✓ Generated description: ${description.length} chars`);
 
         // Save enrichment result
-        await supabase
+        const { error: completedUpdateError } = await supabase
           .from('visual_enrichment_queue')
           .update({
             enrichment_text: description,
@@ -108,6 +112,10 @@ serve(async (req) => {
             processed_at: new Date().toISOString()
           })
           .eq('id', item.id);
+
+        if (completedUpdateError) {
+          throw new Error(`Failed to update queue status to completed: ${completedUpdateError.message}`);
+        }
 
         // ===== SELF-HEALING: Update chunks with placeholder =====
         const placeholder = `[VISUAL_ENRICHMENT_PENDING: ${item.id}]`;
