@@ -2465,6 +2465,15 @@ export type Database = {
         Args: { p_agent_id: string; p_user_id: string }
         Returns: string
       }
+      get_unassigned_benchmark_documents: {
+        Args: never
+        Returns: {
+          assigned_chunks: number
+          document_id: string
+          file_name: string
+          ready_chunks: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
