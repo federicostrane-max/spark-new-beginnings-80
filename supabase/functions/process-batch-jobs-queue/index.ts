@@ -22,7 +22,9 @@ serve(async (req) => {
 
     console.log(`[Batch Queue Worker] Starting job queue processing`);
 
-    // Find stuck jobs (processing for >10 minutes) and reset them
+    // =========================================================================
+    // PHASE 1: Find stuck jobs (processing for >10 minutes) and reset them
+    // =========================================================================
     const stuckThreshold = new Date(Date.now() - STUCK_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const { data: stuckJobs } = await supabase
       .from('processing_jobs')
@@ -65,7 +67,7 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // SELF-HEALING: Auto-recovery dei job falliti per billing/transient errors
+    // PHASE 2: SELF-HEALING - Auto-recovery dei job falliti per billing/transient errors
     // Se un job è fallito da più di 10 minuti, riproviamo assumendo che 
     // l'utente abbia risolto il problema (es. ricaricato crediti LlamaParse)
     // =========================================================================
@@ -89,7 +91,45 @@ serve(async (req) => {
       console.log(`[Batch Queue Worker] 🩹 Self-healed ${healedJobs.length} old failed jobs for retry`);
     }
 
-    // Fetch one pending job (ordered by document_id, batch_index for sequential processing)
+    // =========================================================================
+    // PHASE 3: AGGREGATION SWEEPER - Sblocca documenti "zombie"
+    // Documenti con TUTTI i batch completati ma status non ancora finale
+    // Questo cattura i casi in cui l'event-driven fallisce (timeout/rete)
+    // =========================================================================
+    console.log(`[Batch Queue Worker] 🧹 Running Aggregation Sweeper...`);
+
+    const { data: zombieDocuments, error: zombieError } = await supabase
+      .rpc('find_zombie_documents_for_aggregation');
+
+    if (zombieError) {
+      console.error('[Batch Queue Worker] Error finding zombie documents:', zombieError);
+    } else if (zombieDocuments && zombieDocuments.length > 0) {
+      console.log(`[Batch Queue Worker] 🧟 Found ${zombieDocuments.length} zombie documents needing aggregation`);
+      
+      for (const doc of zombieDocuments) {
+        console.log(`[Batch Queue Worker] Re-triggering aggregation for: ${doc.file_name} (${doc.document_id})`);
+        
+        try {
+          const { error: aggError } = await supabase.functions.invoke('aggregate-document-batches', {
+            body: { documentId: doc.document_id }
+          });
+          
+          if (aggError) {
+            console.error(`[Batch Queue Worker] Aggregation failed for ${doc.file_name}:`, aggError);
+          } else {
+            console.log(`[Batch Queue Worker] ✅ Aggregation triggered for ${doc.file_name}`);
+          }
+        } catch (err) {
+          console.error(`[Batch Queue Worker] Exception triggering aggregation for ${doc.file_name}:`, err);
+        }
+      }
+    } else {
+      console.log(`[Batch Queue Worker] ✅ No zombie documents found`);
+    }
+
+    // =========================================================================
+    // PHASE 4: Process next pending job (one at a time for sequential processing)
+    // =========================================================================
     const { data: pendingJobs, error: fetchError } = await supabase
       .from('processing_jobs')
       .select('id, document_id, batch_index, retry_count')
@@ -105,7 +145,11 @@ serve(async (req) => {
     if (!pendingJobs || pendingJobs.length === 0) {
       console.log(`[Batch Queue Worker] No pending jobs found`);
       return new Response(
-        JSON.stringify({ message: 'No pending jobs', processed: 0 }),
+        JSON.stringify({ 
+          message: 'No pending jobs', 
+          processed: 0,
+          zombiesFound: zombieDocuments?.length || 0 
+        }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -143,7 +187,8 @@ serve(async (req) => {
         JSON.stringify({
           success: true,
           processed: 1,
-          job: { id: job.id, batch_index: job.batch_index, document_id: job.document_id }
+          job: { id: job.id, batch_index: job.batch_index, document_id: job.document_id },
+          zombiesFound: zombieDocuments?.length || 0
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

@@ -11,6 +11,44 @@ const corsHeaders = {
 
 const PAGES_PER_BATCH = 20;
 
+// ============= FIX 1: RETRY POLICY - Exponential Backoff per Storage Upload =============
+async function uploadWithRetry(
+  supabase: any,
+  bucket: string,
+  path: string,
+  data: Uint8Array,
+  options: { contentType: string; upsert: boolean },
+  maxRetries: number = 3
+): Promise<void> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(path, data, options);
+    
+    if (!error) {
+      if (attempt > 0) {
+        console.log(`[Split PDF] ✅ Upload successful on attempt ${attempt + 1}/${maxRetries}`);
+      }
+      return;
+    }
+    
+    lastError = new Error(error.message);
+    console.warn(`[Split PDF] ⚠️ Upload attempt ${attempt + 1}/${maxRetries} failed: ${error.message}`);
+    
+    if (attempt < maxRetries - 1) {
+      const backoffMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+      const jitter = Math.random() * 500; // Add jitter to prevent thundering herd
+      console.log(`[Split PDF] Retrying in ${Math.round(backoffMs + jitter)}ms...`);
+      await new Promise(r => setTimeout(r, backoffMs + jitter));
+    }
+  }
+  
+  console.error(`[Split PDF] ❌ Upload failed after ${maxRetries} attempts`);
+  throw lastError || new Error('Upload failed after all retries');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -98,17 +136,16 @@ serve(async (req) => {
       const batchFileName = `${document.file_name.replace('.pdf', '')}_batch_${batchIndex}.pdf`;
       const batchFilePath = `batches/${documentId}/${batchFileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('pipeline-a-uploads')
-        .upload(batchFilePath, batchPdfBytes, {
-          contentType: 'application/pdf',
-          upsert: true  // Allow re-processing by overwriting existing batches
-        });
+      // FIX 1: Upload with retry policy (exponential backoff)
+      await uploadWithRetry(
+        supabase,
+        'pipeline-a-uploads',
+        batchFilePath,
+        batchPdfBytes,
+        { contentType: 'application/pdf', upsert: true }
+      );
 
-      if (uploadError) {
-        console.error(`[Split PDF] Failed to upload batch ${batchIndex}:`, uploadError);
-        throw new Error(`Batch upload failed: ${uploadError.message}`);
-      }
+      console.log(`[Split PDF] ✅ Batch ${batchIndex} uploaded successfully`);
 
       // Create processing job
       const { data: job, error: jobError } = await supabase

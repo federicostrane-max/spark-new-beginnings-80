@@ -2446,6 +2446,15 @@ export type Database = {
       }
       count_documents_without_chunks: { Args: never; Returns: number }
       count_processing_documents: { Args: never; Returns: number }
+      find_zombie_documents_for_aggregation: {
+        Args: never
+        Returns: {
+          completed_batches: number
+          document_id: string
+          file_name: string
+          total_batches: number
+        }[]
+      }
       get_agent_sync_status: {
         Args: { p_agent_id: string }
         Returns: {
