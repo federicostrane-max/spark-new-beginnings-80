@@ -4715,7 +4715,9 @@ ${knowledgeContext}${searchResultsContext}`;
                     }
                     
                     // Handle function calls - EXECUTE IMMEDIATELY
-                    const functionCall = parsed.candidates?.[0]?.content?.parts?.[0]?.functionCall;
+                    // 🔧 FIX: Preserve original model content to retain thought_signature
+                    const originalModelContent = parsed.candidates?.[0]?.content;
+                    const functionCall = originalModelContent?.parts?.[0]?.functionCall;
                     if (functionCall && functionCall.name) {
                       toolUseName = functionCall.name;
                       toolUseId = `gemini_${Date.now()}`;
@@ -4777,7 +4779,8 @@ ${knowledgeContext}${searchResultsContext}`;
                             body: JSON.stringify({
                               contents: [
                                 ...geminiMessages,
-                                {
+                                // 🔧 FIX: Use original model content to preserve thought_signature (prevents 400 errors)
+                                originalModelContent || {
                                   role: 'model',
                                   parts: [{ functionCall: { name: toolUseName, args: toolInput } }]
                                 },
