@@ -58,6 +58,21 @@ const SUITE_LABELS = {
   trading: '📊 TradingView Pro'
 };
 
+// Maximum available documents per suite (from source repos/APIs)
+const SUITE_MAX_DOCS: Record<string, number> = {
+  general: 5000,      // DocVQA validation set
+  finance: 8000,      // FinQA train.json
+  financebench: 150,  // FinanceBench Q&A pairs
+  charts: 10000,      // ChartQA dataset
+  receipts: 1000,     // CORD dataset
+  science: 1500,      // QASPER dataset
+  narrative: 1500,    // NarrativeQA
+  code: 100,          // GitHub samples
+  safety: 20,         // Adversarial questions pool
+  hybrid: 5,          // ArXiv test papers
+  trading: 5          // TradingView hardcoded tests
+};
+
 export default function Benchmark() {
   const navigate = useNavigate();
   const [dataset, setDataset] = useState<any[]>([]);
@@ -719,162 +734,223 @@ export default function Benchmark() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="general" 
-                checked={provisionSuites.general}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, general: !!checked }))
-                }
-              />
-              <Label htmlFor="general" className="font-normal cursor-pointer">
-                📄 General (DocVQA) - Documenti generici
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="general" 
+                  checked={provisionSuites.general}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, general: !!checked }))
+                  }
+                />
+                <Label htmlFor="general" className="font-normal cursor-pointer">
+                  📄 General (DocVQA) - Documenti generici
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.general.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="finance" 
-                checked={provisionSuites.finance}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, finance: !!checked }))
-                }
-              />
-              <Label htmlFor="finance" className="font-normal cursor-pointer">
-                📊 Finance (FinQA) - Tabelle finanziarie
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="finance" 
+                  checked={provisionSuites.finance}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, finance: !!checked }))
+                  }
+                />
+                <Label htmlFor="finance" className="font-normal cursor-pointer">
+                  📊 Finance (FinQA) - Tabelle finanziarie
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.finance.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="financebench" 
-                checked={provisionSuites.financebench}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, financebench: !!checked }))
-                }
-              />
-              <Label htmlFor="financebench" className="font-normal cursor-pointer">
-                💼 FinanceBench - 10-K Reports (Documenti Complessi)
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="financebench" 
+                  checked={provisionSuites.financebench}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, financebench: !!checked }))
+                  }
+                />
+                <Label htmlFor="financebench" className="font-normal cursor-pointer">
+                  💼 FinanceBench - 10-K Reports
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.financebench}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="charts" 
-                checked={provisionSuites.charts}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, charts: !!checked }))
-                }
-              />
-              <Label htmlFor="charts" className="font-normal cursor-pointer">
-                📈 Charts (ChartQA) - Grafici visivi
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="charts" 
+                  checked={provisionSuites.charts}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, charts: !!checked }))
+                  }
+                />
+                <Label htmlFor="charts" className="font-normal cursor-pointer">
+                  📈 Charts (ChartQA) - Grafici visivi
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.charts.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="receipts" 
-                checked={provisionSuites.receipts}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, receipts: !!checked }))
-                }
-              />
-              <Label htmlFor="receipts" className="font-normal cursor-pointer">
-                🧾 Receipts (CORD) - Scontrini e fatture
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="receipts" 
+                  checked={provisionSuites.receipts}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, receipts: !!checked }))
+                  }
+                />
+                <Label htmlFor="receipts" className="font-normal cursor-pointer">
+                  🧾 Receipts (CORD) - Scontrini e fatture
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.receipts.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="science" 
-                checked={provisionSuites.science}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, science: !!checked }))
-                }
-              />
-              <Label htmlFor="science" className="font-normal cursor-pointer">
-                🔬 Science (QASPER) - Paper scientifici
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="science" 
+                  checked={provisionSuites.science}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, science: !!checked }))
+                  }
+                />
+                <Label htmlFor="science" className="font-normal cursor-pointer">
+                  🔬 Science (QASPER) - Paper scientifici
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.science.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="narrative" 
-                checked={provisionSuites.narrative}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, narrative: !!checked }))
-                }
-              />
-              <Label htmlFor="narrative" className="font-normal cursor-pointer">
-                📖 Narrative (NarrativeQA) - Deep understanding
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="narrative" 
+                  checked={provisionSuites.narrative}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, narrative: !!checked }))
+                  }
+                />
+                <Label htmlFor="narrative" className="font-normal cursor-pointer">
+                  📖 Narrative - Deep understanding
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.narrative.toLocaleString()}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="code" 
-                checked={provisionSuites.code}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, code: !!checked }))
-                }
-              />
-              <Label htmlFor="code" className="font-normal cursor-pointer">
-                💻 Code (GitHub) - Codice sorgente
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="code" 
+                  checked={provisionSuites.code}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, code: !!checked }))
+                  }
+                />
+                <Label htmlFor="code" className="font-normal cursor-pointer">
+                  💻 Code (GitHub) - Codice sorgente
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.code}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="safety" 
-                checked={provisionSuites.safety}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, safety: !!checked }))
-                }
-              />
-              <Label htmlFor="safety" className="font-normal cursor-pointer">
-                🛡️ Safety - Domande adversarial
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="safety" 
+                  checked={provisionSuites.safety}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, safety: !!checked }))
+                  }
+                />
+                <Label htmlFor="safety" className="font-normal cursor-pointer">
+                  🛡️ Safety - Domande adversarial
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.safety}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="hybrid" 
-                checked={provisionSuites.hybrid}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, hybrid: !!checked }))
-                }
-              />
-              <Label htmlFor="hybrid" className="font-normal cursor-pointer">
-                🔬 Hybrid PDF (ArXiv) - Test Visual Enrichment
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="hybrid" 
+                  checked={provisionSuites.hybrid}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, hybrid: !!checked }))
+                  }
+                />
+                <Label htmlFor="hybrid" className="font-normal cursor-pointer">
+                  🔬 Hybrid PDF (ArXiv) - Visual Enrichment
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.hybrid}</Badge>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="trading" 
-                checked={provisionSuites.trading}
-                onCheckedChange={(checked) => 
-                  setProvisionSuites(prev => ({ ...prev, trading: !!checked }))
-                }
-              />
-              <Label htmlFor="trading" className="font-normal cursor-pointer">
-                📊 TradingView Pro - Financial Charts Analysis
-              </Label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="trading" 
+                  checked={provisionSuites.trading}
+                  onCheckedChange={(checked) => 
+                    setProvisionSuites(prev => ({ ...prev, trading: !!checked }))
+                  }
+                />
+                <Label htmlFor="trading" className="font-normal cursor-pointer">
+                  📊 TradingView Pro - Charts Analysis
+                </Label>
+              </div>
+              <Badge variant="outline" className="text-xs">max {SUITE_MAX_DOCS.trading}</Badge>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="sampleSize">Sample Size per Suite</Label>
+            
+            {/* Sample Size with dynamic max */}
+            <div className="space-y-2 pt-2 border-t">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="sampleSize">Sample Size per Suite</Label>
+                <span className="text-xs text-muted-foreground">
+                  Max effettivo: {Math.min(
+                    ...Object.entries(provisionSuites)
+                      .filter(([_, enabled]) => enabled)
+                      .map(([suite]) => SUITE_MAX_DOCS[suite] || 1000)
+                  )}
+                </span>
+              </div>
               <Input 
                 id="sampleSize"
                 type="number" 
                 min={1}
-                max={20}
+                max={Math.min(
+                  ...Object.entries(provisionSuites)
+                    .filter(([_, enabled]) => enabled)
+                    .map(([suite]) => SUITE_MAX_DOCS[suite] || 1000)
+                )}
                 value={sampleSize || ''} 
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === '') {
-                    setSampleSize(0); // Allow empty temporarily
+                    setSampleSize(0);
                   } else {
                     const num = parseInt(val);
+                    const maxAllowed = Math.min(
+                      ...Object.entries(provisionSuites)
+                        .filter(([_, enabled]) => enabled)
+                        .map(([suite]) => SUITE_MAX_DOCS[suite] || 1000)
+                    );
                     if (!isNaN(num)) {
-                      setSampleSize(Math.min(20, Math.max(0, num)));
+                      setSampleSize(Math.min(maxAllowed, Math.max(0, num)));
                     }
                   }
                 }}
                 onBlur={() => {
                   if (!sampleSize || sampleSize < 1) setSampleSize(1);
-                  if (sampleSize > 20) setSampleSize(20);
+                  const maxAllowed = Math.min(
+                    ...Object.entries(provisionSuites)
+                      .filter(([_, enabled]) => enabled)
+                      .map(([suite]) => SUITE_MAX_DOCS[suite] || 1000)
+                  );
+                  if (sampleSize > maxAllowed) setSampleSize(maxAllowed);
                 }}
               />
+              <p className="text-xs text-muted-foreground">
+                Scaricherà al massimo questo numero di documenti per ogni suite selezionata
+              </p>
             </div>
           </div>
           <div className="flex justify-end gap-2">
