@@ -858,18 +858,22 @@ export default function Benchmark() {
                 type="number" 
                 min={1}
                 max={20}
-                value={sampleSize} 
+                value={sampleSize || ''} 
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === '') {
-                    setSampleSize(1);
+                    setSampleSize(0); // Allow empty temporarily
                   } else {
                     const num = parseInt(val);
-                    if (!isNaN(num) && num >= 1 && num <= 20) {
-                      setSampleSize(num);
+                    if (!isNaN(num)) {
+                      setSampleSize(Math.min(20, Math.max(0, num)));
                     }
                   }
-                }} 
+                }}
+                onBlur={() => {
+                  if (!sampleSize || sampleSize < 1) setSampleSize(1);
+                  if (sampleSize > 20) setSampleSize(20);
+                }}
               />
             </div>
           </div>
