@@ -4743,6 +4743,31 @@ ${knowledgeContext}${searchResultsContext}`;
                         
                         fullResponse = newFullResponse;
                         
+                        // Sanitize tool result for Google API (prevents 400 errors)
+                        const sanitizeForGoogle = (result: any): any => {
+                          if (!result?.results) return result;
+                          const MAX_CONTENT_LENGTH = 1000;
+                          const MAX_CHUNKS = 5;
+                          return {
+                            ...result,
+                            results: result.results.slice(0, MAX_CHUNKS).map((r: any) => ({
+                              document_name: String(r.document_name || ''),
+                              content: String(r.content || '')
+                                .slice(0, MAX_CONTENT_LENGTH)
+                                .replace(/&#x[0-9a-fA-F]+;/g, ' ')
+                                .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+                                .replace(/\n+/g, ' ')
+                                .replace(/\|/g, ' ')
+                                .replace(/\s+/g, ' ')
+                                .trim(),
+                              category: String(r.category || ''),
+                              similarity: Number(r.similarity) || 0
+                            }))
+                          };
+                        };
+                        const sanitizedResult = sanitizeForGoogle(toolResult);
+                        console.log(`📦 [REQ-${requestId}] [Google] Sanitized tool result: ${JSON.stringify(sanitizedResult).length} chars, chunks: ${sanitizedResult?.results?.length || 0}`);
+                        
                         // Continue streaming with tool result
                         const continueResponse = await fetch(
                           `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${GOOGLE_API_KEY}&alt=sse`,
@@ -4758,7 +4783,7 @@ ${knowledgeContext}${searchResultsContext}`;
                                 },
                                 {
                                   role: 'function',
-                                  parts: [{ functionResponse: { name: toolUseName, response: toolResult } }]
+                                  parts: [{ functionResponse: { name: toolUseName, response: sanitizedResult } }]
                                 }
                               ],
                               tools: geminiTools,
@@ -4771,7 +4796,25 @@ ${knowledgeContext}${searchResultsContext}`;
                         );
                         
                         if (!continueResponse.ok) {
-                          throw new Error(`Google API error: ${continueResponse.status}`);
+                          const errorBody = await continueResponse.text();
+                          console.error(`❌ [REQ-${requestId}] [Google] API error ${continueResponse.status}: ${errorBody.slice(0, 500)}`);
+                          
+                          // FALLBACK: Generate response from retrieved chunks
+                          if (toolResult?.results?.length > 0) {
+                            const fallbackContent = toolResult.results
+                              .slice(0, 3)
+                              .map((r: any) => `[${r.document_name}]: ${String(r.content || '').slice(0, 500)}`)
+                              .join('\n\n');
+                            
+                            const fallbackResponse = `Based on the retrieved documents:\n\n${fallbackContent}\n\n(Note: This is a fallback response due to API error)`;
+                            fullResponse += fallbackResponse;
+                            await sendSSE(JSON.stringify({ type: 'content', text: fallbackResponse }));
+                            await sendSSE(JSON.stringify({ type: 'end' }));
+                            console.log(`⚠️ [REQ-${requestId}] [Google] Fallback response generated from ${toolResult.results.length} chunks`);
+                            break; // Exit the tool calling loop
+                          } else {
+                            throw new Error(`Google API error: ${continueResponse.status} - ${errorBody.slice(0, 200)}`);
+                          }
                         }
                         
                         // Stream the continuation response (also SSE format)
