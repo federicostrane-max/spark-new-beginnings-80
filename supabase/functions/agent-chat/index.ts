@@ -355,7 +355,7 @@ async function getConversationState(conversationId: string, supabaseClient: any)
     .from('agent_conversations')
     .select('last_proposed_query, waiting_for_confirmation')
     .eq('id', conversationId)
-    .single();
+    .maybeSingle();
 
   console.log(`📖 [WORKFLOW] State loaded from DB for conversation ${conversationId}:`, data);
 
