@@ -44,11 +44,12 @@ serve(async (req) => {
       iteration++;
       console.log(`[Process Vision Queue] Iteration ${iteration}/${MAX_ITERATIONS}`);
 
-      // Fetch pending queue items
+      // Fetch pending queue items - ONLY those with valid chunk_id to avoid constraint errors
       const { data: queueItems, error: fetchError } = await supabase
         .from('visual_enrichment_queue')
         .select('*')
         .eq('status', 'pending')
+        .not('chunk_id', 'is', null)  // CRITICAL: Skip unlinked jobs to prevent infinite loop
         .order('created_at', { ascending: true })
         .limit(BATCH_SIZE);
 
