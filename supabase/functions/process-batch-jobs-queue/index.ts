@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const MAX_RETRIES = 3;
 const STUCK_THRESHOLD_MINUTES = 10;
+const FAILED_RECOVERY_THRESHOLD_MINUTES = 10; // Self-healing dopo 10 minuti
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -61,6 +62,31 @@ serve(async (req) => {
           console.log(`[Batch Queue Worker] Job ${job.id} (batch ${job.batch_index}) reset to pending (retry ${retryCount}/${MAX_RETRIES})`);
         }
       }
+    }
+
+    // =========================================================================
+    // SELF-HEALING: Auto-recovery dei job falliti per billing/transient errors
+    // Se un job è fallito da più di 10 minuti, riproviamo assumendo che 
+    // l'utente abbia risolto il problema (es. ricaricato crediti LlamaParse)
+    // =========================================================================
+    const failedRecoveryThreshold = new Date(Date.now() - FAILED_RECOVERY_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    
+    const { data: healedJobs, error: healError } = await supabase
+      .from('processing_jobs')
+      .update({ 
+        status: 'pending', 
+        retry_count: 0,  // Reset completo per nuova chance
+        error_message: null,
+        updated_at: new Date().toISOString() 
+      })
+      .eq('status', 'failed')
+      .lt('updated_at', failedRecoveryThreshold)
+      .select('id, batch_index');
+
+    if (healError) {
+      console.error('[Batch Queue Worker] Error healing failed jobs:', healError);
+    } else if (healedJobs && healedJobs.length > 0) {
+      console.log(`[Batch Queue Worker] 🩹 Self-healed ${healedJobs.length} old failed jobs for retry`);
     }
 
     // Fetch one pending job (ordered by document_id, batch_index for sequential processing)
