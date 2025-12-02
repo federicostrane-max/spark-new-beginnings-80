@@ -368,12 +368,16 @@ export default function Benchmark() {
         });
 
         try {
-          // 1. Check if document exists and is ready
-          const { data: doc, error: docError } = await supabase
+          // 1. Check if document exists and is ready (handles duplicates by taking most recent)
+          const { data: docs, error: docError } = await supabase
             .from('pipeline_a_hybrid_documents')
             .select('id, status')
             .eq('file_name', fileName)
-            .maybeSingle();
+            .eq('status', 'ready')
+            .order('created_at', { ascending: false })
+            .limit(1);
+          
+          const doc = docs?.[0] || null;
 
         if (docError) throw docError;
 
