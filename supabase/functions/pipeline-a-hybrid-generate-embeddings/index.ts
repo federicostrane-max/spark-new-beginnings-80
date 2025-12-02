@@ -2,6 +2,11 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { generateEmbedding } from "../_shared/embeddingService.ts";
 
+// Declare EdgeRuntime for background task support
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<any>) => void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -100,6 +105,59 @@ async function buildEmbeddingInput(chunk: any, fileName: string): Promise<string
   }
   
   return embeddingText;
+}
+
+/**
+ * EVENT-DRIVEN TRIGGER: Immediately assign benchmark document chunks after embeddings are ready
+ * Fire-and-forget pattern using EdgeRuntime.waitUntil for non-blocking execution
+ */
+async function triggerBenchmarkAssignment(supabase: any, docId: string): Promise<void> {
+  try {
+    // Check if document is part of a benchmark dataset
+    const { data: benchmarkRecord, error: benchmarkError } = await supabase
+      .from('benchmark_datasets')
+      .select('id, suite_category, file_name')
+      .eq('document_id', docId)
+      .maybeSingle();
+
+    if (benchmarkError) {
+      console.error(`[Event-Driven Trigger] Error checking benchmark_datasets:`, benchmarkError);
+      return;
+    }
+
+    if (!benchmarkRecord) {
+      // Not a benchmark document, skip
+      return;
+    }
+
+    console.log(`[Event-Driven Trigger] 🎯 Document ${docId} is benchmark (suite: ${benchmarkRecord.suite_category}). Triggering immediate assignment...`);
+
+    // Invoke assign-benchmark-chunks with specific documentId
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/assign-benchmark-chunks`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ documentId: docId }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Event-Driven Trigger] ❌ Assignment failed for ${docId}: ${response.status} - ${errorText}`);
+      return;
+    }
+
+    const result = await response.json();
+    console.log(`[Event-Driven Trigger] ✅ Assignment completed for ${benchmarkRecord.file_name}: ${result.assigned || 0} chunks assigned`);
+
+  } catch (error) {
+    // Critical: Log errors clearly for debugging since waitUntil is "silent"
+    console.error(`[Event-Driven Trigger] ❌ CRITICAL ERROR for document ${docId}:`, error);
+  }
 }
 
 serve(async (req) => {
@@ -225,8 +283,10 @@ serve(async (req) => {
       }
     }
 
-    // Update document status to ready
+    // Update document status to ready + EVENT-DRIVEN BENCHMARK ASSIGNMENT
     const documentIds = [...new Set(chunks.map(c => c.document_id))];
+    const documentsMarkedReady: string[] = [];
+
     for (const docId of documentIds) {
       // Verifica che esistano chunks E siano TUTTI ready
       const { count: totalChunks } = await supabase
@@ -247,7 +307,14 @@ serve(async (req) => {
           .update({ status: 'ready', updated_at: new Date().toISOString() })
           .eq('id', docId);
         console.log(`[Pipeline A-Hybrid Embeddings] Document ${docId} marked ready (${readyChunks}/${totalChunks} chunks ready)`);
+        documentsMarkedReady.push(docId);
       }
+    }
+
+    // ✅ EVENT-DRIVEN TRIGGER: Immediate benchmark assignment for all documents just marked ready
+    // Uses EdgeRuntime.waitUntil for fire-and-forget non-blocking execution
+    for (const docId of documentsMarkedReady) {
+      EdgeRuntime.waitUntil(triggerBenchmarkAssignment(supabase, docId));
     }
 
     return new Response(
@@ -255,7 +322,8 @@ serve(async (req) => {
         success: true,
         processed: processedCount,
         failed: failedCount,
-        message: `Processed ${processedCount} chunk(s), ${failedCount} failed`
+        documentsReady: documentsMarkedReady.length,
+        message: `Processed ${processedCount} chunk(s), ${failedCount} failed, ${documentsMarkedReady.length} documents ready`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
