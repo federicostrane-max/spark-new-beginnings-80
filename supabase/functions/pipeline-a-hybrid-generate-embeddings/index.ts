@@ -208,6 +208,61 @@ serve(async (req) => {
       }
     }
 
+    // ============================================================
+    // STUCK CHUNK RECOVERY: Reset chunks stuck in 'processing' for >5 minutes
+    // Uses updated_at which is set when status changes to 'processing'
+    // ============================================================
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    // Find stuck chunks that can still be retried (retry_count < 3)
+    const { data: stuckChunks, error: stuckError } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id, document_id, embedding_retry_count')
+      .eq('embedding_status', 'processing')
+      .lt('updated_at', fiveMinutesAgo)
+      .lt('embedding_retry_count', 3);
+
+    if (stuckChunks && stuckChunks.length > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] Found ${stuckChunks.length} stuck chunks (< 3 retries), resetting to pending`);
+      
+      for (const stuck of stuckChunks) {
+        const newRetryCount = (stuck.embedding_retry_count || 0) + 1;
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .update({ 
+            embedding_status: 'pending',
+            embedding_retry_count: newRetryCount,
+            embedding_error: `Retry #${newRetryCount}: stuck in processing for >5 minutes`
+          })
+          .eq('id', stuck.id);
+        console.log(`[Pipeline A-Hybrid Embeddings] Reset chunk ${stuck.id} to pending (retry ${newRetryCount}/3)`);
+      }
+    }
+
+    // Find chunks that exceeded retry limit AND have been stuck for >5 minutes
+    // ✅ Race condition fix: include updated_at filter to give full 5 minutes before marking failed
+    const { data: failedChunks } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id, document_id')
+      .eq('embedding_status', 'processing')
+      .lt('updated_at', fiveMinutesAgo)
+      .gte('embedding_retry_count', 3);
+
+    if (failedChunks && failedChunks.length > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] ${failedChunks.length} chunks exceeded retry limit, marking as failed`);
+      
+      for (const failed of failedChunks) {
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .update({ 
+            embedding_status: 'failed',
+            embedding_error: 'Exceeded maximum retry attempts (3) after being stuck in processing'
+          })
+          .eq('id', failed.id);
+        console.log(`[Pipeline A-Hybrid Embeddings] Marked chunk ${failed.id} as failed (exceeded 3 retries)`);
+      }
+    }
+
     // Fetch pending chunks with document file_name via JOIN
     let query = supabase
       .from('pipeline_a_hybrid_chunks_raw')

@@ -1716,6 +1716,7 @@ export type Database = {
           embedded_at: string | null
           embedding: string | null
           embedding_error: string | null
+          embedding_retry_count: number | null
           embedding_status: string | null
           heading_hierarchy: Json | null
           id: string
@@ -1723,6 +1724,7 @@ export type Database = {
           original_content: string | null
           page_number: number | null
           summary: string | null
+          updated_at: string | null
         }
         Insert: {
           batch_index?: number | null
@@ -1734,6 +1736,7 @@ export type Database = {
           embedded_at?: string | null
           embedding?: string | null
           embedding_error?: string | null
+          embedding_retry_count?: number | null
           embedding_status?: string | null
           heading_hierarchy?: Json | null
           id?: string
@@ -1741,6 +1744,7 @@ export type Database = {
           original_content?: string | null
           page_number?: number | null
           summary?: string | null
+          updated_at?: string | null
         }
         Update: {
           batch_index?: number | null
@@ -1752,6 +1756,7 @@ export type Database = {
           embedded_at?: string | null
           embedding?: string | null
           embedding_error?: string | null
+          embedding_retry_count?: number | null
           embedding_status?: string | null
           heading_hierarchy?: Json | null
           id?: string
@@ -1759,6 +1764,7 @@ export type Database = {
           original_content?: string | null
           page_number?: number | null
           summary?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
