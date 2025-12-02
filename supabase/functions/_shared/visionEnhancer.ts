@@ -433,6 +433,27 @@ FOCUS SPECIFICO PER DOCUMENTI LEGALI:
 - Nota clausole chiave
 - Documenta firme e timbri se visibili
 VERBOSITÀ: ALTA per riferimenti, MEDIA per contenuto`,
+
+    'science': `MODE: SCIENTIFIC DATA EXTRACTION
+TARGET: Research papers, scientific figures, data visualizations
+
+REQUIRED OUTPUT FORMAT:
+[TYPE] {Figure / Chart / Table / Diagram / Graph}
+[TITLE] {Figure caption or title}
+[PAGE] {Use page number from METADATA}
+[DATA]
+For quantitative data, USE MARKDOWN TABLE FORMAT:
+| Variable | Value | Unit | Uncertainty |
+|----------|-------|------|-------------|
+
+EXTRACT: axis labels, data points, error bars, p-values, statistical significance markers.
+[METHODOLOGY] {If visible: sample size, conditions, experimental setup}
+[NOTE] {Footnotes, asterisks, significance levels (*, **, ***)}
+
+CONSTRAINTS:
+- Preserve exact numerical precision from source.
+- Include units for all measurements.
+- Note statistical significance markers.`,
   };
   
   const basePrompt = basePrompts[elementType] || basePrompts['layout_picture'];
