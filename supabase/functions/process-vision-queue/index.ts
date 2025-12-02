@@ -88,14 +88,16 @@ serve(async (req) => {
         const metadata = item.image_metadata || {};
         const imageType = metadata.type || 'layout_picture';
         const documentContext = metadata.document_context || { domain: 'general' };
+        const pageNumber = metadata.page;  // Extract page number for RAG metadata
 
         // Call Claude Vision with context-awareness
-        console.log(`[Vision Queue] Calling Claude Vision for ${metadata.image_name}`);
+        console.log(`[Vision Queue] Calling Claude Vision for ${metadata.image_name}, page: ${pageNumber || 'unknown'}`);
         const description = await describeVisualElementContextAware(
           imageBuffer,
           imageType,
           documentContext,
-          anthropicKey
+          anthropicKey,
+          pageNumber  // Pass page number for RAG metadata
         );
 
         if (!description || description.length === 0) {
