@@ -130,10 +130,34 @@ serve(async (req) => {
         throw new Error(`Job creation failed: ${jobError?.message}`);
       }
 
-      console.log(`[Split PDF] Created job ${job.id} for batch ${batchIndex} - worker will process via cron`);
+      console.log(`[Split PDF] Created job ${job.id} for batch ${batchIndex}`);
     }
 
     console.log(`[Split PDF] Successfully created ${totalBatches} batches for document ${documentId}`);
+
+    // ===== EVENT-DRIVEN: Trigger first batch immediately (no cron wait) =====
+    const { data: firstJob, error: firstJobError } = await supabase
+      .from('processing_jobs')
+      .select('id')
+      .eq('document_id', documentId)
+      .eq('batch_index', 0)
+      .eq('status', 'pending')
+      .single();
+
+    if (firstJob && !firstJobError) {
+      console.log(`[Split PDF] ⚡ EVENT-DRIVEN: Triggering first batch immediately (job: ${firstJob.id})`);
+      try {
+        EdgeRuntime.waitUntil(
+          supabase.functions.invoke('process-pdf-batch', {
+            body: { jobId: firstJob.id }
+          }).then(() => {
+            console.log(`[Split PDF] First batch processing triggered`);
+          })
+        );
+      } catch (invokeError) {
+        console.warn('[Split PDF] Failed to trigger first batch (cron will handle):', invokeError);
+      }
+    }
 
     return new Response(
       JSON.stringify({
@@ -141,7 +165,8 @@ serve(async (req) => {
         documentId,
         totalPages,
         totalBatches,
-        message: `Split into ${totalBatches} batches, processing started`
+        processingMode: 'event-driven',
+        message: `Split into ${totalBatches} batches, first batch triggered immediately`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

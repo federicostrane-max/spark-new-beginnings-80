@@ -237,14 +237,36 @@ serve(async (req) => {
 
     console.log(`[Process Batch] Batch ${job.batch_index} completed: ${chunksToInsert.length} chunks, ${enqueuedCount} images enqueued`);
 
-    // Trigger aggregation check (event-driven)
-    EdgeRuntime.waitUntil(
-      supabase.functions.invoke('aggregate-document-batches', {
-        body: { documentId: job.document_id }
-      }).then(() => {
-        console.log(`[Process Batch] Triggered aggregator for document ${job.document_id}`);
-      })
-    );
+    // ===== EVENT-DRIVEN CHAINING: Trigger next batch immediately =====
+    const { data: nextJob, error: nextJobError } = await supabase
+      .from('processing_jobs')
+      .select('id, batch_index')
+      .eq('document_id', job.document_id)
+      .eq('status', 'pending')
+      .order('batch_index', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (nextJob && !nextJobError) {
+      console.log(`[Process Batch] ⚡ EVENT-DRIVEN: Triggering next batch ${nextJob.batch_index} (job: ${nextJob.id})`);
+      EdgeRuntime.waitUntil(
+        supabase.functions.invoke('process-pdf-batch', {
+          body: { jobId: nextJob.id }
+        }).then(() => {
+          console.log(`[Process Batch] Next batch triggered successfully`);
+        })
+      );
+    } else {
+      // No more pending batches - trigger aggregation
+      console.log(`[Process Batch] All batches completed, triggering aggregation`);
+      EdgeRuntime.waitUntil(
+        supabase.functions.invoke('aggregate-document-batches', {
+          body: { documentId: job.document_id }
+        }).then(() => {
+          console.log(`[Process Batch] Triggered aggregator for document ${job.document_id}`);
+        })
+      );
+    }
 
     return new Response(
       JSON.stringify({
