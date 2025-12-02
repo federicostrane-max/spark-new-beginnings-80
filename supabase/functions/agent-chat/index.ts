@@ -3507,6 +3507,13 @@ The system has automatically executed a search based on your proposed query and 
               console.log(`📊 [BREAKDOWN]`, queryBreakdown);
             }
             
+            // 🔍 DIAGNOSTIC: Log retrieval results for debugging empty responses
+            console.log(`🔍 [REQ-${requestId}] Retrieved ${documents?.length || 0} chunks for agent ${agent.id}`);
+            if (documents?.length > 0) {
+              console.log(`   Top similarity: ${documents[0]?.similarity?.toFixed(3) || 'N/A'}`);
+              console.log(`   Top document: ${documents[0]?.document_name || 'N/A'}`);
+            }
+            
             // ============================================================================
             // DOCUMENT-SPECIFIC FILTERING (for benchmark/explicit document queries)
             // ============================================================================
@@ -3680,6 +3687,9 @@ ${knowledgeContext}${searchResultsContext}`;
           const enhancedSystemPrompt = mentions.length > 0 
             ? baseSystemPrompt + mentionInstruction
             : baseSystemPrompt;
+          
+          // 🤖 DIAGNOSTIC: Log context size before LLM call
+          console.log(`🤖 [REQ-${requestId}] Calling ${llmProvider} with ${enhancedSystemPrompt?.length || 0} chars context`);
 
           // Define tools for all agents (simplified - tools are now optional/secondary)
           let toolCallCount = 0; // Track tool calls for validation
@@ -6078,6 +6088,14 @@ ${knowledgeContext}${searchResultsContext}`;
       // If non-streaming mode, await completion and return JSON
       await processRequest();
       await closeStream(); // Ensure stream is closed
+      
+      // ⚠️ DIAGNOSTIC: Log if response is empty (helps debug benchmark issues)
+      if (!accumulatedResponse) {
+        console.error(`⚠️ [REQ-${requestId}] Empty response accumulated!`);
+        console.error(`   llmProvider: ${finalLlmProvider}`);
+        console.error(`   chunks: ${finalRetrievalMetadata?.chunks_retrieved || 0}`);
+        console.error(`   knowledge_stats: ${JSON.stringify(finalKnowledgeStats)}`);
+      }
       
       return new Response(
         JSON.stringify({ 
