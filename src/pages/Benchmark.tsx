@@ -859,7 +859,17 @@ export default function Benchmark() {
                 min={1}
                 max={20}
                 value={sampleSize} 
-                onChange={(e) => setSampleSize(parseInt(e.target.value) || 5)} 
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setSampleSize(1);
+                  } else {
+                    const num = parseInt(val);
+                    if (!isNaN(num) && num >= 1 && num <= 20) {
+                      setSampleSize(num);
+                    }
+                  }
+                }} 
               />
             </div>
           </div>
