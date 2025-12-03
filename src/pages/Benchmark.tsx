@@ -730,14 +730,14 @@ export default function Benchmark() {
 
       {/* Provisioning Dialog */}
       <Dialog open={showProvisioning} onOpenChange={setShowProvisioning}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Configura Dataset di Benchmark</DialogTitle>
             <DialogDescription>
               Scarica automaticamente dataset da GitHub e configura le suite di test
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Checkbox 
@@ -957,7 +957,7 @@ export default function Benchmark() {
               </p>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-2 pt-4 border-t flex-shrink-0">
             <Button variant="outline" onClick={() => setShowProvisioning(false)}>
               Annulla
             </Button>
