@@ -372,13 +372,45 @@ serve(async (req) => {
       EdgeRuntime.waitUntil(triggerBenchmarkAssignment(supabase, docId));
     }
 
+    // ✅ SELF-CONTINUATION: If more pending chunks exist, trigger another batch immediately
+    // This eliminates dependency on cron cycles for continuous processing
+    const { count: remainingPending } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id', { count: 'exact', head: true })
+      .eq('embedding_status', 'pending');
+
+    if (remainingPending && remainingPending > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] 🔄 ${remainingPending} chunks still pending, triggering self-continuation...`);
+      
+      // Fire-and-forget self-invocation for next batch
+      EdgeRuntime.waitUntil((async () => {
+        try {
+          const response = await fetch(`${supabaseUrl}/functions/v1/pipeline-a-hybrid-generate-embeddings`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${supabaseKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ batchSize: effectiveBatchSize }),
+          });
+          
+          if (!response.ok) {
+            console.error(`[Pipeline A-Hybrid Embeddings] Self-continuation failed: ${response.status}`);
+          }
+        } catch (error) {
+          console.error(`[Pipeline A-Hybrid Embeddings] Self-continuation error:`, error);
+        }
+      })());
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         processed: processedCount,
         failed: failedCount,
         documentsReady: documentsMarkedReady.length,
-        message: `Processed ${processedCount} chunk(s), ${failedCount} failed, ${documentsMarkedReady.length} documents ready`
+        remainingPending: remainingPending || 0,
+        message: `Processed ${processedCount} chunk(s), ${failedCount} failed, ${documentsMarkedReady.length} documents ready, ${remainingPending || 0} pending`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
