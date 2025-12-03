@@ -1197,7 +1197,7 @@ serve(async (req) => {
     if (suites.financebench) {
       console.log('[Provision Benchmark] Processing FinanceBench suite (Complex 10-K Reports)...');
       
-      const cleanup = await cleanupExistingSuite(supabase, 'finance', 'benchmark_finance');
+      const cleanup = await cleanupExistingSuite(supabase, 'financebench', 'benchmark_financebench');
       console.log(`[Provision Benchmark] Cleaned up FinanceBench: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
       
       try {
