@@ -1193,12 +1193,12 @@ serve(async (req) => {
       }
     }
 
-    // ===== PHASE 11: FinanceBench (Complex 10-K Reports) - BATCH PROCESSING =====
+    // ===== PHASE 11: FinanceBench (Complex 10-K Reports) - SMART INCREMENTAL MODE =====
     if (suites.financebench) {
-      console.log('[Provision Benchmark] Processing FinanceBench suite (Complex 10-K Reports)...');
+      console.log('[Provision Benchmark] Processing FinanceBench suite (Complex 10-K Reports) - SMART INCREMENTAL MODE...');
+      console.log('[Provision Benchmark] ✓ Anti-duplicate protection enabled - existing ready documents will be reused');
       
-      const cleanup = await cleanupExistingSuite(supabase, 'financebench', 'benchmark_financebench');
-      console.log(`[Provision Benchmark] Cleaned up FinanceBench: ${cleanup.documentsDeleted} docs, ${cleanup.chunksDeleted} chunks, ${cleanup.datasetsDeleted} Q&A entries`);
+      // NO cleanup - we reuse existing documents!
       
       try {
         // Fetch FinanceBench dataset from GitHub (two files: questions + document metadata)
@@ -1242,11 +1242,63 @@ serve(async (req) => {
         // Sample documents (limit to sampleSize)
         const sampled = financebenchData.slice(0, sampleSize);
         
-        // Step 1: Download PDFs sequentially (10-K reports are large, ~5-20MB each)
-        const pdfs: any[] = [];
+        let skippedDuplicates = 0;
+        let newDownloads = 0;
+        
+        // Process each entry with anti-duplicate check
         for (let i = 0; i < sampled.length; i++) {
           const entry = sampled[i];
-          console.log(`[Provision Benchmark] Downloading FinanceBench PDF ${i + 1}/${sampled.length}: ${entry.doc_name}`);
+          const fileName = `financebench_${String(i + 1).padStart(3, '0')}_${entry.company}.pdf`;
+          
+          console.log(`[Provision Benchmark] Processing FinanceBench ${i + 1}/${sampled.length}: ${fileName}`);
+          
+          // ===== ANTI-DUPLICATE CHECK =====
+          const existingDoc = await findExistingReadyDocument(supabase, fileName, 'benchmark_financebench');
+          const existingQA = await findExistingQAEntry(supabase, fileName, 'financebench');
+          
+          // If document exists and is ready/processing, skip download
+          if (existingDoc.exists && existingDoc.status !== 'failed') {
+            console.log(`[Anti-Duplicate] ⏭️ SKIPPING download for ${fileName} - already exists (status: ${existingDoc.status})`);
+            skippedDuplicates++;
+            
+            // Only insert Q&A if it doesn't exist yet
+            if (!existingQA.exists && existingDoc.documentId) {
+              const { error: insertError } = await supabase
+                .from('benchmark_datasets')
+                .insert({
+                  file_name: fileName,
+                  storage_path: `benchmark_financebench/${fileName}`,
+                  suite_category: 'financebench',
+                  question: entry.question,
+                  ground_truth: entry.answer,
+                  source_repo: 'patronus-ai/financebench',
+                  source_metadata: {
+                    company: entry.company,
+                    year: entry.year,
+                    doc_name: entry.doc_name,
+                    doc_link: entry.doc_link,
+                    evidence: entry.evidence,
+                    question_type: entry.question_type
+                  },
+                  document_id: existingDoc.documentId,
+                  provisioned_at: new Date().toISOString()
+                });
+              
+              if (insertError) {
+                console.warn(`[Anti-Duplicate] Q&A insert warning for ${fileName}:`, insertError.message);
+              } else {
+                console.log(`[Anti-Duplicate] ✓ Added Q&A entry for existing document ${fileName}`);
+              }
+            }
+            
+            results.financebench.success++;
+            results.financebench.documents.push({ fileName, documentId: existingDoc.documentId, reused: true });
+            continue;
+          }
+          
+          // ===== NEW DOWNLOAD =====
+          newDownloads++;
+          console.log(`[Provision Benchmark] Downloading FinanceBench PDF ${newDownloads}: ${entry.doc_name}`);
           
           const pdfUrl = entry.doc_link;
           if (!pdfUrl) {
@@ -1260,98 +1312,66 @@ serve(async (req) => {
             if (!pdfResponse.ok) throw new Error(`Failed to fetch PDF: ${pdfResponse.statusText}`);
             
             const pdfBuffer = await pdfResponse.arrayBuffer();
-            const fileName = `financebench_${String(i + 1).padStart(3, '0')}_${entry.company}.pdf`;
             
-            pdfs.push({
-              fileName,
-              pdfBuffer,
-              question: entry.question,
-              groundTruth: entry.answer,
-              metadata: {
-                company: entry.company,
-                year: entry.year,
-                doc_name: entry.doc_name,
-                doc_link: entry.doc_link,
-                evidence: entry.evidence,
-                question_type: entry.question_type
+            console.log(`[Provision Benchmark] Downloaded ${fileName} (${(pdfBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+            
+            // Upload to storage first (avoid base64 memory explosion)
+            const storagePath = `benchmark_financebench/${fileName}`;
+            const { error: uploadError } = await supabase.storage
+              .from('pipeline-a-uploads')
+              .upload(storagePath, pdfBuffer, {
+                contentType: 'application/pdf',
+                upsert: true
+              });
+            
+            if (uploadError) {
+              console.error(`[Provision Benchmark] Storage upload failed for ${fileName}:`, uploadError);
+              results.financebench.failed++;
+              continue;
+            }
+            
+            // Get public URL
+            const { data: urlData } = supabase.storage
+              .from('pipeline-a-uploads')
+              .getPublicUrl(storagePath);
+            
+            console.log(`[Provision Benchmark] Ingesting via storage URL: ${urlData.publicUrl}`);
+            
+            // Ingest via storage URL
+            const result = await supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
+              body: {
+                fileName: fileName,
+                storageUrl: urlData.publicUrl,
+                fileSize: pdfBuffer.byteLength,
+                folder: 'benchmark_financebench',
+                source_type: 'pdf'
               }
             });
             
-            console.log(`[Provision Benchmark] Downloaded ${fileName} (${(pdfBuffer.byteLength / 1024 / 1024).toFixed(2)} MB)`);
-          } catch (pdfError) {
-            console.error(`[Provision Benchmark] Failed to download PDF for entry ${i + 1}:`, pdfError);
-            results.financebench.failed++;
-          }
-        }
-        
-        console.log(`[Provision Benchmark] Downloaded ${pdfs.length} FinanceBench PDFs`);
-        
-        // Step 2: Ingest all documents sequentially (large PDFs, avoid parallel overload)
-        const ingestResults: any[] = [];
-        for (let i = 0; i < pdfs.length; i++) {
-          const pdf = pdfs[i];
-          console.log(`[Provision Benchmark] Ingesting FinanceBench PDF ${i + 1}/${pdfs.length}: ${pdf.fileName}`);
-          
-          // Upload to storage first (avoid base64 memory explosion)
-          const storagePath = `benchmark_financebench/${pdf.fileName}`;
-          const { error: uploadError } = await supabase.storage
-            .from('pipeline-a-uploads')
-            .upload(storagePath, pdf.pdfBuffer, {
-              contentType: 'application/pdf',
-              upsert: true
-            });
-          
-          if (uploadError) {
-            console.error(`[Provision Benchmark] Storage upload failed for ${pdf.fileName}:`, uploadError);
-            results.financebench.failed++;
-            continue;
-          }
-          
-          // Get public URL
-          const { data: urlData } = supabase.storage
-            .from('pipeline-a-uploads')
-            .getPublicUrl(storagePath);
-          
-          console.log(`[Provision Benchmark] Ingesting via storage URL: ${urlData.publicUrl}`);
-          
-          // Ingest via storage URL
-          const result = await supabase.functions.invoke('pipeline-a-hybrid-ingest-pdf', {
-            body: {
-              fileName: pdf.fileName,
-              storageUrl: urlData.publicUrl,
-              fileSize: pdf.pdfBuffer.byteLength,
-              folder: 'benchmark_financebench',
-              source_type: 'pdf'
+            if (result.error || !result.data?.documentId) {
+              console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} ingest failed:`, result.error);
+              results.financebench.failed++;
+              continue;
             }
-          });
-          
-          ingestResults.push(result);
-          console.log(`[Provision Benchmark] FinanceBench PDF ${i + 1}/${pdfs.length} ingested successfully`);
-        }
-        
-        console.log(`[Provision Benchmark] All ${ingestResults.length} FinanceBench PDFs ingested sequentially`);
-        
-        // Step 3: Insert Q&A pairs immediately
-        for (let i = 0; i < pdfs.length; i++) {
-          const pdf = pdfs[i];
-          const result = ingestResults[i];
-          
-          if (result.error || !result.data?.documentId) {
-            console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} ingest failed:`, result.error);
-            results.financebench.failed++;
-            continue;
-          }
-          
+            
+            // Insert Q&A entry
             const { error: insertError } = await supabase
               .from('benchmark_datasets')
               .insert({
-                file_name: pdf.fileName,
-                storage_path: `benchmark_financebench/${pdf.fileName}`,
+                file_name: fileName,
+                storage_path: `benchmark_financebench/${fileName}`,
                 suite_category: 'financebench',
-                question: pdf.question,
-                ground_truth: pdf.groundTruth,
+                question: entry.question,
+                ground_truth: entry.answer,
                 source_repo: 'patronus-ai/financebench',
-                source_metadata: pdf.metadata,
+                source_metadata: {
+                  company: entry.company,
+                  year: entry.year,
+                  doc_name: entry.doc_name,
+                  doc_link: entry.doc_link,
+                  evidence: entry.evidence,
+                  question_type: entry.question_type
+                },
                 document_id: result.data.documentId,
                 provisioned_at: new Date().toISOString()
               });
@@ -1361,12 +1381,18 @@ serve(async (req) => {
               results.financebench.failed++;
             } else {
               results.financebench.success++;
-              results.financebench.documents.push({ fileName: pdf.fileName, documentId: result.data.documentId });
-              console.log(`[Provision Benchmark] FinanceBench ${i + 1}: document queued for processing - assignment will happen automatically via cron`);
+              results.financebench.documents.push({ fileName, documentId: result.data.documentId, reused: false });
+              console.log(`[Provision Benchmark] FinanceBench ${i + 1}: document queued for processing`);
             }
+            
+          } catch (pdfError) {
+            console.error(`[Provision Benchmark] Failed to download PDF for entry ${i + 1}:`, pdfError);
+            results.financebench.failed++;
+          }
         }
         
         console.log(`[Provision Benchmark] FinanceBench suite complete: ${results.financebench.success} success, ${results.financebench.failed} failed`);
+        console.log(`[Provision Benchmark] 📊 Anti-duplicate stats: ${skippedDuplicates} reused, ${newDownloads} new downloads`);
 
       } catch (suiteError) {
         console.error('[Provision Benchmark] FinanceBench suite EXCEPTION:', suiteError);
@@ -1662,6 +1688,58 @@ function convertNarrativeQAToMarkdown(entry: any, index: number): string {
   markdown += `<!-- Question: ${entry.question} -->\n`;
   
   return markdown;
+}
+
+// ===== HELPER: Check if document already exists and is ready (ANTI-DUPLICATE) =====
+async function findExistingReadyDocument(
+  supabase: any,
+  fileName: string,
+  folderName: string
+): Promise<{ exists: boolean; documentId: string | null; status: string | null }> {
+  const { data: existingDoc, error } = await supabase
+    .from('pipeline_a_hybrid_documents')
+    .select('id, status')
+    .eq('file_name', fileName)
+    .eq('folder', folderName)
+    .maybeSingle();
+  
+  if (error) {
+    console.warn(`[Anti-Duplicate] Error checking for existing document ${fileName}:`, error.message);
+    return { exists: false, documentId: null, status: null };
+  }
+  
+  if (existingDoc) {
+    console.log(`[Anti-Duplicate] ✓ Found existing document: ${fileName} (status: ${existingDoc.status})`);
+    return { exists: true, documentId: existingDoc.id, status: existingDoc.status };
+  }
+  
+  return { exists: false, documentId: null, status: null };
+}
+
+// ===== HELPER: Check if Q&A entry already exists =====
+async function findExistingQAEntry(
+  supabase: any,
+  fileName: string,
+  suiteCategory: string
+): Promise<{ exists: boolean; entryId: string | null }> {
+  const { data: existingEntry, error } = await supabase
+    .from('benchmark_datasets')
+    .select('id')
+    .eq('file_name', fileName)
+    .eq('suite_category', suiteCategory)
+    .maybeSingle();
+  
+  if (error) {
+    console.warn(`[Anti-Duplicate] Error checking for existing Q&A entry:`, error.message);
+    return { exists: false, entryId: null };
+  }
+  
+  if (existingEntry) {
+    console.log(`[Anti-Duplicate] ✓ Q&A entry already exists for ${fileName} in ${suiteCategory}`);
+    return { exists: true, entryId: existingEntry.id };
+  }
+  
+  return { exists: false, entryId: null };
 }
 
 // ===== HELPER: Cleanup existing suite before re-provisioning =====
