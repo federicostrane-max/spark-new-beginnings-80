@@ -35,6 +35,36 @@ serve(async (req) => {
 
     console.log('[Process Vision Queue] Starting continuous queue processing');
 
+    // ===== PHASE 0: STUCK JOB RECOVERY =====
+    // Reset jobs stuck in 'processing' for more than 5 minutes (worker crash/timeout)
+    const STUCK_JOB_THRESHOLD_MINUTES = 5;
+    const stuckThreshold = new Date(Date.now() - STUCK_JOB_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    
+    const { data: stuckJobs, error: stuckError } = await supabase
+      .from('visual_enrichment_queue')
+      .select('id, chunk_id, document_id, created_at')
+      .eq('status', 'processing')
+      .lt('created_at', stuckThreshold);
+    
+    if (stuckError) {
+      console.error('[Process Vision Queue] Failed to fetch stuck jobs:', stuckError.message);
+    } else if (stuckJobs && stuckJobs.length > 0) {
+      console.log(`[Process Vision Queue] 🔧 Found ${stuckJobs.length} stuck job(s) in 'processing' state, resetting to 'pending'`);
+      
+      for (const stuckJob of stuckJobs) {
+        const { error: resetError } = await supabase
+          .from('visual_enrichment_queue')
+          .update({ status: 'pending' })
+          .eq('id', stuckJob.id);
+        
+        if (resetError) {
+          console.error(`[Process Vision Queue] Failed to reset stuck job ${stuckJob.id}:`, resetError.message);
+        } else {
+          console.log(`[Process Vision Queue] ✓ Reset stuck job ${stuckJob.id} (created ${stuckJob.created_at})`);
+        }
+      }
+    }
+
     let totalProcessed = 0;
     let totalFailed = 0;
     let iteration = 0;
