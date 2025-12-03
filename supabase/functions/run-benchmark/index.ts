@@ -90,17 +90,31 @@ serve(async (req) => {
         const conversationId = crypto.randomUUID();
         const startTime = Date.now();
 
-        // Call agent-chat (server-side, no streaming)
-        const { data: agentData, error: agentError } = await supabase.functions.invoke('agent-chat', {
-          body: {
-            agentSlug: 'book-serach-expert', // Benchmark Tester slug
+        // Call agent-chat with serverUserId for server-to-server authentication
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        
+        const agentChatResponse = await fetch(`${supabaseUrl}/functions/v1/agent-chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceRoleKey}`
+          },
+          body: JSON.stringify({
+            agentSlug: 'book-serach-expert',
             message: question,
             conversationId,
-            stream: false
-          }
+            stream: false,
+            serverUserId: BENCHMARK_USER_ID
+          })
         });
 
-        if (agentError) throw agentError;
+        if (!agentChatResponse.ok) {
+          const errorText = await agentChatResponse.text();
+          throw new Error(`agent-chat error ${agentChatResponse.status}: ${errorText.slice(0, 200)}`);
+        }
+
+        const agentData = await agentChatResponse.json();
 
         const agentResponse = agentData?.response || agentData?.message || '';
         const responseTimeMs = Date.now() - startTime;
