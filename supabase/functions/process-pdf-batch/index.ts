@@ -17,10 +17,36 @@ const MAX_IMAGES_PER_DOC = 50;  // 🛡️ Prevent queue overflow on large docum
 const VISUAL_ELEMENT_TYPES = ['layout_picture', 'layout_table', 'layout_keyValueRegion'];
 const MAX_IMAGE_SIZE_MB = 5;    // Skip images larger than this
 
+// ===== BATCH TRACE REPORT INTERFACE =====
+interface BatchTraceReport {
+  batch_index: number;
+  pages_processed: number;
+  page_range: { start: number; end: number };
+  llamaparse_job_id: string | null;
+  processing_time_ms: number;
+  text_extraction: {
+    super_document_chars: number;
+    ordered_elements: number;
+  };
+  chunking: {
+    text_chunks_created: number;
+    visual_chunks_created: number;
+    total_chunks: number;
+  };
+  visual_enrichment: {
+    images_found: number;
+    images_skipped_size: number;
+    images_enqueued: number;
+  };
+  completed_at: string;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  const startTime = Date.now();
 
   try {
     const { jobId } = await req.json();
@@ -60,6 +86,10 @@ serve(async (req) => {
 
     console.log(`[Process Batch] Processing batch ${job.batch_index} (pages ${job.page_start}-${job.page_end})`);
 
+    // Initialize trace report tracking
+    let llamaparseJobId: string | null = null;
+    let imagesSkippedSize = 0;
+
     // Download batch PDF
     const { data: batchBlob, error: downloadError } = await supabase.storage
       .from('pipeline-a-uploads')
@@ -78,8 +108,9 @@ serve(async (req) => {
       batchPdfBuffer,
       `batch_${job.batch_index}.pdf`,
       llamaApiKey,
-      async (llamaJobId: string) => {
-        console.log(`[Process Batch] LlamaParse job created: ${llamaJobId}`);
+      async (jobIdFromLlama: string) => {
+        llamaparseJobId = jobIdFromLlama;
+        console.log(`[Process Batch] LlamaParse job created: ${jobIdFromLlama}`);
       }
     );
 
@@ -94,6 +125,7 @@ serve(async (req) => {
     // ===== PHASE 3: VISUAL ENRICHMENT QUEUE =====
     const queuedImagePlaceholders: Array<{ imageName: string; queueId: string; page: number }> = [];
     let enqueuedCount = 0;
+    let imagesFound = 0;
     
     if (anthropicKey && jsonResult.rawJson?.pages) {
       console.log(`[Process Batch] Scanning for visual elements (max ${MAX_IMAGES_PER_DOC})...`);
@@ -102,6 +134,11 @@ serve(async (req) => {
         if (!page.images || page.images.length === 0) continue;
         
         for (const image of page.images) {
+          // Count total images found
+          if (VISUAL_ELEMENT_TYPES.includes(image.type)) {
+            imagesFound++;
+          }
+          
           // 🛡️ STOP if we hit the limit
           if (enqueuedCount >= MAX_IMAGES_PER_DOC) {
             console.log(`[Process Batch] ⚠️ MAX_IMAGES limit reached (${MAX_IMAGES_PER_DOC}), stopping image queue`);
@@ -117,6 +154,7 @@ serve(async (req) => {
               // Skip if image too large
               if (imageSizeMB > MAX_IMAGE_SIZE_MB) {
                 console.log(`[Process Batch] ⚠️ SKIPPED ${image.name} - Size ${imageSizeMB.toFixed(2)}MB exceeds ${MAX_IMAGE_SIZE_MB}MB`);
+                imagesSkippedSize++;
                 continue;
               }
               
@@ -268,13 +306,43 @@ serve(async (req) => {
     console.log(`[Process Batch] ✅ Created ${visualChunksCreated}/${queuedImagePlaceholders.length} visual chunks`);
     const totalChunksCreated = chunksToInsert.length + visualChunksCreated;
 
-    // Update job status
+    // ===== GENERATE BATCH TRACE REPORT =====
+    const batchTraceReport: BatchTraceReport = {
+      batch_index: job.batch_index,
+      pages_processed: job.page_end - job.page_start + 1,
+      page_range: { start: job.page_start, end: job.page_end },
+      llamaparse_job_id: llamaparseJobId || jsonResult.jobId,
+      processing_time_ms: Date.now() - startTime,
+      text_extraction: {
+        super_document_chars: superDocument.length,
+        ordered_elements: orderedElements.length
+      },
+      chunking: {
+        text_chunks_created: chunksToInsert.length,
+        visual_chunks_created: visualChunksCreated,
+        total_chunks: totalChunksCreated
+      },
+      visual_enrichment: {
+        images_found: imagesFound,
+        images_skipped_size: imagesSkippedSize,
+        images_enqueued: enqueuedCount
+      },
+      completed_at: new Date().toISOString()
+    };
+
+    console.log(`[Process Batch] 📊 Trace Report: ${JSON.stringify(batchTraceReport)}`);
+
+    // Update job status with trace report in metadata
     await supabase
       .from('processing_jobs')
       .update({
         status: 'completed',
         chunks_created: totalChunksCreated,
-        completed_at: new Date().toISOString()
+        completed_at: new Date().toISOString(),
+        metadata: {
+          ...(job.metadata || {}),
+          trace_report: batchTraceReport
+        }
       })
       .eq('id', jobId);
 
@@ -320,6 +388,7 @@ serve(async (req) => {
         textChunks: chunksToInsert.length,
         visualChunks: visualChunksCreated,
         imagesEnqueued: enqueuedCount,
+        traceReport: batchTraceReport,
         message: 'Batch processed successfully with visual enrichment'
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

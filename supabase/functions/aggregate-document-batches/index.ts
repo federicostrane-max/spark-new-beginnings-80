@@ -8,6 +8,26 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ===== AGGREGATED TRACE REPORT INTERFACE =====
+interface AggregatedTraceReport {
+  document_id: string;
+  processing_path: 'batch';
+  total_batches: number;
+  batches: any[];
+  summary: {
+    total_pages: number;
+    total_chunks: number;
+    text_chunks: number;
+    visual_chunks: number;
+    total_visual_elements_found: number;
+    total_visual_elements_enqueued: number;
+    total_visual_elements_skipped: number;
+    total_processing_time_ms: number;
+    super_document_total_chars: number;
+  };
+  aggregated_at: string;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -29,11 +49,12 @@ serve(async (req) => {
 
     console.log(`[Aggregator] Checking completion status for document: ${documentId}`);
 
-    // Count jobs by status
+    // Fetch ALL job data including metadata for trace reports
     const { data: jobs, error: jobsError } = await supabase
       .from('processing_jobs')
-      .select('status, chunks_created')
-      .eq('document_id', documentId);
+      .select('status, chunks_created, batch_index, metadata')
+      .eq('document_id', documentId)
+      .order('batch_index', { ascending: true });
 
     if (jobsError) {
       throw new Error(`Failed to fetch jobs: ${jobsError.message}`);
@@ -91,7 +112,36 @@ serve(async (req) => {
       console.error(`[Aggregator] ❌ Document ${documentId} completely failed: ${statusMessage}`);
     }
 
-    // Update document status
+    // ===== AGGREGATE TRACE REPORTS FROM ALL BATCHES =====
+    const batchTraceReports = jobs
+      .filter(j => j.metadata?.trace_report)
+      .map(j => j.metadata.trace_report);
+
+    console.log(`[Aggregator] Found ${batchTraceReports.length} batch trace reports to aggregate`);
+
+    // Calculate aggregated summary
+    const aggregatedTraceReport: AggregatedTraceReport = {
+      document_id: documentId,
+      processing_path: 'batch',
+      total_batches: totalJobs,
+      batches: batchTraceReports,
+      summary: {
+        total_pages: batchTraceReports.reduce((sum, r) => sum + (r.pages_processed || 0), 0),
+        total_chunks: batchTraceReports.reduce((sum, r) => sum + (r.chunking?.total_chunks || 0), 0),
+        text_chunks: batchTraceReports.reduce((sum, r) => sum + (r.chunking?.text_chunks_created || 0), 0),
+        visual_chunks: batchTraceReports.reduce((sum, r) => sum + (r.chunking?.visual_chunks_created || 0), 0),
+        total_visual_elements_found: batchTraceReports.reduce((sum, r) => sum + (r.visual_enrichment?.images_found || 0), 0),
+        total_visual_elements_enqueued: batchTraceReports.reduce((sum, r) => sum + (r.visual_enrichment?.images_enqueued || 0), 0),
+        total_visual_elements_skipped: batchTraceReports.reduce((sum, r) => sum + (r.visual_enrichment?.images_skipped_size || 0), 0),
+        total_processing_time_ms: batchTraceReports.reduce((sum, r) => sum + (r.processing_time_ms || 0), 0),
+        super_document_total_chars: batchTraceReports.reduce((sum, r) => sum + (r.text_extraction?.super_document_chars || 0), 0)
+      },
+      aggregated_at: new Date().toISOString()
+    };
+
+    console.log(`[Aggregator] 📊 Aggregated Trace Report Summary:`, JSON.stringify(aggregatedTraceReport.summary));
+
+    // Update document status with aggregated trace report
     const { error: updateError } = await supabase
       .from('pipeline_a_hybrid_documents')
       .update({
@@ -102,7 +152,8 @@ serve(async (req) => {
           completed_batches: completedJobs,
           failed_batches: failedJobs,
           total_chunks: totalChunks,
-          message: statusMessage
+          message: statusMessage,
+          trace_report: aggregatedTraceReport
         }
       })
       .eq('id', documentId);
@@ -110,6 +161,8 @@ serve(async (req) => {
     if (updateError) {
       throw new Error(`Failed to update document: ${updateError.message}`);
     }
+
+    console.log(`[Aggregator] ✅ Saved aggregated trace report for ${documentId}`);
 
     // If successfully chunked, trigger embedding generation
     if (documentStatus === 'chunked') {
@@ -131,6 +184,7 @@ serve(async (req) => {
         failedJobs,
         totalJobs,
         totalChunks,
+        traceReport: aggregatedTraceReport.summary,
         message: statusMessage
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
