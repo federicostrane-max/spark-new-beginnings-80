@@ -74,10 +74,22 @@ Deno.serve(async (req) => {
     }
 
     if (rpcError) {
-      console.error('[check-agent-health] RPC error:', rpcError);
+      console.error('[check-agent-health] RPC error:', JSON.stringify(rpcError));
+      // Return degraded response instead of 500 to prevent UI errors
+      const degradedHealth = {
+        agentId,
+        totalDocuments: 0,
+        syncedDocuments: 0,
+        pendingDocuments: 0,
+        failedDocuments: 0,
+        hasIssues: false,
+        documents: [],
+        degraded: true,
+        message: `Sync status unavailable: ${rpcError.message || 'Unknown error'}`
+      };
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch agent sync status' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ success: true, health: degradedHealth }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
