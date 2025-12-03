@@ -332,58 +332,90 @@ export function buildContextAwareVisualPrompt(
     'embedded_image': 'Analyze this embedded image.',
   };
   
-  // Domain-specific enhancements (come enhanceAnalystPrompt per video)
+  // Domain-specific enhancements - RAG OPTIMIZED (no narrative, dense output)
   const domainEnhancements: Record<string, string> = {
-    'trading': `
-FOCUS SPECIFICO PER TRADING/FINANZA:
-- Identifica OGNI candlestick pattern visibile (doji, hammer, engulfing, etc.)
-- Estrai TUTTI i livelli di prezzo visibili con precisione decimale
-- Documenta OGNI interazione prezzo-indicatore:
-  * Timestamp/posizione nel grafico
-  * Prezzo esatto al punto di contatto
-  * Tipo di indicatore (SMA, EMA, Bollinger, etc.)
-  * Direzione (touch from above/below)
-  * Risultato (bounce, breakout, cross)
-- Identifica supporti e resistenze con livelli esatti
-- Nota volumi se visibili
-VERBOSITÀ: MASSIMA - ogni numero conta`,
+    'trading': `TASK: Transcribe trading chart data for RAG retrieval.
 
-    'trading_view_pro': `
-ANALISI PROFESSIONALE SCREENSHOT TRADINGVIEW:
+OUTPUT FORMAT (strict):
+[TYPE] Chart | Candlestick | Indicator
+[TITLE] {asset pair, timeframe if visible}
+[PAGE] {from METADATA}
+[CONTEXT] {exchange, date range if visible}
+[PRICE_DATA]
+| Metric | Value |
+|--------|-------|
+| Last Price | {exact} |
+| High | {exact} |
+| Low | {exact} |
+| Open | {exact} |
+[INDICATORS]
+| Indicator | Value |
+|-----------|-------|
+| EMA 8 | {exact} |
+| SMA 50 | {exact} |
+| RSI | {exact} |
+| Volume | {exact} |
+[LEVELS]
+| Type | Price |
+|------|-------|
+| Resistance | {exact} |
+| Support | {exact} |
+[PATTERNS] {candlestick patterns visible: doji, hammer, engulfing, etc.}
 
-1. LEGENDA DATI (Top-Left Corner):
-   - Trascrivi ESATTAMENTE tutti i valori nei box informativi
-   - Formato: "EMA 8: [valore]", "SMA 50: [valore]", "Vol: [valore]"
-   - Questi sono i dati PIÙ PRECISI disponibili
+TRANSCRIPTION RULES:
+- Copy ALL prices with full decimal precision
+- Include ALL visible indicator values from legend
+- Note ALL horizontal lines as support/resistance levels
 
-2. STRUTTURA PREZZO E CANDELE:
-   - Tipo candele: Verdi (Bullish) o Rosse (Bearish)
-   - Ultima candela: descrivi corpo, wick superiore/inferiore
-   - Pattern riconoscibili: Doji, Hammer, Engulfing, Morning Star, etc.
+FORBIDDEN:
+- Price predictions or analysis
+- "The chart shows...", "We can observe..."
+- Trend interpretations unless explicitly labeled
 
-3. INDICATORI OVERLAY (Sul grafico principale):
-   - Identifica OGNI linea colorata (Medie Mobili, Bollinger Bands)
-   - Posizione rispetto al prezzo: sopra/sotto/attraversamento
-   - Interazioni: touch points, crossover, supporto dinamico
+MAXIMUM 800 CHARACTERS.`,
 
-4. DISEGNI UTENTE E LIVELLI:
-   - Linee orizzontali: livelli di Supporto/Resistenza
-   - Linee oblique: trendlines, canali
-   - LEGGI I PREZZI dall'asse Y destro con precisione decimale
+    'trading_view_pro': `TASK: Transcribe TradingView screenshot for RAG retrieval.
 
-5. SOTTO-GRAFICI (Pannelli Inferiori):
-   - Nome indicatore (RSI, MACD, OBV, Volume)
-   - Trend della linea/istogramma (crescente/decrescente)
-   - Livelli chiave (RSI 30/70, zero line MACD)
-   - Divergenze rispetto al prezzo
+OUTPUT FORMAT (strict):
+[TYPE] TradingView Chart
+[TITLE] {ticker symbol, timeframe}
+[PAGE] {from METADATA}
+[LEGEND_DATA]
+| Indicator | Value |
+|-----------|-------|
+{transcribe ALL values from top-left info boxes exactly}
+[PRICE_ACTION]
+| Metric | Value |
+|--------|-------|
+| Current | {exact} |
+| High | {exact} |
+| Low | {exact} |
+[OVERLAYS]
+| Indicator | Value | Position vs Price |
+|-----------|-------|-------------------|
+| EMA/SMA | {exact} | above/below/crossing |
+[SUBCHARTS]
+| Indicator | Value | Level |
+|-----------|-------|-------|
+| RSI | {exact} | {vs 30/70} |
+| MACD | {exact} | {vs zero} |
+[USER_DRAWINGS]
+| Type | Price Level |
+|------|-------------|
+| Horizontal Line | {exact from Y-axis} |
+| Trendline | {start-end if readable} |
 
-6. TERMINOLOGIA OBBLIGATORIA:
-   - Usa: Breakout, Divergenza, Consolidamento, Pullback
-   - Specifica: Golden Cross, Death Cross se visibili
-   - Pattern: Head and Shoulders, Double Top/Bottom, Triangle
+TRANSCRIPTION RULES:
+- Read ALL prices from right Y-axis with full precision
+- Transcribe EVERY value in legend boxes
+- Note crossovers as fact, not prediction
 
-OUTPUT: Markdown strutturato con TUTTI i valori numerici estratti.
-PRECISIONE: Ogni numero deve essere trascritto esattamente come appare.`,
+FORBIDDEN:
+- Trading recommendations
+- Future price predictions
+- "Bullish/bearish outlook" interpretations
+
+MAXIMUM 800 CHARACTERS.`,
 
     'finance': `TASK: Transcribe financial data for RAG retrieval.
 
@@ -410,53 +442,173 @@ FORBIDDEN (will break RAG):
 - Describing what is NOT present
 
 ONE REPRESENTATION ONLY: The markdown table IS the description.
-Do not explain it, summarize it, or add commentary.`,
+Do not explain it, summarize it, or add commentary.
 
-    'architecture': `
-FOCUS SPECIFICO PER ARCHITETTURA:
-- Identifica ogni stanza/ambiente con dimensioni
-- Nota orientamento (Nord/Sud/Est/Ovest) se indicato
-- Estrai quote e misure in metri/piedi
-- Identifica materiali se specificati
-- Nota scale, proporzioni, rapporti
-VERBOSITÀ: ALTA per misure, MEDIA per descrizioni`,
+MAXIMUM 800 CHARACTERS.`,
 
-    'medical': `
-FOCUS SPECIFICO PER MEDICINA:
-- Estrai TUTTI i valori diagnostici con unità
-- Nota range di riferimento se presenti
-- Identifica anomalie rispetto ai range normali
-- Documenta terminologia medica esatta
-VERBOSITÀ: MASSIMA - precisione critica`,
+    'architecture': `TASK: Transcribe architectural drawing data for RAG retrieval.
 
-    'legal': `
-FOCUS SPECIFICO PER DOCUMENTI LEGALI:
-- Estrai date, numeri di protocollo, riferimenti
-- Identifica parti coinvolte
-- Nota clausole chiave
-- Documenta firme e timbri se visibili
-VERBOSITÀ: ALTA per riferimenti, MEDIA per contenuto`,
+OUTPUT FORMAT (strict):
+[TYPE] Floor Plan | Elevation | Section | Detail
+[TITLE] {drawing title/number}
+[PAGE] {from METADATA}
+[CONTEXT] {scale, orientation if shown}
+[DIMENSIONS]
+| Element | Measurement | Unit |
+|---------|-------------|------|
+{ALL dimensions visible on drawing}
+[SPACES]
+| Room/Area | Dimensions | Area |
+|-----------|------------|------|
+{ALL labeled spaces with measurements}
+[ANNOTATIONS]
+| Reference | Description |
+|-----------|-------------|
+{ALL text labels, material callouts, notes}
+[SYMBOLS]
+| Symbol | Meaning |
+|--------|---------|
+{Door swings, windows, fixtures if labeled}
 
-    'science': `MODE: SCIENTIFIC DATA EXTRACTION
-TARGET: Research papers, scientific figures, data visualizations
+TRANSCRIPTION RULES:
+- Extract ALL numeric dimensions exactly as shown
+- Preserve units (m, ft, mm, inches)
+- Include scale ratio if present
+- Note North arrow orientation if visible
 
-REQUIRED OUTPUT FORMAT:
-[TYPE] {Figure / Chart / Table / Diagram / Graph}
-[TITLE] {Figure caption or title}
-[PAGE] {Use page number from METADATA}
+FORBIDDEN:
+- Design critique or suggestions
+- "The layout shows...", "This appears to be..."
+- Assumptions about unlabeled elements
+
+MAXIMUM 800 CHARACTERS.`,
+
+    'medical': `TASK: Transcribe medical data for RAG retrieval.
+
+OUTPUT FORMAT (strict):
+[TYPE] Lab Report | Imaging | Chart | Prescription
+[TITLE] {report title, test name}
+[PAGE] {from METADATA}
+[CONTEXT] {date, patient ID if visible - anonymize if needed}
 [DATA]
-For quantitative data, USE MARKDOWN TABLE FORMAT:
-| Variable | Value | Unit | Uncertainty |
-|----------|-------|------|-------------|
+| Test/Metric | Value | Unit | Reference Range | Flag |
+|-------------|-------|------|-----------------|------|
+{ALL values with exact precision}
+[FINDINGS]
+| Finding | Description |
+|---------|-------------|
+{Transcribe exact text from report}
+[NOTES] {footnotes, methodology notes if present}
 
-EXTRACT: axis labels, data points, error bars, p-values, statistical significance markers.
-[METHODOLOGY] {If visible: sample size, conditions, experimental setup}
-[NOTE] {Footnotes, asterisks, significance levels (*, **, ***)}
+TRANSCRIPTION RULES:
+- Copy ALL numerical values exactly as shown
+- Preserve units (mg/dL, mmol/L, etc.)
+- Include reference ranges when displayed
+- Note flags (H/L, abnormal markers) exactly as shown
 
-CONSTRAINTS:
-- Preserve exact numerical precision from source.
-- Include units for all measurements.
-- Note statistical significance markers.`,
+FORBIDDEN:
+- Medical interpretations or diagnoses
+- "This indicates...", "The patient may have..."
+- Advice or recommendations
+- Information not visible in the image
+
+MAXIMUM 800 CHARACTERS.`,
+
+    'legal': `TASK: Transcribe legal document data for RAG retrieval.
+
+OUTPUT FORMAT (strict):
+[TYPE] Contract | Filing | Certificate | Court Document
+[TITLE] {document title}
+[PAGE] {from METADATA}
+[CONTEXT] {jurisdiction, date, case/file number}
+[PARTIES]
+| Role | Name/Entity |
+|------|-------------|
+{ALL parties mentioned}
+[KEY_DATA]
+| Field | Value |
+|-------|-------|
+| Date | {exact} |
+| Reference Number | {exact} |
+| Effective Date | {exact} |
+{ALL dates, numbers, identifiers}
+[CLAUSES]
+| Section | Summary |
+|---------|---------|
+{Clause numbers and titles, not full text}
+[SIGNATURES]
+| Signatory | Present |
+|-----------|---------|
+{Names of signatories if visible}
+
+TRANSCRIPTION RULES:
+- Extract ALL dates, numbers, reference codes exactly
+- Preserve formatting of legal citations
+- Note section/clause numbers precisely
+
+FORBIDDEN:
+- Legal interpretation or advice
+- "This clause means...", "This suggests..."
+- Opinions on validity or enforceability
+
+MAXIMUM 800 CHARACTERS.`,
+
+    'science': `TASK: Transcribe scientific data for RAG retrieval.
+
+OUTPUT FORMAT (strict):
+[TYPE] Figure | Graph | Table | Diagram
+[TITLE] {figure caption/number}
+[PAGE] {from METADATA}
+[CONTEXT] {study, methodology if visible}
+[DATA]
+| Variable | Value | Unit | Error/CI |
+|----------|-------|------|----------|
+{ALL data points with uncertainties}
+[AXES]
+| Axis | Label | Range | Unit |
+|------|-------|-------|------|
+{X and Y axis details}
+[STATISTICS]
+| Metric | Value |
+|--------|-------|
+| n | {sample size} |
+| p-value | {exact} |
+| R² | {exact} |
+[NOTE] {significance markers: *, **, ***, NS}
+
+TRANSCRIPTION RULES:
+- Preserve exact numerical precision
+- Include ALL error bars, confidence intervals
+- Note statistical significance markers exactly
+- Include units for every measurement
+
+FORBIDDEN:
+- Interpretation of results
+- "This suggests...", "The data indicates..."
+- Conclusions not stated in the figure
+
+MAXIMUM 800 CHARACTERS.`,
+
+    'general': `TASK: Transcribe image content for RAG retrieval.
+
+OUTPUT FORMAT:
+[TYPE] {Table | Chart | Diagram | Text | Photo | Other}
+[TITLE] {title if visible}
+[PAGE] {from METADATA}
+[CONTENT]
+{Markdown table for structured data, or plain text transcription}
+
+TRANSCRIPTION RULES:
+- Extract ALL visible text and numbers
+- Use markdown table for tabular data
+- Preserve exact formatting of numbers
+
+FORBIDDEN:
+- "The image shows...", "We can see..."
+- Descriptions of colors, layout, aesthetics
+- Information not visible in the image
+
+MAXIMUM 800 CHARACTERS.`,
   };
   
   const basePrompt = basePrompts[elementType] || basePrompts['layout_picture'];
