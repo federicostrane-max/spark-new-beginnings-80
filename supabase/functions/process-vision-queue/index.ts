@@ -87,8 +87,35 @@ serve(async (req) => {
         // Extract metadata
         const metadata = item.image_metadata || {};
         const imageType = metadata.type || 'layout_picture';
-        const documentContext = metadata.document_context || { domain: 'general' };
         const pageNumber = metadata.page;  // Extract page number for RAG metadata
+        
+        // 🔧 FIX: Infer domain from document folder if document_context missing
+        let documentContext = metadata.document_context;
+        if (!documentContext) {
+          // Fetch document folder to infer domain
+          const { data: docData } = await supabase
+            .from('pipeline_a_hybrid_documents')
+            .select('folder, file_name')
+            .eq('id', item.document_id)
+            .single();
+          
+          // Infer domain from folder name
+          const folder = docData?.folder?.toLowerCase() || '';
+          let inferredDomain = 'general';
+          
+          if (folder.includes('financebench') || folder.includes('finance') || folder.includes('finqa')) {
+            inferredDomain = 'finance';
+          } else if (folder.includes('trading')) {
+            inferredDomain = 'trading';
+          } else if (folder.includes('medical') || folder.includes('health')) {
+            inferredDomain = 'medical';
+          } else if (folder.includes('architecture') || folder.includes('floorplan')) {
+            inferredDomain = 'architecture';
+          }
+          
+          documentContext = { domain: inferredDomain };
+          console.log(`[Vision Queue] Inferred domain '${inferredDomain}' from folder '${folder}' for ${docData?.file_name}`);
+        }
 
         // Call Claude Vision with context-awareness
         console.log(`[Vision Queue] Calling Claude Vision for ${metadata.image_name}, page: ${pageNumber || 'unknown'}`);
