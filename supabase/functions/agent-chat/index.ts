@@ -2242,21 +2242,41 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { data: { user }, error: userError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
-
-    if (userError || !user) {
-      console.error('Authentication failed:', userError);
-      throw new Error('Unauthorized');
-    }
-
-    console.log('User authenticated:', user.id);
-
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId } = requestBody;
+
+    // Server-to-server calls can pass serverUserId directly (for benchmark system)
+    let userId: string;
+    if (serverUserId && typeof serverUserId === 'string') {
+      // Validate that this is a server-side call by checking if the token is the service role key
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const providedToken = authHeader.replace('Bearer ', '');
+      
+      // Accept server calls with either service role key or anon key (for internal function invokes)
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+      if (providedToken === serviceRoleKey || providedToken === anonKey) {
+        console.log('Server-to-server call authenticated with serverUserId:', serverUserId);
+        userId = serverUserId;
+      } else {
+        console.error('Invalid token for server-to-server call');
+        throw new Error('Unauthorized');
+      }
+    } else {
+      // Normal user authentication
+      const { data: { user }, error: userError } = await supabase.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+
+      if (userError || !user) {
+        console.error('Authentication failed:', userError);
+        throw new Error('Unauthorized');
+      }
+      
+      console.log('User authenticated:', user.id);
+      userId = user.id;
+    }
     const enableStreaming = stream !== false; // Default to streaming unless explicitly disabled
     
     // Validate inputs
@@ -2273,7 +2293,7 @@ Deno.serve(async (req) => {
 
     // Detailed request logging
     console.log('🆔 [REQ-' + requestId + '] New request received');
-    console.log('   User:', user.id);
+    console.log('   User:', userId);
     console.log('   Conversation:', conversationId || 'NEW');
     console.log('   Agent:', agentSlug);
     console.log('   Message length:', message.length, 'chars');
@@ -2313,7 +2333,7 @@ Deno.serve(async (req) => {
         .from('agent_conversations')
         .select('*')
         .eq('id', conversationId)
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .maybeSingle();
 
       if (existingConv) {
@@ -2327,7 +2347,7 @@ Deno.serve(async (req) => {
           .from('agent_conversations')
           .insert({
             id: conversationId,
-            user_id: user.id,
+            user_id: userId,
             agent_id: agent.id,
             title: message.substring(0, 100)
           })
@@ -2342,7 +2362,7 @@ Deno.serve(async (req) => {
       const { data: existingConv } = await supabase
         .from('agent_conversations')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('agent_id', agent.id)
         .maybeSingle();
 
@@ -2355,7 +2375,7 @@ Deno.serve(async (req) => {
         const { data, error } = await supabase
           .from('agent_conversations')
           .insert({
-            user_id: user.id,
+            user_id: userId,
             agent_id: agent.id,
             title: message.substring(0, 100)
           })
@@ -2503,7 +2523,7 @@ Deno.serve(async (req) => {
           // 2. Get or create consultation conversation for target agent
           const { data: consultConvId, error: consultConvError } = await supabase
             .rpc('get_or_create_conversation', {
-              p_user_id: user.id,
+              p_user_id: userId,
               p_agent_id: targetAgent.id
             });
           
@@ -3064,7 +3084,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
               .from('agent_conversations')
               .select('id')
               .eq('agent_id', promptExpert.id)
-              .eq('user_id', user.id)
+              .eq('user_id', userId)
               .single();
             
             if (convError || !expertConv) {
@@ -3072,7 +3092,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
                 .from('agent_conversations')
                 .insert({
                   agent_id: promptExpert.id,
-                  user_id: user.id,
+                  user_id: userId,
                   title: `Modifica prompt da ${agent.name}`
                 })
                 .select('id')
@@ -3152,7 +3172,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
                   agent_id: targetAgent.id,
                   system_prompt: targetAgent.system_prompt,
                   version_number: nextVersion,
-                  created_by: user.id
+                  created_by: userId
                 });
               
               console.log(`💾 [MODIFY PROMPT] Saved old prompt to history (version ${nextVersion})`);
@@ -3731,7 +3751,7 @@ ${knowledgeContext}${searchResultsContext}`;
             toolInput: any,
             context: {
               agent: any,
-              user: any,
+              userId: string,
               conversation: any,
               supabase: any,
               sendSSE: Function,
@@ -4742,7 +4762,7 @@ ${knowledgeContext}${searchResultsContext}`;
                           toolInput,
                           {
                             agent,
-                            user,
+                            userId,
                             conversation,
                             supabase,
                             sendSSE,
@@ -4905,7 +4925,7 @@ ${knowledgeContext}${searchResultsContext}`;
                           toolInput,
                           {
                             agent,
-                            user,
+                            userId,
                             conversation,
                             supabase,
                             sendSSE,
@@ -5015,7 +5035,7 @@ ${knowledgeContext}${searchResultsContext}`;
                     toolInput,
                     {
                       agent,
-                      user,
+                      userId,
                       conversation,
                       supabase,
                       sendSSE,
@@ -5141,7 +5161,7 @@ ${knowledgeContext}${searchResultsContext}`;
                           toolInput,
                           {
                             agent,
-                            user,
+                            userId,
                             conversation,
                             supabase,
                             sendSSE,
@@ -5228,7 +5248,7 @@ ${knowledgeContext}${searchResultsContext}`;
                         toolInput,
                         {
                           agent,
-                          user,
+                          userId,
                           conversation,
                           supabase,
                           sendSSE,

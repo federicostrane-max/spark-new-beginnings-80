@@ -201,7 +201,12 @@ verify_jwt = false
 timeout = 300
 
 [functions.evaluate-answer]
-verify_jwt = true
+verify_jwt = false
+timeout = 60
+
+[functions.run-benchmark]
+verify_jwt = false
+timeout = 3600
 
 # ===== BENCHMARK SYSTEM =====
 [functions.pipeline-a-hybrid-ingest-markdown]
