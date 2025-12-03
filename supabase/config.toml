@@ -200,6 +200,10 @@ verify_jwt = false
 verify_jwt = false
 timeout = 300
 
+[functions.agent-chat]
+verify_jwt = false
+timeout = 300
+
 [functions.evaluate-answer]
 verify_jwt = false
 timeout = 60
