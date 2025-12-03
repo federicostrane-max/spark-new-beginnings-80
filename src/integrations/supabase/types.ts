@@ -2192,6 +2192,7 @@ export type Database = {
           error_message: string | null
           id: string
           input_file_path: string
+          metadata: Json | null
           page_end: number
           page_start: number
           retry_count: number | null
@@ -2208,6 +2209,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           input_file_path: string
+          metadata?: Json | null
           page_end: number
           page_start: number
           retry_count?: number | null
@@ -2224,6 +2226,7 @@ export type Database = {
           error_message?: string | null
           id?: string
           input_file_path?: string
+          metadata?: Json | null
           page_end?: number
           page_start?: number
           retry_count?: number | null
