@@ -4,6 +4,11 @@ import { decodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { describeVisualElementContextAware } from "../_shared/visionEnhancer.ts";
 import { generateEmbedding } from "../_shared/embeddingService.ts";
 
+// Declare EdgeRuntime for background task support
+declare const EdgeRuntime: {
+  waitUntil: (promise: Promise<any>) => void;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -350,6 +355,75 @@ serve(async (req) => {
     }
 
     console.log(`[Process Vision Queue] ✅ Final summary: ${totalProcessed} processed, ${totalFailed} failed across ${iteration} iteration(s)`);
+
+    // ===== PHASE 3: ZOMBIE DOCUMENT FINALIZATION =====
+    // Check for documents stuck in 'chunked' status where ALL chunks are 'ready'
+    // This fixes the architectural dead-lock where generate-embeddings only updates docs when it processes chunks
+    const { data: zombieDocuments, error: zombieError } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id, file_name')
+      .eq('status', 'chunked');
+
+    if (zombieError) {
+      console.error('[Process Vision Queue] Failed to fetch zombie documents:', zombieError.message);
+    } else if (zombieDocuments && zombieDocuments.length > 0) {
+      console.log(`[Process Vision Queue] 🔍 Checking ${zombieDocuments.length} document(s) in 'chunked' status for finalization`);
+      
+      for (const doc of zombieDocuments) {
+        // Count total chunks vs ready chunks
+        const { count: totalChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id);
+
+        const { count: readyChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'ready');
+
+        // If ALL chunks are ready, finalize document
+        if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
+          const { error: updateError } = await supabase
+            .from('pipeline_a_hybrid_documents')
+            .update({ status: 'ready', updated_at: new Date().toISOString() })
+            .eq('id', doc.id);
+
+          if (updateError) {
+            console.error(`[Process Vision Queue] Failed to finalize document ${doc.id}:`, updateError.message);
+          } else {
+            console.log(`[Process Vision Queue] ✅ FINALIZED zombie document ${doc.file_name} (${readyChunks}/${totalChunks} chunks ready)`);
+            
+            // Trigger benchmark assignment if applicable
+            const { data: benchmarkRecord } = await supabase
+              .from('benchmark_datasets')
+              .select('id, suite_category')
+              .eq('document_id', doc.id)
+              .maybeSingle();
+
+            if (benchmarkRecord) {
+              console.log(`[Process Vision Queue] 🎯 Triggering benchmark assignment for ${doc.file_name}`);
+              EdgeRuntime.waitUntil((async () => {
+                try {
+                  await fetch(`${supabaseUrl}/functions/v1/assign-benchmark-chunks`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ documentId: doc.id }),
+                  });
+                } catch (e) {
+                  console.error(`[Process Vision Queue] Benchmark assignment failed:`, e);
+                }
+              })());
+            }
+          }
+        } else {
+          console.log(`[Process Vision Queue] Document ${doc.file_name} not ready yet: ${readyChunks || 0}/${totalChunks || 0} chunks ready`);
+        }
+      }
+    }
 
     return new Response(
       JSON.stringify({
