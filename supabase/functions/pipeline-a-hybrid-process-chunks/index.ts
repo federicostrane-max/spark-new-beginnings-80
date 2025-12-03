@@ -548,13 +548,9 @@ serve(async (req) => {
             
             console.log(`[Visual Enrichment Queue] ✅ Enqueued ${queuedImagePlaceholders.length} images for async processing`);
             
-            // Insert placeholders into superDocument for each enqueued image
-            for (const placeholder of queuedImagePlaceholders) {
-              const placeholderText = `\n\n[VISUAL_ENRICHMENT_PENDING: ${placeholder.queueId}]\n(Image: ${placeholder.imageName}, Page: ${placeholder.page})\n\n`;
-              mutableSuperDocument += placeholderText;
-            }
-            
-            console.log(`[Visual Queue] Inserted ${queuedImagePlaceholders.length} placeholders into document`);
+            // ✅ NEW ARCHITECTURE: Visual elements will be chunked SEPARATELY, not concatenated
+            // This prevents embedding dilution from multiple tables in one chunk
+            console.log(`[Visual Queue] ${queuedImagePlaceholders.length} visual elements will be created as SEPARATE chunks (not concatenated)`);
           } else {
             console.log('[Visual Enrichment Queue] Skipped (no Anthropic key or no images)');
           }
@@ -726,46 +722,63 @@ serve(async (req) => {
           }
         }
 
-        // ✅ ARCHITECTURAL FIX: Populate chunk_id in visual_enrichment_queue jobs
-        // Jobs were created with chunk_id NULL (before chunks existed)
-        // Now match placeholder queue_ids with actual chunk_ids
-        console.log('[Chunk-Job Linking] Matching placeholders with queue jobs...');
-        
-        const { data: createdChunks, error: fetchError } = await supabase
-          .from('pipeline_a_hybrid_chunks_raw')
-          .select('id, content')
-          .eq('document_id', doc.id)
-          .like('content', '%[VISUAL_ENRICHMENT_PENDING:%');
-        
-        if (fetchError) {
-          console.error('[Chunk-Job Linking] Failed to fetch chunks with placeholders:', fetchError);
-        } else if (createdChunks && createdChunks.length > 0) {
-          let linkedCount = 0;
+        // ===== CREATE SEPARATE VISUAL CHUNKS (PDF only) =====
+        // ✅ NEW ARCHITECTURE: Each visual element gets its own dedicated chunk
+        // This prevents embedding dilution and enables precise semantic search
+        // Note: queuedImagePlaceholders only exists for PDF documents
+        if (doc.source_type === 'pdf') {
+          // Fetch pending visual queue items for this document to create separate chunks
+          const { data: pendingVisuals } = await supabase
+            .from('visual_enrichment_queue')
+            .select('id, image_metadata')
+            .eq('document_id', doc.id)
+            .eq('status', 'pending')
+            .is('chunk_id', null);
           
-          for (const chunk of createdChunks) {
-            // Extract queue_id from placeholder: [VISUAL_ENRICHMENT_PENDING: queue_id]
-            const match = chunk.content.match(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/);
-            if (match && match[1]) {
-              const queueId = match[1];
+          if (pendingVisuals && pendingVisuals.length > 0) {
+            console.log(`[Visual Chunks] Creating ${pendingVisuals.length} dedicated visual chunks...`);
+            
+            const textChunksCount = chunks.length;
+            
+            for (let i = 0; i < pendingVisuals.length; i++) {
+              const visual = pendingVisuals[i];
+              const meta = visual.image_metadata || {};
               
-              // Update job with chunk_id
-              const { error: updateError } = await supabase
+              // Create dedicated chunk for this visual element
+              const { data: visualChunk, error: visualChunkError } = await supabase
+                .from('pipeline_a_hybrid_chunks_raw')
+                .insert({
+                  document_id: doc.id,
+                  chunk_index: textChunksCount + i,
+                  content: `[VISUAL_PENDING: ${meta.image_name || 'unknown'}]`,
+                  chunk_type: 'visual',
+                  page_number: meta.page || null,
+                  embedding_status: 'waiting_enrichment',
+                  heading_hierarchy: { visual_element: meta.image_name, page: meta.page }
+                })
+                .select('id')
+                .single();
+
+              if (visualChunkError) {
+                console.error(`[Visual Chunks] Failed to create chunk for ${meta.image_name}:`, visualChunkError.message);
+                continue;
+              }
+
+              // Link chunk_id directly in visual_enrichment_queue
+              const { error: linkError } = await supabase
                 .from('visual_enrichment_queue')
-                .update({ chunk_id: chunk.id })
-                .eq('id', queueId)
-                .eq('document_id', doc.id);
-              
-              if (updateError) {
-                console.error(`[Chunk-Job Linking] Failed to link chunk ${chunk.id} to job ${queueId}:`, updateError);
+                .update({ chunk_id: visualChunk.id })
+                .eq('id', visual.id);
+
+              if (linkError) {
+                console.error(`[Visual Chunks] Failed to link queue ${visual.id} to chunk ${visualChunk.id}:`, linkError.message);
               } else {
-                linkedCount++;
+                console.log(`[Visual Chunks] ✓ Created chunk ${visualChunk.id} for ${meta.image_name} (page ${meta.page})`);
               }
             }
+            
+            console.log(`[Visual Chunks] ✅ Created ${pendingVisuals.length} dedicated visual chunks`);
           }
-          
-          console.log(`[Chunk-Job Linking] ✅ Linked ${linkedCount}/${createdChunks.length} chunks to their visual jobs`);
-        } else {
-          console.log('[Chunk-Job Linking] No placeholder chunks found');
         }
 
         // Finalize trace report
