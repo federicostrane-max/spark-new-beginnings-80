@@ -388,26 +388,21 @@ PRECISIONE: Ogni numero deve essere trascritto esattamente come appare.`,
     'finance': `MODE: DENSE DATA SERIALIZATION
 TARGET: Financial Reports (10-K, Balance Sheets, Income Statements)
 
-REQUIRED OUTPUT FORMAT:
-[TYPE] {Table / Chart / Text / Infographic}
-[TITLE] {Exact title found in image}
-[PAGE] {Use page number from METADATA below, or "unknown"}
-[CONTEXT] {Time period, Currency units (e.g., $ Millions), Company Name}
-[DATA]
-For financial statements with multiple year columns, USE MARKDOWN TABLE FORMAT:
-|                | 2017    | 2018    | YoY %   |
-|----------------|---------|---------|---------|
-| Revenue        | 31,657  | 32,765  | +3.5%   |
+⚠️ STRICT LENGTH LIMIT: Maximum 800 characters total output.
 
-EXTRACT ALL ROWS containing numerical values.
-Omit ONLY decorative separator lines or empty whitespace.
-[NOTE] {Any footnotes or asterisks attached to data}
-[INSIGHTS] {Max 1-2 sentences on visible trends, optional}
+REQUIRED OUTPUT FORMAT:
+[TYPE] {Table / Chart / Text}
+[TITLE] {Exact title}
+[PAGE] {Page number from METADATA}
+[DATA] Markdown table - KEY rows only (max 8-10 rows)
+[NOTE] {Footnotes if critical}
 
 CONSTRAINTS:
-- No conversational filler ("The table shows...", "We can observe...").
-- Pure data transcription only.
-- Preserve exact number formatting from source.`,
+- MAXIMUM 800 CHARACTERS - this is a hard limit
+- No "Key Data Points" narrative sections
+- No supporting calculations
+- No quarterly breakdowns unless essential
+- Pure data, zero filler`,
 
     'architecture': `
 FOCUS SPECIFICO PER ARCHITETTURA:
