@@ -8,6 +8,42 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ===== GENERATE META CHUNK CONTENT =====
+function generateMetaChunkContent(fileName: string, report: AggregatedTraceReport): string {
+  const s = report.summary;
+  const lines: string[] = [];
+  
+  lines.push(`## 📋 Processing Report: ${fileName}`);
+  lines.push(``);
+  lines.push(`**Processing Path:** Batch (${report.total_batches} batches)`);
+  lines.push(`**Total Pages:** ${s.total_pages}`);
+  lines.push(``);
+  
+  // Chunking Stats
+  lines.push(`### Chunking Statistics`);
+  lines.push(`- **Total Chunks:** ${s.total_chunks}`);
+  lines.push(`- **Text Chunks:** ${s.text_chunks}`);
+  lines.push(`- **Visual Chunks:** ${s.visual_chunks}`);
+  lines.push(`- **Super-Document Size:** ${(s.super_document_total_chars / 1000).toFixed(1)}K chars`);
+  lines.push(``);
+  
+  // Visual Enrichment
+  lines.push(`### Visual Enrichment`);
+  lines.push(`- **Elements Found:** ${s.total_visual_elements_found}`);
+  lines.push(`- **Elements Enqueued:** ${s.total_visual_elements_enqueued}`);
+  if (s.total_visual_elements_skipped > 0) {
+    lines.push(`- **Elements Skipped (size):** ${s.total_visual_elements_skipped}`);
+  }
+  lines.push(``);
+  
+  // Processing Time
+  lines.push(`### Processing`);
+  lines.push(`- **Total Time:** ${(s.total_processing_time_ms / 1000).toFixed(1)}s`);
+  lines.push(`- **Completed:** ${new Date(report.aggregated_at).toLocaleString('en-US')}`);
+  
+  return lines.join('\n');
+}
+
 // ===== AGGREGATED TRACE REPORT INTERFACE =====
 interface AggregatedTraceReport {
   document_id: string;
@@ -163,6 +199,46 @@ serve(async (req) => {
     }
 
     console.log(`[Aggregator] ✅ Saved aggregated trace report for ${documentId}`);
+
+    // ===== INSERT META CHUNK WITH PROCESSING TRACE REPORT =====
+    // Fetch document name for meta chunk
+    const { data: docInfo } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('file_name')
+      .eq('id', documentId)
+      .single();
+
+    // Generate Markdown summary for agent self-awareness
+    const metaChunkContent = generateMetaChunkContent(docInfo?.file_name || 'Unknown', aggregatedTraceReport);
+    
+    // Get max chunk_index for this document
+    const { data: maxChunkData } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('chunk_index')
+      .eq('document_id', documentId)
+      .order('chunk_index', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextChunkIndex = (maxChunkData?.chunk_index || 0) + 1;
+
+    // Insert meta chunk
+    const { error: metaInsertError } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .insert({
+        document_id: documentId,
+        chunk_index: nextChunkIndex,
+        chunk_type: 'meta',
+        content: metaChunkContent,
+        embedding_status: 'pending',
+        is_atomic: true
+      });
+
+    if (metaInsertError) {
+      console.error(`[Aggregator] Failed to insert meta chunk: ${metaInsertError.message}`);
+    } else {
+      console.log(`[Aggregator] ✅ Inserted meta chunk for ${docInfo?.file_name}`);
+    }
 
     // If successfully chunked, trigger embedding generation
     if (documentStatus === 'chunked') {
