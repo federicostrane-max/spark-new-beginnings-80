@@ -178,12 +178,7 @@ serve(async (req) => {
       }
       
       console.log(`[Process Batch] ✅ Enqueued ${enqueuedCount} images for visual enrichment`);
-      
-      // Insert placeholders into superDocument for each enqueued image
-      for (const placeholder of queuedImagePlaceholders) {
-        const placeholderText = `\n\n[VISUAL_ENRICHMENT_PENDING: ${placeholder.queueId}]\n(Image: ${placeholder.imageName}, Page: ${placeholder.page})\n\n`;
-        mutableSuperDocument += placeholderText;
-      }
+      // NOTE: NO placeholder concatenation - visual chunks created separately below
     } else {
       console.log('[Process Batch] Visual enrichment skipped (no ANTHROPIC_API_KEY or no pages)');
     }
@@ -225,60 +220,65 @@ serve(async (req) => {
       }
     }
 
-    // ===== CHUNK-JOB LINKING: Match placeholders with queue jobs =====
-    console.log('[Process Batch] Linking chunks to visual enrichment jobs...');
-
-    const { data: createdChunks, error: fetchError } = await supabase
-      .from('pipeline_a_hybrid_chunks_raw')
-      .select('id, content')
-      .eq('document_id', job.document_id)
-      .eq('batch_index', job.batch_index)
-      .like('content', '%[VISUAL_ENRICHMENT_PENDING:%');
-
-    if (fetchError) {
-      console.error('[Process Batch] Failed to fetch chunks with placeholders:', fetchError);
-    } else if (createdChunks && createdChunks.length > 0) {
-      let linkedCount = 0;
-      let totalPlaceholders = 0;
+    // ===== PHASE 5: CREATE SEPARATE VISUAL CHUNKS =====
+    // Each visual element gets its own dedicated chunk for focused embeddings
+    console.log(`[Process Batch] Creating ${queuedImagePlaceholders.length} separate visual chunks...`);
+    
+    let visualChunksCreated = 0;
+    for (const placeholder of queuedImagePlaceholders) {
+      // Create dedicated visual chunk with waiting_enrichment status
+      const visualChunk = {
+        document_id: job.document_id,
+        chunk_index: (job.batch_index * 10000) + chunksToInsert.length + visualChunksCreated,
+        batch_index: job.batch_index,
+        chunk_type: 'visual',
+        content: `[VISUAL_ENRICHMENT_PENDING: ${placeholder.queueId}]\n(Image: ${placeholder.imageName}, Page: ${placeholder.page})`,
+        original_content: null,
+        is_atomic: true,
+        page_number: placeholder.page + job.page_start - 1,
+        heading_hierarchy: null,
+        embedding_status: 'waiting_enrichment'
+      };
       
-      for (const chunk of createdChunks) {
-        // FIX: Use matchAll() to capture ALL placeholders in a chunk, not just the first one
-        const matches = [...chunk.content.matchAll(/\[VISUAL_ENRICHMENT_PENDING:\s*([a-f0-9-]+)\]/g)];
-        totalPlaceholders += matches.length;
-        
-        for (const match of matches) {
-          const queueId = match[1];
-          
-          const { error: updateError } = await supabase
-            .from('visual_enrichment_queue')
-            .update({ chunk_id: chunk.id })
-            .eq('id', queueId)
-            .eq('document_id', job.document_id);
-          
-          if (updateError) {
-            console.error(`[Process Batch] Failed to link chunk ${chunk.id} to job ${queueId}:`, updateError);
-          } else {
-            linkedCount++;
-          }
-        }
+      const { data: createdChunk, error: insertError } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .insert(visualChunk)
+        .select('id')
+        .single();
+      
+      if (insertError) {
+        console.error(`[Process Batch] Failed to create visual chunk for ${placeholder.imageName}:`, insertError);
+        continue;
       }
       
-      console.log(`[Process Batch] ✅ Linked ${linkedCount}/${totalPlaceholders} visual jobs across ${createdChunks.length} chunks`);
-    } else {
-      console.log('[Process Batch] No chunks with visual placeholders to link');
+      // Immediately link chunk_id to visual_enrichment_queue
+      const { error: linkError } = await supabase
+        .from('visual_enrichment_queue')
+        .update({ chunk_id: createdChunk.id })
+        .eq('id', placeholder.queueId);
+      
+      if (linkError) {
+        console.error(`[Process Batch] Failed to link visual chunk to queue ${placeholder.queueId}:`, linkError);
+      } else {
+        visualChunksCreated++;
+        console.log(`[Process Batch] ✓ Created visual chunk ${createdChunk.id} linked to queue ${placeholder.queueId}`);
+      }
     }
+    
+    console.log(`[Process Batch] ✅ Created ${visualChunksCreated}/${queuedImagePlaceholders.length} visual chunks`);
+    const totalChunksCreated = chunksToInsert.length + visualChunksCreated;
 
     // Update job status
     await supabase
       .from('processing_jobs')
       .update({
         status: 'completed',
-        chunks_created: chunksToInsert.length,
+        chunks_created: totalChunksCreated,
         completed_at: new Date().toISOString()
       })
       .eq('id', jobId);
 
-    console.log(`[Process Batch] Batch ${job.batch_index} completed: ${chunksToInsert.length} chunks, ${enqueuedCount} images enqueued`);
+    console.log(`[Process Batch] Batch ${job.batch_index} completed: ${totalChunksCreated} chunks (${chunksToInsert.length} text + ${visualChunksCreated} visual), ${enqueuedCount} images enqueued`);
 
     // ===== EVENT-DRIVEN CHAINING: Trigger next batch immediately =====
     const { data: nextJob, error: nextJobError } = await supabase
@@ -316,7 +316,9 @@ serve(async (req) => {
         success: true,
         jobId,
         batchIndex: job.batch_index,
-        chunksCreated: chunksToInsert.length,
+        chunksCreated: totalChunksCreated,
+        textChunks: chunksToInsert.length,
+        visualChunks: visualChunksCreated,
         imagesEnqueued: enqueuedCount,
         message: 'Batch processed successfully with visual enrichment'
       }),
