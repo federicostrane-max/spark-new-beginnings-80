@@ -120,89 +120,143 @@ serve(async (req) => {
           throw new Error(`Failed to update queue status to completed: ${completedUpdateError.message}`);
         }
 
-        // ===== SELF-HEALING: Update chunks with placeholder =====
-        const placeholder = `[VISUAL_ENRICHMENT_PENDING: ${item.id}]`;
+        // ===== UPDATE CHUNK WITH VISUAL DESCRIPTION =====
+        // NEW ARCHITECTURE: Dedicated visual chunks are updated directly
+        // BACKWARD COMPAT: Old chunks with placeholders use replacement logic
         
-        // Find chunks containing the placeholder
-        const { data: chunksToUpdate, error: chunkFetchError } = await supabase
-          .from('pipeline_a_hybrid_chunks_raw')
-          .select('id, content, original_content')
-          .eq('document_id', item.document_id)
-          .ilike('content', `%${placeholder}%`);
+        if (item.chunk_id) {
+          // ✅ NEW ARCHITECTURE: Update dedicated visual chunk directly
+          console.log(`[Vision Queue] Updating dedicated visual chunk ${item.chunk_id}`);
+          
+          // Get document name for embedding context
+          const { data: doc } = await supabase
+            .from('pipeline_a_hybrid_documents')
+            .select('file_name')
+            .eq('id', item.document_id)
+            .single();
+          
+          // Update chunk with description and mark ready for embedding
+          const { error: updateChunkError } = await supabase
+            .from('pipeline_a_hybrid_chunks_raw')
+            .update({
+              content: description,
+              embedding_status: 'pending' // Ready for embedding generation
+            })
+            .eq('id', item.chunk_id);
 
-        if (chunkFetchError) {
-          console.warn(`[Vision Queue] Failed to fetch chunks for placeholder replacement:`, chunkFetchError);
-        } else if (chunksToUpdate && chunksToUpdate.length > 0) {
-          console.log(`[Vision Queue] Found ${chunksToUpdate.length} chunk(s) with placeholder`);
-
-          for (const chunk of chunksToUpdate) {
-            // Replace placeholder with actual description (newline optional for robustness)
-            const updatedContent = chunk.content.replace(
-              new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
-              `\n\n${description}\n\n`
-            );
+          if (updateChunkError) {
+            console.error(`[Vision Queue] Failed to update chunk ${item.chunk_id}:`, updateChunkError.message);
+          } else {
+            console.log(`[Vision Queue] ✓ Updated visual chunk ${item.chunk_id} with ${description.length} chars`);
             
-            const updatedOriginalContent = chunk.original_content
-              ? chunk.original_content.replace(
-                  new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
-                  `\n\n${description}\n\n`
-                )
-              : null;
-
-            // Update chunk content
-            await supabase
-              .from('pipeline_a_hybrid_chunks_raw')
-              .update({ 
-                content: updatedContent,
-                original_content: updatedOriginalContent,
-                embedding_status: 'pending' // Mark for re-embedding
-              })
-              .eq('id', chunk.id);
-
-            console.log(`[Vision Queue] ✓ Updated chunk ${chunk.id}, marked for re-embedding`);
-          }
-
-          // Regenerate embeddings for updated chunks
-          console.log(`[Vision Queue] Regenerating embeddings for ${chunksToUpdate.length} chunk(s)`);
-          for (const chunk of chunksToUpdate) {
+            // Generate embedding immediately for the visual chunk
             try {
-              const { data: updatedChunk } = await supabase
+              const embeddingInput = doc 
+                ? `Document: ${doc.file_name}\n\n${description}`
+                : description;
+
+              const embedding = await generateEmbedding(embeddingInput, openAiKey);
+
+              await supabase
                 .from('pipeline_a_hybrid_chunks_raw')
-                .select('content, document_id')
-                .eq('id', chunk.id)
-                .single();
+                .update({ 
+                  embedding: `[${embedding.embedding.join(',')}]`,
+                  embedding_status: 'ready',
+                  embedded_at: new Date().toISOString()
+                })
+                .eq('id', item.chunk_id);
 
-              if (updatedChunk) {
-                // Get document name for embedding context
-                const { data: doc } = await supabase
-                  .from('pipeline_a_hybrid_documents')
-                  .select('file_name')
-                  .eq('id', updatedChunk.document_id)
-                  .single();
-
-                const embeddingInput = doc 
-                  ? `Document: ${doc.file_name}\n\n${updatedChunk.content}`
-                  : updatedChunk.content;
-
-                const embedding = await generateEmbedding(embeddingInput, openAiKey);
-
-                await supabase
-                  .from('pipeline_a_hybrid_chunks_raw')
-                  .update({ 
-                    embedding: `[${embedding.embedding.join(',')}]`,
-                    embedding_status: 'ready',
-                    embedded_at: new Date().toISOString()
-                  })
-                  .eq('id', chunk.id);
-
-                console.log(`[Vision Queue] ✓ Regenerated embedding for chunk ${chunk.id}`);
-              }
+              console.log(`[Vision Queue] ✓ Generated embedding for visual chunk ${item.chunk_id}`);
             } catch (embErr: any) {
-              console.error(`[Vision Queue] Failed to regenerate embedding for chunk ${chunk.id}:`, embErr);
+              console.error(`[Vision Queue] Failed to generate embedding for chunk ${item.chunk_id}:`, embErr);
+              // Mark as pending so cron can retry
             }
           }
         } else {
-          console.log(`[Vision Queue] No chunks found with placeholder ${placeholder}`);
+          // ⚠️ BACKWARD COMPATIBILITY: Old architecture with placeholders in text chunks
+          console.log(`[Vision Queue] Legacy mode: searching for placeholder in text chunks`);
+          
+          const placeholder = `[VISUAL_ENRICHMENT_PENDING: ${item.id}]`;
+          
+          // Find chunks containing the placeholder
+          const { data: chunksToUpdate, error: chunkFetchError } = await supabase
+            .from('pipeline_a_hybrid_chunks_raw')
+            .select('id, content, original_content')
+            .eq('document_id', item.document_id)
+            .ilike('content', `%${placeholder}%`);
+
+          if (chunkFetchError) {
+            console.warn(`[Vision Queue] Failed to fetch chunks for placeholder replacement:`, chunkFetchError);
+          } else if (chunksToUpdate && chunksToUpdate.length > 0) {
+            console.log(`[Vision Queue] Found ${chunksToUpdate.length} chunk(s) with placeholder`);
+
+            for (const chunk of chunksToUpdate) {
+              // Replace placeholder with actual description
+              const updatedContent = chunk.content.replace(
+                new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
+                `\n\n${description}\n\n`
+              );
+              
+              const updatedOriginalContent = chunk.original_content
+                ? chunk.original_content.replace(
+                    new RegExp(`\\[VISUAL_ENRICHMENT_PENDING: ${item.id}\\]\\n\\(Image: [^)]+\\)\\n?`, 'g'),
+                    `\n\n${description}\n\n`
+                  )
+                : null;
+
+              // Update chunk content
+              await supabase
+                .from('pipeline_a_hybrid_chunks_raw')
+                .update({ 
+                  content: updatedContent,
+                  original_content: updatedOriginalContent,
+                  embedding_status: 'pending'
+                })
+                .eq('id', chunk.id);
+
+              console.log(`[Vision Queue] ✓ Updated chunk ${chunk.id}, marked for re-embedding`);
+            }
+
+            // Regenerate embeddings for updated chunks
+            for (const chunk of chunksToUpdate) {
+              try {
+                const { data: updatedChunk } = await supabase
+                  .from('pipeline_a_hybrid_chunks_raw')
+                  .select('content, document_id')
+                  .eq('id', chunk.id)
+                  .single();
+
+                if (updatedChunk) {
+                  const { data: doc } = await supabase
+                    .from('pipeline_a_hybrid_documents')
+                    .select('file_name')
+                    .eq('id', updatedChunk.document_id)
+                    .single();
+
+                  const embeddingInput = doc 
+                    ? `Document: ${doc.file_name}\n\n${updatedChunk.content}`
+                    : updatedChunk.content;
+
+                  const embedding = await generateEmbedding(embeddingInput, openAiKey);
+
+                  await supabase
+                    .from('pipeline_a_hybrid_chunks_raw')
+                    .update({ 
+                      embedding: `[${embedding.embedding.join(',')}]`,
+                      embedding_status: 'ready',
+                      embedded_at: new Date().toISOString()
+                    })
+                    .eq('id', chunk.id);
+
+                  console.log(`[Vision Queue] ✓ Regenerated embedding for chunk ${chunk.id}`);
+                }
+              } catch (embErr: any) {
+                console.error(`[Vision Queue] Failed to regenerate embedding for chunk ${chunk.id}:`, embErr);
+              }
+            }
+          } else {
+            console.log(`[Vision Queue] No chunks found with placeholder ${placeholder}`);
+          }
         }
 
         processedCount++;
