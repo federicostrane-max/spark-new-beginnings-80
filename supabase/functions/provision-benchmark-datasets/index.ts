@@ -1293,7 +1293,7 @@ serve(async (req) => {
           console.log(`[Provision Benchmark] Ingesting FinanceBench PDF ${i + 1}/${pdfs.length}: ${pdf.fileName}`);
           
           // Upload to storage first (avoid base64 memory explosion)
-          const storagePath = `benchmark_finance/${pdf.fileName}`;
+          const storagePath = `benchmark_financebench/${pdf.fileName}`;
           const { error: uploadError } = await supabase.storage
             .from('pipeline-a-uploads')
             .upload(storagePath, pdf.pdfBuffer, {
@@ -1320,7 +1320,7 @@ serve(async (req) => {
               fileName: pdf.fileName,
               storageUrl: urlData.publicUrl,
               fileSize: pdf.pdfBuffer.byteLength,
-              folder: 'benchmark_finance',
+              folder: 'benchmark_financebench',
               source_type: 'pdf'
             }
           });
@@ -1346,7 +1346,7 @@ serve(async (req) => {
               .from('benchmark_datasets')
               .insert({
                 file_name: pdf.fileName,
-                storage_path: `benchmark_finance/${pdf.fileName}`,
+                storage_path: `benchmark_financebench/${pdf.fileName}`,
                 suite_category: 'financebench',
                 question: pdf.question,
                 ground_truth: pdf.groundTruth,
