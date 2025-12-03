@@ -86,48 +86,62 @@ serve(async (req) => {
           continue;
         }
 
-        // Generate unique conversation ID for isolation
-        const conversationId = crypto.randomUUID();
         const startTime = Date.now();
-
-        // Call agent-chat with serverUserId for server-to-server authentication
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
         
-        const agentChatResponse = await fetch(`${supabaseUrl}/functions/v1/agent-chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${serviceRoleKey}`
-          },
-          body: JSON.stringify({
-            agentSlug: 'book-serach-expert',
-            message: question,
-            conversationId,
-            stream: false,
-            serverUserId: BENCHMARK_USER_ID
-          })
-        });
+        let agentResponse = '';
+        let responseTimeMs = 0;
+        const MAX_RETRIES = 2;
+        
+        // Retry loop for empty responses
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          const conversationId = crypto.randomUUID(); // New conversation each attempt
+          const attemptStart = Date.now();
+          
+          console.log(`[Run Benchmark] 🔄 Attempt ${attempt}/${MAX_RETRIES} for ${fileName}`);
+          
+          const agentChatResponse = await fetch(`${supabaseUrl}/functions/v1/agent-chat`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${serviceRoleKey}`
+            },
+            body: JSON.stringify({
+              agentSlug: 'book-serach-expert',
+              message: question,
+              conversationId,
+              stream: false,
+              serverUserId: BENCHMARK_USER_ID
+            })
+          });
 
-        if (!agentChatResponse.ok) {
-          const errorText = await agentChatResponse.text();
-          throw new Error(`agent-chat error ${agentChatResponse.status}: ${errorText.slice(0, 200)}`);
+          if (!agentChatResponse.ok) {
+            const errorText = await agentChatResponse.text();
+            throw new Error(`agent-chat error ${agentChatResponse.status}: ${errorText.slice(0, 200)}`);
+          }
+
+          const agentData = await agentChatResponse.json();
+          agentResponse = agentData?.response || agentData?.message || '';
+          responseTimeMs = Date.now() - startTime;
+          
+          if (agentResponse) {
+            console.log(`[Run Benchmark] ✅ Got response on attempt ${attempt}`);
+            break;
+          }
+          
+          console.warn(`[Run Benchmark] ⚠️ Empty response on attempt ${attempt}, retrying...`);
         }
 
-        const agentData = await agentChatResponse.json();
-
-        const agentResponse = agentData?.response || agentData?.message || '';
-        const responseTimeMs = Date.now() - startTime;
-
         if (!agentResponse) {
-          console.error(`[Run Benchmark] ❌ Empty response for ${fileName}`);
+          console.error(`[Run Benchmark] ❌ Empty response after ${MAX_RETRIES} attempts for ${fileName}`);
           await supabase.from('benchmark_results').insert({
             run_id: runId,
             pdf_file: fileName,
             question: q.question,
             ground_truth: q.ground_truth,
             status: 'failed',
-            error: 'Agent returned empty response',
+            error: `Agent returned empty response after ${MAX_RETRIES} attempts`,
             response_time_ms: responseTimeMs,
             suite_category: suite
           });
