@@ -1239,70 +1239,89 @@ serve(async (req) => {
         console.log(`[Provision Benchmark] Fetched ${questionsData.length} questions, ${metaData.length} doc metadata entries`);
         console.log(`[Provision Benchmark] Merged: ${financebenchData.filter(d => d.doc_link).length} entries with PDF URLs`);
 
-        // Sample documents (limit to sampleSize)
-        const sampled = financebenchData.slice(0, sampleSize);
+        // ===== GROUP QUESTIONS BY DOCUMENT =====
+        // FinanceBench has N questions per document, so we group by doc_name
+        const docGroups = new Map<string, typeof financebenchData>();
+        for (const entry of financebenchData) {
+          const docName = entry.doc_name;
+          if (!docGroups.has(docName)) {
+            docGroups.set(docName, []);
+          }
+          docGroups.get(docName)!.push(entry);
+        }
+        
+        console.log(`[Provision Benchmark] FinanceBench: ${financebenchData.length} questions across ${docGroups.size} unique documents`);
+        
+        // Take first N unique documents based on sampleSize
+        const uniqueDocs = Array.from(docGroups.entries()).slice(0, sampleSize);
         
         let skippedDuplicates = 0;
         let newDownloads = 0;
+        let totalQuestionsAdded = 0;
         
-        // Process each entry with anti-duplicate check
-        for (let i = 0; i < sampled.length; i++) {
-          const entry = sampled[i];
-          const fileName = `financebench_${String(i + 1).padStart(3, '0')}_${entry.company}.pdf`;
+        // Process each unique document with all its questions
+        for (let docIndex = 0; docIndex < uniqueDocs.length; docIndex++) {
+          const [docName, questions] = uniqueDocs[docIndex];
+          const firstEntry = questions[0];
+          const fileName = `financebench_${String(docIndex + 1).padStart(3, '0')}_${firstEntry.company}.pdf`;
           
-          console.log(`[Provision Benchmark] Processing FinanceBench ${i + 1}/${sampled.length}: ${fileName}`);
+          console.log(`[Provision Benchmark] Processing FinanceBench doc ${docIndex + 1}/${uniqueDocs.length}: ${fileName} (${questions.length} questions)`);
           
           // ===== ANTI-DUPLICATE CHECK =====
           const existingDoc = await findExistingReadyDocument(supabase, fileName, 'benchmark_financebench');
-          const existingQA = await findExistingQAEntry(supabase, fileName, 'financebench');
           
-          // If document exists and is ready/processing, skip download
+          // If document exists and is ready/processing, skip download but add missing Q&As
           if (existingDoc.exists && existingDoc.status !== 'failed') {
             console.log(`[Anti-Duplicate] ⏭️ SKIPPING download for ${fileName} - already exists (status: ${existingDoc.status})`);
             skippedDuplicates++;
             
-            // Only insert Q&A if it doesn't exist yet
-            if (!existingQA.exists && existingDoc.documentId) {
-              const { error: insertError } = await supabase
-                .from('benchmark_datasets')
-                .insert({
-                  file_name: fileName,
-                  storage_path: `benchmark_financebench/${fileName}`,
-                  suite_category: 'financebench',
-                  question: entry.question,
-                  ground_truth: entry.answer,
-                  source_repo: 'patronus-ai/financebench',
-                  source_metadata: {
-                    company: entry.company,
-                    year: entry.year,
-                    doc_name: entry.doc_name,
-                    doc_link: entry.doc_link,
-                    evidence: entry.evidence,
-                    question_type: entry.question_type
-                  },
-                  document_id: existingDoc.documentId,
-                  provisioned_at: new Date().toISOString()
-                });
+            // Insert ALL Q&A entries for this document (if they don't exist)
+            for (const entry of questions) {
+              const existingQA = await findExistingQAEntry(supabase, fileName, 'financebench', entry.question);
               
-              if (insertError) {
-                console.warn(`[Anti-Duplicate] Q&A insert warning for ${fileName}:`, insertError.message);
-              } else {
-                console.log(`[Anti-Duplicate] ✓ Added Q&A entry for existing document ${fileName}`);
+              if (!existingQA.exists && existingDoc.documentId) {
+                const { error: insertError } = await supabase
+                  .from('benchmark_datasets')
+                  .insert({
+                    file_name: fileName,
+                    storage_path: `benchmark_financebench/${fileName}`,
+                    suite_category: 'financebench',
+                    question: entry.question,
+                    ground_truth: entry.answer,
+                    source_repo: 'patronus-ai/financebench',
+                    source_metadata: {
+                      company: entry.company,
+                      year: entry.year,
+                      doc_name: entry.doc_name,
+                      doc_link: entry.doc_link,
+                      evidence: entry.evidence,
+                      question_type: entry.question_type
+                    },
+                    document_id: existingDoc.documentId,
+                    provisioned_at: new Date().toISOString()
+                  });
+                
+                if (insertError) {
+                  console.warn(`[Anti-Duplicate] Q&A insert warning for ${fileName}:`, insertError.message);
+                } else {
+                  totalQuestionsAdded++;
+                  console.log(`[Anti-Duplicate] ✓ Added Q&A entry for existing document ${fileName}`);
+                }
               }
             }
             
             results.financebench.success++;
-            results.financebench.documents.push({ fileName, documentId: existingDoc.documentId, reused: true });
+            results.financebench.documents.push({ fileName, documentId: existingDoc.documentId, reused: true, questionsCount: questions.length });
             continue;
           }
           
           // ===== NEW DOWNLOAD =====
           newDownloads++;
-          console.log(`[Provision Benchmark] Downloading FinanceBench PDF ${newDownloads}: ${entry.doc_name}`);
+          console.log(`[Provision Benchmark] Downloading FinanceBench PDF ${newDownloads}: ${docName}`);
           
-          const pdfUrl = entry.doc_link;
+          const pdfUrl = firstEntry.doc_link;
           if (!pdfUrl) {
-            console.warn(`[Provision Benchmark] No PDF URL for entry ${i + 1}, skipping`);
+            console.warn(`[Provision Benchmark] No PDF URL for doc ${docName}, skipping`);
             results.financebench.failed++;
             continue;
           }
@@ -1349,49 +1368,52 @@ serve(async (req) => {
             });
             
             if (result.error || !result.data?.documentId) {
-              console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} ingest failed:`, result.error);
+              console.error(`[Provision Benchmark] FinanceBench doc ${docIndex + 1} ingest failed:`, result.error);
               results.financebench.failed++;
               continue;
             }
             
-            // Insert Q&A entry
-            const { error: insertError } = await supabase
-              .from('benchmark_datasets')
-              .insert({
-                file_name: fileName,
-                storage_path: `benchmark_financebench/${fileName}`,
-                suite_category: 'financebench',
-                question: entry.question,
-                ground_truth: entry.answer,
-                source_repo: 'patronus-ai/financebench',
-                source_metadata: {
-                  company: entry.company,
-                  year: entry.year,
-                  doc_name: entry.doc_name,
-                  doc_link: entry.doc_link,
-                  evidence: entry.evidence,
-                  question_type: entry.question_type
-                },
-                document_id: result.data.documentId,
-                provisioned_at: new Date().toISOString()
-              });
-            
-            if (insertError) {
-              console.error(`[Provision Benchmark] FinanceBench PDF ${i + 1} Q&A insert failed:`, insertError);
-              results.financebench.failed++;
-            } else {
-              results.financebench.success++;
-              results.financebench.documents.push({ fileName, documentId: result.data.documentId, reused: false });
-              console.log(`[Provision Benchmark] FinanceBench ${i + 1}: document queued for processing`);
+            // Insert ALL Q&A entries for this document
+            for (const entry of questions) {
+              const { error: insertError } = await supabase
+                .from('benchmark_datasets')
+                .insert({
+                  file_name: fileName,
+                  storage_path: `benchmark_financebench/${fileName}`,
+                  suite_category: 'financebench',
+                  question: entry.question,
+                  ground_truth: entry.answer,
+                  source_repo: 'patronus-ai/financebench',
+                  source_metadata: {
+                    company: entry.company,
+                    year: entry.year,
+                    doc_name: entry.doc_name,
+                    doc_link: entry.doc_link,
+                    evidence: entry.evidence,
+                    question_type: entry.question_type
+                  },
+                  document_id: result.data.documentId,
+                  provisioned_at: new Date().toISOString()
+                });
+              
+              if (insertError) {
+                console.error(`[Provision Benchmark] Q&A insert failed for ${fileName}:`, insertError);
+              } else {
+                totalQuestionsAdded++;
+              }
             }
             
+            results.financebench.success++;
+            results.financebench.documents.push({ fileName, documentId: result.data.documentId, reused: false, questionsCount: questions.length });
+            console.log(`[Provision Benchmark] FinanceBench doc ${docIndex + 1}: document queued with ${questions.length} questions`);
+            
           } catch (pdfError) {
-            console.error(`[Provision Benchmark] Failed to download PDF for entry ${i + 1}:`, pdfError);
+            console.error(`[Provision Benchmark] Failed to download PDF for doc ${docName}:`, pdfError);
             results.financebench.failed++;
           }
         }
         
-        console.log(`[Provision Benchmark] FinanceBench suite complete: ${results.financebench.success} success, ${results.financebench.failed} failed`);
+        console.log(`[Provision Benchmark] FinanceBench suite complete: ${results.financebench.success} docs, ${totalQuestionsAdded} Q&A entries added`);
         console.log(`[Provision Benchmark] 📊 Anti-duplicate stats: ${skippedDuplicates} reused, ${newDownloads} new downloads`);
 
       } catch (suiteError) {
@@ -1720,14 +1742,21 @@ async function findExistingReadyDocument(
 async function findExistingQAEntry(
   supabase: any,
   fileName: string,
-  suiteCategory: string
+  suiteCategory: string,
+  question?: string  // Optional: check for specific question (for multi-question per doc)
 ): Promise<{ exists: boolean; entryId: string | null }> {
-  const { data: existingEntry, error } = await supabase
+  let query = supabase
     .from('benchmark_datasets')
     .select('id')
     .eq('file_name', fileName)
-    .eq('suite_category', suiteCategory)
-    .maybeSingle();
+    .eq('suite_category', suiteCategory);
+  
+  // If question provided, check for exact question match (multi-question per doc scenario)
+  if (question) {
+    query = query.eq('question', question);
+  }
+  
+  const { data: existingEntry, error } = await query.maybeSingle();
   
   if (error) {
     console.warn(`[Anti-Duplicate] Error checking for existing Q&A entry:`, error.message);
@@ -1735,7 +1764,7 @@ async function findExistingQAEntry(
   }
   
   if (existingEntry) {
-    console.log(`[Anti-Duplicate] ✓ Q&A entry already exists for ${fileName} in ${suiteCategory}`);
+    console.log(`[Anti-Duplicate] ✓ Q&A entry already exists for ${fileName} in ${suiteCategory}${question ? ' (specific question)' : ''}`);
     return { exists: true, entryId: existingEntry.id };
   }
   
