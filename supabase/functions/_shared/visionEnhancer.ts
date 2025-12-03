@@ -385,24 +385,32 @@ ANALISI PROFESSIONALE SCREENSHOT TRADINGVIEW:
 OUTPUT: Markdown strutturato con TUTTI i valori numerici estratti.
 PRECISIONE: Ogni numero deve essere trascritto esattamente come appare.`,
 
-    'finance': `MODE: DENSE DATA SERIALIZATION
-TARGET: Financial Reports (10-K, Balance Sheets, Income Statements)
+    'finance': `TASK: Transcribe financial data for RAG retrieval.
 
-⚠️ STRICT LENGTH LIMIT: Maximum 800 characters total output.
+OUTPUT FORMAT (strict):
+[TYPE] Table | Chart | Text
+[TITLE] {exact title from image}
+[PAGE] {from METADATA}
+[CONTEXT] {period, currency, company if visible}
+[DATA]
+{Single markdown table with ALL numerical rows}
+[NOTE] {footnotes attached to numbers, if any}
 
-REQUIRED OUTPUT FORMAT:
-[TYPE] {Table / Chart / Text}
-[TITLE] {Exact title}
-[PAGE] {Page number from METADATA}
-[DATA] Markdown table - KEY rows only (max 8-10 rows)
-[NOTE] {Footnotes if critical}
+TRANSCRIPTION RULES:
+- Extract ALL rows containing numbers - never summarize
+- Copy numbers EXACTLY as shown: "1,577" not "1.6k"
+- Multi-year columns: | 2016 | 2017 | 2018 |
+- Negative values: preserve $(1,577) or -1,577
 
-CONSTRAINTS:
-- MAXIMUM 800 CHARACTERS - this is a hard limit
-- No "Key Data Points" narrative sections
-- No supporting calculations
-- No quarterly breakdowns unless essential
-- Pure data, zero filler`,
+FORBIDDEN (will break RAG):
+- "Key Data Points" or "Insights" sections
+- Calculated values not in image (YoY%, growth rates, margins)
+- Filler: "The table shows...", "We observe...", "As shown..."
+- Repeating data in multiple formats
+- Describing what is NOT present
+
+ONE REPRESENTATION ONLY: The markdown table IS the description.
+Do not explain it, summarize it, or add commentary.`,
 
     'architecture': `
 FOCUS SPECIFICO PER ARCHITETTURA:
