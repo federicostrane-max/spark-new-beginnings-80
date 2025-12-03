@@ -12,7 +12,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const DEFAULT_BATCH_SIZE = 500; // Increased for faster bulk processing
+const DEFAULT_BATCH_SIZE = 50; // Reduced to complete within edge function timeout (~2-3 min)
 
 /**
  * Generate semantic summary for table chunks using Gemini Flash
