@@ -128,24 +128,13 @@ serve(async (req) => {
         throw new Error(`Agent chat failed: ${agentChatResponse.status} - ${errorText}`);
       }
 
-      // Parse SSE response
-      const responseText = await agentChatResponse.text();
-      const lines = responseText.split('\n');
+      // Parse JSON response (stream: false returns JSON, not SSE)
+      const responseData = await agentChatResponse.json();
       
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            // Support both formats: 'content'/'text' (agent-chat) and 'token'/'content' (legacy)
-            if (data.type === 'content' && data.text) {
-              agentResponse += data.text;
-            } else if (data.type === 'token' && data.content) {
-              agentResponse += data.content;
-            }
-          } catch {
-            // Skip non-JSON lines
-          }
-        }
+      if (responseData.response) {
+        agentResponse = responseData.response;
+      } else if (responseData.error) {
+        throw new Error(`Agent error: ${responseData.error}`);
       }
 
       if (!agentResponse.trim()) {
