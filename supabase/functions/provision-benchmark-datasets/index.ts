@@ -9,6 +9,11 @@ const corsHeaders = {
 // Benchmark agent ID (pipiline C tester)
 const BENCHMARK_AGENT_ID = 'bcca9289-0d7b-4e74-87f5-0f66ae93249c';
 
+// ===== BLACKLIST: Documents to skip (encrypted/unreadable PDFs) =====
+const FINANCEBENCH_BLACKLIST_COMPANIES = [
+  'AES Corporation'  // PDF encrypted - OCR extraction fails, only 2 chunks from 257 pages
+];
+
 // Helper function to assign chunks to benchmark agent (Pipeline A-Hybrid)
 async function assignChunksToAgent(supabase: any, documentId: string): Promise<number> {
   // Fetch all ready chunk IDs for this document
@@ -1252,8 +1257,20 @@ serve(async (req) => {
         
         console.log(`[Provision Benchmark] FinanceBench: ${financebenchData.length} questions across ${docGroups.size} unique documents`);
         
+        // Filter out blacklisted companies BEFORE processing
+        const filteredDocs = Array.from(docGroups.entries()).filter(([docName, questions]) => {
+          const company = questions[0]?.company;
+          if (FINANCEBENCH_BLACKLIST_COMPANIES.includes(company)) {
+            console.log(`[BLACKLIST] ⛔ Skipping ${company} - document in blacklist (encrypted PDF)`);
+            return false;
+          }
+          return true;
+        });
+        
+        console.log(`[Provision Benchmark] After blacklist filter: ${filteredDocs.length} documents available`);
+        
         // Take first N unique documents based on sampleSize
-        const uniqueDocs = Array.from(docGroups.entries()).slice(0, sampleSize);
+        const uniqueDocs = filteredDocs.slice(0, sampleSize);
         
         let skippedDuplicates = 0;
         let newDownloads = 0;
