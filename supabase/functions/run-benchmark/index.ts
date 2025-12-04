@@ -89,13 +89,44 @@ serve(async (req) => {
 
     console.log(`[Run Benchmark] ✅ Enqueued ${jobsToInsert.length} jobs with run_id: ${run_id}`);
 
-    // Return immediately - jobs will be processed asynchronously by triggers
+    // EVENT-DRIVEN: Immediately trigger job processing instead of waiting for cron
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    
+    // Use EdgeRuntime.waitUntil to invoke process-benchmark-job in background
+    // This starts processing immediately without blocking the response
+    const triggerProcessing = async () => {
+      try {
+        console.log(`[Run Benchmark] 🚀 Triggering immediate job processing...`);
+        
+        // Invoke process-benchmark-job with batch mode
+        const response = await fetch(`${supabaseUrl}/functions/v1/process-benchmark-job`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${anonKey}`
+          },
+          body: JSON.stringify({ fallback_mode: true })
+        });
+        
+        if (!response.ok) {
+          console.error(`[Run Benchmark] ❌ Failed to trigger processing: ${response.status}`);
+        } else {
+          console.log(`[Run Benchmark] ✅ Processing triggered successfully`);
+        }
+      } catch (err) {
+        console.error(`[Run Benchmark] ❌ Error triggering processing:`, err);
+      }
+    };
+
+    // Fire and forget - don't block response
+    (globalThis as any).EdgeRuntime?.waitUntil?.(triggerProcessing()) || triggerProcessing();
+
     return new Response(JSON.stringify({
       success: true,
       run_id,
       total_jobs: jobsToInsert.length,
       suite,
-      message: 'Benchmark jobs enqueued. Processing will happen asynchronously.'
+      message: 'Benchmark avviato! Jobs in elaborazione immediata.'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

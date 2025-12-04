@@ -64,11 +64,44 @@ serve(async (req) => {
     const failed = results.filter(r => r.error).length;
     console.log(`[Process Benchmark Job] Batch complete: ${completed} success, ${failed} failed`);
 
+    // SELF-CONTINUATION: Check for more pending jobs and trigger next batch
+    const { count: remainingCount } = await supabase
+      .from('benchmark_jobs_queue')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+
+    if (remainingCount && remainingCount > 0) {
+      console.log(`[Process Benchmark Job] 🔄 ${remainingCount} jobs remaining - triggering self-continuation`);
+      
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      
+      const triggerNext = async () => {
+        try {
+          await fetch(`${supabaseUrl}/functions/v1/process-benchmark-job`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${anonKey}`
+            },
+            body: JSON.stringify({ fallback_mode: true })
+          });
+        } catch (err) {
+          console.error(`[Process Benchmark Job] Self-continuation error:`, err);
+        }
+      };
+
+      // Fire and forget
+      (globalThis as any).EdgeRuntime?.waitUntil?.(triggerNext()) || triggerNext();
+    } else {
+      console.log(`[Process Benchmark Job] ✅ All jobs processed - no continuation needed`);
+    }
+
     return new Response(JSON.stringify({
       batch: true,
       processed: results.length,
       completed,
       failed,
+      remaining: remainingCount || 0,
       results
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
