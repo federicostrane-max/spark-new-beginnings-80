@@ -55,11 +55,12 @@ serve(async (req) => {
       // Batch mode: fetch new documents AND stuck documents to resume
       const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
       
-      // 1. New documents (ingested status)
+      // 1. New documents (ingested status) - EXCLUDE PDFs which use batch path only
       const { data: newDocs } = await supabase
         .from('pipeline_a_hybrid_documents')
         .select('*')
         .eq('status', 'ingested')
+        .neq('source_type', 'pdf')  // PDFs go ONLY via split-pdf-into-batches → process-pdf-batch
         .order('created_at', { ascending: true })
         .limit(BATCH_SIZE);
       
