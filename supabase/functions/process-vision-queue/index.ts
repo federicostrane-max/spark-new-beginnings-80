@@ -359,16 +359,20 @@ serve(async (req) => {
     // ===== PHASE 3: ZOMBIE DOCUMENT FINALIZATION =====
     // Check for documents stuck in 'chunked' status where ALL chunks are 'ready'
     // This fixes the architectural dead-lock where generate-embeddings only updates docs when it processes chunks
+    console.log(`[Vision Queue DEBUG] 🔍 Starting zombie document finalization check...`);
+    
     const { data: zombieDocuments, error: zombieError } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('id, file_name')
+      .select('id, file_name, status')
       .eq('status', 'chunked');
 
     if (zombieError) {
-      console.error('[Process Vision Queue] Failed to fetch zombie documents:', zombieError.message);
-    } else if (zombieDocuments && zombieDocuments.length > 0) {
-      console.log(`[Process Vision Queue] 🔍 Checking ${zombieDocuments.length} document(s) in 'chunked' status for finalization`);
-      
+      console.error('[Vision Queue DEBUG] Failed to fetch zombie documents:', zombieError.message);
+    } else {
+      console.log(`[Vision Queue DEBUG] Found ${zombieDocuments?.length || 0} document(s) in 'chunked' status`);
+    }
+    
+    if (zombieDocuments && zombieDocuments.length > 0) {
       for (const doc of zombieDocuments) {
         // Count total chunks vs ready chunks
         const { count: totalChunks } = await supabase
@@ -382,6 +386,21 @@ serve(async (req) => {
           .eq('document_id', doc.id)
           .eq('embedding_status', 'ready');
 
+        // 🔍 DEBUG: Check other statuses
+        const { count: waitingEnrichment } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'waiting_enrichment');
+
+        const { count: pendingChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'pending');
+
+        console.log(`[Vision Queue DEBUG] Zombie check ${doc.file_name}: total=${totalChunks}, ready=${readyChunks}, pending=${pendingChunks}, waiting_enrichment=${waitingEnrichment}`);
+
         // If ALL chunks are ready, finalize document
         if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
           const { error: updateError } = await supabase
@@ -390,19 +409,26 @@ serve(async (req) => {
             .eq('id', doc.id);
 
           if (updateError) {
-            console.error(`[Process Vision Queue] Failed to finalize document ${doc.id}:`, updateError.message);
+            console.error(`[Vision Queue DEBUG] Failed to finalize document ${doc.id}:`, updateError.message);
           } else {
-            console.log(`[Process Vision Queue] ✅ FINALIZED zombie document ${doc.file_name} (${readyChunks}/${totalChunks} chunks ready)`);
+            console.log(`[Vision Queue DEBUG] ✅ FINALIZED zombie document ${doc.file_name} (${readyChunks}/${totalChunks} chunks ready)`);
             
             // Trigger benchmark assignment if applicable
-            const { data: benchmarkRecord } = await supabase
+            const { data: benchmarkRecord, error: bmError } = await supabase
               .from('benchmark_datasets')
               .select('id, suite_category')
               .eq('document_id', doc.id)
-              .maybeSingle();
+              .limit(1);
 
-            if (benchmarkRecord) {
-              console.log(`[Process Vision Queue] 🎯 Triggering benchmark assignment for ${doc.file_name}`);
+            // Log for debugging
+            if (bmError) {
+              console.log(`[Vision Queue DEBUG] Benchmark check error for ${doc.file_name}:`, bmError.message);
+            } else {
+              console.log(`[Vision Queue DEBUG] Benchmark check for ${doc.file_name}: found ${benchmarkRecord?.length || 0} record(s)`);
+            }
+
+            if (benchmarkRecord && benchmarkRecord.length > 0) {
+              console.log(`[Vision Queue DEBUG] 🎯 Triggering benchmark assignment for ${doc.file_name}`);
               EdgeRuntime.waitUntil((async () => {
                 try {
                   await fetch(`${supabaseUrl}/functions/v1/assign-benchmark-chunks`, {
