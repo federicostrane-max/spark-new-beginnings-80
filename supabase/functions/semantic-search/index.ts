@@ -7,6 +7,92 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ========== FINANCE QUERY EXPANSION DICTIONARY ==========
+const FINANCE_EXPANSION_DICTIONARY: Record<string, string[]> = {
+  // Acronimi bilancio
+  'ppne': ['property', 'plant', 'equipment', 'net', 'PP&E', 'fixed assets'],
+  'ppe': ['property', 'plant', 'equipment', 'PP&E', 'fixed assets'],
+  'net ppne': ['net property plant equipment', 'PP&E net', 'fixed assets net'],
+  
+  // Working Capital Metrics
+  'dpo': ['days', 'payable', 'outstanding', 'accounts payable', 'payment terms'],
+  'dso': ['days', 'sales', 'outstanding', 'accounts receivable', 'collection'],
+  'dio': ['days', 'inventory', 'outstanding', 'inventory turnover'],
+  
+  // Profitability Metrics
+  'eps': ['earnings', 'per', 'share', 'net income', 'shares outstanding'],
+  'ebitda': ['earnings', 'before', 'interest', 'taxes', 'depreciation', 'amortization', 'operating income'],
+  'ebit': ['earnings', 'before', 'interest', 'taxes', 'operating income'],
+  'roe': ['return', 'on', 'equity', 'net income', 'shareholders equity'],
+  'roa': ['return', 'on', 'assets', 'net income', 'total assets'],
+  'roic': ['return', 'on', 'invested', 'capital'],
+  
+  // Liquidity Ratios
+  'quick ratio': ['acid test', 'current assets', 'current liabilities', 'inventory'],
+  'current ratio': ['current assets', 'current liabilities', 'liquidity'],
+  
+  // Leverage Ratios
+  'd/e': ['debt', 'to', 'equity', 'leverage', 'financial leverage'],
+  'p/e': ['price', 'to', 'earnings', 'valuation', 'multiple'],
+  
+  // Fiscal Year Patterns
+  'fy': ['fiscal', 'year', 'annual', 'yearly'],
+  'fy2016': ['fiscal year 2016', '2016', 'annual 2016'],
+  'fy2017': ['fiscal year 2017', '2017', 'annual 2017'],
+  'fy2018': ['fiscal year 2018', '2018', 'annual 2018'],
+  'fy2019': ['fiscal year 2019', '2019', 'annual 2019'],
+  'fy2020': ['fiscal year 2020', '2020', 'annual 2020'],
+  'fy2021': ['fiscal year 2021', '2021', 'annual 2021'],
+  'fy2022': ['fiscal year 2022', '2022', 'annual 2022'],
+  'fy2023': ['fiscal year 2023', '2023', 'annual 2023'],
+  
+  // Cash Flow
+  'ocf': ['operating', 'cash', 'flow', 'cash from operations'],
+  'fcf': ['free', 'cash', 'flow', 'capital expenditure'],
+  'capex': ['capital', 'expenditure', 'investment', 'PP&E additions'],
+  
+  // Income Statement
+  'cogs': ['cost', 'of', 'goods', 'sold', 'cost of sales', 'cost of revenue'],
+  'sga': ['selling', 'general', 'administrative', 'operating expenses'],
+  'r&d': ['research', 'development', 'R&D expense'],
+  
+  // Balance Sheet
+  'goodwill': ['intangible', 'assets', 'acquisition'],
+  'inventory': ['inventories', 'stock', 'merchandise'],
+  'receivables': ['accounts receivable', 'trade receivables', 'AR'],
+  'payables': ['accounts payable', 'trade payables', 'AP'],
+  
+  // FinanceBench-specific (dai casi di errore benchmark)
+  'debt securities': ['notes', 'bonds', 'debentures', 'fixed income', 'investments'],
+  'restructuring': ['restructuring charges', 'restructuring liability', 'employee severance', 'impairment'],
+  'organic growth': ['organic', 'excluding acquisitions', 'excluding M&A', 'core growth'],
+  'segment': ['business segment', 'operating segment', 'division', 'reportable segment'],
+  'revenue growth': ['sales growth', 'top line growth', 'net sales change'],
+};
+
+// Funzione di Query Expansion (solo per dominio finance)
+function expandFinanceQuery(query: string): string {
+  let expandedTerms: string[] = [];
+  const queryLower = query.toLowerCase();
+  
+  for (const [term, expansions] of Object.entries(FINANCE_EXPANSION_DICTIONARY)) {
+    // Word boundary match (case-insensitive), escape special regex chars
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escapedTerm}\\b`, 'gi');
+    if (regex.test(queryLower)) {
+      expandedTerms.push(...expansions);
+    }
+  }
+  
+  if (expandedTerms.length > 0) {
+    // Deduplicate and append to original query
+    const uniqueExpansions = [...new Set(expandedTerms)];
+    return `${query} ${uniqueExpansions.join(' ')}`;
+  }
+  
+  return query;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -33,9 +119,18 @@ serve(async (req) => {
       throw new Error('OPENAI_API_KEY not configured');
     }
 
-    console.log('Performing semantic search for:', query);
+    // ========== FINANCE QUERY EXPANSION (Solo Semantic) ==========
+    const expandedQuery = expandFinanceQuery(query);
+    const expansionApplied = expandedQuery !== query;
 
-    // Generate query embedding
+    if (expansionApplied) {
+      console.log(`[Finance Query Expansion] Original: "${query}"`);
+      console.log(`[Finance Query Expansion] Expanded: "${expandedQuery}"`);
+    }
+
+    console.log('Performing semantic search for:', expansionApplied ? expandedQuery : query);
+
+    // Generate query embedding (usa query ESPANSA per semantic search)
     const embeddingResponse = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -44,7 +139,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'text-embedding-3-small',
-        input: query,
+        input: expandedQuery,  // ← Query espansa per embedding più ricco
       }),
     });
 
@@ -71,7 +166,7 @@ serve(async (req) => {
       match_count: topK * 2,
     };
     const keywordParams = {
-      search_query: query,
+      search_query: query,  // ← Query ORIGINALE (non espansa) per match esatto
       p_agent_id: agentId,
       match_count: topK * 2,
     };
