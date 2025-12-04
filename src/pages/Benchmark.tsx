@@ -103,8 +103,11 @@ export default function Benchmark() {
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(false);
 
   useEffect(() => {
-    loadDataset();
-    loadAvailableRuns();
+    const init = async () => {
+      const runs = await loadAvailableRuns();
+      await loadDataset(false, runs);
+    };
+    init();
   }, []);
 
   const handleRegenerateTableEmbeddings = async () => {
@@ -139,7 +142,7 @@ export default function Benchmark() {
     }
   };
 
-  const loadAvailableRuns = async () => {
+  const loadAvailableRuns = async (): Promise<Array<{ run_id: string; created_at: string; total: number }>> => {
     try {
       const { data, error } = await supabase
         .from('benchmark_results')
@@ -165,8 +168,10 @@ export default function Benchmark() {
 
       const runs = Array.from(runsMap.values());
       setAvailableRuns(runs);
+      return runs;
     } catch (error) {
       console.error('Error loading runs:', error);
+      return [];
     }
   };
 
@@ -218,7 +223,7 @@ export default function Benchmark() {
     }
   };
 
-  const loadDataset = async (skipAutoLoad: boolean = false) => {
+  const loadDataset = async (skipAutoLoad: boolean = false, runsOverride?: Array<{ run_id: string; created_at: string; total: number }>) => {
     try {
       // 🔧 FIX: Reset state before loading to prevent stale data
       setResults([]);
@@ -246,9 +251,10 @@ export default function Benchmark() {
         }));
         setResults(initialResults);
 
-        // 🔧 AUTO-LOAD: Load latest completed run if exists (skip when user explicitly selects "Nuovo Benchmark")
-        if (!skipAutoLoad && availableRuns.length > 0) {
-          const latestRun = availableRuns[0];
+        // 🔧 AUTO-LOAD: Load latest completed run if exists (use runsOverride to avoid race condition)
+        const runs = runsOverride || availableRuns;
+        if (!skipAutoLoad && runs.length > 0) {
+          const latestRun = runs[0];
           await loadHistoricalResults(latestRun.run_id);
         }
       } else {
