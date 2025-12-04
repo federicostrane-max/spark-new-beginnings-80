@@ -210,7 +210,11 @@ timeout = 60
 
 [functions.run-benchmark]
 verify_jwt = false
-timeout = 3600
+timeout = 60
+
+[functions.process-benchmark-job]
+verify_jwt = false
+timeout = 300
 
 # ===== BENCHMARK SYSTEM =====
 [functions.pipeline-a-hybrid-ingest-markdown]

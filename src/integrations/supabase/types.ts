@@ -748,6 +748,56 @@ export type Database = {
         }
         Relationships: []
       }
+      benchmark_jobs_queue: {
+        Row: {
+          attempts: number | null
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          max_attempts: number | null
+          question_id: string | null
+          result: Json | null
+          run_id: string
+          started_at: string | null
+          status: string | null
+        }
+        Insert: {
+          attempts?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          max_attempts?: number | null
+          question_id?: string | null
+          result?: Json | null
+          run_id: string
+          started_at?: string | null
+          status?: string | null
+        }
+        Update: {
+          attempts?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          max_attempts?: number | null
+          question_id?: string | null
+          result?: Json | null
+          run_id?: string
+          started_at?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmark_jobs_queue_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "benchmark_datasets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmark_results: {
         Row: {
           agent_response: string | null
