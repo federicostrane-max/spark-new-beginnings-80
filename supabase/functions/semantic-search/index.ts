@@ -162,7 +162,7 @@ serve(async (req) => {
     const semanticParams = {
       query_embedding: queryEmbedding,
       p_agent_id: agentId || null,
-      match_threshold: 0.10, // DECREASED: 0.15→0.10 per maggior recall (Benchmark tuning)
+      match_threshold: 0.07, // DECREASED: 0.10→0.07 per maggior recall su financial docs
       match_count: topK * 2,
     };
     const keywordParams = {
