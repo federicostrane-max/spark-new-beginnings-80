@@ -93,8 +93,8 @@ serve(async (req) => {
     const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer());
     console.log(`[Split PDF] Downloaded ${pdfBytes.length} bytes`);
 
-    // Load PDF and count pages
-    const pdfDoc = await PDFDocument.load(pdfBytes);
+    // Load PDF and count pages (handle encrypted PDFs)
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
     const totalPages = pdfDoc.getPageCount();
     const totalBatches = Math.ceil(totalPages / PAGES_PER_BATCH);
 
