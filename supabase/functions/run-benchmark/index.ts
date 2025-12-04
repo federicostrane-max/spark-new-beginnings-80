@@ -101,6 +101,10 @@ serve(async (req) => {
           
           console.log(`[Run Benchmark] 🔄 Attempt ${attempt}/${MAX_RETRIES} for ${fileName}`);
           
+          // Use AbortController for extended timeout (3 minutes)
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+          
           const agentChatResponse = await fetch(`${supabaseUrl}/functions/v1/agent-chat`, {
             method: 'POST',
             headers: {
@@ -113,8 +117,11 @@ serve(async (req) => {
               conversationId,
               stream: false,
               serverUserId: BENCHMARK_USER_ID
-            })
+            }),
+            signal: controller.signal
           });
+          
+          clearTimeout(timeoutId);
 
           if (!agentChatResponse.ok) {
             const errorText = await agentChatResponse.text();
