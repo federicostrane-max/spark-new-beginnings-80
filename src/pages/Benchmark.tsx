@@ -347,28 +347,55 @@ export default function Benchmark() {
         throw new Error(data?.error || 'Unknown server error');
       }
       
-      // Show results summary
-      const { summary, runId } = data;
-      setProgress(100);
+      // Handle async job-based response
+      const { run_id, total_jobs, message } = data;
+      setProgress(50);
       
       toast.success(
-        `✅ Benchmark completato!\n` +
-        `Accuracy: ${summary.accuracy}\n` +
-        `Corrette: ${summary.correct}/${summary.completed}\n` +
-        `Fallite: ${summary.failed}`,
-        { duration: 10000 }
+        `🚀 ${message || 'Benchmark avviato!'}\n` +
+        `Run ID: ${run_id?.substring(0, 8)}...\n` +
+        `Jobs creati: ${total_jobs}`,
+        { duration: 8000 }
       );
       
-      // Load results from database
-      setSelectedRunId(runId);
-      await loadHistoricalResults(runId);
-      await loadAvailableRuns();
+      // Start polling for results
+      setSelectedRunId(run_id);
+      
+      // Poll for job completion
+      let pollCount = 0;
+      const maxPolls = 120; // 10 minutes max
+      const pollInterval = setInterval(async () => {
+        pollCount++;
+        
+        const { data: jobStatus } = await supabase
+          .from('benchmark_jobs_queue')
+          .select('status')
+          .eq('run_id', run_id);
+        
+        const pending = jobStatus?.filter(j => j.status === 'pending' || j.status === 'processing').length || 0;
+        const completed = jobStatus?.filter(j => j.status === 'completed' || j.status === 'failed').length || 0;
+        const total = jobStatus?.length || total_jobs;
+        
+        setProgress(50 + Math.round((completed / total) * 50));
+        
+        if (pending === 0 || pollCount >= maxPolls) {
+          clearInterval(pollInterval);
+          setProgress(100);
+          
+          // Load final results
+          await loadHistoricalResults(run_id);
+          await loadAvailableRuns();
+          
+          toast.success(`✅ Benchmark completato! ${completed}/${total} jobs processati`);
+          setIsRunning(false);
+        }
+      }, 5000);
       
     } catch (error: any) {
       console.error('[BENCHMARK] Critical error:', error);
       toast.error(`❌ Errore benchmark: ${error.message}`);
-    } finally {
       setIsRunning(false);
+    } finally {
       setCurrentDoc(null);
     }
   };
