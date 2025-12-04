@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const BENCHMARK_AGENT_SLUG = 'pipiline-c-tester';
+const BENCHMARK_AGENT_SLUG = 'book-serach-expert';
 const BENCHMARK_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 serve(async (req) => {
@@ -136,7 +136,10 @@ serve(async (req) => {
         if (line.startsWith('data: ')) {
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === 'token' && data.content) {
+            // Support both formats: 'content'/'text' (agent-chat) and 'token'/'content' (legacy)
+            if (data.type === 'content' && data.text) {
+              agentResponse += data.text;
+            } else if (data.type === 'token' && data.content) {
               agentResponse += data.content;
             }
           } catch {
