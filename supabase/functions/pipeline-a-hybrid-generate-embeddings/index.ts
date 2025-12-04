@@ -114,21 +114,25 @@ async function buildEmbeddingInput(chunk: any, fileName: string): Promise<string
 async function triggerBenchmarkAssignment(supabase: any, docId: string): Promise<void> {
   try {
     // Check if document is part of a benchmark dataset
-    const { data: benchmarkRecord, error: benchmarkError } = await supabase
+    // Use .limit(1) instead of .maybeSingle() to handle N-to-1 document-questions relationship
+    const { data: benchmarkRecords, error: benchmarkError } = await supabase
       .from('benchmark_datasets')
       .select('id, suite_category, file_name')
       .eq('document_id', docId)
-      .maybeSingle();
+      .limit(1);
 
     if (benchmarkError) {
       console.error(`[Event-Driven Trigger] Error checking benchmark_datasets:`, benchmarkError);
       return;
     }
 
-    if (!benchmarkRecord) {
+    if (!benchmarkRecords || benchmarkRecords.length === 0) {
       // Not a benchmark document, skip
+      console.log(`[Event-Driven Trigger] Document ${docId} is NOT a benchmark document`);
       return;
     }
+    
+    const benchmarkRecord = benchmarkRecords[0];
 
     console.log(`[Event-Driven Trigger] 🎯 Document ${docId} is benchmark (suite: ${benchmarkRecord.suite_category}). Triggering immediate assignment...`);
 
@@ -355,14 +359,31 @@ serve(async (req) => {
         .eq('document_id', docId)
         .eq('embedding_status', 'ready');
 
+      // 🔍 DEBUG: Check waiting_enrichment chunks separately
+      const { count: waitingEnrichment } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', docId)
+        .eq('embedding_status', 'waiting_enrichment');
+
+      const { count: pendingChunks } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id', { count: 'exact', head: true })
+        .eq('document_id', docId)
+        .eq('embedding_status', 'pending');
+
+      console.log(`[Embeddings DEBUG] Document ${docId}: total=${totalChunks}, ready=${readyChunks}, pending=${pendingChunks}, waiting_enrichment=${waitingEnrichment}`);
+
       // Solo se ha chunks E sono tutti ready
       if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
         await supabase
           .from('pipeline_a_hybrid_documents')
           .update({ status: 'ready', updated_at: new Date().toISOString() })
           .eq('id', docId);
-        console.log(`[Pipeline A-Hybrid Embeddings] Document ${docId} marked ready (${readyChunks}/${totalChunks} chunks ready)`);
+        console.log(`[Embeddings DEBUG] ✅ Document ${docId} ALL READY - marked status='ready', triggering benchmark assignment`);
         documentsMarkedReady.push(docId);
+      } else {
+        console.log(`[Embeddings DEBUG] ⏳ Document ${docId} NOT ready: ${readyChunks}/${totalChunks} (${waitingEnrichment} waiting enrichment, ${pendingChunks} pending)`);
       }
     }
 
