@@ -128,7 +128,57 @@ serve(async (req) => {
     }
 
     // =========================================================================
-    // PHASE 4: Process next pending job (one at a time for sequential processing)
+    // PHASE 4: INGESTED ORPHAN RECOVERY - Documenti bloccati in 'ingested'
+    // Quando split-pdf-into-batches fallisce silenziosamente, il documento
+    // rimane 'ingested' senza processing_jobs. Questo phase lo recupera.
+    // =========================================================================
+    const INGESTED_ORPHAN_THRESHOLD_MINUTES = 5;
+    const ingestedOrphanThreshold = new Date(Date.now() - INGESTED_ORPHAN_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    
+    const { data: ingestedOrphans, error: orphanError } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id, file_name')
+      .eq('status', 'ingested')
+      .eq('source_type', 'pdf')
+      .lt('updated_at', ingestedOrphanThreshold)
+      .limit(3); // Process max 3 per cycle to avoid overload
+
+    if (orphanError) {
+      console.error('[Batch Queue Worker] Error finding ingested orphans:', orphanError);
+    } else if (ingestedOrphans && ingestedOrphans.length > 0) {
+      console.log(`[Batch Queue Worker] 🔧 Found ${ingestedOrphans.length} ingested orphan documents - re-triggering split`);
+      
+      for (const orphan of ingestedOrphans) {
+        console.log(`[Batch Queue Worker] Re-invoking split-pdf-into-batches for: ${orphan.file_name} (${orphan.id})`);
+        
+        try {
+          const { error: splitError } = await supabase.functions.invoke('split-pdf-into-batches', {
+            body: { documentId: orphan.id }
+          });
+          
+          if (splitError) {
+            console.error(`[Batch Queue Worker] Split failed for ${orphan.file_name}:`, splitError);
+            // Mark as failed to prevent infinite retry loops
+            await supabase
+              .from('pipeline_a_hybrid_documents')
+              .update({ 
+                status: 'failed', 
+                error_message: `Split failed after orphan recovery: ${splitError.message}` 
+              })
+              .eq('id', orphan.id);
+          } else {
+            console.log(`[Batch Queue Worker] ✅ Split re-triggered for ${orphan.file_name}`);
+          }
+        } catch (err) {
+          console.error(`[Batch Queue Worker] Exception re-triggering split for ${orphan.file_name}:`, err);
+        }
+      }
+    } else {
+      console.log(`[Batch Queue Worker] ✅ No ingested orphans found`);
+    }
+
+    // =========================================================================
+    // PHASE 5: Process next pending job (one at a time for sequential processing)
     // =========================================================================
     const { data: pendingJobs, error: fetchError } = await supabase
       .from('processing_jobs')
