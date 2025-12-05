@@ -99,7 +99,7 @@ serve(async (req) => {
   }
 
   try {
-    const { query, agentId, topK = 5 } = await req.json();
+    const { query, agentId, topK = 5, documentFilter = null } = await req.json();
     
     // ========== DIAGNOSTIC LOGGING ==========
     console.log('[DEBUG] Received agentId:', agentId);
@@ -108,7 +108,13 @@ serve(async (req) => {
     console.log('[DEBUG] agentId === undefined:', agentId === undefined);
     console.log('[DEBUG] Query:', query);
     console.log('[DEBUG] topK:', topK);
+    console.log('[DEBUG] documentFilter:', documentFilter);
     // ========================================
+    
+    // ========== PRE-FILTER LOGGING ==========
+    if (documentFilter) {
+      console.log(`[PRE-FILTER] Restricting search to document: "${documentFilter}"`);
+    }
     
     if (!query) {
       throw new Error('No query provided');
@@ -155,7 +161,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ========== TRUE HYBRID SEARCH ==========
+    // ========== TRUE HYBRID SEARCH WITH PRE-FILTERING ==========
     // Execute BOTH semantic and keyword searches in parallel (never skip keyword)
     console.log('Executing True Hybrid Search (semantic + keyword in parallel)...');
     
@@ -164,11 +170,13 @@ serve(async (req) => {
       p_agent_id: agentId || null,
       match_threshold: 0.10, // OPTIMAL: 0.10 confirmed by FinanceBench testing (65% vs 60% at 0.07)
       match_count: topK * 2,
+      p_document_name: documentFilter, // PRE-FILTER: restrict to specific document
     };
     const keywordParams = {
       search_query: query,  // ← Query ORIGINALE (non espansa) per match esatto
       p_agent_id: agentId,
       match_count: topK * 2,
+      p_document_name: documentFilter, // PRE-FILTER: restrict to specific document
     };
     
     const [semanticResponse, keywordResponse] = await Promise.all([

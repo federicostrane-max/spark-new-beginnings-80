@@ -2555,18 +2555,40 @@ export type Database = {
         }
         Returns: boolean
       }
-      keyword_search_documents: {
-        Args: { match_count?: number; p_agent_id: string; search_query: string }
-        Returns: {
-          category: string
-          chunk_type: string
-          content: string
-          document_name: string
-          id: string
-          pipeline_source: string
-          similarity: number
-        }[]
-      }
+      keyword_search_documents:
+        | {
+            Args: {
+              match_count?: number
+              p_agent_id: string
+              p_document_name?: string
+              search_query: string
+            }
+            Returns: {
+              category: string
+              chunk_type: string
+              content: string
+              document_name: string
+              id: string
+              pipeline_source: string
+              similarity: number
+            }[]
+          }
+        | {
+            Args: {
+              match_count?: number
+              p_agent_id: string
+              search_query: string
+            }
+            Returns: {
+              category: string
+              chunk_type: string
+              content: string
+              document_name: string
+              id: string
+              pipeline_source: string
+              similarity: number
+            }[]
+          }
       log_operation_complete: {
         Args: {
           p_error_code?: string
@@ -2592,23 +2614,42 @@ export type Database = {
         }
         Returns: string
       }
-      match_documents: {
-        Args: {
-          match_count?: number
-          match_threshold?: number
-          p_agent_id: string
-          query_embedding: string
-        }
-        Returns: {
-          category: string
-          chunk_type: string
-          content: string
-          document_name: string
-          id: string
-          pipeline_source: string
-          similarity: number
-        }[]
-      }
+      match_documents:
+        | {
+            Args: {
+              match_count?: number
+              match_threshold?: number
+              p_agent_id: string
+              p_document_name?: string
+              query_embedding: string
+            }
+            Returns: {
+              category: string
+              chunk_type: string
+              content: string
+              document_name: string
+              id: string
+              pipeline_source: string
+              similarity: number
+            }[]
+          }
+        | {
+            Args: {
+              match_count?: number
+              match_threshold?: number
+              p_agent_id: string
+              query_embedding: string
+            }
+            Returns: {
+              category: string
+              chunk_type: string
+              content: string
+              document_name: string
+              id: string
+              pipeline_source: string
+              similarity: number
+            }[]
+          }
       recategorize_github_documents: { Args: never; Returns: number }
     }
     Enums: {
