@@ -160,9 +160,25 @@ export default function Benchmark() {
       if (error) throw error;
 
       if (data?.success && data?.url) {
-        toast.success(`✅ Report HTML generato! ${data.stats?.correct}/${data.stats?.total} corrette (${data.stats?.accuracy}%). Usa Stampa > Salva come PDF`);
-        // Open HTML in new tab
-        window.open(data.url, '_blank');
+        toast.success(`✅ Report PDF generato! ${data.stats?.correct}/${data.stats?.total} corrette (${data.stats?.accuracy}%)`);
+        
+        // Download PDF using fetch to bypass ad-blocker
+        try {
+          const response = await fetch(data.url);
+          const blob = await response.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = data.fileName || 'benchmark_report.pdf';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(downloadUrl);
+        } catch (fetchError) {
+          // Fallback: open URL directly if fetch fails
+          console.warn('Direct download failed, opening URL:', fetchError);
+          window.open(data.url, '_blank');
+        }
       } else {
         throw new Error(data?.error || 'Export failed');
       }
