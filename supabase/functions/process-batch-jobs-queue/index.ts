@@ -133,11 +133,12 @@ serve(async (req) => {
     // rimane 'ingested' senza processing_jobs. Questo phase lo recupera.
     // =========================================================================
     const INGESTED_ORPHAN_THRESHOLD_MINUTES = 5;
+    const RETRY_GRACE_PERIOD_MINUTES = 15; // Grace period before marking as failed
     const ingestedOrphanThreshold = new Date(Date.now() - INGESTED_ORPHAN_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     
     const { data: ingestedOrphans, error: orphanError } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('id, file_name')
+      .select('id, file_name, updated_at')  // Include updated_at for age calculation
       .eq('status', 'ingested')
       .eq('source_type', 'pdf')
       .lt('updated_at', ingestedOrphanThreshold)
@@ -158,14 +159,26 @@ serve(async (req) => {
           
           if (splitError) {
             console.error(`[Batch Queue Worker] Split failed for ${orphan.file_name}:`, splitError);
-            // Mark as failed to prevent infinite retry loops
-            await supabase
-              .from('pipeline_a_hybrid_documents')
-              .update({ 
-                status: 'failed', 
-                error_message: `Split failed after orphan recovery: ${splitError.message}` 
-              })
-              .eq('id', orphan.id);
+            
+            // Age-based retry logic: only mark as failed after grace period
+            const orphanAge = Date.now() - new Date(orphan.updated_at).getTime();
+            const gracePeriodMs = RETRY_GRACE_PERIOD_MINUTES * 60 * 1000;
+            
+            if (orphanAge < gracePeriodMs) {
+              // Orphan is recent - leave as 'ingested' for retry in next cycle
+              console.log(`[Batch Queue Worker] ⏳ Split failed for ${orphan.file_name}, but orphan is recent (${Math.round(orphanAge/60000)}min old) - will retry later`);
+              // Don't mark failed, leave as ingested for next cycle
+            } else {
+              // Orphan is old (15+ minutes of retries) - mark failed definitively
+              console.log(`[Batch Queue Worker] ⛔ Split failed for ${orphan.file_name} after ${Math.round(orphanAge/60000)}min of retries - marking as failed`);
+              await supabase
+                .from('pipeline_a_hybrid_documents')
+                .update({ 
+                  status: 'failed', 
+                  error_message: `Split failed after multiple recovery attempts (${Math.round(orphanAge/60000)} minutes): ${splitError.message}` 
+                })
+                .eq('id', orphan.id);
+            }
           } else {
             console.log(`[Batch Queue Worker] ✅ Split re-triggered for ${orphan.file_name}`);
           }
