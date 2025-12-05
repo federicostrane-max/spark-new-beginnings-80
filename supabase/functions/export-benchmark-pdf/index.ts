@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { jsPDF } from "https://esm.sh/jspdf@2.5.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -26,7 +27,6 @@ interface ChunkMatch {
 function extractKeyTerms(text: string): string[] {
   const keywords: string[] = [];
   
-  // Financial terms
   const financialTerms = [
     'revenue', 'sales', 'income', 'expense', 'profit', 'loss', 'margin',
     'capex', 'capital expenditure', 'pp&e', 'ppne', 'property plant',
@@ -44,13 +44,52 @@ function extractKeyTerms(text: string): string[] {
     }
   }
   
-  // Extract year patterns (2018, 2019, etc.)
   const yearMatches = text.match(/\b20\d{2}\b/g);
   if (yearMatches) {
     keywords.push(...yearMatches);
   }
   
   return keywords;
+}
+
+// Fix common UTF-8 mojibake encoding issues
+function fixEncoding(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/Ã¨/g, 'e')
+    .replace(/Ã©/g, 'e')
+    .replace(/Ã /g, 'a')
+    .replace(/Ã¹/g, 'u')
+    .replace(/Ã²/g, 'o')
+    .replace(/Ã¬/g, 'i')
+    .replace(/Ã§/g, 'c')
+    .replace(/Ã±/g, 'n')
+    .replace(/Ã¶/g, 'o')
+    .replace(/Ã¼/g, 'u')
+    .replace(/Ã¤/g, 'a')
+    .replace(/ÃŸ/g, 'ss')
+    .replace(/Ã‰/g, 'E')
+    .replace(/Ã€/g, 'A')
+    .replace(/â€"/g, '-')
+    .replace(/â€"/g, '-')
+    .replace(/â€™/g, "'")
+    .replace(/â€˜/g, "'")
+    .replace(/â€œ/g, '"')
+    .replace(/â€/g, '"')
+    .replace(/â€¦/g, '...')
+    .replace(/Â°/g, ' deg')
+    .replace(/Â·/g, '.')
+    .replace(/Â®/g, '(R)')
+    .replace(/â„¢/g, '(TM)')
+    .replace(/Â©/g, '(C)')
+    .replace(/Â /g, ' ')
+    .replace(/\u0000/g, '')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    // Remove any remaining non-ASCII that jsPDF can't handle
+    .replace(/[^\x00-\x7F]/g, ' ');
 }
 
 serve(async (req) => {
@@ -88,16 +127,6 @@ serve(async (req) => {
     const correctAnswers = results.filter(r => r.correct).length;
     const accuracy = ((correctAnswers / totalQuestions) * 100).toFixed(1);
 
-    // Group by document for statistics
-    const docStats: Record<string, { total: number; correct: number }> = {};
-    results.forEach(r => {
-      if (!docStats[r.pdf_file]) {
-        docStats[r.pdf_file] = { total: 0, correct: 0 };
-      }
-      docStats[r.pdf_file].total++;
-      if (r.correct) docStats[r.pdf_file].correct++;
-    });
-
     // Cache document IDs
     const docIdCache: Record<string, string | null> = {};
     
@@ -107,7 +136,6 @@ serve(async (req) => {
     for (const result of results) {
       let sourceChunk: ChunkMatch | null = null;
       
-      // Get or fetch document ID
       if (!(result.pdf_file in docIdCache)) {
         const { data: doc } = await supabase
           .from('pipeline_a_hybrid_documents')
@@ -120,18 +148,12 @@ serve(async (req) => {
       const docId = docIdCache[result.pdf_file];
       
       if (docId && result.ground_truth) {
-        // Extract key search terms from ground truth AND question for better matching
         const groundTruth = result.ground_truth;
         const question = result.question || '';
-        
-        // Extract key financial/domain terms from question
         const questionKeywords = extractKeyTerms(question);
-        
-        // Extract numbers from ground truth
         const numbers = groundTruth.match(/[\d,]+\.?\d*%?/g) || [];
         const cleanNumbers = numbers.map((n: string) => n.replace(/,/g, '').replace(/%$/, ''));
         
-        // Fetch multiple candidate chunks
         const { data: allChunks } = await supabase
           .from('pipeline_a_hybrid_chunks_raw')
           .select('content, chunk_type, page_number')
@@ -139,31 +161,26 @@ serve(async (req) => {
           .eq('embedding_status', 'ready');
         
         if (allChunks && allChunks.length > 0) {
-          // Score each chunk based on relevance
           const scoredChunks = allChunks.map((chunk: any) => {
             let score = 0;
             const contentLower = chunk.content.toLowerCase();
             
-            // Score: +10 for each ground truth number found in chunk
             for (const num of cleanNumbers) {
               if (num && chunk.content.includes(num)) {
                 score += 10;
               }
             }
             
-            // Score: +5 for each question keyword found
             for (const keyword of questionKeywords) {
               if (contentLower.includes(keyword.toLowerCase())) {
                 score += 5;
               }
             }
             
-            // Prefer visual/table chunks for numerical data
             if (cleanNumbers.length > 0 && (chunk.chunk_type === 'visual' || chunk.chunk_type === 'table')) {
               score += 3;
             }
             
-            // Penalize very short or very long chunks
             const len = chunk.content.length;
             if (len < 100) score -= 2;
             if (len > 3000) score -= 1;
@@ -171,10 +188,8 @@ serve(async (req) => {
             return { ...chunk, score };
           });
           
-          // Sort by score descending
           scoredChunks.sort((a: any, b: any) => b.score - a.score);
           
-          // Take the best match if it has a reasonable score
           if (scoredChunks.length > 0 && scoredChunks[0].score >= 5) {
             const c = scoredChunks[0];
             sourceChunk = {
@@ -192,26 +207,162 @@ serve(async (req) => {
       });
     }
 
-    // Generate HTML report
-    const htmlContent = generateHtmlReport(
-      runId,
-      resultsWithChunks,
-      { total: totalQuestions, correct: correctAnswers, accuracy },
-      docStats
-    );
+    // Generate PDF using jsPDF
+    console.log('[export-benchmark-pdf] Generating PDF...');
+    
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+    
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const contentWidth = pageWidth - (margin * 2);
+    let y = margin;
+    
+    // Helper to add new page if needed
+    const checkPageBreak = (neededHeight: number) => {
+      if (y + neededHeight > pageHeight - margin) {
+        doc.addPage();
+        y = margin;
+        return true;
+      }
+      return false;
+    };
+    
+    // Helper to write wrapped text
+    const writeText = (text: string, fontSize: number, isBold: boolean = false): number => {
+      doc.setFontSize(fontSize);
+      doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+      const cleanText = fixEncoding(text);
+      const lines = doc.splitTextToSize(cleanText, contentWidth);
+      const lineHeight = fontSize * 0.4;
+      
+      for (const line of lines) {
+        checkPageBreak(lineHeight + 2);
+        doc.text(line, margin, y);
+        y += lineHeight;
+      }
+      y += 2;
+      return lines.length;
+    };
+    
+    // Title
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('BENCHMARK REPORT', margin, y);
+    y += 10;
+    
+    // Summary
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Run ID: ${runId.substring(0, 8)}`, margin, y);
+    y += 5;
+    doc.text(`Accuracy: ${accuracy}% (${correctAnswers}/${totalQuestions})`, margin, y);
+    y += 5;
+    doc.text(`Date: ${new Date().toISOString().split('T')[0]}`, margin, y);
+    y += 15;
+    
+    // Separator
+    doc.setDrawColor(0);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 10;
+    
+    // Questions
+    for (let i = 0; i < resultsWithChunks.length; i++) {
+      const result = resultsWithChunks[i];
+      
+      // Check if we need a new page for this question (estimate ~80mm per question)
+      checkPageBreak(80);
+      
+      // Question header
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      const status = result.correct ? '[CORRECT]' : '[INCORRECT]';
+      doc.text(`QUESTION #${i + 1} ${status}`, margin, y);
+      y += 4;
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Document: ${fixEncoding(result.pdf_file)}`, margin, y);
+      y += 8;
+      
+      // DOMANDA
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DOMANDA:', margin, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      writeText(result.question || 'N/A', 9);
+      y += 3;
+      
+      // GROUND TRUTH
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RISPOSTA ATTESA (GROUND TRUTH):', margin, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      writeText(result.ground_truth || 'N/A', 9);
+      y += 3;
+      
+      // RISPOSTA AGENTE
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RISPOSTA AGENTE:', margin, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      // Truncate long responses
+      let agentResponse = result.agent_response || 'N/A';
+      if (agentResponse.length > 1500) {
+        agentResponse = agentResponse.substring(0, 1500) + '... [TRUNCATED]';
+      }
+      writeText(agentResponse, 8);
+      y += 3;
+      
+      // CHUNK SORGENTE
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('CHUNK CONTENENTE INFORMAZIONE:', margin, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      
+      if (result.sourceChunk) {
+        const chunkMeta = `[Type: ${result.sourceChunk.chunk_type}${result.sourceChunk.page_number ? `, Page: ${result.sourceChunk.page_number}` : ''}]`;
+        doc.setFontSize(7);
+        doc.text(chunkMeta, margin, y);
+        y += 4;
+        // Truncate long chunks
+        let chunkContent = result.sourceChunk.content;
+        if (chunkContent.length > 1000) {
+          chunkContent = chunkContent.substring(0, 1000) + '... [TRUNCATED]';
+        }
+        writeText(chunkContent, 7);
+      } else {
+        doc.setFontSize(8);
+        doc.text('NESSUN CHUNK TROVATO CONTENENTE L\'INFORMAZIONE RICHIESTA', margin, y);
+        y += 5;
+      }
+      
+      // Separator between questions
+      y += 5;
+      doc.setDrawColor(180);
+      doc.line(margin, y, pageWidth - margin, y);
+      y += 10;
+    }
+    
+    // Generate PDF as array buffer
+    const pdfArrayBuffer = doc.output('arraybuffer');
+    const pdfUint8Array = new Uint8Array(pdfArrayBuffer);
 
-    console.log('[export-benchmark-pdf] Generating HTML report...');
-
-    // Save HTML to Supabase Storage
-    const fileName = `benchmark_report_${runId.substring(0, 8)}_${Date.now()}.html`;
+    // Save PDF to Supabase Storage
+    const fileName = `benchmark_report_${runId.substring(0, 8)}_${Date.now()}.pdf`;
     const filePath = `benchmarks/${fileName}`;
-
-    const htmlBuffer = new TextEncoder().encode(htmlContent);
 
     const { error: uploadError } = await supabase.storage
       .from('pdf-exports')
-      .upload(filePath, htmlBuffer, {
-        contentType: 'text/html',
+      .upload(filePath, pdfUint8Array, {
+        contentType: 'application/pdf',
         upsert: false
       });
 
@@ -225,7 +376,7 @@ serve(async (req) => {
       .from('pdf-exports')
       .getPublicUrl(filePath);
 
-    console.log(`[export-benchmark-pdf] HTML report exported successfully: ${fileName}`);
+    console.log(`[export-benchmark-pdf] PDF exported successfully: ${fileName}`);
 
     return new Response(JSON.stringify({ 
       success: true,
@@ -246,395 +397,3 @@ serve(async (req) => {
     });
   }
 });
-
-function generateHtmlReport(
-  runId: string,
-  results: Array<BenchmarkResult & { sourceChunk: ChunkMatch | null }>,
-  stats: { total: number; correct: number; accuracy: string },
-  docStats: Record<string, { total: number; correct: number }>
-): string {
-  const timestamp = new Date().toISOString().split('T')[0];
-  
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Benchmark Report - ${timestamp}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { 
-      font-family: 'Segoe UI', system-ui, sans-serif; 
-      font-size: 11px; 
-      line-height: 1.5;
-      color: #1f2937;
-      background: #f9fafb;
-      padding: 20px;
-    }
-    .container { max-width: 900px; margin: 0 auto; }
-    
-    h1 { 
-      font-size: 24px; 
-      color: #111827; 
-      margin-bottom: 20px;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #2563eb;
-    }
-    
-    /* Summary Card */
-    .summary-card {
-      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-      color: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 25px;
-      display: flex;
-      gap: 30px;
-      align-items: center;
-    }
-    .big-stat {
-      text-align: center;
-      min-width: 100px;
-    }
-    .big-stat-value { font-size: 36px; font-weight: bold; }
-    .big-stat-label { font-size: 11px; opacity: 0.9; text-transform: uppercase; }
-    .summary-meta { font-size: 10px; opacity: 0.8; margin-top: 10px; }
-    
-    /* Document Table */
-    .doc-section { margin-bottom: 30px; }
-    .doc-section h2 { font-size: 16px; color: #1e40af; margin-bottom: 12px; }
-    .doc-table {
-      width: 100%;
-      border-collapse: collapse;
-      background: white;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .doc-table th {
-      background: #f3f4f6;
-      padding: 10px 12px;
-      text-align: left;
-      font-weight: 600;
-      font-size: 10px;
-      text-transform: uppercase;
-      color: #6b7280;
-    }
-    .doc-table td {
-      padding: 10px 12px;
-      border-top: 1px solid #e5e7eb;
-    }
-    .accuracy-bar {
-      height: 6px;
-      background: #e5e7eb;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .accuracy-fill { height: 100%; background: #22c55e; }
-    
-    /* Question Cards */
-    .questions-section h2 { 
-      font-size: 18px; 
-      color: #111827; 
-      margin: 30px 0 20px 0;
-      padding-top: 20px;
-      border-top: 2px solid #e5e7eb;
-    }
-    
-    .question-card {
-      background: white;
-      border-radius: 10px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-      overflow: hidden;
-      page-break-inside: avoid;
-    }
-    
-    .card-header {
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #e5e7eb;
-    }
-    .card-header.correct { background: #f0fdf4; border-left: 4px solid #22c55e; }
-    .card-header.incorrect { background: #fef2f2; border-left: 4px solid #ef4444; }
-    
-    .card-title {
-      font-weight: 600;
-      font-size: 12px;
-      color: #374151;
-    }
-    .card-doc { font-size: 10px; color: #6b7280; margin-top: 2px; }
-    
-    .badge {
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 10px;
-      font-weight: 600;
-    }
-    .badge-correct { background: #dcfce7; color: #166534; }
-    .badge-incorrect { background: #fee2e2; color: #991b1b; }
-    
-    .card-body { padding: 16px; }
-    
-    .field {
-      margin-bottom: 14px;
-    }
-    .field:last-child { margin-bottom: 0; }
-    
-    .field-label {
-      font-size: 9px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #6b7280;
-      margin-bottom: 6px;
-    }
-    
-    .field-content {
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-size: 11px;
-      line-height: 1.6;
-    }
-    
-    .question-box {
-      background: #fefce8;
-      border: 1px solid #fde047;
-    }
-    
-    .expected-box {
-      background: #f0fdf4;
-      border: 1px solid #86efac;
-      font-weight: 600;
-      color: #166534;
-    }
-    
-    .response-box {
-      background: #f8fafc;
-      border: 1px solid #cbd5e1;
-      max-height: 150px;
-      overflow-y: auto;
-    }
-    
-    .judge-box {
-      background: #fffbeb;
-      border: 1px solid #fcd34d;
-      font-style: italic;
-      color: #92400e;
-    }
-    
-    .chunk-box {
-      background: #eff6ff;
-      border: 1px solid #93c5fd;
-      font-size: 10px;
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .chunk-meta {
-      font-size: 9px;
-      color: #3b82f6;
-      margin-bottom: 6px;
-      font-weight: 600;
-    }
-    
-    .no-chunk {
-      background: #fef2f2;
-      border: 1px solid #fca5a5;
-      color: #991b1b;
-      font-style: italic;
-    }
-    
-    .response-time {
-      font-size: 9px;
-      color: #9ca3af;
-      text-align: right;
-      margin-top: 8px;
-    }
-    
-    pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-family: inherit;
-      margin: 0;
-    }
-    
-    @media print {
-      body { padding: 10px; background: white; }
-      .question-card { box-shadow: none; border: 1px solid #e5e7eb; }
-      .summary-card { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>Benchmark Analysis Report</h1>
-    
-    <div class="summary-card">
-      <div class="big-stat">
-        <div class="big-stat-value">${stats.accuracy}%</div>
-        <div class="big-stat-label">Accuracy</div>
-      </div>
-      <div class="big-stat">
-        <div class="big-stat-value">${stats.correct}</div>
-        <div class="big-stat-label">Correct</div>
-      </div>
-      <div class="big-stat">
-        <div class="big-stat-value">${stats.total - stats.correct}</div>
-        <div class="big-stat-label">Errors</div>
-      </div>
-      <div class="big-stat">
-        <div class="big-stat-value">${Object.keys(docStats).length}</div>
-        <div class="big-stat-label">Documents</div>
-      </div>
-      <div style="flex-grow: 1;">
-        <div class="summary-meta">Run ID: ${runId.substring(0, 8)}</div>
-        <div class="summary-meta">Generated: ${timestamp}</div>
-      </div>
-    </div>
-
-    <div class="doc-section">
-      <h2>Accuracy by Document</h2>
-      <table class="doc-table">
-        <thead>
-          <tr>
-            <th style="width: 50%">Document</th>
-            <th>Questions</th>
-            <th>Correct</th>
-            <th style="width: 20%">Accuracy</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${Object.entries(docStats)
-            .sort((a, b) => (b[1].correct / b[1].total) - (a[1].correct / a[1].total))
-            .map(([doc, s]) => {
-              const acc = ((s.correct / s.total) * 100).toFixed(0);
-              return `
-            <tr>
-              <td>${doc}</td>
-              <td>${s.total}</td>
-              <td>${s.correct}</td>
-              <td>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <div class="accuracy-bar" style="flex-grow: 1;">
-                    <div class="accuracy-fill" style="width: ${acc}%"></div>
-                  </div>
-                  <span style="min-width: 35px;">${acc}%</span>
-                </div>
-              </td>
-            </tr>`;
-            }).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <div class="questions-section">
-      <h2>Detailed Question Analysis (${results.length} questions)</h2>
-      
-      ${results.map((r, idx) => `
-        <div class="question-card">
-          <div class="card-header ${r.correct ? 'correct' : 'incorrect'}">
-            <div>
-              <div class="card-title">Question #${idx + 1}</div>
-              <div class="card-doc">${r.pdf_file}</div>
-            </div>
-            <span class="badge ${r.correct ? 'badge-correct' : 'badge-incorrect'}">
-              ${r.correct ? 'CORRECT' : 'INCORRECT'}
-            </span>
-          </div>
-          
-          <div class="card-body">
-            <div class="field">
-              <div class="field-label">Question</div>
-              <div class="field-content question-box">${escapeHtml(r.question)}</div>
-            </div>
-            
-            <div class="field">
-              <div class="field-label">Expected Answer (Ground Truth)</div>
-              <div class="field-content expected-box">${escapeHtml(r.ground_truth)}</div>
-            </div>
-            
-            <div class="field">
-              <div class="field-label">Agent Response</div>
-              <div class="field-content response-box">${escapeHtml(r.agent_response?.substring(0, 2000) || 'No response')}</div>
-            </div>
-            
-            ${r.reason ? `
-            <div class="field">
-              <div class="field-label">Judge Evaluation</div>
-              <div class="field-content judge-box">${escapeHtml(r.reason)}</div>
-            </div>
-            ` : ''}
-            
-            <div class="field">
-              <div class="field-label">Source Chunk (where answer should be found)</div>
-              ${r.sourceChunk ? `
-              <div class="field-content chunk-box">
-                <div class="chunk-meta">
-                  Type: ${r.sourceChunk.chunk_type} 
-                  ${r.sourceChunk.page_number ? '| Page: ' + r.sourceChunk.page_number : ''}
-                </div>
-                ${escapeHtml(r.sourceChunk.content)}
-              </div>
-              ` : `
-              <div class="field-content no-chunk">
-                No matching chunk found in knowledge base containing the expected answer
-              </div>
-              `}
-            </div>
-            
-            <div class="response-time">Response time: ${r.response_time_ms}ms</div>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// Fix common UTF-8 mojibake encoding issues
-function fixEncoding(text: string): string {
-  if (!text) return '';
-  return text
-    // Fix common UTF-8 double-encoding issues (mojibake)
-    .replace(/Ã¨/g, 'è')
-    .replace(/Ã©/g, 'é')
-    .replace(/Ã /g, 'à')
-    .replace(/Ã¹/g, 'ù')
-    .replace(/Ã²/g, 'ò')
-    .replace(/Ã¬/g, 'ì')
-    .replace(/Ã§/g, 'ç')
-    .replace(/Ã±/g, 'ñ')
-    .replace(/Ã¶/g, 'ö')
-    .replace(/Ã¼/g, 'ü')
-    .replace(/Ã¤/g, 'ä')
-    .replace(/ÃŸ/g, 'ß')
-    .replace(/Ã‰/g, 'É')
-    .replace(/Ã€/g, 'À')
-    .replace(/â€"/g, '—')  // em dash
-    .replace(/â€"/g, '–')  // en dash
-    .replace(/â€™/g, "'")  // right single quote
-    .replace(/â€˜/g, "'")  // left single quote
-    .replace(/â€œ/g, '"')  // left double quote
-    .replace(/â€/g, '"')   // right double quote
-    .replace(/â€¦/g, '...') // ellipsis
-    .replace(/Â°/g, '°')   // degree
-    .replace(/Â·/g, '·')   // middle dot
-    .replace(/Â®/g, '®')   // registered
-    .replace(/â„¢/g, '™')  // trademark
-    .replace(/Â©/g, '©')   // copyright
-    .replace(/Â /g, ' ')   // non-breaking space artifact
-    .replace(/\u0000/g, '') // null chars
-    .replace(/&#039;/g, "'"); // HTML entity for apostrophe
-}
-
-function escapeHtml(text: string): string {
-  if (!text) return '';
-  // First fix encoding, then escape dangerous HTML chars
-  const fixed = fixEncoding(text);
-  return fixed
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
