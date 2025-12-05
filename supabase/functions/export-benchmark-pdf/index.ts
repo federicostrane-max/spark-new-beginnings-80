@@ -52,10 +52,11 @@ function extractKeyTerms(text: string): string[] {
   return keywords;
 }
 
-// Fix common UTF-8 mojibake encoding issues
+// Fix common UTF-8 mojibake encoding issues and convert accented chars for jsPDF
 function fixEncoding(text: string): string {
   if (!text) return '';
   return text
+    // Mojibake fixes (UTF-8 decoded as Latin-1)
     .replace(/Ã¨/g, 'e')
     .replace(/Ã©/g, 'e')
     .replace(/Ã /g, 'a')
@@ -88,8 +89,41 @@ function fixEncoding(text: string): string {
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    // Remove any remaining non-ASCII that jsPDF can't handle
-    .replace(/[^\x00-\x7F]/g, ' ');
+    // Italian accented characters → ASCII equivalents (jsPDF default font)
+    .replace(/[àáâãä]/g, 'a')
+    .replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u')
+    .replace(/[ÀÁÂÃÄ]/g, 'A')
+    .replace(/[ÈÉÊË]/g, 'E')
+    .replace(/[ÌÍÎÏ]/g, 'I')
+    .replace(/[ÒÓÔÕÖ]/g, 'O')
+    .replace(/[ÙÚÛÜ]/g, 'U')
+    .replace(/ç/g, 'c')
+    .replace(/Ç/g, 'C')
+    .replace(/ñ/g, 'n')
+    .replace(/Ñ/g, 'N')
+    .replace(/ß/g, 'ss')
+    // Common symbols
+    .replace(/€/g, 'EUR')
+    .replace(/£/g, 'GBP')
+    .replace(/¥/g, 'JPY')
+    .replace(/°/g, ' deg')
+    .replace(/±/g, '+/-')
+    .replace(/×/g, 'x')
+    .replace(/÷/g, '/')
+    .replace(/≤/g, '<=')
+    .replace(/≥/g, '>=')
+    .replace(/≠/g, '!=')
+    .replace(/•/g, '-')
+    .replace(/–/g, '-')
+    .replace(/—/g, '-')
+    .replace(/'/g, "'")
+    .replace(/'/g, "'")
+    .replace(/"/g, '"')
+    .replace(/"/g, '"')
+    .replace(/…/g, '...');
 }
 
 serve(async (req) => {
@@ -161,42 +195,62 @@ serve(async (req) => {
           .eq('embedding_status', 'ready');
         
         if (allChunks && allChunks.length > 0) {
-          const scoredChunks = allChunks.map((chunk: any) => {
-            let score = 0;
-            const contentLower = chunk.content.toLowerCase();
-            
-            for (const num of cleanNumbers) {
-              if (num && chunk.content.includes(num)) {
-                score += 10;
+          // IMPROVED ALGORITHM: If ground truth contains numbers, chunk MUST contain at least one
+          const hasGroundTruthNumbers = cleanNumbers.length > 0 && cleanNumbers.some((n: string) => n.length >= 2);
+          
+          // Filter chunks that contain at least one ground truth number (if applicable)
+          const eligibleChunks = hasGroundTruthNumbers
+            ? allChunks.filter((chunk: any) => cleanNumbers.some((num: string) => num && chunk.content.includes(num)))
+            : allChunks;
+          
+          // If ground truth has numbers but NO chunk contains them, sourceChunk remains null
+          if (hasGroundTruthNumbers && eligibleChunks.length === 0) {
+            console.log(`[export-benchmark-pdf] No chunk contains ground truth numbers: ${cleanNumbers.join(', ')}`);
+            sourceChunk = null;
+          } else {
+            // Score only eligible chunks
+            const scoredChunks = eligibleChunks.map((chunk: any) => {
+              let score = 0;
+              const contentLower = chunk.content.toLowerCase();
+              
+              // Count how many ground truth numbers are in this chunk
+              for (const num of cleanNumbers) {
+                if (num && chunk.content.includes(num)) {
+                  score += 15; // Higher weight for number matches
+                }
               }
-            }
-            
-            for (const keyword of questionKeywords) {
-              if (contentLower.includes(keyword.toLowerCase())) {
+              
+              // Keyword matches from question
+              for (const keyword of questionKeywords) {
+                if (contentLower.includes(keyword.toLowerCase())) {
+                  score += 5;
+                }
+              }
+              
+              // Bonus for visual/table chunks when numbers are involved
+              if (hasGroundTruthNumbers && (chunk.chunk_type === 'visual' || chunk.chunk_type === 'table')) {
                 score += 5;
               }
+              
+              // Length penalties
+              const len = chunk.content.length;
+              if (len < 100) score -= 3;
+              if (len > 3000) score -= 2;
+              
+              return { ...chunk, score };
+            });
+            
+            scoredChunks.sort((a: any, b: any) => b.score - a.score);
+            
+            // Higher threshold: 15 points minimum (at least one number + one keyword)
+            if (scoredChunks.length > 0 && scoredChunks[0].score >= 15) {
+              const c = scoredChunks[0];
+              sourceChunk = {
+                content: c.content,
+                chunk_type: c.chunk_type || 'text',
+                page_number: c.page_number
+              };
             }
-            
-            if (cleanNumbers.length > 0 && (chunk.chunk_type === 'visual' || chunk.chunk_type === 'table')) {
-              score += 3;
-            }
-            
-            const len = chunk.content.length;
-            if (len < 100) score -= 2;
-            if (len > 3000) score -= 1;
-            
-            return { ...chunk, score };
-          });
-          
-          scoredChunks.sort((a: any, b: any) => b.score - a.score);
-          
-          if (scoredChunks.length > 0 && scoredChunks[0].score >= 5) {
-            const c = scoredChunks[0];
-            sourceChunk = {
-              content: c.content,
-              chunk_type: c.chunk_type || 'text',
-              page_number: c.page_number
-            };
           }
         }
       }
