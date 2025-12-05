@@ -2294,6 +2294,30 @@ export type Database = {
           },
         ]
       }
+      query_expansion_cache: {
+        Row: {
+          created_at: string | null
+          expanded_query: string
+          expansion_source: string
+          original_query: string
+          query_hash: string
+        }
+        Insert: {
+          created_at?: string | null
+          expanded_query: string
+          expansion_source?: string
+          original_query: string
+          query_hash: string
+        }
+        Update: {
+          created_at?: string | null
+          expanded_query?: string
+          expansion_source?: string
+          original_query?: string
+          query_hash?: string
+        }
+        Relationships: []
+      }
       search_query_history: {
         Row: {
           agent_id: string

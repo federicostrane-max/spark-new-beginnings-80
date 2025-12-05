@@ -20,6 +20,10 @@ verify_jwt = true
 [functions.semantic-search]
 verify_jwt = true
 
+[functions.expand-query-llm]
+verify_jwt = false
+timeout = 15
+
 [functions.download-pdf-tool]
 verify_jwt = true
 
