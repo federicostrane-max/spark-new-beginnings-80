@@ -593,11 +593,47 @@ function generateHtmlReport(
 </html>`;
 }
 
+// Fix common UTF-8 mojibake encoding issues
+function fixEncoding(text: string): string {
+  if (!text) return '';
+  return text
+    // Fix common UTF-8 double-encoding issues (mojibake)
+    .replace(/Ã¨/g, 'è')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ã /g, 'à')
+    .replace(/Ã¹/g, 'ù')
+    .replace(/Ã²/g, 'ò')
+    .replace(/Ã¬/g, 'ì')
+    .replace(/Ã§/g, 'ç')
+    .replace(/Ã±/g, 'ñ')
+    .replace(/Ã¶/g, 'ö')
+    .replace(/Ã¼/g, 'ü')
+    .replace(/Ã¤/g, 'ä')
+    .replace(/ÃŸ/g, 'ß')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ã€/g, 'À')
+    .replace(/â€"/g, '—')  // em dash
+    .replace(/â€"/g, '–')  // en dash
+    .replace(/â€™/g, "'")  // right single quote
+    .replace(/â€˜/g, "'")  // left single quote
+    .replace(/â€œ/g, '"')  // left double quote
+    .replace(/â€/g, '"')   // right double quote
+    .replace(/â€¦/g, '...') // ellipsis
+    .replace(/Â°/g, '°')   // degree
+    .replace(/Â·/g, '·')   // middle dot
+    .replace(/Â®/g, '®')   // registered
+    .replace(/â„¢/g, '™')  // trademark
+    .replace(/Â©/g, '©')   // copyright
+    .replace(/Â /g, ' ')   // non-breaking space artifact
+    .replace(/\u0000/g, '') // null chars
+    .replace(/&#039;/g, "'"); // HTML entity for apostrophe
+}
+
 function escapeHtml(text: string): string {
   if (!text) return '';
-  // Only escape characters that are dangerous in HTML content
-  // Don't escape apostrophes - they display as &#039; otherwise
-  return text
+  // First fix encoding, then escape dangerous HTML chars
+  const fixed = fixEncoding(text);
+  return fixed
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
