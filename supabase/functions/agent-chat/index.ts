@@ -183,12 +183,13 @@ async function parallelSemanticSearch(
   queries: string[], 
   agentId: string, 
   topKPerQuery: number,
-  supabase: any
+  supabase: any,
+  documentFilter: string | null = null  // PRE-FILTER: restrict to specific document
 ): Promise<{ 
   documents: any[], 
   queryBreakdown: Record<string, number> 
 }> {
-  console.log(`🔍 [PARALLEL-SEARCH] Executing ${queries.length} searches with topK=${topKPerQuery}`);
+  console.log(`🔍 [PARALLEL-SEARCH] Executing ${queries.length} searches with topK=${topKPerQuery}${documentFilter ? `, documentFilter="${documentFilter}"` : ''}`);
   
   const queryBreakdown: Record<string, number> = {};
   
@@ -197,7 +198,7 @@ async function parallelSemanticSearch(
     const searchPromises = queries.map(async (query) => {
       try {
         const { data, error } = await supabase.functions.invoke('semantic-search', {
-          body: { query, agentId, topK: topKPerQuery }
+          body: { query, agentId, topK: topKPerQuery, documentFilter }
         });
         
         if (error) {
@@ -3496,7 +3497,8 @@ The system has automatically executed a search based on your proposed query and 
                   body: {
                     query: decomposedQueries[0],
                     agentId: agent.id,
-                    topK: topK
+                    topK: topK,
+                    documentFilter: specifiedDocumentName  // PRE-FILTER: pass document name to RPC
                   }
                 }
               );
@@ -3517,7 +3519,8 @@ The system has automatically executed a search based on your proposed query and 
                 decomposedQueries, 
                 agent.id, 
                 topKPerQuery,
-                supabase
+                supabase,
+                specifiedDocumentName  // PRE-FILTER: pass document name to RPC
               );
               
               documents = searchResult.documents;
@@ -3540,25 +3543,16 @@ The system has automatically executed a search based on your proposed query and 
             // specifiedDocumentName already declared at the beginning of try block
             let originalDocuments: any[] = [];
             
-            if (specifiedDocumentName) {
-              originalDocuments = [...documents]; // Backup dei risultati originali
-              const unfilteredCount = documents.length;
-              
-              documents = documents.filter((chunk: any) => 
-                chunk.document_name === specifiedDocumentName
+            // ========== SANITY CHECK (should never trigger with PRE-FILTER) ==========
+            if (specifiedDocumentName && documents.length > 0) {
+              const wrongDocs = documents.filter((chunk: any) => 
+                chunk.document_name !== specifiedDocumentName
               );
-              
-              console.log(`📋 [DOC-FILTER] Filtered for document "${specifiedDocumentName}": ${unfilteredCount} → ${documents.length} chunks`);
-              
-              // Fallback: se semantic search non ha trovato il documento specificato,
-              // dobbiamo aumentare il topK per cercare più in profondità
-              if (documents.length === 0) {
-                console.log(`⚠️ [DOC-FILTER] No chunks found for "${specifiedDocumentName}" in top ${unfilteredCount} results`);
-                console.log(`⚠️ [DOC-FILTER] This means semantic similarity is too low - document may not match query`);
-                
-                // Mantieni tutti i risultati originali per permettere all'agente di rispondere
-                // anche se il documento specifico non è stato trovato
-                documents = originalDocuments;
+              if (wrongDocs.length > 0) {
+                console.warn(`⚠️ [DOC-FILTER SANITY] WARNING: ${wrongDocs.length} chunks from wrong documents leaked through PRE-FILTER!`);
+                console.warn(`⚠️ [DOC-FILTER SANITY] Expected: "${specifiedDocumentName}", Found: ${[...new Set(wrongDocs.map((c: any) => c.document_name))].join(', ')}`);
+              } else {
+                console.log(`✅ [DOC-FILTER] PRE-FILTER successful: all ${documents.length} chunks from "${specifiedDocumentName}"`);
               }
             }
             
