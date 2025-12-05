@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, PlayCircle, CheckCircle, XCircle, AlertCircle, Clock, Settings, RefreshCw } from "lucide-react";
+import { ArrowLeft, PlayCircle, CheckCircle, XCircle, AlertCircle, Clock, Settings, RefreshCw, FileDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -101,6 +101,7 @@ export default function Benchmark() {
   const [availableRuns, setAvailableRuns] = useState<Array<{ run_id: string; created_at: string; total: number }>>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -139,6 +140,38 @@ export default function Benchmark() {
       toast.error('Errore durante la rigenerazione degli embedding');
     } finally {
       setIsRegenerating(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!selectedRunId) {
+      toast.error('Seleziona un run da esportare');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      toast.info('Generazione report PDF in corso...');
+      
+      const { data, error } = await supabase.functions.invoke('export-benchmark-pdf', {
+        body: { runId: selectedRunId }
+      });
+
+      if (error) throw error;
+
+      if (data?.success && data?.url) {
+        toast.success(`✅ Report PDF generato! ${data.stats?.correct}/${data.stats?.total} corrette (${data.stats?.accuracy}%)`);
+        // Open PDF in new tab
+        window.open(data.url, '_blank');
+      } else {
+        throw new Error(data?.error || 'Export failed');
+      }
+      
+    } catch (error) {
+      console.error('Export PDF error:', error);
+      toast.error('Errore durante l\'esportazione PDF');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -574,6 +607,16 @@ export default function Benchmark() {
           >
             <PlayCircle className="h-4 w-4 md:h-5 md:w-5" />
             {isRunning ? 'In Corso...' : 'Avvia'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportPdf}
+            disabled={isExporting || !selectedRunId}
+            size="sm"
+            className="gap-2"
+          >
+            <FileDown className={`h-4 w-4 ${isExporting ? 'animate-pulse' : ''}`} />
+            <span className="hidden sm:inline">{isExporting ? 'Esportando...' : 'Export PDF'}</span>
           </Button>
         </div>
       </div>
