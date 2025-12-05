@@ -468,7 +468,7 @@ function generateHtmlReport(
 </head>
 <body>
   <div class="container">
-    <h1>📊 Benchmark Analysis Report</h1>
+    <h1>Benchmark Analysis Report</h1>
     
     <div class="summary-card">
       <div class="big-stat">
@@ -494,7 +494,7 @@ function generateHtmlReport(
     </div>
 
     <div class="doc-section">
-      <h2>📁 Accuracy by Document</h2>
+      <h2>Accuracy by Document</h2>
       <table class="doc-table">
         <thead>
           <tr>
@@ -529,61 +529,61 @@ function generateHtmlReport(
     </div>
 
     <div class="questions-section">
-      <h2>📝 Detailed Question Analysis (${results.length} questions)</h2>
+      <h2>Detailed Question Analysis (${results.length} questions)</h2>
       
       ${results.map((r, idx) => `
         <div class="question-card">
           <div class="card-header ${r.correct ? 'correct' : 'incorrect'}">
             <div>
               <div class="card-title">Question #${idx + 1}</div>
-              <div class="card-doc">📄 ${r.pdf_file}</div>
+              <div class="card-doc">${r.pdf_file}</div>
             </div>
             <span class="badge ${r.correct ? 'badge-correct' : 'badge-incorrect'}">
-              ${r.correct ? '✓ CORRECT' : '✗ INCORRECT'}
+              ${r.correct ? 'CORRECT' : 'INCORRECT'}
             </span>
           </div>
           
           <div class="card-body">
             <div class="field">
-              <div class="field-label">❓ Question</div>
-              <div class="field-content question-box"><pre>${escapeHtml(r.question)}</pre></div>
+              <div class="field-label">Question</div>
+              <div class="field-content question-box">${escapeHtml(r.question)}</div>
             </div>
             
             <div class="field">
-              <div class="field-label">✅ Expected Answer (Ground Truth)</div>
-              <div class="field-content expected-box"><pre>${escapeHtml(r.ground_truth)}</pre></div>
+              <div class="field-label">Expected Answer (Ground Truth)</div>
+              <div class="field-content expected-box">${escapeHtml(r.ground_truth)}</div>
             </div>
             
             <div class="field">
-              <div class="field-label">🤖 Agent Response</div>
-              <div class="field-content response-box"><pre>${escapeHtml(r.agent_response?.substring(0, 2000) || 'No response')}</pre></div>
+              <div class="field-label">Agent Response</div>
+              <div class="field-content response-box">${escapeHtml(r.agent_response?.substring(0, 2000) || 'No response')}</div>
             </div>
             
             ${r.reason ? `
             <div class="field">
-              <div class="field-label">⚖️ Judge Evaluation</div>
-              <div class="field-content judge-box"><pre>${escapeHtml(r.reason)}</pre></div>
+              <div class="field-label">Judge Evaluation</div>
+              <div class="field-content judge-box">${escapeHtml(r.reason)}</div>
             </div>
             ` : ''}
             
             <div class="field">
-              <div class="field-label">📚 Source Chunk (where answer should be found)</div>
+              <div class="field-label">Source Chunk (where answer should be found)</div>
               ${r.sourceChunk ? `
               <div class="field-content chunk-box">
                 <div class="chunk-meta">
                   Type: ${r.sourceChunk.chunk_type} 
-                  ${r.sourceChunk.page_number ? `| Page: ${r.sourceChunk.page_number}` : ''}
+                  ${r.sourceChunk.page_number ? '| Page: ' + r.sourceChunk.page_number : ''}
                 </div>
-                <pre>${escapeHtml(r.sourceChunk.content)}</pre>
+                ${escapeHtml(r.sourceChunk.content)}
               </div>
               ` : `
               <div class="field-content no-chunk">
-                ⚠️ No matching chunk found in knowledge base containing the expected answer
+                No matching chunk found in knowledge base containing the expected answer
               </div>
               `}
             </div>
             
-            <div class="response-time">⏱️ Response time: ${r.response_time_ms}ms</div>
+            <div class="response-time">Response time: ${r.response_time_ms}ms</div>
           </div>
         </div>
       `).join('')}
@@ -595,10 +595,10 @@ function generateHtmlReport(
 
 function escapeHtml(text: string): string {
   if (!text) return '';
+  // Only escape characters that are dangerous in HTML content
+  // Don't escape apostrophes - they display as &#039; otherwise
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/>/g, '&gt;');
 }
