@@ -22,6 +22,37 @@ interface ChunkMatch {
   page_number: number | null;
 }
 
+// Extract key financial/domain terms from question text
+function extractKeyTerms(text: string): string[] {
+  const keywords: string[] = [];
+  
+  // Financial terms
+  const financialTerms = [
+    'revenue', 'sales', 'income', 'expense', 'profit', 'loss', 'margin',
+    'capex', 'capital expenditure', 'pp&e', 'ppne', 'property plant',
+    'cash flow', 'dividend', 'earnings', 'eps', 'assets', 'liabilities',
+    'debt', 'equity', 'ratio', 'turnover', 'operating', 'gross', 'net',
+    'fiscal', 'quarter', 'annual', 'fy2018', 'fy2019', 'fy2020', 'fy2021', 'fy2022', 'fy2023',
+    'segment', 'growth', 'organic', 'acquisition', 'consumer', 'industrial'
+  ];
+  
+  const textLower = text.toLowerCase();
+  
+  for (const term of financialTerms) {
+    if (textLower.includes(term)) {
+      keywords.push(term);
+    }
+  }
+  
+  // Extract year patterns (2018, 2019, etc.)
+  const yearMatches = text.match(/\b20\d{2}\b/g);
+  if (yearMatches) {
+    keywords.push(...yearMatches);
+  }
+  
+  return keywords;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -89,54 +120,69 @@ serve(async (req) => {
       const docId = docIdCache[result.pdf_file];
       
       if (docId && result.ground_truth) {
-        // Extract key search terms from ground truth
-        // Try to find numbers, percentages, or key words
+        // Extract key search terms from ground truth AND question for better matching
         const groundTruth = result.ground_truth;
+        const question = result.question || '';
         
-        // Search strategies: try multiple approaches
-        let chunks: any[] = [];
+        // Extract key financial/domain terms from question
+        const questionKeywords = extractKeyTerms(question);
         
-        // Strategy 1: Search for exact numbers/percentages in ground truth
-        const numberMatch = groundTruth.match(/[\d,]+\.?\d*%?/g);
-        if (numberMatch && numberMatch.length > 0) {
-          const searchNum = numberMatch[0].replace(/,/g, '');
-          const { data } = await supabase
-            .from('pipeline_a_hybrid_chunks_raw')
-            .select('content, chunk_type, page_number')
-            .eq('document_id', docId)
-            .eq('embedding_status', 'ready')
-            .ilike('content', `%${searchNum}%`)
-            .limit(1);
-          if (data && data.length > 0) chunks = data;
-        }
+        // Extract numbers from ground truth
+        const numbers = groundTruth.match(/[\d,]+\.?\d*%?/g) || [];
+        const cleanNumbers = numbers.map((n: string) => n.replace(/,/g, '').replace(/%$/, ''));
         
-        // Strategy 2: If no number match, search for key words
-        if (chunks.length === 0) {
-          const words = groundTruth
-            .replace(/[^\w\s]/g, ' ')
-            .split(/\s+/)
-            .filter((w: string) => w.length > 4)
-            .slice(0, 3);
+        // Fetch multiple candidate chunks
+        const { data: allChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('content, chunk_type, page_number')
+          .eq('document_id', docId)
+          .eq('embedding_status', 'ready');
+        
+        if (allChunks && allChunks.length > 0) {
+          // Score each chunk based on relevance
+          const scoredChunks = allChunks.map((chunk: any) => {
+            let score = 0;
+            const contentLower = chunk.content.toLowerCase();
+            
+            // Score: +10 for each ground truth number found in chunk
+            for (const num of cleanNumbers) {
+              if (num && chunk.content.includes(num)) {
+                score += 10;
+              }
+            }
+            
+            // Score: +5 for each question keyword found
+            for (const keyword of questionKeywords) {
+              if (contentLower.includes(keyword.toLowerCase())) {
+                score += 5;
+              }
+            }
+            
+            // Prefer visual/table chunks for numerical data
+            if (cleanNumbers.length > 0 && (chunk.chunk_type === 'visual' || chunk.chunk_type === 'table')) {
+              score += 3;
+            }
+            
+            // Penalize very short or very long chunks
+            const len = chunk.content.length;
+            if (len < 100) score -= 2;
+            if (len > 3000) score -= 1;
+            
+            return { ...chunk, score };
+          });
           
-          if (words.length > 0) {
-            const { data } = await supabase
-              .from('pipeline_a_hybrid_chunks_raw')
-              .select('content, chunk_type, page_number')
-              .eq('document_id', docId)
-              .eq('embedding_status', 'ready')
-              .ilike('content', `%${words[0]}%`)
-              .limit(1);
-            if (data && data.length > 0) chunks = data;
+          // Sort by score descending
+          scoredChunks.sort((a: any, b: any) => b.score - a.score);
+          
+          // Take the best match if it has a reasonable score
+          if (scoredChunks.length > 0 && scoredChunks[0].score >= 5) {
+            const c = scoredChunks[0];
+            sourceChunk = {
+              content: c.content,
+              chunk_type: c.chunk_type || 'text',
+              page_number: c.page_number
+            };
           }
-        }
-        
-        if (chunks.length > 0) {
-          const c = chunks[0];
-          sourceChunk = {
-            content: c.content,
-            chunk_type: c.chunk_type || 'text',
-            page_number: c.page_number
-          };
         }
       }
 
