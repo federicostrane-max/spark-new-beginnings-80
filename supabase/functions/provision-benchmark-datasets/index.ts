@@ -12,10 +12,11 @@ const BENCHMARK_AGENT_ID = 'bcca9289-0d7b-4e74-87f5-0f66ae93249c';
 // ===== BLACKLIST: Documents to skip (encrypted/unreadable/corrupted PDFs) =====
 const FINANCEBENCH_BLACKLIST_COMPANIES = [
   'AES Corporation',      // PDF encrypted - only 2 chunks from 257 pages
-  'Amazon',               // PDF encrypted - only 1 chunk extractable
+  'Amazon',               // PDF encrypted - only 1 chunk extractable (financebench_009)
   'American Express',     // PDF encrypted - only 1 chunk extractable  
   'American Water Works', // PDF encrypted - only 1 chunk extractable (appears 2x in dataset)
-  'AMD'                   // PDF corrupted - No PDF header found (financebench_016)
+  'AMD',                  // PDF corrupted - No PDF header found (financebench_016)
+  'Amcor'                 // Wrong document type - 8-K legal filing, not 10-K financial data (financebench_013)
 ];
 
 // Helper function to assign chunks to benchmark agent (Pipeline A-Hybrid)
