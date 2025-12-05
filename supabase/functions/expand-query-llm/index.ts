@@ -153,16 +153,29 @@ serve(async (req) => {
       throw new Error('No query provided');
     }
 
-    console.log(`[expand-query-llm] Input query: "${query}"`);
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('[QUERY EXPANSION] Starting expansion process');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log(`📝 ORIGINAL QUERY: "${query}"`);
+    console.log(`📏 Query length: ${query.length} chars`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Step 1: Check cache
+    // Step 1: Normalize and hash
+    const normalizedQuery = normalizeQuery(query);
     const queryHash = await hashQuery(query);
-    console.log(`[Cache] Looking up hash: ${queryHash}`);
+    console.log('───────────────────────────────────────────────────────────');
+    console.log(`🔄 NORMALIZATION:`);
+    console.log(`   Original:   "${query}"`);
+    console.log(`   Normalized: "${normalizedQuery}"`);
+    console.log(`   Hash:       ${queryHash}`);
+
+    // Step 2: Check cache
+    console.log('───────────────────────────────────────────────────────────');
+    console.log(`🗄️  CACHE LOOKUP: hash=${queryHash}`);
 
     const { data: cached, error: cacheError } = await supabase
       .from('query_expansion_cache')
@@ -171,7 +184,10 @@ serve(async (req) => {
       .maybeSingle();
 
     if (cached) {
-      console.log(`[Cache HIT] Source: ${cached.expansion_source}`);
+      console.log(`✅ CACHE HIT!`);
+      console.log(`   Source: ${cached.expansion_source}`);
+      console.log(`   Expanded: "${cached.expanded_query}"`);
+      console.log('═══════════════════════════════════════════════════════════');
       return new Response(
         JSON.stringify({
           original_query: query,
@@ -183,46 +199,82 @@ serve(async (req) => {
       );
     }
 
-    console.log('[Cache MISS] Generating expansion...');
+    console.log('❌ CACHE MISS - generating new expansion...');
 
     let expandedQuery: string;
     let source: string;
 
-    // Step 2: Try LLM expansion (if API key available)
+    // Step 3: Try LLM expansion (if API key available)
     if (lovableApiKey) {
+      console.log('───────────────────────────────────────────────────────────');
+      console.log('🤖 LLM EXPANSION:');
+      console.log(`   API Key: ${lovableApiKey ? '✅ Available' : '❌ Missing'}`);
+      console.log(`   Model: google/gemini-2.5-flash-lite`);
+      console.log('   Calling Lovable AI Gateway...');
+      
+      const startTime = Date.now();
       const llmResult = await expandWithLLM(query, lovableApiKey);
+      const elapsed = Date.now() - startTime;
+      
+      console.log(`   ⏱️  LLM call took: ${elapsed}ms`);
+      
       if (llmResult) {
         expandedQuery = llmResult;
         source = 'llm';
+        console.log(`   ✅ LLM SUCCESS`);
+        console.log(`   📤 LLM Output: "${llmResult}"`);
       } else {
-        // Fallback to dictionary
-        console.log('[Fallback] LLM failed, using dictionary');
+        console.log('   ⚠️  LLM FAILED - falling back to dictionary');
         expandedQuery = expandWithDictionary(query);
         source = 'dictionary';
       }
     } else {
-      // No API key, use dictionary
-      console.log('[expand-query-llm] No LOVABLE_API_KEY, using dictionary');
+      console.log('───────────────────────────────────────────────────────────');
+      console.log('📚 DICTIONARY EXPANSION (no LOVABLE_API_KEY):');
       expandedQuery = expandWithDictionary(query);
       source = 'dictionary';
     }
 
-    // Step 3: Store in cache (fire-and-forget)
-    supabase
+    // Log expansion comparison
+    console.log('───────────────────────────────────────────────────────────');
+    console.log('📊 EXPANSION RESULT:');
+    console.log(`   Source: ${source.toUpperCase()}`);
+    console.log(`   Original (${query.length} chars): "${query}"`);
+    console.log(`   Expanded (${expandedQuery.length} chars): "${expandedQuery}"`);
+    
+    const expansionApplied = expandedQuery !== query;
+    if (expansionApplied) {
+      // Calculate what was added
+      const addedTerms = expandedQuery.replace(query, '').trim();
+      console.log(`   ✅ Expansion applied: YES`);
+      console.log(`   ➕ Added terms: "${addedTerms}"`);
+      console.log(`   📈 Expansion ratio: ${(expandedQuery.length / query.length).toFixed(2)}x`);
+    } else {
+      console.log(`   ℹ️  Expansion applied: NO (query unchanged)`);
+    }
+
+    // Step 4: Store in cache
+    console.log('───────────────────────────────────────────────────────────');
+    console.log('💾 CACHING RESULT...');
+    
+    const { error: insertError } = await supabase
       .from('query_expansion_cache')
       .upsert({
         query_hash: queryHash,
         original_query: query,
         expanded_query: expandedQuery,
         expansion_source: source,
-      })
-      .then(({ error }) => {
-        if (error) console.error('[Cache] Failed to store:', error);
-        else console.log('[Cache] Stored successfully');
       });
+    
+    if (insertError) {
+      console.error(`   ❌ Cache insert failed: ${insertError.message}`);
+    } else {
+      console.log(`   ✅ Cached successfully (hash: ${queryHash})`);
+    }
 
-    const expansionApplied = expandedQuery !== query;
-    console.log(`[expand-query-llm] Expansion applied: ${expansionApplied}, source: ${source}`);
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('[QUERY EXPANSION] Complete');
+    console.log('═══════════════════════════════════════════════════════════');
 
     return new Response(
       JSON.stringify({
@@ -236,7 +288,9 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('[expand-query-llm] Error:', error);
+    console.error('═══════════════════════════════════════════════════════════');
+    console.error('[QUERY EXPANSION] ERROR:', error);
+    console.error('═══════════════════════════════════════════════════════════');
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       {
