@@ -160,8 +160,8 @@ export default function Benchmark() {
       if (error) throw error;
 
       if (data?.success && data?.url) {
-        toast.success(`✅ Report PDF generato! ${data.stats?.correct}/${data.stats?.total} corrette (${data.stats?.accuracy}%)`);
-        // Open PDF in new tab
+        toast.success(`✅ Report HTML generato! ${data.stats?.correct}/${data.stats?.total} corrette (${data.stats?.accuracy}%). Usa Stampa > Salva come PDF`);
+        // Open HTML in new tab
         window.open(data.url, '_blank');
       } else {
         throw new Error(data?.error || 'Export failed');

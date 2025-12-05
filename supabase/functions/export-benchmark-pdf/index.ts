@@ -34,11 +34,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    
-    if (!lovableApiKey) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -129,47 +124,18 @@ serve(async (req) => {
       docStats
     );
 
-    console.log('[export-benchmark-pdf] Converting HTML to PDF...');
-    
-    const pdfResponse = await fetch('https://api.lovable.app/api/html-to-pdf', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        html: htmlContent,
-        options: {
-          format: 'A4',
-          margin: {
-            top: '15mm',
-            right: '10mm',
-            bottom: '15mm',
-            left: '10mm',
-          },
-          printBackground: true,
-        }
-      }),
-    });
+    console.log('[export-benchmark-pdf] Generating HTML report...');
 
-    if (!pdfResponse.ok) {
-      const errorText = await pdfResponse.text();
-      throw new Error(`PDF generation failed: ${errorText}`);
-    }
-
-    const pdfBlob = await pdfResponse.blob();
-    const pdfBuffer = await pdfBlob.arrayBuffer();
-    
-    console.log(`[export-benchmark-pdf] PDF generated, size: ${pdfBuffer.byteLength} bytes`);
-
-    // Save PDF to Supabase Storage
-    const fileName = `benchmark_report_${runId.substring(0, 8)}_${Date.now()}.pdf`;
+    // Save HTML to Supabase Storage (user can print to PDF from browser)
+    const fileName = `benchmark_report_${runId.substring(0, 8)}_${Date.now()}.html`;
     const filePath = `benchmarks/${fileName}`;
+
+    const htmlBuffer = new TextEncoder().encode(htmlContent);
 
     const { error: uploadError } = await supabase.storage
       .from('pdf-exports')
-      .upload(filePath, pdfBuffer, {
-        contentType: 'application/pdf',
+      .upload(filePath, htmlBuffer, {
+        contentType: 'text/html',
         upsert: false
       });
 
@@ -183,7 +149,7 @@ serve(async (req) => {
       .from('pdf-exports')
       .getPublicUrl(filePath);
 
-    console.log(`[export-benchmark-pdf] PDF exported successfully: ${fileName}`);
+    console.log(`[export-benchmark-pdf] HTML report exported successfully: ${fileName}`);
 
     return new Response(JSON.stringify({ 
       success: true,
