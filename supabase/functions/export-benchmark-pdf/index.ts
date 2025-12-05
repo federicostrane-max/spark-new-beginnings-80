@@ -18,8 +18,8 @@ interface BenchmarkResult {
 
 interface ChunkMatch {
   content: string;
-  similarity: number;
   chunk_type: string;
+  page_number: number | null;
 }
 
 serve(async (req) => {
@@ -67,52 +67,82 @@ serve(async (req) => {
       if (r.correct) docStats[r.pdf_file].correct++;
     });
 
-    // For each incorrect answer, try to find matching chunks
-    const resultsWithChunks: Array<BenchmarkResult & { relevantChunks: ChunkMatch[] }> = [];
+    // Cache document IDs
+    const docIdCache: Record<string, string | null> = {};
+    
+    // For each result, find the chunk containing the ground truth
+    const resultsWithChunks: Array<BenchmarkResult & { sourceChunk: ChunkMatch | null }> = [];
     
     for (const result of results) {
-      let relevantChunks: ChunkMatch[] = [];
+      let sourceChunk: ChunkMatch | null = null;
       
-      // Only search for chunks if we have a ground truth to search for
-      if (!result.correct && result.ground_truth) {
-        // Extract key terms from ground truth for search
-        const searchTerms = result.ground_truth
-          .replace(/[^\w\s\d.%$]/g, ' ')
-          .split(/\s+/)
-          .filter((t: string) => t.length > 2)
-          .slice(0, 5)
-          .join(' ');
-        
-        // Find document ID
+      // Get or fetch document ID
+      if (!(result.pdf_file in docIdCache)) {
         const { data: doc } = await supabase
           .from('pipeline_a_hybrid_documents')
           .select('id')
           .eq('file_name', result.pdf_file)
           .maybeSingle();
-
-        if (doc) {
-          // Search for chunks containing the answer
-          const { data: chunks } = await supabase
+        docIdCache[result.pdf_file] = doc?.id || null;
+      }
+      
+      const docId = docIdCache[result.pdf_file];
+      
+      if (docId && result.ground_truth) {
+        // Extract key search terms from ground truth
+        // Try to find numbers, percentages, or key words
+        const groundTruth = result.ground_truth;
+        
+        // Search strategies: try multiple approaches
+        let chunks: any[] = [];
+        
+        // Strategy 1: Search for exact numbers/percentages in ground truth
+        const numberMatch = groundTruth.match(/[\d,]+\.?\d*%?/g);
+        if (numberMatch && numberMatch.length > 0) {
+          const searchNum = numberMatch[0].replace(/,/g, '');
+          const { data } = await supabase
             .from('pipeline_a_hybrid_chunks_raw')
-            .select('content, chunk_type')
-            .eq('document_id', doc.id)
+            .select('content, chunk_type, page_number')
+            .eq('document_id', docId)
             .eq('embedding_status', 'ready')
-            .ilike('content', `%${searchTerms.split(' ')[0]}%`)
-            .limit(3);
-
-          if (chunks && chunks.length > 0) {
-            relevantChunks = chunks.map(c => ({
-              content: c.content.substring(0, 500) + (c.content.length > 500 ? '...' : ''),
-              similarity: 0,
-              chunk_type: c.chunk_type || 'text'
-            }));
+            .ilike('content', `%${searchNum}%`)
+            .limit(1);
+          if (data && data.length > 0) chunks = data;
+        }
+        
+        // Strategy 2: If no number match, search for key words
+        if (chunks.length === 0) {
+          const words = groundTruth
+            .replace(/[^\w\s]/g, ' ')
+            .split(/\s+/)
+            .filter((w: string) => w.length > 4)
+            .slice(0, 3);
+          
+          if (words.length > 0) {
+            const { data } = await supabase
+              .from('pipeline_a_hybrid_chunks_raw')
+              .select('content, chunk_type, page_number')
+              .eq('document_id', docId)
+              .eq('embedding_status', 'ready')
+              .ilike('content', `%${words[0]}%`)
+              .limit(1);
+            if (data && data.length > 0) chunks = data;
           }
+        }
+        
+        if (chunks.length > 0) {
+          const c = chunks[0];
+          sourceChunk = {
+            content: c.content,
+            chunk_type: c.chunk_type || 'text',
+            page_number: c.page_number
+          };
         }
       }
 
       resultsWithChunks.push({
         ...result,
-        relevantChunks
+        sourceChunk
       });
     }
 
@@ -126,7 +156,7 @@ serve(async (req) => {
 
     console.log('[export-benchmark-pdf] Generating HTML report...');
 
-    // Save HTML to Supabase Storage (user can print to PDF from browser)
+    // Save HTML to Supabase Storage
     const fileName = `benchmark_report_${runId.substring(0, 8)}_${Date.now()}.html`;
     const filePath = `benchmarks/${fileName}`;
 
@@ -173,283 +203,348 @@ serve(async (req) => {
 
 function generateHtmlReport(
   runId: string,
-  results: Array<BenchmarkResult & { relevantChunks: ChunkMatch[] }>,
+  results: Array<BenchmarkResult & { sourceChunk: ChunkMatch | null }>,
   stats: { total: number; correct: number; accuracy: string },
   docStats: Record<string, { total: number; correct: number }>
 ): string {
   const timestamp = new Date().toISOString().split('T')[0];
   
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>Benchmark Report - ${timestamp}</title>
   <style>
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body { 
-      font-family: 'Segoe UI', Arial, sans-serif; 
-      font-size: 10px; 
-      line-height: 1.4;
-      color: #1a1a1a;
-      margin: 0;
-      padding: 10px;
+      font-family: 'Segoe UI', system-ui, sans-serif; 
+      font-size: 11px; 
+      line-height: 1.5;
+      color: #1f2937;
+      background: #f9fafb;
+      padding: 20px;
     }
+    .container { max-width: 900px; margin: 0 auto; }
+    
     h1 { 
-      font-size: 18px; 
-      color: #0f172a; 
-      border-bottom: 2px solid #3b82f6;
-      padding-bottom: 8px;
-      margin-bottom: 15px;
+      font-size: 24px; 
+      color: #111827; 
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 3px solid #2563eb;
     }
-    h2 { 
-      font-size: 14px; 
-      color: #1e40af;
-      margin-top: 20px;
-      margin-bottom: 10px;
-      page-break-after: avoid;
-    }
-    h3 {
-      font-size: 12px;
-      color: #374151;
-      margin: 15px 0 8px 0;
-      page-break-after: avoid;
-    }
-    .summary-box {
-      background: #f0f9ff;
-      border: 1px solid #bae6fd;
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 15px;
-    }
-    .stats-grid {
+    
+    /* Summary Card */
+    .summary-card {
+      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+      color: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 25px;
       display: flex;
-      gap: 15px;
-      flex-wrap: wrap;
+      gap: 30px;
+      align-items: center;
     }
-    .stat-item {
-      background: white;
-      border: 1px solid #e5e7eb;
-      border-radius: 4px;
-      padding: 8px 12px;
+    .big-stat {
+      text-align: center;
       min-width: 100px;
     }
-    .stat-value { 
-      font-size: 18px; 
-      font-weight: bold; 
-      color: #0f172a; 
-    }
-    .stat-label { 
-      font-size: 9px; 
-      color: #6b7280; 
-      text-transform: uppercase;
-    }
+    .big-stat-value { font-size: 36px; font-weight: bold; }
+    .big-stat-label { font-size: 11px; opacity: 0.9; text-transform: uppercase; }
+    .summary-meta { font-size: 10px; opacity: 0.8; margin-top: 10px; }
+    
+    /* Document Table */
+    .doc-section { margin-bottom: 30px; }
+    .doc-section h2 { font-size: 16px; color: #1e40af; margin-bottom: 12px; }
     .doc-table {
       width: 100%;
       border-collapse: collapse;
-      margin: 10px 0;
-      font-size: 9px;
-    }
-    .doc-table th, .doc-table td {
-      border: 1px solid #e5e7eb;
-      padding: 5px 8px;
-      text-align: left;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
     .doc-table th {
       background: #f3f4f6;
+      padding: 10px 12px;
+      text-align: left;
       font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+      color: #6b7280;
     }
-    .question-block {
-      border: 1px solid #e5e7eb;
-      border-radius: 6px;
-      margin: 12px 0;
-      page-break-inside: avoid;
+    .doc-table td {
+      padding: 10px 12px;
+      border-top: 1px solid #e5e7eb;
+    }
+    .accuracy-bar {
+      height: 6px;
+      background: #e5e7eb;
+      border-radius: 3px;
       overflow: hidden;
     }
-    .question-header {
-      background: #f8fafc;
-      padding: 8px 10px;
-      border-bottom: 1px solid #e5e7eb;
+    .accuracy-fill { height: 100%; background: #22c55e; }
+    
+    /* Question Cards */
+    .questions-section h2 { 
+      font-size: 18px; 
+      color: #111827; 
+      margin: 30px 0 20px 0;
+      padding-top: 20px;
+      border-top: 2px solid #e5e7eb;
+    }
+    
+    .question-card {
+      background: white;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      overflow: hidden;
+      page-break-inside: avoid;
+    }
+    
+    .card-header {
+      padding: 12px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      border-bottom: 1px solid #e5e7eb;
     }
-    .question-doc {
+    .card-header.correct { background: #f0fdf4; border-left: 4px solid #22c55e; }
+    .card-header.incorrect { background: #fef2f2; border-left: 4px solid #ef4444; }
+    
+    .card-title {
       font-weight: 600;
+      font-size: 12px;
       color: #374151;
-      font-size: 9px;
     }
+    .card-doc { font-size: 10px; color: #6b7280; margin-top: 2px; }
+    
     .badge {
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 8px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 10px;
       font-weight: 600;
     }
-    .badge-correct {
-      background: #dcfce7;
+    .badge-correct { background: #dcfce7; color: #166534; }
+    .badge-incorrect { background: #fee2e2; color: #991b1b; }
+    
+    .card-body { padding: 16px; }
+    
+    .field {
+      margin-bottom: 14px;
+    }
+    .field:last-child { margin-bottom: 0; }
+    
+    .field-label {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+    
+    .field-content {
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    
+    .question-box {
+      background: #fefce8;
+      border: 1px solid #fde047;
+    }
+    
+    .expected-box {
+      background: #f0fdf4;
+      border: 1px solid #86efac;
+      font-weight: 600;
       color: #166534;
     }
-    .badge-incorrect {
-      background: #fee2e2;
-      color: #991b1b;
+    
+    .response-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      max-height: 150px;
+      overflow-y: auto;
     }
-    .question-body { padding: 10px; }
-    .section-label {
-      font-size: 8px;
-      font-weight: 600;
-      color: #6b7280;
-      text-transform: uppercase;
-      margin-bottom: 4px;
+    
+    .judge-box {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      font-style: italic;
+      color: #92400e;
     }
-    .question-text {
-      background: #fefce8;
-      border-left: 3px solid #eab308;
-      padding: 8px;
-      margin: 8px 0;
+    
+    .chunk-box {
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
       font-size: 10px;
-    }
-    .ground-truth {
-      background: #dcfce7;
-      border-left: 3px solid #22c55e;
-      padding: 8px;
-      margin: 8px 0;
-    }
-    .agent-response {
-      background: #f1f5f9;
-      border-left: 3px solid #64748b;
-      padding: 8px;
-      margin: 8px 0;
       max-height: 200px;
-      overflow: hidden;
+      overflow-y: auto;
     }
-    .judge-reason {
-      background: #fef3c7;
-      border-left: 3px solid #f59e0b;
-      padding: 8px;
-      margin: 8px 0;
+    .chunk-meta {
+      font-size: 9px;
+      color: #3b82f6;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    
+    .no-chunk {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
       font-style: italic;
     }
-    .chunks-section {
-      background: #eff6ff;
-      border-left: 3px solid #3b82f6;
-      padding: 8px;
-      margin: 8px 0;
-    }
-    .chunk-item {
-      background: white;
-      border: 1px solid #dbeafe;
-      border-radius: 4px;
-      padding: 6px;
-      margin: 4px 0;
-      font-size: 8px;
-      max-height: 100px;
-      overflow: hidden;
-    }
-    .meta-info {
-      font-size: 8px;
+    
+    .response-time {
+      font-size: 9px;
       color: #9ca3af;
-      margin-top: 5px;
+      text-align: right;
+      margin-top: 8px;
     }
-    .page-break { page-break-before: always; }
+    
     pre {
       white-space: pre-wrap;
       word-wrap: break-word;
-      margin: 0;
       font-family: inherit;
+      margin: 0;
+    }
+    
+    @media print {
+      body { padding: 10px; background: white; }
+      .question-card { box-shadow: none; border: 1px solid #e5e7eb; }
+      .summary-card { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
 <body>
-  <h1>📊 FinanceBench Benchmark Report</h1>
-  
-  <div class="summary-box">
-    <div class="stats-grid">
-      <div class="stat-item">
-        <div class="stat-value">${stats.accuracy}%</div>
-        <div class="stat-label">Accuracy</div>
+  <div class="container">
+    <h1>📊 Benchmark Analysis Report</h1>
+    
+    <div class="summary-card">
+      <div class="big-stat">
+        <div class="big-stat-value">${stats.accuracy}%</div>
+        <div class="big-stat-label">Accuracy</div>
       </div>
-      <div class="stat-item">
-        <div class="stat-value">${stats.correct}/${stats.total}</div>
-        <div class="stat-label">Correct</div>
+      <div class="big-stat">
+        <div class="big-stat-value">${stats.correct}</div>
+        <div class="big-stat-label">Correct</div>
       </div>
-      <div class="stat-item">
-        <div class="stat-value">${Object.keys(docStats).length}</div>
-        <div class="stat-label">Documents</div>
+      <div class="big-stat">
+        <div class="big-stat-value">${stats.total - stats.correct}</div>
+        <div class="big-stat-label">Errors</div>
+      </div>
+      <div class="big-stat">
+        <div class="big-stat-value">${Object.keys(docStats).length}</div>
+        <div class="big-stat-label">Documents</div>
+      </div>
+      <div style="flex-grow: 1;">
+        <div class="summary-meta">Run ID: ${runId.substring(0, 8)}</div>
+        <div class="summary-meta">Generated: ${timestamp}</div>
       </div>
     </div>
-    <div class="meta-info">
-      Run ID: ${runId} | Generated: ${timestamp}
+
+    <div class="doc-section">
+      <h2>📁 Accuracy by Document</h2>
+      <table class="doc-table">
+        <thead>
+          <tr>
+            <th style="width: 50%">Document</th>
+            <th>Questions</th>
+            <th>Correct</th>
+            <th style="width: 20%">Accuracy</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${Object.entries(docStats)
+            .sort((a, b) => (b[1].correct / b[1].total) - (a[1].correct / a[1].total))
+            .map(([doc, s]) => {
+              const acc = ((s.correct / s.total) * 100).toFixed(0);
+              return `
+            <tr>
+              <td>${doc}</td>
+              <td>${s.total}</td>
+              <td>${s.correct}</td>
+              <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div class="accuracy-bar" style="flex-grow: 1;">
+                    <div class="accuracy-fill" style="width: ${acc}%"></div>
+                  </div>
+                  <span style="min-width: 35px;">${acc}%</span>
+                </div>
+              </td>
+            </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="questions-section">
+      <h2>📝 Detailed Question Analysis (${results.length} questions)</h2>
+      
+      ${results.map((r, idx) => `
+        <div class="question-card">
+          <div class="card-header ${r.correct ? 'correct' : 'incorrect'}">
+            <div>
+              <div class="card-title">Question #${idx + 1}</div>
+              <div class="card-doc">📄 ${r.pdf_file}</div>
+            </div>
+            <span class="badge ${r.correct ? 'badge-correct' : 'badge-incorrect'}">
+              ${r.correct ? '✓ CORRECT' : '✗ INCORRECT'}
+            </span>
+          </div>
+          
+          <div class="card-body">
+            <div class="field">
+              <div class="field-label">❓ Question</div>
+              <div class="field-content question-box"><pre>${escapeHtml(r.question)}</pre></div>
+            </div>
+            
+            <div class="field">
+              <div class="field-label">✅ Expected Answer (Ground Truth)</div>
+              <div class="field-content expected-box"><pre>${escapeHtml(r.ground_truth)}</pre></div>
+            </div>
+            
+            <div class="field">
+              <div class="field-label">🤖 Agent Response</div>
+              <div class="field-content response-box"><pre>${escapeHtml(r.agent_response?.substring(0, 2000) || 'No response')}</pre></div>
+            </div>
+            
+            ${r.reason ? `
+            <div class="field">
+              <div class="field-label">⚖️ Judge Evaluation</div>
+              <div class="field-content judge-box"><pre>${escapeHtml(r.reason)}</pre></div>
+            </div>
+            ` : ''}
+            
+            <div class="field">
+              <div class="field-label">📚 Source Chunk (where answer should be found)</div>
+              ${r.sourceChunk ? `
+              <div class="field-content chunk-box">
+                <div class="chunk-meta">
+                  Type: ${r.sourceChunk.chunk_type} 
+                  ${r.sourceChunk.page_number ? `| Page: ${r.sourceChunk.page_number}` : ''}
+                </div>
+                <pre>${escapeHtml(r.sourceChunk.content)}</pre>
+              </div>
+              ` : `
+              <div class="field-content no-chunk">
+                ⚠️ No matching chunk found in knowledge base containing the expected answer
+              </div>
+              `}
+            </div>
+            
+            <div class="response-time">⏱️ Response time: ${r.response_time_ms}ms</div>
+          </div>
+        </div>
+      `).join('')}
     </div>
   </div>
-
-  <h2>📁 Results by Document</h2>
-  <table class="doc-table">
-    <thead>
-      <tr>
-        <th>Document</th>
-        <th>Questions</th>
-        <th>Correct</th>
-        <th>Accuracy</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${Object.entries(docStats).map(([doc, s]) => `
-        <tr>
-          <td>${doc}</td>
-          <td>${s.total}</td>
-          <td>${s.correct}</td>
-          <td>${((s.correct / s.total) * 100).toFixed(0)}%</td>
-        </tr>
-      `).join('')}
-    </tbody>
-  </table>
-
-  <div class="page-break"></div>
-  
-  <h2>📝 Detailed Results</h2>
-  
-  ${results.map((r, idx) => `
-    <div class="question-block">
-      <div class="question-header">
-        <span class="question-doc">#${idx + 1} | ${r.pdf_file}</span>
-        <span class="badge ${r.correct ? 'badge-correct' : 'badge-incorrect'}">
-          ${r.correct ? '✓ CORRECT' : '✗ INCORRECT'}
-        </span>
-      </div>
-      <div class="question-body">
-        <div class="section-label">Question</div>
-        <div class="question-text"><pre>${escapeHtml(r.question)}</pre></div>
-        
-        <div class="section-label">Expected Answer (Ground Truth)</div>
-        <div class="ground-truth"><pre>${escapeHtml(r.ground_truth)}</pre></div>
-        
-        <div class="section-label">Agent Response</div>
-        <div class="agent-response"><pre>${escapeHtml(r.agent_response?.substring(0, 1500) || 'No response')}</pre></div>
-        
-        ${r.reason ? `
-          <div class="section-label">Judge Evaluation</div>
-          <div class="judge-reason"><pre>${escapeHtml(r.reason)}</pre></div>
-        ` : ''}
-        
-        ${r.relevantChunks && r.relevantChunks.length > 0 ? `
-          <div class="section-label">Relevant Chunks Found (containing answer)</div>
-          <div class="chunks-section">
-            ${r.relevantChunks.map(c => `
-              <div class="chunk-item">
-                <strong>[${c.chunk_type}]</strong> ${escapeHtml(c.content)}
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-        
-        <div class="meta-info">Response time: ${r.response_time_ms}ms</div>
-      </div>
-    </div>
-  `).join('')}
-  
 </body>
-</html>
-  `;
+</html>`;
 }
 
 function escapeHtml(text: string): string {
