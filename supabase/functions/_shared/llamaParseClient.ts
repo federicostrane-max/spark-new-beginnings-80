@@ -216,7 +216,11 @@ export async function uploadToLlamaParseJson(
     formData.append('result_type', 'json');
     formData.append('extract_layout', 'true');
     formData.append('extract_images', 'true');
-    formData.append('language', 'it');
+    formData.append('language', 'en');
+    
+    // CRITICAL: Enable auto-mode for scanned PDFs (image-based pages)
+    // This triggers multimodal processing when pages contain primarily images
+    formData.append('auto_mode_trigger_on_image_in_page', 'true');
 
     const response = await fetch(`${LLAMAPARSE_API_BASE}/upload`, {
       method: 'POST',
