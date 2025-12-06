@@ -262,3 +262,7 @@ timeout = 300
 [functions.cleanup-pipeline-a-storage]
 verify_jwt = false
 timeout = 60
+
+[functions.test-claude-ocr]
+verify_jwt = false
+timeout = 300

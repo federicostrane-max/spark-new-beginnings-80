@@ -160,13 +160,16 @@ serve(async (req) => {
     // ===== FETCH DOCUMENT INFO FOR RATIO CHECK =====
     const { data: docData } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('file_name, extraction_mode, extraction_attempts, processing_metadata')
+      .select('file_name, extraction_mode, extraction_attempts, processing_metadata, page_count')
       .eq('id', documentId)
       .single();
 
-    const totalPages = docData?.processing_metadata?.total_pages || 0;
+    // Use page_count from document, fallback to processing_metadata, then 0
+    const totalPages = docData?.page_count || docData?.processing_metadata?.total_pages || 0;
     const currentMode = docData?.extraction_mode || 'auto';
-    const extractionAttempts = docData?.extraction_attempts || 1;
+    const extractionAttempts = docData?.extraction_attempts || 0;
+    
+    console.log(`[Aggregator] Document info: pages=${totalPages}, mode=${currentMode}, attempts=${extractionAttempts}, chunks=${totalChunks}`);
 
     // ===== SELF-HEALING: Page-Chunk Ratio Check =====
     let shouldRetryWithMultimodal = false;
