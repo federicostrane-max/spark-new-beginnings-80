@@ -228,12 +228,12 @@ serve(async (req) => {
         .delete()
         .eq('document_id', documentId);
 
-      // 4. Reset document to 'ingested' with multimodal mode
+      // 4. Reset document to 'ingested' with premium mode
       const { error: resetError } = await supabase
         .from('pipeline_a_hybrid_documents')
         .update({
           status: 'ingested',
-          extraction_mode: 'multimodal',
+          extraction_mode: 'premium',
           processing_metadata: {
             ...docData?.processing_metadata,
             retry_reason: ratioCheckResult.reason,
@@ -249,12 +249,12 @@ serve(async (req) => {
       }
 
       // 5. Trigger split-pdf-into-batches immediately
-      console.log(`[Aggregator] ⚡ Triggering multimodal reprocessing...`);
+      console.log(`[Aggregator] ⚡ Triggering premium reprocessing...`);
       EdgeRuntime.waitUntil(
         supabase.functions.invoke('split-pdf-into-batches', {
           body: { documentId }
         }).then(() => {
-          console.log(`[Aggregator] ✅ Multimodal retry triggered for ${documentId}`);
+          console.log(`[Aggregator] ✅ Premium retry triggered for ${documentId}`);
         })
       );
 
@@ -262,11 +262,11 @@ serve(async (req) => {
         JSON.stringify({
           success: true,
           documentId,
-          action: 'retry_with_multimodal',
+          action: 'retry_with_premium',
           reason: ratioCheckResult.reason,
           previousMode: currentMode,
           previousChunks: totalChunks,
-          message: `Low extraction detected, retrying with multimodal mode`
+          message: `Low extraction detected, retrying with premium mode`
         }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );

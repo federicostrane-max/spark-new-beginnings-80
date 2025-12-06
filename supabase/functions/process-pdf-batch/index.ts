@@ -86,7 +86,7 @@ serve(async (req) => {
 
     // Get extraction mode from job metadata
     const extractionMode = job.metadata?.extraction_mode || 'auto';
-    const forceMultimodal = extractionMode === 'multimodal';
+    const forcePremium = extractionMode === 'multimodal' || extractionMode === 'premium';
     console.log(`[Process Batch] Processing batch ${job.batch_index} (pages ${job.page_start}-${job.page_end}) [mode: ${extractionMode}]`);
 
     // Initialize trace report tracking
@@ -106,7 +106,7 @@ serve(async (req) => {
     console.log(`[Process Batch] Downloaded batch (${batchPdfBuffer.length} bytes)`);
 
     // ===== PHASE 1: JSON EXTRACTION (mode-aware) =====
-    console.log(`[Process Batch] Calling LlamaParse JSON extraction (forceMultimodal: ${forceMultimodal})`);
+    console.log(`[Process Batch] Calling LlamaParse JSON extraction (forcePremium: ${forcePremium})`);
     const jsonResult = await extractJsonWithLayoutAndCallback(
       batchPdfBuffer,
       `batch_${job.batch_index}.pdf`,
@@ -115,7 +115,7 @@ serve(async (req) => {
         llamaparseJobId = jobIdFromLlama;
         console.log(`[Process Batch] LlamaParse job created: ${jobIdFromLlama}`);
       },
-      forceMultimodal  // <-- Pass extraction mode
+      forcePremium  // <-- Pass extraction mode
     );
 
     console.log(`[Process Batch] LlamaParse completed for batch ${job.batch_index}`);
