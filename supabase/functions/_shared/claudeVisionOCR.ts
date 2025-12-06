@@ -6,12 +6,14 @@
  * 
  * Architecture:
  * 1. Download PDF from storage
- * 2. Send PDF to Claude Vision (native PDF support)
- * 3. Extract structured text
- * 4. Return text for chunking
+ * 2. For PDFs > 100 pages: split into 100-page chunks using pdf-lib
+ * 3. Send each chunk to Claude Vision (native PDF support)
+ * 4. Combine extracted text from all chunks
+ * 5. Return text for chunking
  */
 
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 // ============= INTERFACES =============
 
@@ -34,7 +36,8 @@ export interface ClaudeOCROptions {
 const MAX_PDF_SIZE_MB = 32; // Claude's max PDF size per request
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'; // Cost-effective for OCR
 const MAX_TOKENS = 8192; // Sufficient for most pages
-const MAX_PAGES_PER_REQUEST = 100; // Claude's limit per PDF request
+const MAX_PAGES_PER_CHUNK = 100; // Claude's limit per PDF request
+const DELAY_BETWEEN_CHUNKS_MS = 1000; // Rate limiting protection
 
 // ============= RETRY UTILITY =============
 
@@ -74,10 +77,60 @@ async function retryWithBackoff<T>(
   throw lastError;
 }
 
+// ============= PDF SPLITTING UTILITY =============
+
+/**
+ * Split a PDF into chunks of maxPages pages each using pdf-lib
+ * Returns array of PDF buffers
+ */
+async function splitPdfIntoChunks(
+  pdfBuffer: Uint8Array,
+  maxPages: number = MAX_PAGES_PER_CHUNK
+): Promise<{ chunk: Uint8Array; startPage: number; endPage: number }[]> {
+  console.log(`[ClaudeOCR] Loading PDF with pdf-lib for splitting...`);
+  
+  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  const totalPages = pdfDoc.getPageCount();
+  
+  console.log(`[ClaudeOCR] PDF has ${totalPages} pages, splitting into ${Math.ceil(totalPages / maxPages)} chunks`);
+  
+  const chunks: { chunk: Uint8Array; startPage: number; endPage: number }[] = [];
+  
+  for (let startPage = 0; startPage < totalPages; startPage += maxPages) {
+    const endPage = Math.min(startPage + maxPages - 1, totalPages - 1);
+    const pageCount = endPage - startPage + 1;
+    
+    console.log(`[ClaudeOCR] Creating chunk: pages ${startPage + 1}-${endPage + 1} (${pageCount} pages)`);
+    
+    // Create new PDF with just these pages
+    const newPdfDoc = await PDFDocument.create();
+    const pageIndices = Array.from({ length: pageCount }, (_, i) => startPage + i);
+    const copiedPages = await newPdfDoc.copyPages(pdfDoc, pageIndices);
+    
+    for (const page of copiedPages) {
+      newPdfDoc.addPage(page);
+    }
+    
+    const chunkBytes = await newPdfDoc.save();
+    chunks.push({
+      chunk: new Uint8Array(chunkBytes),
+      startPage: startPage + 1, // 1-indexed for logging
+      endPage: endPage + 1
+    });
+    
+    console.log(`[ClaudeOCR] Chunk created: ${(chunkBytes.length / 1024 / 1024).toFixed(2)} MB`);
+  }
+  
+  return chunks;
+}
+
 // ============= MAIN OCR FUNCTION =============
 
 /**
  * Extract text from a PDF using Claude Vision's native PDF support
+ * 
+ * For PDFs > 100 pages: splits into 100-page chunks using pdf-lib,
+ * processes each chunk separately, and combines results.
  * 
  * @param pdfBuffer - Raw PDF file buffer
  * @param options - OCR options including API key
@@ -104,60 +157,40 @@ export async function extractTextWithClaudeVision(
     };
   }
   
-  // Count pages in PDF to determine if pagination needed
-  const totalPages = countPdfPages(pdfBuffer);
-  console.log(`[ClaudeOCR] Detected ${totalPages} pages in PDF`);
-  
-  // If more than 100 pages, use paginated processing
-  if (totalPages > MAX_PAGES_PER_REQUEST) {
-    console.log(`[ClaudeOCR] PDF exceeds ${MAX_PAGES_PER_REQUEST} pages, using paginated processing`);
-    return await extractTextPaginated(pdfBuffer, totalPages, options);
-  }
-  
-  // Standard single-request processing for ≤100 pages
-  return await extractTextSingleRequest(pdfBuffer, options);
-}
-
-/**
- * Count pages in PDF by parsing the PDF structure
- * Uses a simple heuristic: count "/Type /Page" occurrences
- */
-function countPdfPages(pdfBuffer: Uint8Array): number {
   try {
-    // Convert to string for pattern matching (works for PDF structure)
-    const decoder = new TextDecoder('latin1');
-    const pdfText = decoder.decode(pdfBuffer);
+    // Load PDF with pdf-lib to get accurate page count
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    const totalPages = pdfDoc.getPageCount();
+    console.log(`[ClaudeOCR] PDF has ${totalPages} pages (pdf-lib count)`);
     
-    // Method 1: Look for /Count in page tree
-    const countMatch = pdfText.match(/\/Count\s+(\d+)/);
-    if (countMatch) {
-      const count = parseInt(countMatch[1], 10);
-      if (count > 0 && count < 10000) {
-        return count;
-      }
+    // If ≤ 100 pages, process directly
+    if (totalPages <= MAX_PAGES_PER_CHUNK) {
+      console.log(`[ClaudeOCR] PDF within limit, processing directly`);
+      return await extractTextSingleRequest(pdfBuffer, totalPages, options);
     }
     
-    // Method 2: Count /Type /Page occurrences (excluding /Pages)
-    const pageMatches = pdfText.match(/\/Type\s*\/Page[^s]/g);
-    if (pageMatches && pageMatches.length > 0) {
-      return pageMatches.length;
-    }
+    // For > 100 pages: split and process each chunk
+    console.log(`[ClaudeOCR] PDF exceeds ${MAX_PAGES_PER_CHUNK} pages, using pdf-lib splitting`);
+    return await extractTextWithSplitting(pdfBuffer, totalPages, options);
     
-    // Fallback: estimate from file size (rough: ~50KB per page for scanned docs)
-    return Math.max(1, Math.ceil(pdfBuffer.length / (50 * 1024)));
   } catch (error) {
-    console.warn('[ClaudeOCR] Error counting pages, using estimate:', error);
-    return Math.max(1, Math.ceil(pdfBuffer.length / (50 * 1024)));
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[ClaudeOCR] ❌ Failed for "${fileName}":`, errorMessage);
+    
+    return {
+      success: false,
+      text: '',
+      pageCount: 0,
+      processingTimeMs: Date.now() - startTime,
+      errorMessage
+    };
   }
 }
 
 /**
- * For PDFs > 100 pages, Claude doesn't support page_range parameter directly.
- * We'll process the whole PDF in a single request with truncation handling.
- * 
- * Note: This is a limitation - for very large PDFs, consider splitting at storage level.
+ * Process large PDF by splitting into chunks with pdf-lib
  */
-async function extractTextPaginated(
+async function extractTextWithSplitting(
   pdfBuffer: Uint8Array,
   totalPages: number,
   options: ClaudeOCROptions
@@ -165,20 +198,57 @@ async function extractTextPaginated(
   const startTime = Date.now();
   const { fileName } = options;
   
-  // For PDFs > 100 pages, Claude API doesn't support page_range.
-  // We'll attempt to process the whole PDF - Claude will process what it can.
-  console.log(`[ClaudeOCR] Large PDF (${totalPages} pages) - processing entire document (may be truncated)`);
+  // Split PDF into 100-page chunks
+  const chunks = await splitPdfIntoChunks(pdfBuffer, MAX_PAGES_PER_CHUNK);
+  console.log(`[ClaudeOCR] Split into ${chunks.length} chunks for processing`);
   
-  // Just use single request processing - Claude will handle what it can
-  const result = await extractTextSingleRequest(pdfBuffer, options);
+  const allTexts: string[] = [];
+  let successfulChunks = 0;
   
-  // Adjust the page count in the result
-  if (result.success) {
-    console.log(`[ClaudeOCR] ✅ Large PDF processed: ${result.text.length} chars (some pages may be truncated)`);
-    result.pageCount = totalPages;
+  for (let i = 0; i < chunks.length; i++) {
+    const { chunk, startPage, endPage } = chunks[i];
+    console.log(`[ClaudeOCR] Processing chunk ${i + 1}/${chunks.length} (pages ${startPage}-${endPage})`);
+    
+    const chunkResult = await extractTextSingleRequest(
+      chunk, 
+      endPage - startPage + 1, 
+      {
+        ...options,
+        fileName: `${fileName} [pages ${startPage}-${endPage}]`
+      },
+      i === 0, // isFirstBatch
+      startPage,
+      endPage,
+      totalPages
+    );
+    
+    if (chunkResult.success && chunkResult.text) {
+      allTexts.push(`\n\n--- PAGES ${startPage}-${endPage} ---\n\n${chunkResult.text}`);
+      successfulChunks++;
+    } else {
+      console.warn(`[ClaudeOCR] Chunk ${i + 1} failed: ${chunkResult.errorMessage}`);
+      allTexts.push(`\n\n--- PAGES ${startPage}-${endPage} [OCR FAILED] ---\n\n`);
+    }
+    
+    // Rate limiting delay between chunks
+    if (i < chunks.length - 1) {
+      console.log(`[ClaudeOCR] Waiting ${DELAY_BETWEEN_CHUNKS_MS}ms before next chunk...`);
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_CHUNKS_MS));
+    }
   }
   
-  return result;
+  const combinedText = allTexts.join('');
+  const success = successfulChunks > 0;
+  
+  console.log(`[ClaudeOCR] ✅ Completed: ${successfulChunks}/${chunks.length} chunks successful, ${combinedText.length} total chars`);
+  
+  return {
+    success,
+    text: combinedText,
+    pageCount: totalPages,
+    processingTimeMs: Date.now() - startTime,
+    errorMessage: success ? undefined : `All ${chunks.length} chunks failed`
+  };
 }
 
 /**
@@ -186,10 +256,19 @@ async function extractTextPaginated(
  */
 async function extractTextSingleRequest(
   pdfBuffer: Uint8Array,
-  options: ClaudeOCROptions
+  pageCount: number,
+  options: ClaudeOCROptions,
+  isFirstBatch: boolean = true,
+  startPage: number = 1,
+  endPage: number = 0,
+  totalPages: number = 0
 ): Promise<ClaudeOCRResult> {
   const startTime = Date.now();
   const { anthropicKey, fileName, maxRetries = 3 } = options;
+  
+  // Use provided values or defaults
+  const actualEndPage = endPage || pageCount;
+  const actualTotalPages = totalPages || pageCount;
   
   const base64Pdf = encodeBase64(pdfBuffer);
   console.log(`[ClaudeOCR] Encoded PDF to base64: ${(base64Pdf.length / 1024).toFixed(0)} KB`);
@@ -223,7 +302,7 @@ async function extractTextSingleRequest(
                 },
                 {
                   type: 'text',
-                  text: getOCRPrompt(true, 1, 0, 0)
+                  text: getOCRPrompt(isFirstBatch, startPage, actualEndPage, actualTotalPages)
                 }
               ]
             }]
@@ -243,16 +322,12 @@ async function extractTextSingleRequest(
       `Claude OCR for ${fileName}`
     );
     
-    // Estimate page count from page breaks or content length
-    const pageBreaks = (extractedText.match(/---/g) || []).length;
-    const estimatedPages = pageBreaks > 0 ? pageBreaks + 1 : Math.ceil(extractedText.length / 3000);
-    
-    console.log(`[ClaudeOCR] ✅ Success: ${extractedText.length} chars, ~${estimatedPages} pages`);
+    console.log(`[ClaudeOCR] ✅ Success: ${extractedText.length} chars, ${pageCount} pages`);
     
     return {
       success: true,
       text: extractedText,
-      pageCount: estimatedPages,
+      pageCount: pageCount,
       processingTimeMs: Date.now() - startTime
     };
     
