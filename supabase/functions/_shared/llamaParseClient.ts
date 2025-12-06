@@ -221,14 +221,14 @@ export async function uploadToLlamaParseJson(
     formData.append('language', 'en');
     
     if (forcePremium && vendorApiKey) {
-      // MULTIMODAL OCR MODE: Use vendor multimodal model for scanned PDFs
-      // This uses our Anthropic key to bypass LlamaParse billing limits
-      console.log(`[LlamaParse] Using MULTIMODAL OCR mode (vendor_multimodal with Anthropic key)`);
-      formData.append('use_vendor_multimodal_model', 'true');
-      formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
+      // LVM MODE: parse_mode + model + vendor key (GitHub Issue #685)
+      // CRITICAL: Use "model" parameter (NOT vendor_multimodal_model_name) with parse_page_with_lvm
+      console.log(`[LlamaParse] Using LVM mode with vendor API key (parse_page_with_lvm + model)`);
+      formData.append('parse_mode', 'parse_page_with_lvm');
+      formData.append('model', 'anthropic-sonnet-3.5');
       formData.append('vendor_multimodal_api_key', vendorApiKey);
     } else if (forcePremium) {
-      // PREMIUM MODE without vendor key (may fail due to LlamaParse billing)
+      // PREMIUM MODE without vendor key (auto_mode with all triggers)
       console.log(`[LlamaParse] Using PREMIUM mode (auto_mode with ALL triggers)`);
       formData.append('auto_mode', 'true');
       formData.append('auto_mode_trigger_on_table_in_page', 'true');
