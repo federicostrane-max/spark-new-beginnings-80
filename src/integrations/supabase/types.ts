@@ -1830,6 +1830,8 @@ export type Database = {
         Row: {
           created_at: string | null
           error_message: string | null
+          extraction_attempts: number | null
+          extraction_mode: string | null
           file_name: string
           file_path: string
           file_size_bytes: number | null
@@ -1847,6 +1849,8 @@ export type Database = {
         Insert: {
           created_at?: string | null
           error_message?: string | null
+          extraction_attempts?: number | null
+          extraction_mode?: string | null
           file_name: string
           file_path: string
           file_size_bytes?: number | null
@@ -1864,6 +1868,8 @@ export type Database = {
         Update: {
           created_at?: string | null
           error_message?: string | null
+          extraction_attempts?: number | null
+          extraction_mode?: string | null
           file_name?: string
           file_path?: string
           file_size_bytes?: number | null

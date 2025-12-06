@@ -84,7 +84,10 @@ serve(async (req) => {
       .update({ status: 'processing' })
       .eq('id', jobId);
 
-    console.log(`[Process Batch] Processing batch ${job.batch_index} (pages ${job.page_start}-${job.page_end})`);
+    // Get extraction mode from job metadata
+    const extractionMode = job.metadata?.extraction_mode || 'auto';
+    const forceMultimodal = extractionMode === 'multimodal';
+    console.log(`[Process Batch] Processing batch ${job.batch_index} (pages ${job.page_start}-${job.page_end}) [mode: ${extractionMode}]`);
 
     // Initialize trace report tracking
     let llamaparseJobId: string | null = null;
@@ -102,8 +105,8 @@ serve(async (req) => {
     const batchPdfBuffer = new Uint8Array(await batchBlob.arrayBuffer());
     console.log(`[Process Batch] Downloaded batch (${batchPdfBuffer.length} bytes)`);
 
-    // ===== PHASE 1: JSON EXTRACTION (was Markdown-only before) =====
-    console.log(`[Process Batch] Calling LlamaParse JSON extraction for batch ${job.batch_index}`);
+    // ===== PHASE 1: JSON EXTRACTION (mode-aware) =====
+    console.log(`[Process Batch] Calling LlamaParse JSON extraction (forceMultimodal: ${forceMultimodal})`);
     const jsonResult = await extractJsonWithLayoutAndCallback(
       batchPdfBuffer,
       `batch_${job.batch_index}.pdf`,
@@ -111,7 +114,8 @@ serve(async (req) => {
       async (jobIdFromLlama: string) => {
         llamaparseJobId = jobIdFromLlama;
         console.log(`[Process Batch] LlamaParse job created: ${jobIdFromLlama}`);
-      }
+      },
+      forceMultimodal  // <-- Pass extraction mode
     );
 
     console.log(`[Process Batch] LlamaParse completed for batch ${job.batch_index}`);
