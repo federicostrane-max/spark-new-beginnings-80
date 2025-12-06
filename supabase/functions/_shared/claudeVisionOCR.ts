@@ -31,9 +31,10 @@ export interface ClaudeOCROptions {
 
 // ============= CONSTANTS =============
 
-const MAX_PDF_SIZE_MB = 32; // Claude's max PDF size
+const MAX_PDF_SIZE_MB = 32; // Claude's max PDF size per request
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001'; // Cost-effective for OCR
 const MAX_TOKENS = 8192; // Sufficient for most pages
+const MAX_PAGES_PER_REQUEST = 100; // Claude's limit per PDF request
 
 // ============= RETRY UTILITY =============
 
@@ -103,38 +104,190 @@ export async function extractTextWithClaudeVision(
     };
   }
   
-  // Encode PDF to base64
+  // Count pages in PDF to determine if pagination needed
+  const totalPages = countPdfPages(pdfBuffer);
+  console.log(`[ClaudeOCR] Detected ${totalPages} pages in PDF`);
+  
+  // If more than 100 pages, use paginated processing
+  if (totalPages > MAX_PAGES_PER_REQUEST) {
+    console.log(`[ClaudeOCR] PDF exceeds ${MAX_PAGES_PER_REQUEST} pages, using paginated processing`);
+    return await extractTextPaginated(pdfBuffer, totalPages, options);
+  }
+  
+  // Standard single-request processing for ≤100 pages
+  return await extractTextSingleRequest(pdfBuffer, options);
+}
+
+/**
+ * Count pages in PDF by parsing the PDF structure
+ * Uses a simple heuristic: count "/Type /Page" occurrences
+ */
+function countPdfPages(pdfBuffer: Uint8Array): number {
+  try {
+    // Convert to string for pattern matching (works for PDF structure)
+    const decoder = new TextDecoder('latin1');
+    const pdfText = decoder.decode(pdfBuffer);
+    
+    // Method 1: Look for /Count in page tree
+    const countMatch = pdfText.match(/\/Count\s+(\d+)/);
+    if (countMatch) {
+      const count = parseInt(countMatch[1], 10);
+      if (count > 0 && count < 10000) {
+        return count;
+      }
+    }
+    
+    // Method 2: Count /Type /Page occurrences (excluding /Pages)
+    const pageMatches = pdfText.match(/\/Type\s*\/Page[^s]/g);
+    if (pageMatches && pageMatches.length > 0) {
+      return pageMatches.length;
+    }
+    
+    // Fallback: estimate from file size (rough: ~50KB per page for scanned docs)
+    return Math.max(1, Math.ceil(pdfBuffer.length / (50 * 1024)));
+  } catch (error) {
+    console.warn('[ClaudeOCR] Error counting pages, using estimate:', error);
+    return Math.max(1, Math.ceil(pdfBuffer.length / (50 * 1024)));
+  }
+}
+
+/**
+ * Extract text using paginated requests for PDFs > 100 pages
+ * Processes in batches of 100 pages using page range parameter
+ */
+async function extractTextPaginated(
+  pdfBuffer: Uint8Array,
+  totalPages: number,
+  options: ClaudeOCROptions
+): Promise<ClaudeOCRResult> {
+  const startTime = Date.now();
+  const { anthropicKey, fileName, maxRetries = 3 } = options;
+  
+  const base64Pdf = encodeBase64(pdfBuffer);
+  const allTextParts: string[] = [];
+  let processedPages = 0;
+  
+  // Calculate number of batches
+  const numBatches = Math.ceil(totalPages / MAX_PAGES_PER_REQUEST);
+  console.log(`[ClaudeOCR] Will process ${numBatches} batches of up to ${MAX_PAGES_PER_REQUEST} pages each`);
+  
+  for (let batchIdx = 0; batchIdx < numBatches; batchIdx++) {
+    const startPage = batchIdx * MAX_PAGES_PER_REQUEST + 1; // 1-indexed
+    const endPage = Math.min((batchIdx + 1) * MAX_PAGES_PER_REQUEST, totalPages);
+    
+    console.log(`[ClaudeOCR] Processing batch ${batchIdx + 1}/${numBatches}: pages ${startPage}-${endPage}`);
+    
+    try {
+      const batchText = await retryWithBackoff(
+        async () => {
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'anthropic-beta': 'pdfs-2024-09-25',
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: CLAUDE_MODEL,
+              max_tokens: MAX_TOKENS,
+              messages: [{
+                role: 'user',
+                content: [
+                  {
+                    type: 'document',
+                    source: {
+                      type: 'base64',
+                      media_type: 'application/pdf',
+                      data: base64Pdf
+                    },
+                    // Claude supports page_range for partial PDF processing
+                    page_range: {
+                      start: startPage,
+                      end: endPage
+                    }
+                  },
+                  {
+                    type: 'text',
+                    text: getOCRPrompt(batchIdx === 0, startPage, endPage, totalPages)
+                  }
+                ]
+              }]
+            })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Claude API error ${response.status}: ${errorText}`);
+          }
+          
+          const result = await response.json();
+          return result.content?.[0]?.text || '';
+        },
+        maxRetries,
+        2000, // Longer delay between batches
+        `Claude OCR batch ${batchIdx + 1} for ${fileName}`
+      );
+      
+      allTextParts.push(batchText);
+      processedPages = endPage;
+      console.log(`[ClaudeOCR] ✅ Batch ${batchIdx + 1} complete: ${batchText.length} chars`);
+      
+      // Small delay between batches to avoid rate limiting
+      if (batchIdx < numBatches - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[ClaudeOCR] ❌ Batch ${batchIdx + 1} failed:`, errorMessage);
+      
+      // Return partial results if we have some
+      if (allTextParts.length > 0) {
+        console.log(`[ClaudeOCR] Returning partial results: ${processedPages}/${totalPages} pages`);
+        return {
+          success: true, // Partial success
+          text: allTextParts.join('\n\n---\n\n'),
+          pageCount: processedPages,
+          processingTimeMs: Date.now() - startTime,
+          errorMessage: `Partial extraction: ${processedPages}/${totalPages} pages (batch ${batchIdx + 1} failed: ${errorMessage})`
+        };
+      }
+      
+      return {
+        success: false,
+        text: '',
+        pageCount: 0,
+        processingTimeMs: Date.now() - startTime,
+        errorMessage
+      };
+    }
+  }
+  
+  // Combine all batches with page break separators
+  const fullText = allTextParts.join('\n\n---\n\n');
+  console.log(`[ClaudeOCR] ✅ Paginated extraction complete: ${fullText.length} chars, ${totalPages} pages`);
+  
+  return {
+    success: true,
+    text: fullText,
+    pageCount: totalPages,
+    processingTimeMs: Date.now() - startTime
+  };
+}
+
+/**
+ * Extract text in a single request for PDFs ≤ 100 pages
+ */
+async function extractTextSingleRequest(
+  pdfBuffer: Uint8Array,
+  options: ClaudeOCROptions
+): Promise<ClaudeOCRResult> {
+  const startTime = Date.now();
+  const { anthropicKey, fileName, maxRetries = 3 } = options;
+  
   const base64Pdf = encodeBase64(pdfBuffer);
   console.log(`[ClaudeOCR] Encoded PDF to base64: ${(base64Pdf.length / 1024).toFixed(0)} KB`);
-  
-  // OCR prompt optimized for scanned documents
-  const ocrPrompt = `You are an expert OCR system. Extract ALL text from this scanned PDF document with maximum accuracy.
-
-CRITICAL INSTRUCTIONS:
-1. Transcribe EVERY piece of visible text, including:
-   - Headers, footers, page numbers
-   - Tables (preserve structure using markdown tables)
-   - Handwritten annotations if legible
-   - Watermarks and stamps
-   - Dates, numbers, codes
-
-2. PRESERVE document structure:
-   - Use ## for section headers
-   - Use markdown tables for tabular data
-   - Use --- for page breaks
-   - Maintain paragraph spacing
-
-3. HANDLE OCR CHALLENGES:
-   - For ambiguous characters, use context to infer (e.g., "0" vs "O", "1" vs "l")
-   - For dates, look for other dates in document to infer year format
-   - If text is truly illegible, mark as [illegible]
-
-4. OUTPUT FORMAT:
-   - Pure text/markdown only
-   - No JSON or structured format
-   - No commentary like "This document contains..."
-
-Begin transcription:`;
 
   try {
     const extractedText = await retryWithBackoff(
@@ -165,7 +318,7 @@ Begin transcription:`;
                 },
                 {
                   type: 'text',
-                  text: ocrPrompt
+                  text: getOCRPrompt(true, 1, 0, 0)
                 }
               ]
             }]
@@ -210,6 +363,48 @@ Begin transcription:`;
       errorMessage
     };
   }
+}
+
+/**
+ * Generate context-aware OCR prompt
+ */
+function getOCRPrompt(isFirstBatch: boolean, startPage: number, endPage: number, totalPages: number): string {
+  const pageContext = totalPages > 0 
+    ? `\n\nNote: Processing pages ${startPage}-${endPage} of ${totalPages} total pages.`
+    : '';
+  
+  const continuationNote = !isFirstBatch
+    ? '\n\nThis is a continuation from previous pages. Continue transcribing without repeating content.'
+    : '';
+  
+  return `You are an expert OCR system. Extract ALL text from this scanned PDF document with maximum accuracy.
+
+CRITICAL INSTRUCTIONS:
+1. Transcribe EVERY piece of visible text, including:
+   - Headers, footers, page numbers
+   - Tables (preserve structure using markdown tables)
+   - Handwritten annotations if legible
+   - Watermarks and stamps
+   - Dates, numbers, codes
+
+2. PRESERVE document structure:
+   - Use ## for section headers
+   - Use markdown tables for tabular data
+   - Use --- for page breaks
+   - Maintain paragraph spacing
+
+3. HANDLE OCR CHALLENGES:
+   - For ambiguous characters, use context to infer (e.g., "0" vs "O", "1" vs "l")
+   - For dates, look for other dates in document to infer year format
+   - If text is truly illegible, mark as [illegible]
+
+4. OUTPUT FORMAT:
+   - Pure text/markdown only
+   - No JSON or structured format
+   - No commentary like "This document contains..."
+${pageContext}${continuationNote}
+
+Begin transcription:`;
 }
 
 // ============= CHUNKING HELPER =============
