@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { extractTextWithClaudeVision, chunkOCROutput } from "../_shared/claudeVisionOCR.ts";
 
 declare const EdgeRuntime: any;
 
@@ -194,82 +195,142 @@ serve(async (req) => {
       }
     }
 
-    // ===== IF RETRY NEEDED: Reset document for multimodal reprocessing =====
+    // ===== IF RETRY NEEDED: Use Claude Vision OCR directly =====
     if (shouldRetryWithMultimodal) {
-      console.log(`[Aggregator] 🔄 SELF-HEALING: Resetting document for multimodal retry...`);
+      console.log(`[Aggregator] 🔄 SELF-HEALING: Using Claude Vision OCR (bypassing LlamaParse)...`);
 
-      // 1. Delete existing chunks
-      const { error: deleteChunksError } = await supabase
-        .from('pipeline_a_hybrid_chunks_raw')
-        .delete()
-        .eq('document_id', documentId);
-
-      if (deleteChunksError) {
-        console.error(`[Aggregator] Failed to delete chunks: ${deleteChunksError.message}`);
+      const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+      if (!anthropicKey) {
+        console.error(`[Aggregator] ❌ ANTHROPIC_API_KEY not set, cannot use Claude OCR fallback`);
+        documentStatus = 'failed';
       } else {
-        console.log(`[Aggregator] Deleted ${totalChunks} chunks for retry`);
-      }
+        // 1. Get document file path
+        const { data: docInfo } = await supabase
+          .from('pipeline_a_hybrid_documents')
+          .select('file_path, storage_bucket')
+          .eq('id', documentId)
+          .single();
 
-      // 2. Delete processing jobs
-      const { error: deleteJobsError } = await supabase
-        .from('processing_jobs')
-        .delete()
-        .eq('document_id', documentId);
+        if (!docInfo?.file_path) {
+          console.error(`[Aggregator] ❌ No file_path for document ${documentId}`);
+          documentStatus = 'failed';
+        } else {
+          // 2. Download PDF from storage
+          console.log(`[Aggregator] 📥 Downloading PDF from ${docInfo.storage_bucket}/${docInfo.file_path}`);
+          const { data: pdfData, error: downloadError } = await supabase.storage
+            .from(docInfo.storage_bucket || 'pipeline-a-hybrid-uploads')
+            .download(docInfo.file_path);
 
-      if (deleteJobsError) {
-        console.error(`[Aggregator] Failed to delete jobs: ${deleteJobsError.message}`);
-      } else {
-        console.log(`[Aggregator] Deleted ${totalJobs} processing jobs for retry`);
-      }
+          if (downloadError || !pdfData) {
+            console.error(`[Aggregator] ❌ Failed to download PDF:`, downloadError?.message);
+            documentStatus = 'failed';
+          } else {
+            // 3. Run Claude Vision OCR
+            const pdfBuffer = new Uint8Array(await pdfData.arrayBuffer());
+            console.log(`[Aggregator] 🔍 Running Claude Vision OCR on ${(pdfBuffer.length / 1024 / 1024).toFixed(2)} MB PDF`);
 
-      // 3. Delete visual enrichment queue entries
-      await supabase
-        .from('visual_enrichment_queue')
-        .delete()
-        .eq('document_id', documentId);
+            const ocrResult = await extractTextWithClaudeVision(pdfBuffer, {
+              anthropicKey,
+              fileName: docData?.file_name || 'unknown.pdf'
+            });
 
-      // 4. Reset document to 'ingested' with premium mode
-      const { error: resetError } = await supabase
-        .from('pipeline_a_hybrid_documents')
-        .update({
-          status: 'ingested',
-          extraction_mode: 'premium',
-          processing_metadata: {
-            ...docData?.processing_metadata,
-            retry_reason: ratioCheckResult.reason,
-            previous_mode: currentMode,
-            previous_chunks: totalChunks,
-            retry_triggered_at: new Date().toISOString()
+            if (!ocrResult.success) {
+              console.error(`[Aggregator] ❌ Claude OCR failed: ${ocrResult.errorMessage}`);
+              documentStatus = 'failed';
+              
+              // Update document with error
+              await supabase
+                .from('pipeline_a_hybrid_documents')
+                .update({
+                  status: 'failed',
+                  error_message: `Claude OCR failed: ${ocrResult.errorMessage}`,
+                  extraction_attempts: extractionAttempts + 1
+                })
+                .eq('id', documentId);
+            } else {
+              console.log(`[Aggregator] ✅ Claude OCR success: ${ocrResult.text.length} chars in ${ocrResult.processingTimeMs}ms`);
+
+              // 4. Delete existing failed chunks
+              await supabase
+                .from('pipeline_a_hybrid_chunks_raw')
+                .delete()
+                .eq('document_id', documentId);
+              console.log(`[Aggregator] Deleted ${totalChunks} failed chunks`);
+
+              // 5. Create new chunks from OCR output
+              const ocrChunks = chunkOCROutput(ocrResult.text);
+              console.log(`[Aggregator] Creating ${ocrChunks.length} chunks from OCR output`);
+
+              const chunksToInsert = ocrChunks.map(chunk => ({
+                document_id: documentId,
+                chunk_index: chunk.chunkIndex,
+                chunk_type: 'text',
+                content: chunk.content,
+                embedding_status: 'pending',
+                is_atomic: false
+              }));
+
+              const { error: insertError } = await supabase
+                .from('pipeline_a_hybrid_chunks_raw')
+                .insert(chunksToInsert);
+
+              if (insertError) {
+                console.error(`[Aggregator] ❌ Failed to insert OCR chunks:`, insertError.message);
+                documentStatus = 'failed';
+              } else {
+                console.log(`[Aggregator] ✅ Inserted ${ocrChunks.length} OCR chunks`);
+
+                // 6. Update document status
+                documentStatus = 'chunked';
+                await supabase
+                  .from('pipeline_a_hybrid_documents')
+                  .update({
+                    status: 'chunked',
+                    extraction_mode: 'claude_ocr',
+                    extraction_attempts: extractionAttempts + 1,
+                    page_count: ocrResult.pageCount,
+                    processing_metadata: {
+                      ...docData?.processing_metadata,
+                      claude_ocr_used: true,
+                      ocr_chars_extracted: ocrResult.text.length,
+                      ocr_processing_time_ms: ocrResult.processingTimeMs,
+                      ocr_chunks_created: ocrChunks.length,
+                      retry_reason: ratioCheckResult.reason,
+                      previous_mode: currentMode,
+                      previous_chunks: totalChunks
+                    }
+                  })
+                  .eq('id', documentId);
+
+                // 7. Trigger embedding generation
+                console.log(`[Aggregator] ⚡ Triggering embedding generation for OCR chunks...`);
+                EdgeRuntime.waitUntil(
+                  supabase.functions.invoke('pipeline-a-hybrid-generate-embeddings', {
+                    body: { documentId }
+                  }).then(() => {
+                    console.log(`[Aggregator] ✅ Embedding generation triggered for ${documentId}`);
+                  })
+                );
+
+                return new Response(
+                  JSON.stringify({
+                    success: true,
+                    documentId,
+                    action: 'claude_ocr_fallback',
+                    reason: ratioCheckResult.reason,
+                    previousMode: currentMode,
+                    previousChunks: totalChunks,
+                    newChunks: ocrChunks.length,
+                    ocrCharsExtracted: ocrResult.text.length,
+                    message: `Low extraction detected, recovered with Claude Vision OCR`
+                  }),
+                  { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                );
+              }
+            }
           }
-        })
-        .eq('id', documentId);
-
-      if (resetError) {
-        console.error(`[Aggregator] Failed to reset document: ${resetError.message}`);
+        }
       }
-
-      // 5. Trigger split-pdf-into-batches immediately
-      console.log(`[Aggregator] ⚡ Triggering premium reprocessing...`);
-      EdgeRuntime.waitUntil(
-        supabase.functions.invoke('split-pdf-into-batches', {
-          body: { documentId }
-        }).then(() => {
-          console.log(`[Aggregator] ✅ Premium retry triggered for ${documentId}`);
-        })
-      );
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          documentId,
-          action: 'retry_with_premium',
-          reason: ratioCheckResult.reason,
-          previousMode: currentMode,
-          previousChunks: totalChunks,
-          message: `Low extraction detected, retrying with premium mode`
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
     }
 
     // ===== AGGREGATE TRACE REPORTS FROM ALL BATCHES =====
