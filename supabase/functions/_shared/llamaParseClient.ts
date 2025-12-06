@@ -216,14 +216,13 @@ export async function uploadToLlamaParseJson(
     formData.append('extract_images', 'true');
     formData.append('language', 'en');
     
-    // CRITICAL: Force multimodal processing for ALL pages
-    // This ensures proper extraction from financial 10-K filings with complex layouts
-    formData.append('use_vendor_multimodal_model', 'true');
-    formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
-    
-    // Auto-mode triggers: process page with multimodal if insufficient text extracted
+    // AUTO-MODE for scanned PDFs: triggers multimodal ONLY on pages that are primarily images
+    // This is cost-effective: regular pages use fast text extraction, scanned pages use OCR
+    // IMPORTANT: Do NOT use 'use_vendor_multimodal_model=true' as it processes ALL pages with multimodal (very expensive)
+    formData.append('auto_mode', 'true');
     formData.append('auto_mode_trigger_on_image_in_page', 'true');
-    formData.append('auto_mode_trigger_on_text_in_page', 'true');
+    // Specify model for auto-mode when triggered
+    formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
 
     const response = await fetch(`${LLAMAPARSE_API_BASE}/upload`, {
       method: 'POST',
