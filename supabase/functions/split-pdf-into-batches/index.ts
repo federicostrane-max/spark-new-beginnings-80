@@ -73,7 +73,7 @@ serve(async (req) => {
     // Fetch document metadata
     const { data: document, error: docError } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('*')
+      .select('*, extraction_mode, extraction_attempts')
       .eq('id', documentId)
       .single();
 
@@ -100,17 +100,26 @@ serve(async (req) => {
 
     console.log(`[Split PDF] Total pages: ${totalPages}, batches: ${totalBatches}`);
 
-    // Update document with processing metadata
+    // Determine extraction mode: use existing mode or default to 'auto'
+    const extractionMode = document.extraction_mode || 'auto';
+    const extractionAttempts = (document.extraction_attempts || 0) + 1;
+    console.log(`[Split PDF] Extraction mode: ${extractionMode}, attempt: ${extractionAttempts}`);
+
+    // Update document with processing metadata and increment attempts
     await supabase
       .from('pipeline_a_hybrid_documents')
       .update({
         status: 'splitting',
+        extraction_mode: extractionMode,
+        extraction_attempts: extractionAttempts,
         processing_metadata: {
           ...document.processing_metadata,
           total_pages: totalPages,
           total_batches: totalBatches,
           pages_per_batch: PAGES_PER_BATCH,
           split_started_at: new Date().toISOString(),
+          extraction_mode: extractionMode,
+          extraction_attempt: extractionAttempts,
         }
       })
       .eq('id', documentId);
@@ -147,7 +156,7 @@ serve(async (req) => {
 
       console.log(`[Split PDF] ✅ Batch ${batchIndex} uploaded successfully`);
 
-      // Create processing job
+      // Create processing job with extraction_mode
       const { data: job, error: jobError } = await supabase
         .from('processing_jobs')
         .insert({
@@ -157,7 +166,10 @@ serve(async (req) => {
           page_end: pageEnd + 1,
           total_batches: totalBatches,
           input_file_path: batchFilePath,
-          status: 'pending'
+          status: 'pending',
+          metadata: {
+            extraction_mode: extractionMode
+          }
         })
         .select()
         .single();
@@ -167,7 +179,7 @@ serve(async (req) => {
         throw new Error(`Job creation failed: ${jobError?.message}`);
       }
 
-      console.log(`[Split PDF] Created job ${job.id} for batch ${batchIndex}`);
+      console.log(`[Split PDF] Created job ${job.id} for batch ${batchIndex} (mode: ${extractionMode})`);
     }
 
     console.log(`[Split PDF] Successfully created ${totalBatches} batches for document ${documentId}`);

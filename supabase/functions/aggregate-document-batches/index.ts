@@ -8,6 +8,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ===== SELF-HEALING: Page-Chunk Ratio Check Thresholds =====
+const MIN_CHUNKS_PER_PAGE_RATIO = 0.5;  // At least 0.5 chunks per page
+const MIN_ABSOLUTE_CHUNKS = 10;          // Minimum 10 chunks for multi-page docs
+const MIN_PAGES_FOR_RATIO_CHECK = 5;     // Skip ratio check for small documents
+const MAX_EXTRACTION_ATTEMPTS = 2;       // Prevent infinite retry loops
+
 // ===== GENERATE META CHUNK CONTENT =====
 function generateMetaChunkContent(fileName: string, report: AggregatedTraceReport): string {
   const s = report.summary;
@@ -17,6 +23,7 @@ function generateMetaChunkContent(fileName: string, report: AggregatedTraceRepor
   lines.push(``);
   lines.push(`**Processing Path:** Batch (${report.total_batches} batches)`);
   lines.push(`**Total Pages:** ${s.total_pages}`);
+  lines.push(`**Extraction Mode:** ${report.extraction_mode || 'auto'}`);
   lines.push(``);
   
   // Chunking Stats
@@ -50,6 +57,7 @@ interface AggregatedTraceReport {
   processing_path: 'batch';
   total_batches: number;
   batches: any[];
+  extraction_mode?: string;
   summary: {
     total_pages: number;
     total_chunks: number;
@@ -148,6 +156,122 @@ serve(async (req) => {
       console.error(`[Aggregator] ❌ Document ${documentId} completely failed: ${statusMessage}`);
     }
 
+    // ===== FETCH DOCUMENT INFO FOR RATIO CHECK =====
+    const { data: docData } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('file_name, extraction_mode, extraction_attempts, processing_metadata')
+      .eq('id', documentId)
+      .single();
+
+    const totalPages = docData?.processing_metadata?.total_pages || 0;
+    const currentMode = docData?.extraction_mode || 'auto';
+    const extractionAttempts = docData?.extraction_attempts || 1;
+
+    // ===== SELF-HEALING: Page-Chunk Ratio Check =====
+    let shouldRetryWithMultimodal = false;
+    let ratioCheckResult = { passed: true, ratio: 0, reason: '' };
+
+    if (documentStatus === 'chunked' && totalPages >= MIN_PAGES_FOR_RATIO_CHECK) {
+      const ratio = totalChunks / totalPages;
+      ratioCheckResult.ratio = ratio;
+
+      if (ratio < MIN_CHUNKS_PER_PAGE_RATIO || totalChunks < MIN_ABSOLUTE_CHUNKS) {
+        ratioCheckResult.passed = false;
+        ratioCheckResult.reason = `ratio=${ratio.toFixed(2)} (min: ${MIN_CHUNKS_PER_PAGE_RATIO}), chunks=${totalChunks} (min: ${MIN_ABSOLUTE_CHUNKS})`;
+
+        console.log(`[Aggregator] ⚠️ RATIO CHECK FAILED: ${ratioCheckResult.reason}`);
+
+        if (currentMode === 'auto' && extractionAttempts < MAX_EXTRACTION_ATTEMPTS) {
+          shouldRetryWithMultimodal = true;
+          console.log(`[Aggregator] 🔄 Will retry with MULTIMODAL mode (attempt ${extractionAttempts + 1}/${MAX_EXTRACTION_ATTEMPTS})`);
+        } else if (extractionAttempts >= MAX_EXTRACTION_ATTEMPTS) {
+          console.error(`[Aggregator] ❌ Max extraction attempts reached (${extractionAttempts}), marking as failed`);
+          documentStatus = 'failed';
+          statusMessage = `Extraction failed after ${extractionAttempts} attempts - insufficient content extracted`;
+        }
+      } else {
+        console.log(`[Aggregator] ✅ RATIO CHECK PASSED: ${totalChunks} chunks / ${totalPages} pages = ${ratio.toFixed(2)} ratio`);
+      }
+    }
+
+    // ===== IF RETRY NEEDED: Reset document for multimodal reprocessing =====
+    if (shouldRetryWithMultimodal) {
+      console.log(`[Aggregator] 🔄 SELF-HEALING: Resetting document for multimodal retry...`);
+
+      // 1. Delete existing chunks
+      const { error: deleteChunksError } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .delete()
+        .eq('document_id', documentId);
+
+      if (deleteChunksError) {
+        console.error(`[Aggregator] Failed to delete chunks: ${deleteChunksError.message}`);
+      } else {
+        console.log(`[Aggregator] Deleted ${totalChunks} chunks for retry`);
+      }
+
+      // 2. Delete processing jobs
+      const { error: deleteJobsError } = await supabase
+        .from('processing_jobs')
+        .delete()
+        .eq('document_id', documentId);
+
+      if (deleteJobsError) {
+        console.error(`[Aggregator] Failed to delete jobs: ${deleteJobsError.message}`);
+      } else {
+        console.log(`[Aggregator] Deleted ${totalJobs} processing jobs for retry`);
+      }
+
+      // 3. Delete visual enrichment queue entries
+      await supabase
+        .from('visual_enrichment_queue')
+        .delete()
+        .eq('document_id', documentId);
+
+      // 4. Reset document to 'ingested' with multimodal mode
+      const { error: resetError } = await supabase
+        .from('pipeline_a_hybrid_documents')
+        .update({
+          status: 'ingested',
+          extraction_mode: 'multimodal',
+          processing_metadata: {
+            ...docData?.processing_metadata,
+            retry_reason: ratioCheckResult.reason,
+            previous_mode: currentMode,
+            previous_chunks: totalChunks,
+            retry_triggered_at: new Date().toISOString()
+          }
+        })
+        .eq('id', documentId);
+
+      if (resetError) {
+        console.error(`[Aggregator] Failed to reset document: ${resetError.message}`);
+      }
+
+      // 5. Trigger split-pdf-into-batches immediately
+      console.log(`[Aggregator] ⚡ Triggering multimodal reprocessing...`);
+      EdgeRuntime.waitUntil(
+        supabase.functions.invoke('split-pdf-into-batches', {
+          body: { documentId }
+        }).then(() => {
+          console.log(`[Aggregator] ✅ Multimodal retry triggered for ${documentId}`);
+        })
+      );
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          documentId,
+          action: 'retry_with_multimodal',
+          reason: ratioCheckResult.reason,
+          previousMode: currentMode,
+          previousChunks: totalChunks,
+          message: `Low extraction detected, retrying with multimodal mode`
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // ===== AGGREGATE TRACE REPORTS FROM ALL BATCHES =====
     const batchTraceReports = jobs
       .filter(j => j.metadata?.trace_report)
@@ -161,6 +285,7 @@ serve(async (req) => {
       processing_path: 'batch',
       total_batches: totalJobs,
       batches: batchTraceReports,
+      extraction_mode: currentMode,
       summary: {
         total_pages: batchTraceReports.reduce((sum, r) => sum + (r.pages_processed || 0), 0),
         total_chunks: batchTraceReports.reduce((sum, r) => sum + (r.chunking?.total_chunks || 0), 0),
@@ -189,7 +314,8 @@ serve(async (req) => {
           failed_batches: failedJobs,
           total_chunks: totalChunks,
           message: statusMessage,
-          trace_report: aggregatedTraceReport
+          trace_report: aggregatedTraceReport,
+          ratio_check: ratioCheckResult
         }
       })
       .eq('id', documentId);
@@ -201,15 +327,8 @@ serve(async (req) => {
     console.log(`[Aggregator] ✅ Saved aggregated trace report for ${documentId}`);
 
     // ===== INSERT META CHUNK WITH PROCESSING TRACE REPORT =====
-    // Fetch document name for meta chunk
-    const { data: docInfo } = await supabase
-      .from('pipeline_a_hybrid_documents')
-      .select('file_name')
-      .eq('id', documentId)
-      .single();
-
     // Generate Markdown summary for agent self-awareness
-    const metaChunkContent = generateMetaChunkContent(docInfo?.file_name || 'Unknown', aggregatedTraceReport);
+    const metaChunkContent = generateMetaChunkContent(docData?.file_name || 'Unknown', aggregatedTraceReport);
     
     // Get max chunk_index for this document
     const { data: maxChunkData } = await supabase
@@ -237,7 +356,7 @@ serve(async (req) => {
     if (metaInsertError) {
       console.error(`[Aggregator] Failed to insert meta chunk: ${metaInsertError.message}`);
     } else {
-      console.log(`[Aggregator] ✅ Inserted meta chunk for ${docInfo?.file_name}`);
+      console.log(`[Aggregator] ✅ Inserted meta chunk for ${docData?.file_name}`);
     }
 
     // If successfully chunked, trigger embedding generation

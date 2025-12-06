@@ -196,14 +196,16 @@ export async function getMarkdownResult(
  * @param pdfBuffer - PDF file as Uint8Array
  * @param fileName - Original file name
  * @param apiKey - LlamaParse API key
+ * @param forceMultimodal - Force multimodal processing for ALL pages (used for retry on low extraction)
  * @returns Job ID for status polling
  */
 export async function uploadToLlamaParseJson(
   pdfBuffer: Uint8Array,
   fileName: string,
-  apiKey: string
+  apiKey: string,
+  forceMultimodal: boolean = false
 ): Promise<string> {
-  console.log(`[LlamaParse] Uploading ${fileName} for JSON extraction with layout (${pdfBuffer.length} bytes)`);
+  console.log(`[LlamaParse] Uploading ${fileName} for JSON extraction (forceMultimodal: ${forceMultimodal}) (${pdfBuffer.length} bytes)`);
 
   return retryWithBackoff(async () => {
     const formData = new FormData();
@@ -216,14 +218,20 @@ export async function uploadToLlamaParseJson(
     formData.append('extract_images', 'true');
     formData.append('language', 'en');
     
-    // CRITICAL: Force multimodal processing for ALL pages to ensure proper extraction
-    // from complex financial 10-K filings. Auto-mode was extracting minimal content.
-    formData.append('use_vendor_multimodal_model', 'true');
-    formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
-    
-    // Auto-mode triggers: process page with multimodal if insufficient text extracted
-    formData.append('auto_mode_trigger_on_image_in_page', 'true');
-    formData.append('auto_mode_trigger_on_text_in_page', 'true');
+    if (forceMultimodal) {
+      // MULTIMODAL MODE: Force multimodal processing for ALL pages
+      // Used for retry when auto_mode extraction was insufficient
+      console.log(`[LlamaParse] Using MULTIMODAL mode (use_vendor_multimodal_model=true)`);
+      formData.append('use_vendor_multimodal_model', 'true');
+      formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
+    } else {
+      // AUTO MODE: Cost-effective - only triggers multimodal on scanned/image pages
+      // Default for first extraction attempt
+      console.log(`[LlamaParse] Using AUTO mode (cost-effective, triggers on scanned pages)`);
+      formData.append('auto_mode', 'true');
+      formData.append('auto_mode_trigger_on_image_in_page', 'true');
+      formData.append('vendor_multimodal_model_name', 'anthropic-sonnet-3.5');
+    }
 
     const response = await fetch(`${LLAMAPARSE_API_BASE}/upload`, {
       method: 'POST',
@@ -317,16 +325,18 @@ export async function extractJsonWithLayout(
  * @param fileName - Original file name
  * @param apiKey - LlamaParse API key
  * @param onJobCreated - Optional callback executed immediately after job creation
+ * @param forceMultimodal - Force multimodal processing for ALL pages (used for retry)
  * @returns JSON content with layout and job ID
  */
 export async function extractJsonWithLayoutAndCallback(
   pdfBuffer: Uint8Array,
   fileName: string,
   apiKey: string,
-  onJobCreated?: (jobId: string) => Promise<void>
+  onJobCreated?: (jobId: string) => Promise<void>,
+  forceMultimodal: boolean = false
 ): Promise<LlamaParseJsonResult> {
   // Step 1: Upload PDF (otteniamo subito il Job ID)
-  const jobId = await uploadToLlamaParseJson(pdfBuffer, fileName, apiKey);
+  const jobId = await uploadToLlamaParseJson(pdfBuffer, fileName, apiKey, forceMultimodal);
   console.log(`[LlamaParse] Upload successful, job_id: ${jobId}`);
 
   // ✅ CRITICAL: Persist job ID IMMEDIATELY via callback (before polling)
