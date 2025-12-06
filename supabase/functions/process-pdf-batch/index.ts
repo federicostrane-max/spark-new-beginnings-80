@@ -106,7 +106,9 @@ serve(async (req) => {
     console.log(`[Process Batch] Downloaded batch (${batchPdfBuffer.length} bytes)`);
 
     // ===== PHASE 1: JSON EXTRACTION (mode-aware) =====
-    console.log(`[Process Batch] Calling LlamaParse JSON extraction (forcePremium: ${forcePremium})`);
+    // Pass anthropicKey as vendor API key for multimodal OCR when forcePremium is enabled
+    const vendorApiKey = forcePremium ? anthropicKey : undefined;
+    console.log(`[Process Batch] Calling LlamaParse JSON extraction (forcePremium: ${forcePremium}, hasVendorKey: ${!!vendorApiKey})`);
     const jsonResult = await extractJsonWithLayoutAndCallback(
       batchPdfBuffer,
       `batch_${job.batch_index}.pdf`,
@@ -115,7 +117,8 @@ serve(async (req) => {
         llamaparseJobId = jobIdFromLlama;
         console.log(`[Process Batch] LlamaParse job created: ${jobIdFromLlama}`);
       },
-      forcePremium  // <-- Pass extraction mode
+      forcePremium,
+      vendorApiKey  // <-- Pass Anthropic key for multimodal OCR
     );
 
     console.log(`[Process Batch] LlamaParse completed for batch ${job.batch_index}`);
