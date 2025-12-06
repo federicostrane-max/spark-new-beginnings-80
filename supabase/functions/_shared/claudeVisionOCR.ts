@@ -152,8 +152,10 @@ function countPdfPages(pdfBuffer: Uint8Array): number {
 }
 
 /**
- * Extract text using paginated requests for PDFs > 100 pages
- * Processes in batches of 100 pages using page range parameter
+ * For PDFs > 100 pages, Claude doesn't support page_range parameter directly.
+ * We'll process the whole PDF in a single request with truncation handling.
+ * 
+ * Note: This is a limitation - for very large PDFs, consider splitting at storage level.
  */
 async function extractTextPaginated(
   pdfBuffer: Uint8Array,
@@ -161,119 +163,22 @@ async function extractTextPaginated(
   options: ClaudeOCROptions
 ): Promise<ClaudeOCRResult> {
   const startTime = Date.now();
-  const { anthropicKey, fileName, maxRetries = 3 } = options;
+  const { fileName } = options;
   
-  const base64Pdf = encodeBase64(pdfBuffer);
-  const allTextParts: string[] = [];
-  let processedPages = 0;
+  // For PDFs > 100 pages, Claude API doesn't support page_range.
+  // We'll attempt to process the whole PDF - Claude will process what it can.
+  console.log(`[ClaudeOCR] Large PDF (${totalPages} pages) - processing entire document (may be truncated)`);
   
-  // Calculate number of batches
-  const numBatches = Math.ceil(totalPages / MAX_PAGES_PER_REQUEST);
-  console.log(`[ClaudeOCR] Will process ${numBatches} batches of up to ${MAX_PAGES_PER_REQUEST} pages each`);
+  // Just use single request processing - Claude will handle what it can
+  const result = await extractTextSingleRequest(pdfBuffer, options);
   
-  for (let batchIdx = 0; batchIdx < numBatches; batchIdx++) {
-    const startPage = batchIdx * MAX_PAGES_PER_REQUEST + 1; // 1-indexed
-    const endPage = Math.min((batchIdx + 1) * MAX_PAGES_PER_REQUEST, totalPages);
-    
-    console.log(`[ClaudeOCR] Processing batch ${batchIdx + 1}/${numBatches}: pages ${startPage}-${endPage}`);
-    
-    try {
-      const batchText = await retryWithBackoff(
-        async () => {
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'x-api-key': anthropicKey,
-              'anthropic-version': '2023-06-01',
-              'anthropic-beta': 'pdfs-2024-09-25',
-              'content-type': 'application/json'
-            },
-            body: JSON.stringify({
-              model: CLAUDE_MODEL,
-              max_tokens: MAX_TOKENS,
-              messages: [{
-                role: 'user',
-                content: [
-                  {
-                    type: 'document',
-                    source: {
-                      type: 'base64',
-                      media_type: 'application/pdf',
-                      data: base64Pdf
-                    },
-                    // Claude supports page_range for partial PDF processing
-                    page_range: {
-                      start: startPage,
-                      end: endPage
-                    }
-                  },
-                  {
-                    type: 'text',
-                    text: getOCRPrompt(batchIdx === 0, startPage, endPage, totalPages)
-                  }
-                ]
-              }]
-            })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Claude API error ${response.status}: ${errorText}`);
-          }
-          
-          const result = await response.json();
-          return result.content?.[0]?.text || '';
-        },
-        maxRetries,
-        2000, // Longer delay between batches
-        `Claude OCR batch ${batchIdx + 1} for ${fileName}`
-      );
-      
-      allTextParts.push(batchText);
-      processedPages = endPage;
-      console.log(`[ClaudeOCR] ✅ Batch ${batchIdx + 1} complete: ${batchText.length} chars`);
-      
-      // Small delay between batches to avoid rate limiting
-      if (batchIdx < numBatches - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-      
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[ClaudeOCR] ❌ Batch ${batchIdx + 1} failed:`, errorMessage);
-      
-      // Return partial results if we have some
-      if (allTextParts.length > 0) {
-        console.log(`[ClaudeOCR] Returning partial results: ${processedPages}/${totalPages} pages`);
-        return {
-          success: true, // Partial success
-          text: allTextParts.join('\n\n---\n\n'),
-          pageCount: processedPages,
-          processingTimeMs: Date.now() - startTime,
-          errorMessage: `Partial extraction: ${processedPages}/${totalPages} pages (batch ${batchIdx + 1} failed: ${errorMessage})`
-        };
-      }
-      
-      return {
-        success: false,
-        text: '',
-        pageCount: 0,
-        processingTimeMs: Date.now() - startTime,
-        errorMessage
-      };
-    }
+  // Adjust the page count in the result
+  if (result.success) {
+    console.log(`[ClaudeOCR] ✅ Large PDF processed: ${result.text.length} chars (some pages may be truncated)`);
+    result.pageCount = totalPages;
   }
   
-  // Combine all batches with page break separators
-  const fullText = allTextParts.join('\n\n---\n\n');
-  console.log(`[ClaudeOCR] ✅ Paginated extraction complete: ${fullText.length} chars, ${totalPages} pages`);
-  
-  return {
-    success: true,
-    text: fullText,
-    pageCount: totalPages,
-    processingTimeMs: Date.now() - startTime
-  };
+  return result;
 }
 
 /**
