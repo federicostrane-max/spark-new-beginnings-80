@@ -17,7 +17,11 @@ const FINANCEBENCH_BLACKLIST_COMPANIES = [
   'American Water Works', // PDF encrypted - only 1 chunk extractable (appears 2x in dataset)
   'AMD',                  // PDF corrupted - No PDF header found (financebench_016)
   'Amcor',                // Wrong document type - 8-K legal filing, not 10-K financial data (financebench_013)
-  'Best Buy'              // PDF encrypted - all 4 docs (014-017) extract only 0-1 chunks from 100+ pages
+  'Best Buy',             // PDF encrypted - all 4 docs (014-017) extract only 0-1 chunks from 100+ pages
+  'Block',                // PDF encrypted - only 1 chunk extractable (financebench_018)
+  'Boeing',               // PDF encrypted - only 1 chunk from 100+ pages (financebench_020, 021)
+  'Corning',              // PDF encrypted - only 1 chunk extractable (financebench_026, 027)
+  'CVS Health'            // PDF encrypted - only 1 chunk extractable (financebench_028)
 ];
 
 // Helper function to assign chunks to benchmark agent (Pipeline A-Hybrid)
