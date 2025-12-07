@@ -29,11 +29,12 @@ serve(async (req) => {
       console.log(`[Assign Benchmark Chunks] 🎯 Event-Driven mode: Processing document ${documentId}`);
 
       // Verify document is in benchmark_datasets
-      const { data: benchmarkRecord, error: benchmarkError } = await supabase
+      // Use .limit(1) instead of .maybeSingle() to handle N-to-1 document-questions relationship
+      const { data: benchmarkRecords, error: benchmarkError } = await supabase
         .from('benchmark_datasets')
         .select('id, file_name, suite_category')
         .eq('document_id', documentId)
-        .maybeSingle();
+        .limit(1);
 
       if (benchmarkError) {
         console.error('[Assign Benchmark Chunks] Error checking benchmark_datasets:', benchmarkError);
@@ -43,13 +44,15 @@ serve(async (req) => {
         );
       }
 
-      if (!benchmarkRecord) {
+      if (!benchmarkRecords || benchmarkRecords.length === 0) {
         console.log(`[Assign Benchmark Chunks] ⚠️ Document ${documentId} not in benchmark_datasets, skipping`);
         return new Response(
           JSON.stringify({ success: true, mode: 'event-driven', assigned: 0, message: 'Not a benchmark document' }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      
+      const benchmarkRecord = benchmarkRecords[0];
 
       // Fetch all ready chunks for this specific document
       const { data: chunks, error: fetchError } = await supabase
