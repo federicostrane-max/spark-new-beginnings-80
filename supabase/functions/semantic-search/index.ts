@@ -119,6 +119,56 @@ interface ChunkWithScore {
   intent_boost?: number;
 }
 
+// ========== CONTENT-BASED SEMANTIC CLASSIFICATION ==========
+// Detect semantic section from chunk content (compensates for generic chunk_types)
+function detectSemanticSection(content: string): string {
+  const lowerContent = content.toLowerCase();
+  
+  // Filing metadata / Cover page detection
+  if (lowerContent.includes('securities registered pursuant to section 12(b)') ||
+      lowerContent.includes('trading symbol') ||
+      lowerContent.includes('title of each class') ||
+      lowerContent.includes('name of each exchange') ||
+      (lowerContent.includes('form 10-k') && lowerContent.includes('annual report')) ||
+      lowerContent.includes('securities and exchange commission')) {
+    return 'cover_page';
+  }
+  
+  // Balance Sheet detection
+  if ((lowerContent.includes('balance sheet') || lowerContent.includes('financial position')) ||
+      (lowerContent.includes('total assets') && lowerContent.includes('total liabilities')) ||
+      (lowerContent.includes('current assets') && lowerContent.includes('current liabilities')) ||
+      lowerContent.includes('stockholders\' equity') ||
+      lowerContent.includes('shareholders\' equity')) {
+    return 'balance_sheet';
+  }
+  
+  // Income Statement detection
+  if (lowerContent.includes('statement of operations') ||
+      lowerContent.includes('statement of income') ||
+      (lowerContent.includes('net revenues') && lowerContent.includes('net income')) ||
+      (lowerContent.includes('gross profit') && lowerContent.includes('operating income'))) {
+    return 'income_statement';
+  }
+  
+  // Cash Flow Statement detection
+  if (lowerContent.includes('statement of cash flows') ||
+      lowerContent.includes('cash flows from operating') ||
+      lowerContent.includes('cash flows from investing') ||
+      lowerContent.includes('cash flows from financing')) {
+    return 'cash_flow_statement';
+  }
+  
+  // Exhibit / Legal section detection
+  if (lowerContent.includes('exhibit index') ||
+      lowerContent.includes('exhibit number') ||
+      /\bexhibit\s+\d+/.test(lowerContent)) {
+    return 'exhibit';
+  }
+  
+  return 'unknown';
+}
+
 function rerankWithBoost(
   chunks: ChunkWithScore[], 
   queryIntent: QueryIntent
@@ -132,36 +182,33 @@ function rerankWithBoost(
   
   return chunks
     .map(chunk => {
-      // Determine chunk category for boost lookup
-      const chunkCategory = chunk.chunk_type?.toLowerCase() || 'text';
+      const content = chunk.content || '';
       
-      // Check for matching boost factors
-      let boostFactor = 1.0;
-      for (const [key, factor] of Object.entries(boostMap)) {
-        if (chunkCategory.includes(key) || chunk.content?.toLowerCase().includes(key)) {
-          boostFactor = Math.max(boostFactor, factor);
-        }
-      }
+      // STEP 1: Detect semantic section from CONTENT (not chunk_type)
+      const semanticSection = detectSemanticSection(content);
       
-      // For filing_metadata intent, also boost chunks containing key terms
+      // STEP 2: Get boost from semantic section first, fallback to chunk_type
+      let boostFactor = boostMap[semanticSection] || boostMap[chunk.chunk_type?.toLowerCase() || 'text'] || 1.0;
+      
+      // STEP 3: Additional content-based boosts for filing_metadata
       if (queryIntent === 'filing_metadata') {
-        const content = chunk.content?.toLowerCase() || '';
-        if (content.includes('securities registered') || 
-            content.includes('section 12(b)') ||
-            content.includes('trading symbol') ||
-            content.includes('new york stock exchange') ||
-            content.includes('nyse')) {
-          boostFactor = Math.max(boostFactor, 2.5);
+        const lowerContent = content.toLowerCase();
+        // Direct match for debt securities question
+        if (lowerContent.includes('securities registered') && 
+            (lowerContent.includes('trading symbol') || lowerContent.includes('new york stock exchange'))) {
+          boostFactor = Math.max(boostFactor, 4.0); // Strong boost for exact match
+        }
+        if (lowerContent.includes('section 12(b)')) {
+          boostFactor = Math.max(boostFactor, 3.5);
         }
       }
       
-      // For balance_sheet_metric, boost chunks with actual numbers/calculations
+      // STEP 4: Additional content-based boosts for balance_sheet_metric
       if (queryIntent === 'balance_sheet_metric') {
-        const content = chunk.content?.toLowerCase() || '';
-        if (content.includes('current assets') ||
-            content.includes('current liabilities') ||
-            content.includes('total assets')) {
-          boostFactor = Math.max(boostFactor, 2.0);
+        const lowerContent = content.toLowerCase();
+        if ((lowerContent.includes('current assets') && lowerContent.includes('current liabilities')) ||
+            (lowerContent.includes('quick ratio') || lowerContent.includes('acid-test'))) {
+          boostFactor = Math.max(boostFactor, 3.0);
         }
       }
       
@@ -170,6 +217,7 @@ function rerankWithBoost(
         ...chunk,
         boosted_score: baseScore * boostFactor,
         intent_boost: boostFactor,
+        semantic_section: semanticSection, // For debugging
       };
     })
     .sort((a, b) => (b.boosted_score || 0) - (a.boosted_score || 0));
@@ -361,6 +409,7 @@ serve(async (req) => {
       // Log top 3 boosted scores for debugging
       const topBoosted = combinedResults.slice(0, 3).map(c => ({
         chunk_type: c.chunk_type,
+        semantic_section: (c as any).semantic_section,
         boost: (c as any).intent_boost,
         original: c.similarity?.toFixed(3),
         boosted: (c as any).boosted_score?.toFixed(3),
