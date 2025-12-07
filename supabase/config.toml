@@ -266,3 +266,6 @@ timeout = 60
 [functions.test-claude-ocr]
 verify_jwt = false
 timeout = 300
+
+[functions.download-system-docs]
+verify_jwt = false
