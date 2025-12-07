@@ -7,6 +7,174 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ========== QUERY-AWARE CHUNK BOOSTING ==========
+
+type QueryIntent = 
+  | 'balance_sheet_metric'      // ROA, quick ratio, debt ratios, assets, liabilities
+  | 'income_statement_metric'   // margins, revenue growth, EPS, net income
+  | 'cash_flow_metric'          // capex, FCF, operating cash flow
+  | 'filing_metadata'           // securities registered, filing date, auditor, exhibits
+  | 'segment_analysis'          // segment revenue, geographic breakdown
+  | 'general';
+
+// Intent detection patterns (rule-based, fast)
+const INTENT_PATTERNS: Record<QueryIntent, RegExp[]> = {
+  'filing_metadata': [
+    /\b(securities?\s+registered|exchange\s+listing|trading\s+symbol|ticker|cusip)\b/i,
+    /\b(auditor|independent\s+accountant|filing\s+date|form\s+(10-[kq]|8-k)|sec\s+filing)\b/i,
+    /\b(registrant|cover\s+page|exhibit\s+index|signatures?)\b/i,
+    /\b(debt\s+securities?\s+(registered|listed|traded))\b/i,
+  ],
+  'balance_sheet_metric': [
+    /\b(quick\s+ratio|current\s+ratio|debt[- ]to[- ]equity|working\s+capital)\b/i,
+    /\b(total\s+(assets?|liabilities?|equity|debt)|book\s+value)\b/i,
+    /\b(roa|roe|return\s+on\s+(assets?|equity))\b/i,
+    /\b(accounts?\s+(receivable|payable)|inventory|cash\s+and\s+equivalents?)\b/i,
+    /\b(balance\s+sheet|financial\s+position)\b/i,
+  ],
+  'income_statement_metric': [
+    /\b(revenue|sales|net\s+income|gross\s+profit|operating\s+income)\b/i,
+    /\b(eps|earnings\s+per\s+share|diluted\s+eps)\b/i,
+    /\b(gross\s+margin|operating\s+margin|net\s+margin|profit\s+margin)\b/i,
+    /\b(income\s+statement|statement\s+of\s+operations?)\b/i,
+    /\b(cost\s+of\s+(goods\s+sold|revenue|sales)|cogs)\b/i,
+  ],
+  'cash_flow_metric': [
+    /\b(capex|capital\s+expenditure|property[,\s]+plant[,\s]+and\s+equipment)\b/i,
+    /\b(free\s+cash\s+flow|fcf|operating\s+cash\s+flow|cash\s+from\s+operations?)\b/i,
+    /\b(cash\s+flow\s+statement|statement\s+of\s+cash\s+flows?)\b/i,
+    /\b(depreciation|amortization|investing\s+activities?|financing\s+activities?)\b/i,
+  ],
+  'segment_analysis': [
+    /\b(segment|geographic|regional|by\s+(region|country|product\s+line))\b/i,
+    /\b(business\s+unit|operating\s+segment|reportable\s+segment)\b/i,
+  ],
+  'general': [], // fallback, no patterns
+};
+
+// Boost multipliers: intent → chunk_type → boost factor
+const BOOST_MAPS: Record<QueryIntent, Record<string, number>> = {
+  'filing_metadata': {
+    'cover_page': 3.0,
+    'header': 2.5,
+    'exhibit': 2.0,
+    'text': 1.2,
+    'table': 0.6,
+    'visual': 0.5,
+  },
+  'balance_sheet_metric': {
+    'balance_sheet': 2.5,
+    'financial_statement': 2.0,
+    'table': 1.8,
+    'visual': 1.5,
+    'text': 0.9,
+  },
+  'income_statement_metric': {
+    'income_statement': 2.5,
+    'financial_statement': 2.0,
+    'table': 1.8,
+    'visual': 1.5,
+    'text': 0.9,
+  },
+  'cash_flow_metric': {
+    'cash_flow_statement': 2.5,
+    'financial_statement': 2.0,
+    'table': 1.8,
+    'visual': 1.5,
+    'text': 0.9,
+  },
+  'segment_analysis': {
+    'segment': 2.0,
+    'table': 1.8,
+    'visual': 1.5,
+    'text': 1.0,
+  },
+  'general': {}, // no boosts applied
+};
+
+function detectQueryIntent(query: string): QueryIntent {
+  for (const [intent, patterns] of Object.entries(INTENT_PATTERNS) as [QueryIntent, RegExp[]][]) {
+    if (intent === 'general') continue; // skip fallback
+    for (const pattern of patterns) {
+      if (pattern.test(query)) {
+        return intent;
+      }
+    }
+  }
+  return 'general';
+}
+
+interface ChunkWithScore {
+  id: string;
+  content: string;
+  category: string;
+  similarity: number;
+  document_name: string;
+  chunk_type: string;
+  pipeline_source: string;
+  search_type?: string;
+  semantic_score?: number | null;
+  keyword_score?: number | null;
+  boosted_score?: number;
+  intent_boost?: number;
+}
+
+function rerankWithBoost(
+  chunks: ChunkWithScore[], 
+  queryIntent: QueryIntent
+): ChunkWithScore[] {
+  const boostMap = BOOST_MAPS[queryIntent];
+  
+  // If general intent, no re-ranking needed
+  if (queryIntent === 'general' || Object.keys(boostMap).length === 0) {
+    return chunks;
+  }
+  
+  return chunks
+    .map(chunk => {
+      // Determine chunk category for boost lookup
+      const chunkCategory = chunk.chunk_type?.toLowerCase() || 'text';
+      
+      // Check for matching boost factors
+      let boostFactor = 1.0;
+      for (const [key, factor] of Object.entries(boostMap)) {
+        if (chunkCategory.includes(key) || chunk.content?.toLowerCase().includes(key)) {
+          boostFactor = Math.max(boostFactor, factor);
+        }
+      }
+      
+      // For filing_metadata intent, also boost chunks containing key terms
+      if (queryIntent === 'filing_metadata') {
+        const content = chunk.content?.toLowerCase() || '';
+        if (content.includes('securities registered') || 
+            content.includes('section 12(b)') ||
+            content.includes('trading symbol') ||
+            content.includes('new york stock exchange') ||
+            content.includes('nyse')) {
+          boostFactor = Math.max(boostFactor, 2.5);
+        }
+      }
+      
+      // For balance_sheet_metric, boost chunks with actual numbers/calculations
+      if (queryIntent === 'balance_sheet_metric') {
+        const content = chunk.content?.toLowerCase() || '';
+        if (content.includes('current assets') ||
+            content.includes('current liabilities') ||
+            content.includes('total assets')) {
+          boostFactor = Math.max(boostFactor, 2.0);
+        }
+      }
+      
+      const baseScore = chunk.similarity || 0;
+      return {
+        ...chunk,
+        boosted_score: baseScore * boostFactor,
+        intent_boost: boostFactor,
+      };
+    })
+    .sort((a, b) => (b.boosted_score || 0) - (a.boosted_score || 0));
+}
+
 // ========== HYBRID QUERY EXPANSION (LLM + Cache + Fallback) ==========
 async function expandQueryHybrid(
   query: string
@@ -179,8 +347,29 @@ serve(async (req) => {
       }
     }
 
-    // Step 3: Convert to array and limit to topK
-    const combinedResults = Array.from(mergedMap.values()).slice(0, topK);
+    // Step 3: Convert to array
+    let combinedResults = Array.from(mergedMap.values());
+
+    // ========== QUERY-AWARE CHUNK BOOSTING (POST-RETRIEVAL RE-RANKING) ==========
+    const queryIntent = detectQueryIntent(query);
+    console.log(`[Intent Detection] Query intent: "${queryIntent}" for query: "${query.substring(0, 80)}..."`);
+    
+    if (queryIntent !== 'general') {
+      console.log(`[Chunk Boosting] Applying ${queryIntent} boost to ${combinedResults.length} chunks`);
+      combinedResults = rerankWithBoost(combinedResults as ChunkWithScore[], queryIntent);
+      
+      // Log top 3 boosted scores for debugging
+      const topBoosted = combinedResults.slice(0, 3).map(c => ({
+        chunk_type: c.chunk_type,
+        boost: (c as any).intent_boost,
+        original: c.similarity?.toFixed(3),
+        boosted: (c as any).boosted_score?.toFixed(3),
+      }));
+      console.log('[Chunk Boosting] Top 3 after re-ranking:', JSON.stringify(topBoosted));
+    }
+
+    // Limit to topK after boosting
+    combinedResults = combinedResults.slice(0, topK);
 
     // Detailed logging for debugging
     console.log(`True Hybrid Search: returning ${combinedResults.length} unique chunks`);
