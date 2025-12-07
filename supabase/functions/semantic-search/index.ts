@@ -119,56 +119,7 @@ interface ChunkWithScore {
   intent_boost?: number;
 }
 
-// ========== CONTENT-BASED SEMANTIC CLASSIFICATION ==========
-// Detect semantic section from chunk content (compensates for generic chunk_types)
-function detectSemanticSection(content: string): string {
-  const lowerContent = content.toLowerCase();
-  
-  // Filing metadata / Cover page detection
-  if (lowerContent.includes('securities registered pursuant to section 12(b)') ||
-      lowerContent.includes('trading symbol') ||
-      lowerContent.includes('title of each class') ||
-      lowerContent.includes('name of each exchange') ||
-      (lowerContent.includes('form 10-k') && lowerContent.includes('annual report')) ||
-      lowerContent.includes('securities and exchange commission')) {
-    return 'cover_page';
-  }
-  
-  // Balance Sheet detection
-  if ((lowerContent.includes('balance sheet') || lowerContent.includes('financial position')) ||
-      (lowerContent.includes('total assets') && lowerContent.includes('total liabilities')) ||
-      (lowerContent.includes('current assets') && lowerContent.includes('current liabilities')) ||
-      lowerContent.includes('stockholders\' equity') ||
-      lowerContent.includes('shareholders\' equity')) {
-    return 'balance_sheet';
-  }
-  
-  // Income Statement detection
-  if (lowerContent.includes('statement of operations') ||
-      lowerContent.includes('statement of income') ||
-      (lowerContent.includes('net revenues') && lowerContent.includes('net income')) ||
-      (lowerContent.includes('gross profit') && lowerContent.includes('operating income'))) {
-    return 'income_statement';
-  }
-  
-  // Cash Flow Statement detection
-  if (lowerContent.includes('statement of cash flows') ||
-      lowerContent.includes('cash flows from operating') ||
-      lowerContent.includes('cash flows from investing') ||
-      lowerContent.includes('cash flows from financing')) {
-    return 'cash_flow_statement';
-  }
-  
-  // Exhibit / Legal section detection
-  if (lowerContent.includes('exhibit index') ||
-      lowerContent.includes('exhibit number') ||
-      /\bexhibit\s+\d+/.test(lowerContent)) {
-    return 'exhibit';
-  }
-  
-  return 'unknown';
-}
-
+// Simple re-ranking based on chunk_type only (no content-based detection)
 function rerankWithBoost(
   chunks: ChunkWithScore[], 
   queryIntent: QueryIntent
@@ -182,42 +133,14 @@ function rerankWithBoost(
   
   return chunks
     .map(chunk => {
-      const content = chunk.content || '';
-      
-      // STEP 1: Detect semantic section from CONTENT (not chunk_type)
-      const semanticSection = detectSemanticSection(content);
-      
-      // STEP 2: Get boost from semantic section first, fallback to chunk_type
-      let boostFactor = boostMap[semanticSection] || boostMap[chunk.chunk_type?.toLowerCase() || 'text'] || 1.0;
-      
-      // STEP 3: Additional content-based boosts for filing_metadata
-      if (queryIntent === 'filing_metadata') {
-        const lowerContent = content.toLowerCase();
-        // Direct match for debt securities question
-        if (lowerContent.includes('securities registered') && 
-            (lowerContent.includes('trading symbol') || lowerContent.includes('new york stock exchange'))) {
-          boostFactor = Math.max(boostFactor, 4.0); // Strong boost for exact match
-        }
-        if (lowerContent.includes('section 12(b)')) {
-          boostFactor = Math.max(boostFactor, 3.5);
-        }
-      }
-      
-      // STEP 4: Additional content-based boosts for balance_sheet_metric
-      if (queryIntent === 'balance_sheet_metric') {
-        const lowerContent = content.toLowerCase();
-        if ((lowerContent.includes('current assets') && lowerContent.includes('current liabilities')) ||
-            (lowerContent.includes('quick ratio') || lowerContent.includes('acid-test'))) {
-          boostFactor = Math.max(boostFactor, 3.0);
-        }
-      }
+      const chunkCategory = chunk.chunk_type?.toLowerCase() || 'text';
+      const boostFactor = boostMap[chunkCategory] || 1.0;
       
       const baseScore = chunk.similarity || 0;
       return {
         ...chunk,
         boosted_score: baseScore * boostFactor,
         intent_boost: boostFactor,
-        semantic_section: semanticSection, // For debugging
       };
     })
     .sort((a, b) => (b.boosted_score || 0) - (a.boosted_score || 0));
@@ -409,7 +332,6 @@ serve(async (req) => {
       // Log top 3 boosted scores for debugging
       const topBoosted = combinedResults.slice(0, 3).map(c => ({
         chunk_type: c.chunk_type,
-        semantic_section: (c as any).semantic_section,
         boost: (c as any).intent_boost,
         original: c.similarity?.toFixed(3),
         boosted: (c as any).boosted_score?.toFixed(3),
