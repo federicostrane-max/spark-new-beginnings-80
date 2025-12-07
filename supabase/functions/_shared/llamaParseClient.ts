@@ -234,9 +234,11 @@ export async function uploadToLlamaParseJson(
       formData.append('auto_mode_trigger_on_table_in_page', 'true');
       formData.append('auto_mode_trigger_on_image_in_page', 'true');
     } else {
-      // BASIC MODE: auto_mode with image trigger for scanned pages
-      console.log(`[LlamaParse] Using BASIC mode (auto_mode with image trigger)`);
+      // BASIC MODE: auto_mode with BOTH triggers (tables + images)
+      // CRITICAL: Tables on cover pages are NOT images - need explicit table trigger!
+      console.log(`[LlamaParse] Using BASIC mode (auto_mode with table + image triggers)`);
       formData.append('auto_mode', 'true');
+      formData.append('auto_mode_trigger_on_table_in_page', 'true');
       formData.append('auto_mode_trigger_on_image_in_page', 'true');
     }
 
