@@ -26,12 +26,29 @@ interface ExtractedMetadata {
   urls?: string[];
 }
 
+// SEMANTIC CHUNK TYPES for improved retrieval
+// Base types: text, table, code_block, list, figure, header
+// SEC/Financial semantic types: cover_page, balance_sheet, income_statement, cash_flow_statement, exhibit, notes_disclosure
+export type SemanticChunkType = 
+  | 'text' 
+  | 'table' 
+  | 'code_block' 
+  | 'list' 
+  | 'figure' 
+  | 'header'
+  | 'cover_page'
+  | 'balance_sheet'
+  | 'income_statement'
+  | 'cash_flow_statement'
+  | 'exhibit'
+  | 'notes_disclosure';
+
 export interface ParsedNode {
   chunk_index: number;
   content: string;              // For embedding (summary for tables)
   original_content?: string;    // Full Markdown (for tables)
   summary?: string;             // LLM-generated summary
-  chunk_type: 'text' | 'table' | 'code_block' | 'list' | 'figure' | 'header';
+  chunk_type: SemanticChunkType;
   is_atomic: boolean;           // Cannot be split
   heading_hierarchy?: {
     h1?: string;
@@ -218,6 +235,85 @@ async function retryWithBackoff<T>(
     }
   }
   throw new Error('Should not reach here');
+}
+
+/**
+ * SEMANTIC CHUNK TYPE DETECTION
+ * Analyzes content to assign semantic chunk types for SEC/Financial documents
+ * This enables Query-Aware Chunk Boosting to work effectively
+ */
+function detectSemanticChunkType(content: string, headings?: { h1?: string; h2?: string; h3?: string }): SemanticChunkType {
+  const lowerContent = content.toLowerCase();
+  const headingText = [headings?.h1, headings?.h2, headings?.h3].filter(Boolean).join(' ').toLowerCase();
+  
+  // COVER PAGE detection (highest priority for filing metadata queries)
+  if (
+    lowerContent.includes('securities registered pursuant to section 12(b)') ||
+    lowerContent.includes('title of each class') && lowerContent.includes('trading symbol') ||
+    lowerContent.includes('name of each exchange on which registered') ||
+    (lowerContent.includes('form 10-k') && lowerContent.includes('annual report')) ||
+    (lowerContent.includes('form 10-q') && lowerContent.includes('quarterly report')) ||
+    lowerContent.includes('securities and exchange commission') && lowerContent.includes('washington')
+  ) {
+    return 'cover_page';
+  }
+  
+  // BALANCE SHEET detection
+  if (
+    headingText.includes('balance sheet') || headingText.includes('financial position') ||
+    lowerContent.includes('consolidated balance sheet') ||
+    (lowerContent.includes('total assets') && lowerContent.includes('total liabilities')) ||
+    (lowerContent.includes('current assets') && lowerContent.includes('current liabilities')) ||
+    lowerContent.includes('stockholders\' equity') || lowerContent.includes('shareholders\' equity')
+  ) {
+    return 'balance_sheet';
+  }
+  
+  // INCOME STATEMENT detection
+  if (
+    headingText.includes('statement of operations') || headingText.includes('income statement') ||
+    headingText.includes('statement of income') ||
+    lowerContent.includes('consolidated statement of operations') ||
+    lowerContent.includes('consolidated statement of income') ||
+    (lowerContent.includes('net revenues') && lowerContent.includes('net income')) ||
+    (lowerContent.includes('gross profit') && lowerContent.includes('operating income'))
+  ) {
+    return 'income_statement';
+  }
+  
+  // CASH FLOW STATEMENT detection
+  if (
+    headingText.includes('cash flow') || headingText.includes('statement of cash') ||
+    lowerContent.includes('consolidated statement of cash flows') ||
+    lowerContent.includes('cash flows from operating activities') ||
+    lowerContent.includes('cash flows from investing activities') ||
+    lowerContent.includes('cash flows from financing activities')
+  ) {
+    return 'cash_flow_statement';
+  }
+  
+  // EXHIBIT detection
+  if (
+    headingText.includes('exhibit') ||
+    lowerContent.includes('exhibit index') ||
+    lowerContent.includes('exhibit number') ||
+    /\bexhibit\s+\d+(\.\d+)?/i.test(content)
+  ) {
+    return 'exhibit';
+  }
+  
+  // NOTES/DISCLOSURE detection
+  if (
+    headingText.includes('notes to') || headingText.includes('note ') ||
+    lowerContent.includes('notes to consolidated financial statements') ||
+    lowerContent.includes('notes to financial statements') ||
+    /^note\s+\d+/i.test(content.trim())
+  ) {
+    return 'notes_disclosure';
+  }
+  
+  // Default to text
+  return 'text';
 }
 
 /**
@@ -497,12 +593,16 @@ async function extractAtomicElements(
       // Generate summary for table
       const summary = await summarizeTable(originalContent, lovableApiKey);
       
+      // ★ SEMANTIC TYPE DETECTION for tables (balance sheet, income statement, etc.)
+      const semanticType = detectSemanticChunkType(originalContent, headingContext);
+      const finalChunkType = semanticType !== 'text' ? semanticType : 'table';
+      
       nodes.push({
         chunk_index: i,
         content: summary,              // Summary for embedding
         original_content: originalContent, // Full table for LLM
         summary,
-        chunk_type: 'table',
+        chunk_type: finalChunkType,    // ★ SEMANTIC TYPE or 'table' as fallback
         is_atomic: true,
         heading_hierarchy: headingContext,
         page_number: undefined, // Will be set during final merge
@@ -704,11 +804,15 @@ function chunkTextContent(
         
         for (const childContent of childChunks) {
           const extracted_metadata = extractMetadataFromContent(childContent);
+          
+          // ★ SEMANTIC CHUNK TYPE DETECTION - analyze content to assign specific type
+          const semanticType = detectSemanticChunkType(childContent, parent.heading_hierarchy);
+          
           nodes.push({
             chunk_index: chunkIndex++,
             content: childContent,              // ★ CHILD per embedding (500 chars)
             original_content: parent.content,   // ★ PARENT per LLM (4000 chars)
-            chunk_type: 'text',
+            chunk_type: semanticType,           // ★ SEMANTIC TYPE instead of generic 'text'
             is_atomic: false,
             heading_hierarchy: parent.heading_hierarchy,
             page_number: parent.page_number,
