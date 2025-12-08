@@ -882,54 +882,143 @@ export type Database = {
         }
         Relationships: []
       }
+      browser_steps: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          expected_outcome: string | null
+          id: string
+          instruction: string
+          instruction_context: string | null
+          lux_actions: Json | null
+          lux_feedback: Json | null
+          max_retries: number | null
+          retry_count: number | null
+          screenshot_after: string | null
+          screenshot_before: string | null
+          started_at: string | null
+          status: string
+          step_number: number
+          task_id: string
+          verification_notes: string | null
+          verification_status: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          expected_outcome?: string | null
+          id?: string
+          instruction: string
+          instruction_context?: string | null
+          lux_actions?: Json | null
+          lux_feedback?: Json | null
+          max_retries?: number | null
+          retry_count?: number | null
+          screenshot_after?: string | null
+          screenshot_before?: string | null
+          started_at?: string | null
+          status?: string
+          step_number: number
+          task_id: string
+          verification_notes?: string | null
+          verification_status?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          expected_outcome?: string | null
+          id?: string
+          instruction?: string
+          instruction_context?: string | null
+          lux_actions?: Json | null
+          lux_feedback?: Json | null
+          max_retries?: number | null
+          retry_count?: number | null
+          screenshot_after?: string | null
+          screenshot_before?: string | null
+          started_at?: string | null
+          status?: string
+          step_number?: number
+          task_id?: string
+          verification_notes?: string | null
+          verification_status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "browser_steps_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "browser_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       browser_tasks: {
         Row: {
           agent_id: string | null
           completed_at: string | null
+          completed_steps: number | null
+          conversation_id: string | null
           created_at: string
           error_message: string | null
           id: string
           input_folders: string[] | null
-          instructions: Json
-          interface_expert_conversation_id: string | null
           output_folder: string | null
           platform: string
+          progress: number | null
           result: Json | null
           started_at: string | null
           status: string
+          task_data: Json | null
+          task_description: string
           task_type: string
+          total_steps: number | null
+          updated_at: string | null
         }
         Insert: {
           agent_id?: string | null
           completed_at?: string | null
+          completed_steps?: number | null
+          conversation_id?: string | null
           created_at?: string
           error_message?: string | null
           id?: string
           input_folders?: string[] | null
-          instructions?: Json
-          interface_expert_conversation_id?: string | null
           output_folder?: string | null
           platform: string
+          progress?: number | null
           result?: Json | null
           started_at?: string | null
           status?: string
+          task_data?: Json | null
+          task_description: string
           task_type: string
+          total_steps?: number | null
+          updated_at?: string | null
         }
         Update: {
           agent_id?: string | null
           completed_at?: string | null
+          completed_steps?: number | null
+          conversation_id?: string | null
           created_at?: string
           error_message?: string | null
           id?: string
           input_folders?: string[] | null
-          instructions?: Json
-          interface_expert_conversation_id?: string | null
           output_folder?: string | null
           platform?: string
+          progress?: number | null
           result?: Json | null
           started_at?: string | null
           status?: string
+          task_data?: Json | null
+          task_description?: string
           task_type?: string
+          total_steps?: number | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -940,8 +1029,8 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "browser_tasks_interface_expert_conversation_id_fkey"
-            columns: ["interface_expert_conversation_id"]
+            foreignKeyName: "browser_tasks_conversation_id_fkey"
+            columns: ["conversation_id"]
             isOneToOne: false
             referencedRelation: "agent_conversations"
             referencedColumns: ["id"]
