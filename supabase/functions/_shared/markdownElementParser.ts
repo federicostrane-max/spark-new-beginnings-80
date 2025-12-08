@@ -454,7 +454,22 @@ async function summarizeTable(
   tableMarkdown: string,
   lovableApiKey: string
 ): Promise<string> {
-  const prompt = `Summarize this table in one concise sentence, describing the main data and its purpose. CRITICAL: Write your summary in the SAME LANGUAGE as the table content (if English, respond in English; if Italian, respond in Italian, etc.):\n\n${tableMarkdown}`;
+  const prompt = `Summarize this table for semantic search retrieval. 
+
+CRITICAL REQUIREMENTS:
+- MUST include specific identifiers: ticker symbols, CUSIP numbers, trading symbols (e.g., MMM26, MMM30)
+- MUST include numerical values: rates, percentages, dollar amounts, dates (e.g., "1.500% Notes due 2026")
+- MUST include entity names: company names, exchange names (NYSE, NASDAQ)
+- MUST include document-specific terms: "Notes due 2026", "Section 12(b)", security types
+
+DO NOT write generic descriptions like "This table shows..." or "The table contains..."
+INSTEAD write concrete data: "3M debt securities registered on NYSE: 1.500% Notes 2026 (MMM26), 1.750% Notes 2030 (MMM30), 1.500% Notes 2031 (MMM31)..."
+
+Write your summary in the SAME LANGUAGE as the table content.
+The summary will be embedded for vector search - users search with specific terms.
+
+Table to summarize:
+${tableMarkdown}`;
 
   return retryWithBackoff(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -466,10 +481,10 @@ async function summarizeTable(
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'You summarize tables concisely. CRITICAL: Always respond in the SAME LANGUAGE as the source content. Preserve the original language exactly.' },
+          { role: 'system', content: 'You summarize tables for semantic search retrieval. CRITICAL: Include ALL specific identifiers (ticker symbols, trading symbols like MMM26), numerical values (rates, percentages, dates), entity names (NYSE, NASDAQ, company names), and document-specific terms. NEVER write generic descriptions. Always respond in the SAME LANGUAGE as the source content.' },
           { role: 'user', content: prompt },
         ],
-        max_tokens: 150,
+        max_tokens: 300,
       }),
     });
 
