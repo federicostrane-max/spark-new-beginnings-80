@@ -974,6 +974,7 @@ export type Database = {
           status: string
           task_data: Json | null
           task_description: string
+          task_secret: string
           task_type: string
           total_steps: number | null
           updated_at: string | null
@@ -995,6 +996,7 @@ export type Database = {
           status?: string
           task_data?: Json | null
           task_description: string
+          task_secret?: string
           task_type: string
           total_steps?: number | null
           updated_at?: string | null
@@ -1016,6 +1018,7 @@ export type Database = {
           status?: string
           task_data?: Json | null
           task_description?: string
+          task_secret?: string
           task_type?: string
           total_steps?: number | null
           updated_at?: string | null
