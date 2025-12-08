@@ -269,3 +269,7 @@ timeout = 300
 
 [functions.download-system-docs]
 verify_jwt = false
+
+[functions.ingest-pdf-from-url]
+verify_jwt = false
+timeout = 120
