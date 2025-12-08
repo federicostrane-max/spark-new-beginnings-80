@@ -218,7 +218,8 @@ async function processJob(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 min timeout
+    const AGENT_TIMEOUT_MS = 55_000; // 55s - safely under edge function 60s limit
+    const timeoutId = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
 
     const prefixedQuestion = `Regarding document '${question.file_name}': ${question.question}`;
     
