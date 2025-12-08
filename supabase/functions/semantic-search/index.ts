@@ -257,7 +257,7 @@ serve(async (req) => {
     const semanticParams = {
       query_embedding: queryEmbedding,
       p_agent_id: agentId || null,
-      match_threshold: 0.10, // OPTIMAL: 0.10 confirmed by FinanceBench testing (65% vs 60% at 0.07)
+      match_threshold: 0.05, // LOWERED: 0.05 to improve retrieval with document pre-filter active
       match_count: topK * 2,
       p_document_name: documentFilter, // PRE-FILTER: restrict to specific document
     };
