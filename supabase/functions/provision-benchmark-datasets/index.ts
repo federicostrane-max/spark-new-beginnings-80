@@ -21,7 +21,12 @@ const FINANCEBENCH_BLACKLIST_COMPANIES = [
   'Block',                // PDF encrypted - only 1 chunk extractable (financebench_018)
   'Boeing',               // PDF encrypted - only 1 chunk from 100+ pages (financebench_020, 021)
   'Corning',              // PDF encrypted - only 1 chunk extractable (financebench_026, 027)
-  'CVS Health'            // PDF encrypted - only 1 chunk extractable (financebench_028)
+  'CVS Health',           // PDF encrypted - only 1 chunk extractable (financebench_028)
+  'Costco',               // PDF encrypted - 0 chunks extracted (financebench_012)
+  'General Mills',        // PDF encrypted - 0 chunks extracted (financebench_015, 016, 017)
+  'MGM Resorts',          // PDF encrypted - 0 chunks extracted (financebench_030-034)
+  'Netflix',              // PDF encrypted - 0 chunks extracted (financebench_037, 038)
+  'Nike'                  // PDF encrypted - 0 chunks extracted (financebench_039, 040)
 ];
 
 // Helper function to assign chunks to benchmark agent (Pipeline A-Hybrid)
