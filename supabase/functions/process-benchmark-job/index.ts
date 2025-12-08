@@ -234,7 +234,8 @@ async function processJob(
         message: prefixedQuestion,
         conversationId,
         stream: false,
-        serverUserId: BENCHMARK_USER_ID
+        serverUserId: BENCHMARK_USER_ID,
+        documentFilter: question.file_name  // EXPLICIT PRE-FILTER: ensures semantic search is restricted to this document
       }),
       signal: controller.signal
     });
