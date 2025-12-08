@@ -32,7 +32,48 @@ serve(async (req) => {
       });
     }
     
-    // Batch mode: pick up to BATCH_SIZE pending jobs
+    // ========== ZOMBIE JOB RECOVERY ==========
+    // Reset jobs stuck in 'processing' for more than 5 minutes (likely timeout/crash)
+    const STUCK_THRESHOLD_MINUTES = 5;
+    const stuckCutoff = new Date(Date.now() - STUCK_THRESHOLD_MINUTES * 60 * 1000).toISOString();
+    
+    const { data: stuckJobs } = await supabase
+      .from('benchmark_jobs_queue')
+      .select('id, attempts, max_attempts, started_at')
+      .eq('status', 'processing')
+      .lt('started_at', stuckCutoff);
+    
+    if (stuckJobs && stuckJobs.length > 0) {
+      console.log(`[Process Benchmark Job] 🧟 Found ${stuckJobs.length} zombie jobs stuck in processing`);
+      
+      for (const stuckJob of stuckJobs) {
+        if (stuckJob.attempts >= stuckJob.max_attempts) {
+          // Max retries exceeded - mark as failed
+          await supabase
+            .from('benchmark_jobs_queue')
+            .update({
+              status: 'failed',
+              completed_at: new Date().toISOString(),
+              error_message: `Exceeded max attempts (${stuckJob.max_attempts}) - job kept timing out`
+            })
+            .eq('id', stuckJob.id);
+          console.log(`[Process Benchmark Job] ❌ Zombie job ${stuckJob.id} marked failed (max retries exceeded)`);
+        } else {
+          // Reset to pending for retry
+          await supabase
+            .from('benchmark_jobs_queue')
+            .update({
+              status: 'pending',
+              started_at: null,
+              error_message: `Auto-reset from stuck processing state (attempt ${stuckJob.attempts})`
+            })
+            .eq('id', stuckJob.id);
+          console.log(`[Process Benchmark Job] 🔄 Zombie job ${stuckJob.id} reset to pending (attempt ${stuckJob.attempts}/${stuckJob.max_attempts})`);
+        }
+      }
+    }
+    
+    // ========== BATCH MODE: pick up to BATCH_SIZE pending jobs ==========
     const { data: pendingJobs } = await supabase
       .from('benchmark_jobs_queue')
       .select('id')
@@ -41,7 +82,11 @@ serve(async (req) => {
       .limit(BATCH_SIZE);
     
     if (!pendingJobs || pendingJobs.length === 0) {
-      return new Response(JSON.stringify({ skipped: true, reason: 'No pending jobs' }), {
+      return new Response(JSON.stringify({ 
+        skipped: true, 
+        reason: 'No pending jobs',
+        zombies_recovered: stuckJobs?.length || 0
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
