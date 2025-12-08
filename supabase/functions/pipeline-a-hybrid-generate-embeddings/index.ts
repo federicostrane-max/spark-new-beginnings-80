@@ -38,11 +38,11 @@ async function generateTableSummary(tableMarkdown: string): Promise<string> {
         messages: [
           {
             role: 'system',
-            content: 'Sei un assistente specializzato nel creare sommari densi e ricchi di dati per tabelle. Il tuo compito è estrarre TUTTI i valori chiave (numeri, nomi, date, totali) dalla tabella Markdown e creare un breve testo descrittivo che catturi il contenuto essenziale.'
+            content: 'You are an expert at creating dense, data-rich summaries for tables. Your task is to extract ALL key values (numbers, names, dates, totals) from the Markdown table and create a brief descriptive text that captures the essential content. CRITICAL: Your summary MUST be in the SAME LANGUAGE as the source table content. If the table is in English, respond in English. If in Italian, respond in Italian. If in Spanish, respond in Spanish. Preserve the original language exactly.'
           },
           {
             role: 'user',
-            content: `Crea un sommario breve (max 3 righe) di questa tabella, includendo TUTTI i valori numerici importanti, nomi, e totali:\n\n${tableMarkdown}\n\nSommario:`
+            content: `Create a brief summary (max 3 lines) of this table, including ALL important numerical values, names, and totals. IMPORTANT: Write your summary in the SAME LANGUAGE as the table content:\n\n${tableMarkdown}\n\nSummary:`
           }
         ],
         temperature: 0.3,

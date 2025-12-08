@@ -454,7 +454,7 @@ async function summarizeTable(
   tableMarkdown: string,
   lovableApiKey: string
 ): Promise<string> {
-  const prompt = `Riassumi questa tabella in una frase concisa, descrivendo i dati principali e il loro scopo:\n\n${tableMarkdown}`;
+  const prompt = `Summarize this table in one concise sentence, describing the main data and its purpose. CRITICAL: Write your summary in the SAME LANGUAGE as the table content (if English, respond in English; if Italian, respond in Italian, etc.):\n\n${tableMarkdown}`;
 
   return retryWithBackoff(async () => {
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -466,7 +466,7 @@ async function summarizeTable(
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'Sei un assistente che riassume tabelle in modo conciso.' },
+          { role: 'system', content: 'You summarize tables concisely. CRITICAL: Always respond in the SAME LANGUAGE as the source content. Preserve the original language exactly.' },
           { role: 'user', content: prompt },
         ],
         max_tokens: 150,
@@ -483,7 +483,7 @@ async function summarizeTable(
     return summary;
   }, 3, 1000, 'summarizeTable').catch(err => {
     console.warn('[MarkdownParser] Table summarization failed after retries:', err);
-    return 'Tabella con dati strutturati';
+    return 'Table with structured data';
   });
 }
 
@@ -495,7 +495,7 @@ async function summarizeCodeBlock(
   code: string,
   lovableApiKey: string
 ): Promise<string> {
-  const prompt = `Analizza questo codice. Identifica il linguaggio, le librerie principali e riassumi in una frase la logica funzionale e l'obiettivo di questo script:
+  const prompt = `Analyze this code. Identify the language, main libraries, and summarize in one sentence the functional logic and objective of this script. Respond in the same language as any comments in the code (default to English if no comments):
 
 ${code.substring(0, 2000)}`;
 
@@ -509,7 +509,7 @@ ${code.substring(0, 2000)}`;
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'Sei un esperto programmatore che analizza e riassume blocchi di codice identificando linguaggio e librerie.' },
+          { role: 'system', content: 'You are an expert programmer who analyzes and summarizes code blocks, identifying language and libraries. Respond in the same language as the code comments, defaulting to English.' },
           { role: 'user', content: prompt },
         ],
         max_tokens: 200,
@@ -521,8 +521,8 @@ ${code.substring(0, 2000)}`;
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content?.trim() || 'Blocco di codice con logica implementativa';
-  }, 3, 1000, 'summarizeCodeBlock').catch(() => 'Blocco di codice con logica implementativa');
+    return data.choices?.[0]?.message?.content?.trim() || 'Code block with implementation logic';
+  }, 3, 1000, 'summarizeCodeBlock').catch(() => 'Code block with implementation logic');
 }
 
 /**
@@ -532,7 +532,7 @@ async function summarizeList(
   listContent: string,
   lovableApiKey: string
 ): Promise<string> {
-  const prompt = `Riassumi in una frase i punti principali di questa lista:
+  const prompt = `Summarize in one sentence the main points of this list. CRITICAL: Write your summary in the SAME LANGUAGE as the list content:
 
 ${listContent.substring(0, 2000)}`;
 
@@ -546,7 +546,7 @@ ${listContent.substring(0, 2000)}`;
       body: JSON.stringify({
         model: 'google/gemini-2.5-flash',
         messages: [
-          { role: 'system', content: 'Sei un assistente che riassume liste in modo conciso.' },
+          { role: 'system', content: 'You summarize lists concisely. CRITICAL: Always respond in the SAME LANGUAGE as the source content.' },
           { role: 'user', content: prompt },
         ],
         max_tokens: 150,
@@ -558,8 +558,8 @@ ${listContent.substring(0, 2000)}`;
     }
 
     const data = await response.json();
-    return data.choices?.[0]?.message?.content?.trim() || 'Elenco con elementi informativi';
-  }, 3, 1000, 'summarizeList').catch(() => 'Elenco con elementi informativi');
+    return data.choices?.[0]?.message?.content?.trim() || 'List with informative elements';
+  }, 3, 1000, 'summarizeList').catch(() => 'List with informative elements');
 }
 
 /**
