@@ -882,6 +882,72 @@ export type Database = {
         }
         Relationships: []
       }
+      browser_tasks: {
+        Row: {
+          agent_id: string | null
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          input_folders: string[] | null
+          instructions: Json
+          interface_expert_conversation_id: string | null
+          output_folder: string | null
+          platform: string
+          result: Json | null
+          started_at: string | null
+          status: string
+          task_type: string
+        }
+        Insert: {
+          agent_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input_folders?: string[] | null
+          instructions?: Json
+          interface_expert_conversation_id?: string | null
+          output_folder?: string | null
+          platform: string
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          task_type: string
+        }
+        Update: {
+          agent_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          input_folders?: string[] | null
+          instructions?: Json
+          interface_expert_conversation_id?: string | null
+          output_folder?: string | null
+          platform?: string
+          result?: Json | null
+          started_at?: string | null
+          status?: string
+          task_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "browser_tasks_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "browser_tasks_interface_expert_conversation_id_fkey"
+            columns: ["interface_expert_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "agent_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       edge_function_execution_logs: {
         Row: {
           agent_id: string | null
