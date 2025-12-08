@@ -2246,7 +2246,7 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter } = requestBody;
 
     // Server-to-server calls can pass serverUserId directly (for benchmark system)
     let userId: string;
@@ -3465,9 +3465,14 @@ The system has automatically executed a search based on your proposed query and 
           try {
             // ============================================================================
             // DETECT DOCUMENT-SPECIFIC QUERY (before search)
+            // Prioritize explicit documentFilter from request body, fallback to pattern extraction
             // ============================================================================
-            const specifiedDocumentName = extractDocumentNameFromQuery(message);
+            const specifiedDocumentName = documentFilter || extractDocumentNameFromQuery(message);
             const isDocumentSpecificQuery = specifiedDocumentName !== null;
+            
+            if (documentFilter) {
+              console.log(`🎯 [DOC-QUERY] Using explicit documentFilter from request: "${documentFilter}"`);
+            }
             
             if (isDocumentSpecificQuery) {
               console.log(`🎯 [DOC-QUERY] Detected document-specific query for: "${specifiedDocumentName}"`);
