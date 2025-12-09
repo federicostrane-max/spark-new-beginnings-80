@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye } from "lucide-react";
+import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -296,6 +296,9 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       case 'search-knowledge':
         template = 'cerca knowledge @';
         break;
+      case 'browser-task':
+        template = 'Automazione browser: ';
+        break;
     }
     
     // Insert template at cursor position
@@ -432,6 +435,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                 <DropdownMenuItem onClick={() => insertAgentAction('delegate')}>
                   <Zap className="mr-2 h-4 w-4" />
                   Delega Azione ad Altro Agente
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem onClick={() => insertAgentAction('browser-task')}>
+                  <Globe className="mr-2 h-4 w-4" />
+                  Crea Browser Task
                 </DropdownMenuItem>
                 
                 <DropdownMenuSub>
