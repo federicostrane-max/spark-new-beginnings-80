@@ -4071,6 +4071,127 @@ ${knowledgeContext}${searchResultsContext}`;
               await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
             }
             
+            // ============= TOOL: create_browser_task =============
+            else if (toolName === 'create_browser_task') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: create_browser_task`);
+              
+              // Helper: Format Lux Instruction (deterministic parser)
+              function formatLuxInstruction(step: { action: string; target: string; value?: string }): string {
+                switch (step.action) {
+                  case 'click': return `Click the ${step.target}`;
+                  case 'type': return `Type '${step.value || ''}' in the ${step.target}`;
+                  case 'scroll': return `Scroll ${step.value || 'down'} until you see the ${step.target}`;
+                  case 'press': return `Press ${step.value || 'Enter'} key`;
+                  case 'wait': return `Wait for the ${step.target} to appear`;
+                  case 'navigate': return `Navigate to ${step.value || step.target}`;
+                  default: return `${step.action} on ${step.target}`;
+                }
+              }
+              
+              try {
+                const { task_description, platform, task_type, start_url, steps } = toolInput;
+                
+                // 1. INSERT browser_tasks with user_id
+                const { data: task, error: taskError } = await context.supabase
+                  .from('browser_tasks')
+                  .insert({
+                    user_id: context.userId,
+                    agent_id: context.agent.id,
+                    conversation_id: context.conversation.id,
+                    task_description,
+                    platform,
+                    task_type,
+                    task_data: { start_url },
+                    status: 'pending',
+                    total_steps: steps?.length || 0,
+                    completed_steps: 0,
+                    progress: 0
+                  })
+                  .select()
+                  .single();
+                
+                if (taskError) throw taskError;
+                
+                // 2. INSERT browser_steps with structured data + formatted instruction
+                if (steps && steps.length > 0) {
+                  const stepsToInsert = steps.map((step: { action: string; target: string; value?: string; expected_outcome?: string }, index: number) => ({
+                    task_id: task.id,
+                    step_number: index + 1,
+                    action_type: step.action,           // Structured data
+                    action_target: step.target,         // Structured data
+                    action_value: step.value || null,   // Structured data
+                    instruction: formatLuxInstruction(step),  // Lux instruction
+                    expected_outcome: step.expected_outcome || null,
+                    status: 'pending',
+                    retry_count: 0,
+                    max_retries: 3
+                  }));
+                  
+                  const { error: stepsError } = await context.supabase
+                    .from('browser_steps')
+                    .insert(stepsToInsert);
+                  
+                  if (stepsError) throw stepsError;
+                }
+                
+                // 3. Construct formatted message for user
+                const stepsFormatted = steps?.map((s: { action: string; target: string; value?: string }, i: number) => 
+                  `${i + 1}. **${s.action.toUpperCase()}** → ${s.target}${s.value ? ` ("${s.value}")` : ''}`
+                ).join('\n') || '';
+                
+                const directMessage = `✅ **Task di automazione browser creato da ${context.agent.name}!**
+
+**Task:** ${task_description}
+**Piattaforma:** ${platform}
+**URL iniziale:** ${start_url}
+
+---
+
+**Step strutturati (${steps?.length || 0} totali):**
+
+${stepsFormatted}
+
+---
+
+**Per eseguire il task:**
+Assicurati che l'app **Architect's Hand Bridge** sia aperta e connessa sul tuo PC.
+Il task apparirà automaticamente e l'esecuzione partirà.`;
+                
+                // 4. INSERT directly in agent_messages (user receives via Realtime)
+                // DO NOT send via SSE to avoid duplicate messages
+                await context.supabase
+                  .from('agent_messages')
+                  .insert({
+                    conversation_id: context.conversation.id,
+                    role: 'assistant',
+                    content: directMessage,
+                    llm_provider: 'system',
+                    metadata: {
+                      source: 'browser_task_tool',
+                      task_id: task.id,
+                      tool_name: 'create_browser_task',
+                      agent_name: context.agent.name
+                    }
+                  });
+                
+                // 5. Return simple result to LLM (message already sent via Realtime)
+                toolResult = {
+                  success: true,
+                  task_id: task.id,
+                  _note: "Messaggio già inviato all'utente via Realtime. Puoi aggiungere un breve commento se utile."
+                };
+                
+                console.log(`✅ [REQ-${context.requestId}] Browser task created: ${task.id}`);
+                
+              } catch (error) {
+                console.error('❌ Error in create_browser_task:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create browser task', success: false };
+                responseText = `❌ Errore nella creazione del browser task: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
             // ============= FALLBACK: Unknown Tool =============
             else {
               console.warn(`⚠️ [REQ-${context.requestId}] Unknown tool: ${toolName}`);
@@ -4328,6 +4449,62 @@ ${knowledgeContext}${searchResultsContext}`;
                 }
               },
               required: ['agent_name', 'new_system_prompt']
+            }
+          });
+          
+          // Tool: create_browser_task - Browser automation via Lux
+          tools.push({
+            name: 'create_browser_task',
+            description: 'Crea un task di automazione browser eseguito dall\'app desktop Architect\'s Hand Bridge via Lux. Usa questo tool quando l\'utente chiede di fare azioni su siti web come ricerche, compilare form, navigare pagine, etc.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                task_description: { 
+                  type: 'string', 
+                  description: 'Descrizione completa del task da eseguire' 
+                },
+                platform: { 
+                  type: 'string', 
+                  description: 'Nome del sito/piattaforma (es: "google", "linkedin", "youtube")' 
+                },
+                task_type: { 
+                  type: 'string', 
+                  enum: ['navigation', 'form_fill', 'download', 'scrape', 'click_sequence', 'login', 'search', 'other'],
+                  description: 'Tipo di task' 
+                },
+                start_url: { 
+                  type: 'string', 
+                  description: 'URL iniziale da cui partire (es: "https://www.google.com")' 
+                },
+                steps: {
+                  type: 'array',
+                  description: 'Lista ordinata di step da eseguire',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      action: { 
+                        type: 'string', 
+                        enum: ['click', 'type', 'scroll', 'press', 'wait', 'navigate'], 
+                        description: 'Tipo di azione: click=clicca elemento, type=scrivi testo, scroll=scorri pagina, press=premi tasto, wait=attendi elemento, navigate=vai a URL' 
+                      },
+                      target: { 
+                        type: 'string', 
+                        description: 'Descrizione VISIVA dell\'elemento target (es: "blue Sign In button in top right corner", "search input field with placeholder Search Google")' 
+                      },
+                      value: { 
+                        type: 'string', 
+                        description: 'Per type: testo da digitare. Per press: tasto (Enter, Tab, Escape). Per scroll: up/down. Per navigate: URL completo.' 
+                      },
+                      expected_outcome: { 
+                        type: 'string', 
+                        description: 'Cosa ci aspettiamo dopo questo step (es: "Search results page appears")' 
+                      }
+                    },
+                    required: ['action', 'target']
+                  }
+                }
+              },
+              required: ['task_description', 'platform', 'task_type', 'start_url', 'steps']
             }
           });
           
