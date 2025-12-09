@@ -884,6 +884,9 @@ export type Database = {
       }
       browser_steps: {
         Row: {
+          action_target: string | null
+          action_type: string | null
+          action_value: string | null
           completed_at: string | null
           created_at: string
           error_message: string | null
@@ -905,6 +908,9 @@ export type Database = {
           verification_status: string | null
         }
         Insert: {
+          action_target?: string | null
+          action_type?: string | null
+          action_value?: string | null
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
@@ -926,6 +932,9 @@ export type Database = {
           verification_status?: string | null
         }
         Update: {
+          action_target?: string | null
+          action_type?: string | null
+          action_value?: string | null
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
@@ -974,10 +983,10 @@ export type Database = {
           status: string
           task_data: Json | null
           task_description: string
-          task_secret: string
           task_type: string
           total_steps: number | null
           updated_at: string | null
+          user_id: string | null
         }
         Insert: {
           agent_id?: string | null
@@ -996,10 +1005,10 @@ export type Database = {
           status?: string
           task_data?: Json | null
           task_description: string
-          task_secret?: string
           task_type: string
           total_steps?: number | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Update: {
           agent_id?: string | null
@@ -1018,10 +1027,10 @@ export type Database = {
           status?: string
           task_data?: Json | null
           task_description?: string
-          task_secret?: string
           task_type?: string
           total_steps?: number | null
           updated_at?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2748,7 +2757,6 @@ export type Database = {
             Args: {
               match_count?: number
               p_agent_id: string
-              p_document_name?: string
               search_query: string
             }
             Returns: {
@@ -2765,6 +2773,7 @@ export type Database = {
             Args: {
               match_count?: number
               p_agent_id: string
+              p_document_name?: string
               search_query: string
             }
             Returns: {
@@ -2808,7 +2817,6 @@ export type Database = {
               match_count?: number
               match_threshold?: number
               p_agent_id: string
-              p_document_name?: string
               query_embedding: string
             }
             Returns: {
@@ -2826,6 +2834,7 @@ export type Database = {
               match_count?: number
               match_threshold?: number
               p_agent_id: string
+              p_document_name?: string
               query_embedding: string
             }
             Returns: {
