@@ -1,31 +1,40 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { AgentHealthStatus } from './useAgentHealth';
 
-const POLL_INTERVAL = 30 * 1000; // 30 seconds
-const AGENT_CHECK_DELAY = 3000; // 3 seconds between agents
+const POLL_INTERVAL = 60 * 1000; // 60 seconds (increased from 30)
+const AGENT_CHECK_DELAY = 2000; // 2 seconds between agents
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const MAX_CONCURRENT_CHECKS = 3; // Maximum concurrent health checks
 
 interface AgentHealthCache {
   status: AgentHealthStatus;
   timestamp: number;
 }
 
+// Global cache shared across all hook instances
+const globalCache = new Map<string, AgentHealthCache>();
+
+// Global lock to prevent multiple simultaneous refresh cycles
+let isRefreshInProgress = false;
+let lastRefreshTime = 0;
+const MIN_REFRESH_INTERVAL = 10000; // 10 seconds minimum between full refreshes
+
 /**
  * Hook per monitorare lo stato di salute di MULTIPLI agenti
- * Usa polling sequenziale con delay per evitare timeout
+ * Usa polling sequenziale con delay e global cache per evitare overload
  */
 export const useMultipleAgentsHealth = (agentIds: string[]) => {
   const [healthStatus, setHealthStatus] = useState<Map<string, AgentHealthStatus>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
-  const [cache, setCache] = useState<Map<string, AgentHealthCache>>(new Map());
+  const mountedRef = useRef(true);
+  const refreshingRef = useRef(false);
 
   const checkSingleAgent = useCallback(async (agentId: string, useCache: boolean = true): Promise<AgentHealthStatus> => {
-    // Check cache first
+    // Check global cache first
     if (useCache) {
-      const cached = cache.get(agentId);
+      const cached = globalCache.get(agentId);
       if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-        console.log(`[useMultipleAgentsHealth] Using cached health for agent ${agentId}`);
         return cached.status;
       }
     }
@@ -47,87 +56,140 @@ export const useMultipleAgentsHealth = (agentIds: string[]) => {
           lastChecked: new Date()
         };
 
-        // Update cache
-        setCache(prev => new Map(prev).set(agentId, {
+        // Update global cache
+        globalCache.set(agentId, {
           status,
           timestamp: Date.now()
-        }));
+        });
 
         return status;
       } else {
         throw new Error(data?.error || 'Failed to fetch health status');
       }
     } catch (err: any) {
-      console.error(`[useMultipleAgentsHealth] Health check failed for agent ${agentId}:`, err);
+      console.error(`[useMultipleAgentsHealth] Health check failed for agent ${agentId}:`, err.message);
       
       // Return cached data if available, even if stale
-      const cached = cache.get(agentId);
+      const cached = globalCache.get(agentId);
       if (cached) {
         return cached.status;
       }
       
-      // Return error status
+      // Return empty status
       return {
         agentId,
-        hasIssues: false, // Don't show false alarms
+        hasIssues: false,
         unsyncedCount: 0,
         errorCount: 0,
         warningCount: 0,
         lastChecked: new Date()
       };
     }
-  }, [cache]);
+  }, []);
 
   const refreshHealth = useCallback(async () => {
+    // Prevent concurrent refresh cycles globally
+    if (isRefreshInProgress) {
+      console.log('[useMultipleAgentsHealth] Refresh already in progress, skipping');
+      return;
+    }
+
+    // Prevent too frequent refreshes
+    const timeSinceLastRefresh = Date.now() - lastRefreshTime;
+    if (timeSinceLastRefresh < MIN_REFRESH_INTERVAL) {
+      console.log(`[useMultipleAgentsHealth] Too soon since last refresh (${timeSinceLastRefresh}ms), skipping`);
+      return;
+    }
+
     if (agentIds.length === 0) {
       setIsLoading(false);
       return;
     }
 
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    isRefreshInProgress = true;
+    lastRefreshTime = Date.now();
+
     setIsLoading(true);
     const newHealthMap = new Map<string, AgentHealthStatus>();
 
     try {
-      // Process agents sequentially with delay to prevent overload
-      for (let i = 0; i < agentIds.length; i++) {
-        const agentId = agentIds[i];
-        
-        try {
-          const status = await checkSingleAgent(agentId, true);
-          newHealthMap.set(agentId, status);
-
-          // Add delay between checks (except for last agent)
-          if (i < agentIds.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, AGENT_CHECK_DELAY));
-          }
-        } catch (error) {
-          console.error(`[useMultipleAgentsHealth] Failed to check agent ${agentId}:`, error);
-          // Continue with next agent
-          newHealthMap.set(agentId, {
-            agentId,
-            hasIssues: false,
-            unsyncedCount: 0,
-            errorCount: 0,
-            warningCount: 0,
-            lastChecked: new Date()
-          });
+      // First, populate from cache
+      for (const agentId of agentIds) {
+        const cached = globalCache.get(agentId);
+        if (cached) {
+          newHealthMap.set(agentId, cached.status);
         }
       }
 
-      setHealthStatus(newHealthMap);
-      console.log(`[useMultipleAgentsHealth] Health check completed for ${agentIds.length} agents`);
+      // Find agents that need fresh data
+      const staleAgentIds = agentIds.filter(agentId => {
+        const cached = globalCache.get(agentId);
+        return !cached || (Date.now() - cached.timestamp) >= CACHE_DURATION;
+      });
+
+      // Process stale agents in small batches with delay
+      for (let i = 0; i < staleAgentIds.length; i += MAX_CONCURRENT_CHECKS) {
+        if (!mountedRef.current) break;
+
+        const batch = staleAgentIds.slice(i, i + MAX_CONCURRENT_CHECKS);
+        
+        // Process batch concurrently
+        const results = await Promise.allSettled(
+          batch.map(agentId => checkSingleAgent(agentId, false))
+        );
+
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            newHealthMap.set(batch[index], result.value);
+          }
+        });
+
+        // Delay between batches (except for last batch)
+        if (i + MAX_CONCURRENT_CHECKS < staleAgentIds.length) {
+          await new Promise(resolve => setTimeout(resolve, AGENT_CHECK_DELAY));
+        }
+      }
+
+      if (mountedRef.current) {
+        setHealthStatus(newHealthMap);
+        console.log(`[useMultipleAgentsHealth] Health check completed for ${agentIds.length} agents (${staleAgentIds.length} refreshed)`);
+      }
     } catch (error) {
       console.error('[useMultipleAgentsHealth] Failed to refresh health:', error);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+      refreshingRef.current = false;
+      isRefreshInProgress = false;
     }
   }, [agentIds.join(','), checkSingleAgent]);
 
   useEffect(() => {
-    refreshHealth();
+    mountedRef.current = true;
 
-    const interval = setInterval(refreshHealth, POLL_INTERVAL);
-    return () => clearInterval(interval);
+    // Initial refresh with random delay to spread load
+    const initialDelay = Math.random() * 3000;
+    const initialTimeout = setTimeout(() => {
+      if (mountedRef.current) {
+        refreshHealth();
+      }
+    }, initialDelay);
+
+    // Set up polling with jitter
+    const interval = setInterval(() => {
+      if (mountedRef.current) {
+        refreshHealth();
+      }
+    }, POLL_INTERVAL + Math.random() * 10000); // Add up to 10s jitter
+
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
   }, [refreshHealth]);
 
   const getAgentStatus = useCallback((agentId: string): AgentHealthStatus | undefined => {
