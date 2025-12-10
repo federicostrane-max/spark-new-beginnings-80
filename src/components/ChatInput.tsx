@@ -25,7 +25,7 @@ interface Agent {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>) => void;
+  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string) => void;
   disabled?: boolean;
   sendDisabled?: boolean;
   placeholder?: string;
@@ -40,6 +40,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const [agentSuggestions, setAgentSuggestions] = useState<Agent[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState<number | null>(null);
+  const [pendingForcedTool, setPendingForcedTool] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -126,9 +127,10 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     if (input.trim() && !disabled) {
       // Close suggestions when submitting
       setShowAgentSuggestions(false);
-      onSend(input.trim(), attachments.length > 0 ? attachments : undefined);
+      onSend(input.trim(), attachments.length > 0 ? attachments : undefined, pendingForcedTool || undefined);
       setInput("");
       setAttachments([]);
+      setPendingForcedTool(null); // Reset after sending
     }
   };
 
@@ -274,6 +276,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
 
   const insertAgentAction = (action: string) => {
     let template = '';
+    let forcedTool: string | null = null;
     
     switch(action) {
       case 'consult':
@@ -298,8 +301,12 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
         break;
       case 'browser-task':
         template = 'Automazione browser: ';
+        forcedTool = 'create_browser_task';
         break;
     }
+    
+    // Set forced tool if applicable
+    setPendingForcedTool(forcedTool);
     
     // Insert template at cursor position
     const cursorPos = textareaRef.current?.selectionStart || input.length;
@@ -321,6 +328,25 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
 
   return (
     <div className="space-y-2">
+      {/* Forced Tool Badge */}
+      {pendingForcedTool && (
+        <div className="flex gap-2 items-center p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+          <Globe className="h-4 w-4 text-emerald-500" />
+          <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
+            🤖 Tool forzato: {pendingForcedTool === 'create_browser_task' ? 'Browser Task' : pendingForcedTool}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 ml-auto"
+            onClick={() => setPendingForcedTool(null)}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+
       {/* Agent Mentions Preview */}
       {mentionedAgents.length > 0 && (
         <div className="flex gap-2 items-center p-2 bg-primary/10 rounded-lg border border-primary/20">

@@ -2246,7 +2246,7 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool } = requestBody;
 
     // Server-to-server calls can pass serverUserId directly (for benchmark system)
     let userId: string;
@@ -2299,6 +2299,7 @@ Deno.serve(async (req) => {
     console.log('   Agent:', agentSlug);
     console.log('   Message length:', message.length, 'chars');
     console.log('   Attachments:', attachments?.length || 0);
+    console.log('   Forced Tool:', forcedTool || 'auto');
     console.log('   Timestamp:', new Date().toISOString());
 
     console.log('Processing chat for agent:', agentSlug);
@@ -4585,7 +4586,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   temperature: 0.7,
                   max_tokens: 4000,
                   tools: deepseekTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && deepseekTools?.some((t: any) => t.function?.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
                 signal: controller.signal
@@ -4625,7 +4628,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   temperature: 0.7,
                   max_tokens: 4096, // 🔧 ADDED: explicit limit (was unlimited before)
                   tools: openaiTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && openaiTools?.some((t: any) => t.function?.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
                 signal: controller.signal
@@ -4675,7 +4680,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   temperature: 0.7,
                   max_tokens: 4096, // 🔧 ADDED: explicit limit (was unlimited before)
                   tools: openrouterTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && openrouterTools?.some((t: any) => t.function?.name === forcedTool || t.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
                 signal: controller.signal
@@ -4762,6 +4769,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,
+                  tool_choice: forcedTool && tools?.some((t: any) => t.name === forcedTool) 
+                    ? { type: "tool", name: forcedTool } 
+                    : { type: "auto" },
                   stream: true // ✅ Riabilitato per compatibilità con parser SSE
                 }),
                 signal: controller.signal
@@ -5673,7 +5683,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   temperature: 0.7,
                   max_tokens: 4000,
                   tools: deepseekTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && deepseekTools?.some((t: any) => t.function?.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
               });
@@ -5767,7 +5779,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   messages: openaiMessages,
                   max_completion_tokens: 16000,
                   tools: openaiTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && openaiTools?.some((t: any) => t.function?.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
               });
@@ -5860,7 +5874,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   model: openrouterModel,
                   messages: openrouterMessages,
                   tools: openrouterTools,
-                  tool_choice: "auto",
+                  tool_choice: forcedTool && openrouterTools?.some((t: any) => t.function?.name === forcedTool || t.name === forcedTool) 
+                    ? { type: "function", function: { name: forcedTool } } 
+                    : "auto",
                   stream: true
                 }),
               });
