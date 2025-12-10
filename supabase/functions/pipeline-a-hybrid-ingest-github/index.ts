@@ -66,6 +66,17 @@ function sanitizeTextContent(content: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 }
 
+// Build hierarchical folder path that mirrors GitHub repository structure
+function buildHierarchicalFolder(baseFolder: string | null, repoName: string, filePath: string): string {
+  // Extract the directory from the file path (without the filename)
+  const lastSlashIndex = filePath.lastIndexOf('/');
+  const directory = lastSlashIndex > 0 ? filePath.substring(0, lastSlashIndex) : '';
+  
+  // Build the hierarchical folder: baseFolder/repoName/directory
+  const repoFolder = baseFolder ? `${baseFolder}/${repoName}` : repoName;
+  return directory ? `${repoFolder}/${directory}` : repoFolder;
+}
+
 // Helper function to get default branch from repository
 async function getDefaultBranch(owner: string, repo: string, githubToken?: string): Promise<string> {
   const headers: Record<string, string> = {
@@ -349,7 +360,7 @@ serve(async (req) => {
                 status: 'ingested',  // Valid status - job queue will handle processing
                 file_size_bytes: sanitizedContent.length,
                 storage_bucket: null,
-                folder: folder || null,
+                folder: buildHierarchicalFolder(folder, repo, file.path),
               })
               .select('id')
               .single();
@@ -434,7 +445,7 @@ serve(async (req) => {
                 status: 'ingested',
                 file_size_bytes: arrayBuffer.byteLength,
                 storage_bucket: 'pipeline-a-uploads',
-                folder: folder || null,
+                folder: buildHierarchicalFolder(folder, repo, file.path),
               })
               .select('id')
               .single();
