@@ -181,6 +181,10 @@ schedule = "*/5 * * * *"
 verify_jwt = true
 timeout = 60
 
+[functions.pipeline-a-hybrid-ingest-github]
+verify_jwt = true
+timeout = 300
+
 [functions.process-vision-job]
 verify_jwt = false
 
