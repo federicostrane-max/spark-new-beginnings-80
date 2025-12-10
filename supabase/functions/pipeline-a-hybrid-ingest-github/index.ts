@@ -463,6 +463,21 @@ serve(async (req) => {
 
     console.log(`[Pipeline A-Hybrid GitHub] Ingestion complete: ${filesIngested} ingested, ${filesSkipped} skipped, ${filesFailed} failed, ${jobsCreated} jobs created`);
 
+    // ★ EVENT-DRIVEN KICKSTART: Immediately invoke job queue processor
+    // This starts processing without waiting for cron (cron serves as safety net)
+    if (jobsCreated > 0) {
+      console.log(`[Pipeline A-Hybrid GitHub] 🚀 Kickstarting job queue processor for ${jobsCreated} jobs...`);
+      EdgeRuntime.waitUntil(
+        supabase.functions.invoke('process-github-jobs-queue', {
+          body: {},
+        }).then(() => {
+          console.log(`[Pipeline A-Hybrid GitHub] Job queue processor invoked successfully`);
+        }).catch((err: Error) => {
+          console.error(`[Pipeline A-Hybrid GitHub] Failed to invoke job queue processor:`, err);
+        })
+      );
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
