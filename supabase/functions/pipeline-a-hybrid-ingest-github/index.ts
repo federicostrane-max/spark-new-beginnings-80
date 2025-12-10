@@ -10,6 +10,9 @@ const corsHeaders = {
 
 const GITHUB_USER_AGENT = 'Lovable-Pipeline-A-Hybrid-GitHub-Ingest/1.0';
 
+// Minimum file size to process (skip empty files like __init__.py)
+const MIN_FILE_SIZE_BYTES = 10;
+
 // Text file extensions that should be ingested as full_text (no LlamaParse needed)
 const TEXT_EXTENSIONS = [
   // Documentation
@@ -262,7 +265,9 @@ serve(async (req) => {
     console.log(`[Pipeline A-Hybrid GitHub] Filtered to ${relevantFiles.length} relevant files`);
 
     let filesIngested = 0;
+    let filesSkipped = 0;
     let filesFailed = 0;
+    let jobsCreated = 0;
 
     // Process files in batches
     const BATCH_SIZE = 10;
@@ -279,6 +284,7 @@ serve(async (req) => {
           // Skip images entirely
           if (isImageFile(fileName)) {
             console.log(`[Pipeline A-Hybrid GitHub] ⏭️ Skipping image file: ${fileName}`);
+            filesSkipped++;
             continue;
           }
 
@@ -292,6 +298,7 @@ serve(async (req) => {
 
           if (existingDoc) {
             console.log(`[Pipeline A-Hybrid GitHub] ⏭️ Duplicate skipped: ${file.path}`);
+            filesSkipped++;
             continue;
           }
 
@@ -319,10 +326,17 @@ serve(async (req) => {
             const textContent = await contentResponse.text();
             const sanitizedContent = sanitizeTextContent(textContent);
 
+            // ⚠️ FIX: Skip empty or minimal files (e.g., empty __init__.py)
+            if (sanitizedContent.length < MIN_FILE_SIZE_BYTES) {
+              console.log(`[Pipeline A-Hybrid GitHub] ⏭️ Skipping empty/minimal file: ${fileName} (${sanitizedContent.length} bytes)`);
+              filesSkipped++;
+              continue;
+            }
+
             // Determine source_type: markdown vs code
             const sourceType = isMarkdownFile(fileName) ? 'markdown' : 'code';
 
-            // Insert into pipeline_a_hybrid_documents with full_text
+            // Insert into pipeline_a_hybrid_documents with status='pending_processing'
             const { data: doc, error: insertError } = await supabase
               .from('pipeline_a_hybrid_documents')
               .insert({
@@ -332,7 +346,7 @@ serve(async (req) => {
                 source_type: sourceType,
                 repo_url: repoUrl,
                 repo_path: file.path,
-                status: 'ingested',
+                status: 'pending_processing',  // Changed from 'ingested'
                 file_size_bytes: sanitizedContent.length,
                 storage_bucket: null,
                 folder: folder || null,
@@ -346,12 +360,21 @@ serve(async (req) => {
 
             console.log(`[Pipeline A-Hybrid GitHub] ✅ Text file ingested (${sourceType}): ${fileName}`);
 
-            // Trigger event-driven processing via pipeline-a-hybrid-process-chunks
-            EdgeRuntime.waitUntil(
-              supabase.functions.invoke('pipeline-a-hybrid-process-chunks', {
-                body: { documentId: doc.id },
-              })
-            );
+            // ⚠️ FIX: Create job in queue instead of direct EdgeRuntime.waitUntil
+            const { error: jobError } = await supabase
+              .from('github_processing_jobs')
+              .insert({
+                document_id: doc.id,
+                file_path: file.path,
+                repo_url: repoUrl,
+                status: 'pending',
+              });
+
+            if (jobError) {
+              console.error(`[Pipeline A-Hybrid GitHub] Failed to create job for ${fileName}:`, jobError);
+            } else {
+              jobsCreated++;
+            }
 
             filesIngested++;
           } else if (isPdfFile(fileName)) {
@@ -375,6 +398,14 @@ serve(async (req) => {
             }
 
             const arrayBuffer = await binaryResponse.arrayBuffer();
+
+            // ⚠️ FIX: Skip empty PDFs
+            if (arrayBuffer.byteLength < MIN_FILE_SIZE_BYTES) {
+              console.log(`[Pipeline A-Hybrid GitHub] ⏭️ Skipping empty PDF: ${fileName} (${arrayBuffer.byteLength} bytes)`);
+              filesSkipped++;
+              continue;
+            }
+
             const fileBlob = new Blob([arrayBuffer]);
 
             // Upload to Supabase Storage
@@ -414,7 +445,7 @@ serve(async (req) => {
 
             console.log(`[Pipeline A-Hybrid GitHub] ✅ PDF uploaded: ${fileName}`);
 
-            // Route PDF through split-pdf-into-batches (same as ingest-pdf)
+            // PDF files still use split-pdf-into-batches (existing robust pattern)
             EdgeRuntime.waitUntil(
               supabase.functions.invoke('split-pdf-into-batches', {
                 body: { documentId: doc.id },
@@ -430,13 +461,15 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[Pipeline A-Hybrid GitHub] Ingestion complete: ${filesIngested} files ingested, ${filesFailed} failed`);
+    console.log(`[Pipeline A-Hybrid GitHub] Ingestion complete: ${filesIngested} ingested, ${filesSkipped} skipped, ${filesFailed} failed, ${jobsCreated} jobs created`);
 
     return new Response(
       JSON.stringify({
         success: true,
         filesIngested,
+        filesSkipped,
         filesFailed,
+        jobsCreated,
         repository: repoUrl,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

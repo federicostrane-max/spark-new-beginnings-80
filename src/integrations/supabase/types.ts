@@ -1204,6 +1204,53 @@ export type Database = {
         }
         Relationships: []
       }
+      github_processing_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          document_id: string
+          error_message: string | null
+          file_path: string
+          id: string
+          repo_url: string
+          retry_count: number | null
+          status: string
+          updated_at: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          document_id: string
+          error_message?: string | null
+          file_path: string
+          id?: string
+          repo_url: string
+          retry_count?: number | null
+          status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          document_id?: string
+          error_message?: string | null
+          file_path?: string
+          id?: string
+          repo_url?: string
+          retry_count?: number | null
+          status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "github_processing_jobs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_a_hybrid_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inter_agent_logs: {
         Row: {
           completed_at: string | null

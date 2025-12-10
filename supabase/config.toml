@@ -2,8 +2,8 @@ project_id = "vjeafbnkycxfzpxwkifw"
 
 # ===== CORE FUNCTIONS =====
 [functions.agent-chat]
-verify_jwt = true
-timeout = 3600
+verify_jwt = false
+timeout = 300
 
 [functions.agent-chat-demo]
 verify_jwt = true
@@ -98,8 +98,6 @@ timeout = 60
 schedule = "*/5 * * * *"
 
 # ===== PIPELINE B: New Document Processing System =====
-# Completely independent from existing pipeline
-
 [functions.pipeline-b-ingest-pdf]
 verify_jwt = true
 
@@ -120,10 +118,7 @@ schedule = "*/5 * * * *"
 verify_jwt = true
 timeout = 60
 
-# ============================================
-# PIPELINE C FUNCTIONS (Content-Aware Chunking)
-# ============================================
-
+# ===== PIPELINE C FUNCTIONS =====
 [functions.pipeline-c-ingest-pdf]
 verify_jwt = false
 timeout = 60
@@ -185,6 +180,12 @@ timeout = 60
 verify_jwt = true
 timeout = 300
 
+# ===== GITHUB JOB QUEUE WORKER =====
+[functions.process-github-jobs-queue]
+verify_jwt = false
+timeout = 300
+schedule = "* * * * *"
+
 [functions.process-vision-job]
 verify_jwt = false
 
@@ -205,10 +206,6 @@ timeout = 600
 verify_jwt = false
 
 [functions.test-llamaparse-layout]
-verify_jwt = false
-timeout = 300
-
-[functions.agent-chat]
 verify_jwt = false
 timeout = 300
 
@@ -240,7 +237,7 @@ timeout = 600
 verify_jwt = false
 timeout = 60
 
-# ===== PARALLEL PDF PROCESSING (PHASE 2) =====
+# ===== PARALLEL PDF PROCESSING =====
 [functions.split-pdf-into-batches]
 verify_jwt = false
 timeout = 300
