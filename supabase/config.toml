@@ -177,7 +177,7 @@ verify_jwt = true
 timeout = 60
 
 [functions.pipeline-a-hybrid-ingest-github]
-verify_jwt = true
+verify_jwt = false
 timeout = 300
 
 # ===== GITHUB JOB QUEUE WORKER =====

@@ -346,7 +346,7 @@ serve(async (req) => {
                 source_type: sourceType,
                 repo_url: repoUrl,
                 repo_path: file.path,
-                status: 'pending_processing',  // Changed from 'ingested'
+                status: 'ingested',  // Valid status - job queue will handle processing
                 file_size_bytes: sanitizedContent.length,
                 storage_bucket: null,
                 folder: folder || null,
