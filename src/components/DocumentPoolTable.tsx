@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -118,6 +118,19 @@ interface DocumentPoolTableProps {
   // No props needed - shows all pool documents
 }
 
+// Debounce utility function
+function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T & { cancel: () => void } {
+  let timeoutId: NodeJS.Timeout | null = null;
+  const debounced = (...args: Parameters<T>) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
+  debounced.cancel = () => {
+    if (timeoutId) clearTimeout(timeoutId);
+  };
+  return debounced as T & { cancel: () => void };
+}
+
 export const DocumentPoolTable = () => {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,28 +186,61 @@ export const DocumentPoolTable = () => {
   const [testResult, setTestResult] = useState<any>(null);
   const [showTestDialog, setShowTestDialog] = useState(false);
 
+  // === REALTIME ERROR LOOP FIX ===
+  // Refs for throttling, debouncing, and error state management
+  const lastErrorToastRef = useRef<number>(0);
+  const isInErrorStateRef = useRef<boolean>(false);
+  const retryCountRef = useRef<number>(0);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const currentPageRef = useRef<number>(1);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Keep currentPageRef in sync
   useEffect(() => {
-    const abortController = new AbortController();
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  // Debounced load function (2 second delay)
+  const debouncedLoadRef = useRef(
+    debounce(() => {
+      // Don't process if in error state
+      if (isInErrorStateRef.current) {
+        console.log('[DocumentPoolTable] Skipping realtime refresh - in error state');
+        return;
+      }
+      
+      // Abort previous request if any
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+      
+      loadDocuments(currentPageRef.current, abortControllerRef.current.signal);
+      loadFolders();
+    }, 2000)
+  );
+
+  useEffect(() => {
+    abortControllerRef.current = new AbortController();
     
-    loadDocuments(currentPage, abortController.signal);
+    // Initial load
+    loadDocuments(currentPage, abortControllerRef.current.signal);
     loadAvailableAgents();
     loadAvailableFolders();
     loadFolders();
 
-    // Realtime subscriptions for all pipelines
+    // Realtime handler that uses debounce
+    const handleRealtimeChange = () => {
+      debouncedLoadRef.current();
+    };
+
+    // Realtime subscriptions for all pipelines - using debounced handler
     const channelKnowledge = supabase
       .channel('knowledge_documents_changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'knowledge_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
+        { event: '*', schema: 'public', table: 'knowledge_documents' },
+        handleRealtimeChange
       )
       .subscribe();
 
@@ -202,15 +248,8 @@ export const DocumentPoolTable = () => {
       .channel('pipeline_a_documents_changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_a_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
+        { event: '*', schema: 'public', table: 'pipeline_a_documents' },
+        handleRealtimeChange
       )
       .subscribe();
 
@@ -218,15 +257,8 @@ export const DocumentPoolTable = () => {
       .channel('pipeline_b_documents_changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_b_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
+        { event: '*', schema: 'public', table: 'pipeline_b_documents' },
+        handleRealtimeChange
       )
       .subscribe();
 
@@ -234,15 +266,8 @@ export const DocumentPoolTable = () => {
       .channel('pipeline_c_documents_changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_c_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
+        { event: '*', schema: 'public', table: 'pipeline_c_documents' },
+        handleRealtimeChange
       )
       .subscribe();
 
@@ -250,20 +275,21 @@ export const DocumentPoolTable = () => {
       .channel('pipeline_a_hybrid_documents_changes')
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'pipeline_a_hybrid_documents'
-        },
-        () => {
-          loadDocuments(currentPage, abortController.signal);
-          loadFolders();
-        }
+        { event: '*', schema: 'public', table: 'pipeline_a_hybrid_documents' },
+        handleRealtimeChange
       )
       .subscribe();
 
     return () => {
-      abortController.abort();
+      // Cancel debounced calls and abort pending requests
+      debouncedLoadRef.current.cancel();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+      
       supabase.removeChannel(channelKnowledge);
       supabase.removeChannel(channelPipelineA);
       supabase.removeChannel(channelPipelineB);
@@ -497,7 +523,46 @@ export const DocumentPoolTable = () => {
       }
       
       console.error('[DocumentPoolTable] ❌ Load error:', error);
+      
+      // === ERROR HANDLING WITH THROTTLED TOAST AND EXPONENTIAL BACKOFF ===
+      isInErrorStateRef.current = true;
       setError(error.message || "Errore sconosciuto");
+      
+      // Throttle error toasts - max 1 every 10 seconds
+      const now = Date.now();
+      if (now - lastErrorToastRef.current > 10000) {
+        toast.error("Errore nel caricamento documenti. Riprovo automaticamente...");
+        lastErrorToastRef.current = now;
+      }
+      
+      // Exponential backoff retry - max 3 attempts
+      if (retryCountRef.current < 3) {
+        const delay = Math.pow(2, retryCountRef.current) * 1000; // 1s, 2s, 4s
+        console.log(`[DocumentPoolTable] Scheduling retry ${retryCountRef.current + 1}/3 in ${delay}ms`);
+        
+        if (retryTimeoutRef.current) {
+          clearTimeout(retryTimeoutRef.current);
+        }
+        
+        retryTimeoutRef.current = setTimeout(() => {
+          retryCountRef.current++;
+          isInErrorStateRef.current = false; // Allow retry
+          
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+          }
+          abortControllerRef.current = new AbortController();
+          
+          loadDocuments(page, abortControllerRef.current.signal);
+        }, delay);
+      } else {
+        console.log('[DocumentPoolTable] Max retries reached, stopping auto-retry');
+        // Reset retry count after a longer delay to allow future manual retries
+        setTimeout(() => {
+          retryCountRef.current = 0;
+          isInErrorStateRef.current = false;
+        }, 30000); // Reset after 30 seconds
+      }
       toast.error("Errore nel caricamento dei documenti");
     } finally {
       setLoading(false);
