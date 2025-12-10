@@ -748,7 +748,11 @@ export default function MultiAgentConsultant() {
     }
   };
 
-  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forceConversationId?: string, forceAgent?: Agent) => {
+  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedToolOrConversationId?: string, forceAgent?: Agent) => {
+    // Detect if third param is forcedTool or forceConversationId
+    const isForcedTool = forcedToolOrConversationId && !forcedToolOrConversationId.includes('-');
+    const forcedTool = isForcedTool ? forcedToolOrConversationId : undefined;
+    const forceConversationId = isForcedTool ? undefined : forcedToolOrConversationId;
     if (!session?.access_token) return;
     
     const agent = forceAgent || currentAgent;
@@ -812,6 +816,7 @@ export default function MultiAgentConsultant() {
             conversationId,
             agentSlug: agent.slug,
             attachments,
+            forcedTool,
           }),
           keepalive: true,
           signal: controller.signal
