@@ -28,7 +28,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
   const [orgImporting, setOrgImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress[]>([]);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b'>('pipeline_a');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_b' | 'pipeline_a_hybrid'>('pipeline_a_hybrid');
 
   // Cleanup interval on unmount
   useEffect(() => {
@@ -89,9 +89,11 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       toast.loading(`Importazione di tutti i repository da ${orgName}...`, { id: 'org-github-import' });
 
       // Route to correct pipeline function
-      const functionName = selectedPipeline === 'pipeline_a' 
-        ? 'pipeline-a-ingest-github' 
-        : 'pipeline-b-ingest-github';
+      const functionName = selectedPipeline === 'pipeline_a_hybrid'
+        ? 'pipeline-a-hybrid-ingest-github'
+        : selectedPipeline === 'pipeline_a' 
+          ? 'pipeline-a-ingest-github' 
+          : 'pipeline-b-ingest-github';
 
       // All pipelines now use the same body format
       const requestBody = { 
@@ -196,15 +198,26 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
       <CardContent className="space-y-6">
         <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
           <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
-          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b')} disabled={orgImporting}>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_b' | 'pipeline_a_hybrid')} disabled={orgImporting}>
             <div className="flex items-start space-x-3 p-3 rounded-lg border-2 border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors">
-              <RadioGroupItem value="pipeline_a" id="gh-pipeline-a" className="mt-1" />
+              <RadioGroupItem value="pipeline_a_hybrid" id="gh-pipeline-a-hybrid" className="mt-1" />
               <div className="flex-1 space-y-1">
-                <Label htmlFor="gh-pipeline-a" className="cursor-pointer font-semibold flex items-center gap-2">
-                  Pipeline A (LlamaParse + Small-to-Big) ⭐ Raccomandato
+                <Label htmlFor="gh-pipeline-a-hybrid" className="cursor-pointer font-semibold flex items-center gap-2">
+                  Pipeline A-Hybrid (Gold Standard) ⭐ Raccomandato
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Parsing intelligente con bypass per file di testo. Code blocks trattati come elementi atomici con summarization AI. Zero costi per file di codice/config.
+                  LlamaParse + Visual Enrichment + Small-to-Big + Context Analyzer. Supporta PDF, Markdown, Code. La migliore qualità disponibile.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
+              <RadioGroupItem value="pipeline_a" id="gh-pipeline-a" className="mt-1" />
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="gh-pipeline-a" className="cursor-pointer font-semibold">
+                  Pipeline A (Legacy)
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Versione base senza Visual Enrichment. Mantiene compatibilità con documenti esistenti.
                 </p>
               </div>
             </div>
@@ -215,7 +228,7 @@ export const GitHubDocsImport = ({ onImportComplete }: GitHubDocsImportProps) =>
                   Pipeline B (Landing AI)
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Parsing avanzato con API Landing AI. Chunk semantici con visual grounding.
+                  Parsing con API Landing AI. Chunk semantici con visual grounding.
                 </p>
               </div>
             </div>

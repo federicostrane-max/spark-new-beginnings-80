@@ -149,13 +149,33 @@ serve(async (req) => {
           .update({ status: 'processing', updated_at: new Date().toISOString() })
           .eq('id', doc.id);
 
-        // Download file from storage
-        const { data: fileData, error: downloadError } = await supabase.storage
-          .from(doc.storage_bucket)
-          .download(doc.file_path);
+        // ===== DOWNLOAD BYPASS: Use full_text if available (GitHub text files) =====
+        let fileData: Blob | null = null;
+        
+        if (doc.full_text) {
+          // GitHub text files: content already in database, no storage download needed
+          console.log(`[Pipeline A-Hybrid Process] Using pre-loaded full_text (${doc.full_text.length} chars)`);
+          // Create a blob from full_text for compatibility with existing code paths
+          fileData = new Blob([doc.full_text], { type: 'text/plain' });
+          
+          // Auto-detect source_type if not set correctly
+          if (!doc.source_type || doc.source_type === 'github') {
+            const isMarkdown = doc.file_name.endsWith('.md') || doc.file_name.endsWith('.mdx');
+            doc.source_type = isMarkdown ? 'markdown' : 'code';
+            console.log(`[Pipeline A-Hybrid Process] Auto-set source_type to: ${doc.source_type}`);
+          }
+        } else if (doc.storage_bucket && doc.file_path) {
+          // PDF/Image: download from storage (existing logic)
+          const { data: downloadedData, error: downloadError } = await supabase.storage
+            .from(doc.storage_bucket)
+            .download(doc.file_path);
 
-        if (downloadError || !fileData) {
-          throw new Error(`Failed to download file: ${downloadError?.message || 'No data'}`);
+          if (downloadError || !downloadedData) {
+            throw new Error(`Failed to download file: ${downloadError?.message || 'No data'}`);
+          }
+          fileData = downloadedData;
+        } else {
+          throw new Error(`Document ${doc.id} has no full_text and no storage path`);
         }
 
         // ===== PHASE 0: CONTEXT ANALYZER (COMMON TO ALL SOURCE TYPES) =====
@@ -346,6 +366,78 @@ serve(async (req) => {
           });
           
           console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from image description`);
+        } else if (doc.source_type === 'code') {
+          // CODE PATH: Wrap as Markdown code block and use parseMarkdownElements
+          console.log(`[Pipeline A-Hybrid Process] Processing code file: ${doc.file_name}`);
+          
+          const codeContent = doc.full_text || await fileData.text();
+          
+          // Detect language from file extension
+          const extension = doc.file_name.split('.').pop()?.toLowerCase() || 'txt';
+          const languageMap: Record<string, string> = {
+            'ts': 'typescript', 'tsx': 'typescript',
+            'js': 'javascript', 'jsx': 'javascript',
+            'py': 'python',
+            'go': 'go',
+            'rs': 'rust',
+            'java': 'java',
+            'rb': 'ruby',
+            'php': 'php',
+            'cs': 'csharp',
+            'cpp': 'cpp', 'c': 'c', 'h': 'c',
+            'swift': 'swift',
+            'kt': 'kotlin',
+            'sh': 'bash', 'bash': 'bash',
+            'sql': 'sql',
+            'json': 'json',
+            'yaml': 'yaml', 'yml': 'yaml',
+            'toml': 'toml',
+            'xml': 'xml',
+            'html': 'html',
+            'css': 'css',
+            'scss': 'scss',
+            'vue': 'vue',
+            'svelte': 'svelte',
+          };
+          const language = languageMap[extension] || extension;
+          
+          // Wrap code as Markdown code block for proper chunking
+          const markdownWrapped = `# ${doc.file_name}\n\n\`\`\`${language}\n${codeContent}\n\`\`\``;
+          
+          // Context Analyzer for code
+          if (anthropicKey && codeContent.length > 100) {
+            try {
+              const { analyzeDocumentContext } = await import("../_shared/contextAnalyzer.ts");
+              documentContext = await analyzeDocumentContext(codeContent.substring(0, 2000), anthropicKey, doc.file_name);
+              
+              traceReport.context_analysis = {
+                domain: documentContext.domain,
+                focus_elements: documentContext.focusElements || [],
+                terminology: documentContext.terminology || [],
+                verbosity: documentContext.verbosity,
+                analysis_model: 'claude-3-5-haiku-20241022'
+              };
+              
+              console.log(`[Context Analyzer] ✓ Code domain: ${documentContext.domain}`);
+            } catch (err) {
+              console.warn('[Context Analyzer] Failed for code file:', err);
+            }
+          }
+          
+          // Use parseMarkdownElements for Small-to-Big chunking with LLM summarization
+          console.log('[Pipeline A-Hybrid Process] Parsing wrapped code as Markdown elements');
+          const parseResult = await parseMarkdownElements(markdownWrapped, lovableApiKey);
+          chunks = parseResult.baseNodes;
+          
+          metadata = {
+            source_type: 'code',
+            language: language,
+            processing_method: 'code_to_markdown_chunking',
+            chunks_generated: chunks.length,
+            original_size_chars: codeContent.length
+          };
+          
+          console.log(`[Pipeline A-Hybrid Process] Generated ${chunks.length} chunks from code file (${language})`);
         } else {
           // PDF PATH: LlamaParse + Context-Aware Visual Enrichment
           const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
