@@ -673,18 +673,34 @@ export const DocumentPoolTable = () => {
   };
 
   const loadGitHubFolders = async () => {
-    // Query GitHub docs from Pipeline B (source_type='github') - they have repo_url
-    const { data: githubDocs, error } = await supabase
+    // Query GitHub docs from Pipeline B (source_type='github')
+    const { data: githubDocsB, error: errorB } = await supabase
       .from('pipeline_b_documents')
       .select('id, file_name, folder, status, created_at, page_count, error_message')
       .eq('source_type', 'github')
       .order('created_at', { ascending: false });
 
-    if (error) throw error;
+    // Query GitHub docs from Pipeline A-Hybrid (source_type='markdown' or 'code')
+    const { data: githubDocsAHybrid, error: errorAHybrid } = await supabase
+      .from('pipeline_a_hybrid_documents')
+      .select('id, file_name, folder, status, created_at, page_count, error_message')
+      .in('source_type', ['markdown', 'code'])
+      .not('folder', 'is', null)
+      .order('created_at', { ascending: false });
 
-    console.log('[loadGitHubFolders] Loaded GitHub docs:', githubDocs?.length || 0);
+    if (errorB) throw errorB;
+    if (errorAHybrid) throw errorAHybrid;
 
-    // Helper per trasformare un documento Pipeline B
+    // Combina documenti da entrambe le pipeline
+    const allGitHubDocs = [
+      ...(githubDocsB || []),
+      ...(githubDocsAHybrid || [])
+    ];
+
+    console.log('[loadGitHubFolders] Loaded GitHub docs:', allGitHubDocs.length, 
+      '(Pipeline B:', githubDocsB?.length || 0, ', A-Hybrid:', githubDocsAHybrid?.length || 0, ')');
+
+    // Helper per trasformare un documento
     const transformDoc = (doc: any) => {
       return {
         id: doc.id,
@@ -702,7 +718,7 @@ export const DocumentPoolTable = () => {
 
     // Mappa documenti per folder path
     const docsByFolder = new Map<string, any[]>();
-    (githubDocs || []).forEach(doc => {
+    allGitHubDocs.forEach(doc => {
       if (doc.folder) {
         if (!docsByFolder.has(doc.folder)) {
           docsByFolder.set(doc.folder, []);
