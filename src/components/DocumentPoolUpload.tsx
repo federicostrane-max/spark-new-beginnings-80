@@ -23,6 +23,9 @@ interface DocumentPoolUploadProps {
   onUploadComplete: () => void;
 }
 
+// Threshold for direct storage upload (5MB) - files larger than this bypass base64 encoding
+const DIRECT_STORAGE_THRESHOLD = 5 * 1024 * 1024;
+
 export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -166,27 +169,74 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          // Step 2: Upload to selected pipeline (instant upload to storage)
-          setProgress((fileIndex / totalFiles) * 100 + 30);
-          
           const pipelineName = selectedPipeline === 'pipeline_a' ? 'Pipeline A' : selectedPipeline === 'pipeline_a_hybrid' ? 'Pipeline A-Hybrid' : 'Pipeline B';
           const edgeFunctionName = selectedPipeline === 'pipeline_a' ? 'pipeline-a-ingest-pdf' : selectedPipeline === 'pipeline_a_hybrid' ? 'pipeline-a-hybrid-ingest-pdf' : 'pipeline-b-ingest-pdf';
           
           console.log(`Uploading "${file.name}" to ${pipelineName}...`);
           
-          // Convert file to base64 for JSON transport
-          const arrayBuffer = await file.arrayBuffer();
-          const base64 = btoa(
-            new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-          );
+          let data, error;
           
-          const { data, error } = await supabase.functions.invoke(edgeFunctionName, {
-            body: { 
-              fileName: file.name,
-              fileData: base64,
-              fileSize: file.size
-            },
-          });
+          // Large files: upload directly to Storage to avoid memory limits
+          if (file.size > DIRECT_STORAGE_THRESHOLD) {
+            console.log(`⚡ Large file (${(file.size / 1024 / 1024).toFixed(1)}MB) - using direct storage upload`);
+            setProgress((fileIndex / totalFiles) * 100 + 10);
+            
+            // Step 1: Upload directly to Supabase Storage
+            const storagePath = `direct-uploads/${crypto.randomUUID()}/${file.name}`;
+            const { error: storageError } = await supabase.storage
+              .from('pipeline-a-uploads')
+              .upload(storagePath, file, {
+                contentType: 'application/pdf',
+                upsert: false
+              });
+            
+            if (storageError) {
+              throw new Error(`Storage upload failed: ${storageError.message}`);
+            }
+            
+            console.log(`✓ File uploaded to storage: ${storagePath}`);
+            setProgress((fileIndex / totalFiles) * 100 + 50);
+            
+            // Step 2: Get public URL
+            const { data: urlData } = supabase.storage
+              .from('pipeline-a-uploads')
+              .getPublicUrl(storagePath);
+            
+            console.log(`✓ Storage URL obtained: ${urlData.publicUrl}`);
+            
+            // Step 3: Invoke edge function with storageUrl (no base64!)
+            const result = await supabase.functions.invoke(edgeFunctionName, {
+              body: { 
+                fileName: file.name,
+                storageUrl: urlData.publicUrl,
+                fileSize: file.size
+              },
+            });
+            
+            data = result.data;
+            error = result.error;
+            
+          } else {
+            // Small files: use existing base64 method
+            console.log(`📄 Small file (${(file.size / 1024 / 1024).toFixed(1)}MB) - using base64 upload`);
+            setProgress((fileIndex / totalFiles) * 100 + 30);
+            
+            const arrayBuffer = await file.arrayBuffer();
+            const base64 = btoa(
+              new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+            );
+            
+            const result = await supabase.functions.invoke(edgeFunctionName, {
+              body: { 
+                fileName: file.name,
+                fileData: base64,
+                fileSize: file.size
+              },
+            });
+            
+            data = result.data;
+            error = result.error;
+          }
 
           if (error) {
             console.error(`Edge function error:`, error);
@@ -317,9 +367,16 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
                 {selectedFiles.map((file, index) => (
                   <div key={index} className="flex items-center justify-between gap-2 bg-muted p-2 rounded">
                     <span className="text-sm truncate flex-1">{file.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {(file.size / 1024 / 1024).toFixed(2)}MB
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {file.size > DIRECT_STORAGE_THRESHOLD && (
+                        <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
+                          Direct Upload
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        {(file.size / 1024 / 1024).toFixed(2)}MB
+                      </span>
+                    </div>
                     <Button
                       variant="ghost"
                       size="sm"
