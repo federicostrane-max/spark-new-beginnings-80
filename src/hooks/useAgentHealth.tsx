@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface DocumentStatus {
@@ -21,8 +21,8 @@ interface AgentHealth {
 }
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-const POLL_INTERVAL = 30 * 1000; // 30 seconds
-const REQUEST_TIMEOUT = 5000; // 5 seconds
+const POLL_INTERVAL = 60 * 1000; // 60 seconds (increased from 30)
+const REQUEST_TIMEOUT = 10000; // 10 seconds
 
 export interface AgentHealthStatus {
   agentId: string;
@@ -33,21 +33,133 @@ export interface AgentHealthStatus {
   lastChecked: Date;
 }
 
+// Global request deduplication - prevents multiple simultaneous requests for same agent
+const pendingRequests = new Map<string, Promise<AgentHealth | null>>();
+const globalCache = new Map<string, { health: AgentHealth; timestamp: number }>();
+
+// Throttle function to prevent rapid successive calls
+const throttledAgents = new Set<string>();
+const THROTTLE_DELAY = 5000; // 5 seconds minimum between calls for same agent
+
+async function fetchAgentHealth(agentId: string): Promise<AgentHealth | null> {
+  // Check if request is already in flight for this agent
+  const pending = pendingRequests.get(agentId);
+  if (pending) {
+    console.log(`[useAgentHealth] Reusing pending request for agent ${agentId}`);
+    return pending;
+  }
+
+  // Check throttle
+  if (throttledAgents.has(agentId)) {
+    const cached = globalCache.get(agentId);
+    if (cached) {
+      console.log(`[useAgentHealth] Throttled - using cache for agent ${agentId}`);
+      return cached.health;
+    }
+    return null;
+  }
+
+  // Check global cache
+  const cached = globalCache.get(agentId);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+    console.log(`[useAgentHealth] Using global cache for agent ${agentId}`);
+    return cached.health;
+  }
+
+  // Create new request
+  const requestPromise = (async () => {
+    try {
+      // Apply throttle
+      throttledAgents.add(agentId);
+      setTimeout(() => throttledAgents.delete(agentId), THROTTLE_DELAY);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+      const { data, error } = await supabase.functions.invoke('check-agent-health', {
+        body: { agentId }
+      });
+
+      clearTimeout(timeoutId);
+
+      if (error) throw error;
+
+      if (data?.success && data.health) {
+        const newHealth: AgentHealth = {
+          ...data.health,
+          lastChecked: new Date(),
+          isStale: false
+        };
+        
+        // Update global cache
+        globalCache.set(agentId, { health: newHealth, timestamp: Date.now() });
+        
+        return newHealth;
+      } else if (data?.health?.degraded) {
+        // Handle degraded response gracefully
+        const degradedHealth: AgentHealth = {
+          agentId,
+          totalDocuments: 0,
+          syncedDocuments: 0,
+          pendingDocuments: 0,
+          failedDocuments: 0,
+          hasIssues: false,
+          documents: [],
+          lastChecked: new Date(),
+          isStale: true
+        };
+        return degradedHealth;
+      } else {
+        throw new Error(data?.error || 'Failed to fetch health status');
+      }
+    } catch (err: any) {
+      console.error(`[useAgentHealth] Health check failed for ${agentId}:`, err.message);
+      
+      // Return cached data if available
+      const cached = globalCache.get(agentId);
+      if (cached) {
+        return { ...cached.health, isStale: true };
+      }
+      
+      // Return empty health instead of null to prevent UI errors
+      return {
+        agentId,
+        totalDocuments: 0,
+        syncedDocuments: 0,
+        pendingDocuments: 0,
+        failedDocuments: 0,
+        hasIssues: false,
+        documents: [],
+        lastChecked: new Date(),
+        isStale: true
+      };
+    } finally {
+      // Clean up pending request
+      pendingRequests.delete(agentId);
+    }
+  })();
+
+  pendingRequests.set(agentId, requestPromise);
+  return requestPromise;
+}
+
 /**
  * Hook per monitorare lo stato di salute di UN SINGOLO agente
- * Usa cache locale e polling intelligente per evitare timeout
+ * Usa cache globale e request deduplication per evitare overload
  */
 export const useAgentHealth = (agentId?: string) => {
   const [health, setHealth] = useState<AgentHealth | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   const checkHealth = useCallback(async (agentIdToCheck: string, useCache: boolean = true): Promise<AgentHealth | null> => {
-    // Check cache first
+    if (!mountedRef.current) return null;
+    
+    // Check local state cache first
     if (useCache && health && health.agentId === agentIdToCheck) {
       const age = Date.now() - health.lastChecked.getTime();
       if (age < CACHE_DURATION) {
-        console.log(`[useAgentHealth] Using cached health data (${Math.round(age / 1000)}s old)`);
         return health;
       }
     }
@@ -56,71 +168,56 @@ export const useAgentHealth = (agentId?: string) => {
     setError(null);
 
     try {
-      // Implement client-side timeout
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout')), REQUEST_TIMEOUT)
-      );
-
-      const healthCheckPromise = supabase.functions.invoke('check-agent-health', {
-        body: { agentId: agentIdToCheck }
-      });
-
-      const { data, error: invokeError } = await Promise.race([
-        healthCheckPromise,
-        timeoutPromise
-      ]) as any;
-
-      if (invokeError) throw invokeError;
-
-      if (data?.success && data.health) {
-        const newHealth: AgentHealth = {
-          ...data.health,
-          lastChecked: new Date(),
-          isStale: false
-        };
+      const newHealth = await fetchAgentHealth(agentIdToCheck);
+      
+      if (mountedRef.current && newHealth) {
         setHealth(newHealth);
-        return newHealth;
-      } else {
-        throw new Error(data?.error || 'Failed to fetch health status');
       }
-
+      
+      return newHealth;
     } catch (err: any) {
-      console.error('[useAgentHealth] Health check failed:', err);
-      
-      // On timeout or error, mark cached data as stale but keep it
-      if (health && health.agentId === agentIdToCheck) {
-        const staleHealth = { ...health, isStale: true };
-        setHealth(staleHealth);
-        setError('Status unavailable (using cached data)');
-        return staleHealth;
+      if (mountedRef.current) {
+        setError(err.message || 'Failed to check health');
       }
-      
-      setError(err.message || 'Failed to check health');
       return null;
-
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [health]);
 
   // Auto-poll when agentId is provided
   useEffect(() => {
+    mountedRef.current = true;
+    
     if (!agentId) return;
 
-    // Initial check
-    checkHealth(agentId, true);
+    // Initial check with small random delay to spread requests
+    const initialDelay = Math.random() * 2000;
+    const initialTimeout = setTimeout(() => {
+      if (mountedRef.current) {
+        checkHealth(agentId, true);
+      }
+    }, initialDelay);
 
-    // Set up polling
+    // Set up polling with jitter
     const interval = setInterval(() => {
-      checkHealth(agentId, true);
-    }, POLL_INTERVAL);
+      if (mountedRef.current) {
+        checkHealth(agentId, true);
+      }
+    }, POLL_INTERVAL + Math.random() * 5000); // Add jitter
 
-    return () => clearInterval(interval);
-  }, [agentId, checkHealth]);
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(initialTimeout);
+      clearInterval(interval);
+    };
+  }, [agentId]); // Remove checkHealth from deps to avoid re-registering
 
   const refresh = useCallback(() => {
     if (agentId) {
-      return checkHealth(agentId, false); // Force fresh check
+      return checkHealth(agentId, false);
     }
     return Promise.resolve(null);
   }, [agentId, checkHealth]);
@@ -145,7 +242,6 @@ export const useAgentHealth = (agentId?: string) => {
     error,
     checkHealth,
     refresh,
-    // Legacy compatibility
     healthStatus: health ? new Map([[health.agentId, getAgentStatus(health.agentId)!]]) : new Map(),
     getAgentStatus,
     hasAnyIssues: () => health?.hasIssues || false,
@@ -174,7 +270,6 @@ export const usePoolDocumentsHealth = () => {
   const checkPoolHealth = async () => {
     setIsLoading(true);
     try {
-      // Check for failed documents across all pipelines
       const [errorsA, errorsB, errorsC] = await Promise.all([
         supabase
           .from('pipeline_a_documents')
@@ -208,9 +303,7 @@ export const usePoolDocumentsHealth = () => {
       setHasIssues(totalIssues > 0);
 
       if (totalIssues > 0) {
-        console.log(`[usePoolDocumentsHealth] Pool has ${totalIssues} documents with issues:`, {
-          errorCount: errors
-        });
+        console.log(`[usePoolDocumentsHealth] Pool has ${totalIssues} documents with issues`);
       }
     } catch (error) {
       console.error('[usePoolDocumentsHealth] Error checking pool health:', error);
@@ -228,7 +321,6 @@ export const usePoolDocumentsHealth = () => {
 
   useEffect(() => {
     checkPoolHealth();
-
     const interval = setInterval(checkPoolHealth, 120000);
     return () => clearInterval(interval);
   }, []);
@@ -245,4 +337,3 @@ export const usePoolDocumentsHealth = () => {
     refresh: checkPoolHealth
   };
 };
-
