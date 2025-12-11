@@ -83,6 +83,10 @@ timeout = 600
 [functions.assign-document-to-agent]
 verify_jwt = true
 
+[functions.bulk-assign-documents]
+verify_jwt = true
+timeout = 300
+
 [functions.check-agent-health]
 verify_jwt = true
 
