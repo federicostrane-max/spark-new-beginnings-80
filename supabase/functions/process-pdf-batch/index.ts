@@ -47,11 +47,16 @@ serve(async (req) => {
   }
 
   const startTime = Date.now();
+  
+  // ✅ FIX 1: Extract jobId BEFORE try block for error handling access
+  let savedJobId: string | null = null;
+  let savedDocumentId: string | null = null;
 
   try {
-    const { jobId } = await req.json();
+    const body = await req.json();
+    savedJobId = body.jobId;
 
-    if (!jobId) {
+    if (!savedJobId) {
       return new Response(
         JSON.stringify({ error: 'jobId is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -65,24 +70,27 @@ serve(async (req) => {
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log(`[Process Batch] Starting job: ${jobId}`);
+    console.log(`[Process Batch] Starting job: ${savedJobId}`);
 
     // Fetch job details
     const { data: job, error: jobError } = await supabase
       .from('processing_jobs')
       .select('*')
-      .eq('id', jobId)
+      .eq('id', savedJobId)
       .single();
 
     if (jobError || !job) {
       throw new Error(`Failed to fetch job: ${jobError?.message || 'Not found'}`);
     }
 
+    // Save document_id for error handling
+    savedDocumentId = job.document_id;
+
     // Update job status to processing
     await supabase
       .from('processing_jobs')
       .update({ status: 'processing' })
-      .eq('id', jobId);
+      .eq('id', savedJobId);
 
     // Get extraction mode from job metadata
     const extractionMode = job.metadata?.extraction_mode || 'auto';
@@ -351,7 +359,7 @@ serve(async (req) => {
           trace_report: batchTraceReport
         }
       })
-      .eq('id', jobId);
+      .eq('id', savedJobId);
 
     console.log(`[Process Batch] Batch ${job.batch_index} completed: ${totalChunksCreated} chunks (${chunksToInsert.length} text + ${visualChunksCreated} visual), ${enqueuedCount} images enqueued`);
 
@@ -389,7 +397,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        jobId,
+        jobId: savedJobId,
         batchIndex: job.batch_index,
         chunksCreated: totalChunksCreated,
         textChunks: chunksToInsert.length,
@@ -404,14 +412,15 @@ serve(async (req) => {
   } catch (error) {
     console.error('[Process Batch] Unexpected error:', error);
 
-    // Mark job as failed if we have jobId
-    try {
-      const { jobId } = await req.json();
-      if (jobId) {
+    // ✅ FIX 1 & 3: Use savedJobId (not req.json()) and continue event-driven chain
+    if (savedJobId) {
+      try {
         const supabase = createClient(
           Deno.env.get('SUPABASE_URL')!,
           Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
         );
+        
+        // Mark job as failed
         await supabase
           .from('processing_jobs')
           .update({
@@ -419,10 +428,43 @@ serve(async (req) => {
             error_message: error instanceof Error ? error.message : 'Unknown error',
             completed_at: new Date().toISOString()
           })
-          .eq('id', jobId);
+          .eq('id', savedJobId);
+
+        console.log(`[Process Batch] ⚠️ Job ${savedJobId} marked as failed`);
+
+        // ✅ FIX 3: Continue event-driven chain even on failure!
+        // This ensures one failed batch doesn't block the entire document
+        if (savedDocumentId) {
+          // Check for next pending batch
+          const { data: nextJob, error: nextJobError } = await supabase
+            .from('processing_jobs')
+            .select('id, batch_index')
+            .eq('document_id', savedDocumentId)
+            .eq('status', 'pending')
+            .order('batch_index', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (nextJob && !nextJobError) {
+            console.log(`[Process Batch] ⚡ Despite failure, triggering next batch ${nextJob.batch_index} (job: ${nextJob.id})`);
+            EdgeRuntime.waitUntil(
+              supabase.functions.invoke('process-pdf-batch', {
+                body: { jobId: nextJob.id }
+              }).catch(err => console.error('[Process Batch] Failed to trigger next batch:', err))
+            );
+          } else {
+            // No more pending batches - trigger aggregation (will mark as partial_failure)
+            console.log(`[Process Batch] No more pending batches, triggering aggregation despite failure`);
+            EdgeRuntime.waitUntil(
+              supabase.functions.invoke('aggregate-document-batches', {
+                body: { documentId: savedDocumentId }
+              }).catch(err => console.error('[Process Batch] Failed to trigger aggregation:', err))
+            );
+          }
+        }
+      } catch (updateError) {
+        console.error('[Process Batch] Failed to handle error gracefully:', updateError);
       }
-    } catch (updateError) {
-      console.error('[Process Batch] Failed to update job status:', updateError);
     }
 
     return new Response(

@@ -29,6 +29,26 @@ async function retryWithBackoff<T>(
   throw new Error('Should not reach here');
 }
 
+/**
+ * Check if a LlamaParse error is transient and should be retried
+ */
+function isTransientLlamaParseError(errorMessage: string): boolean {
+  const lowerError = errorMessage.toLowerCase();
+  return (
+    lowerError.includes('billing') ||
+    lowerError.includes('rate limit') ||
+    lowerError.includes('rate_limit') ||
+    lowerError.includes('temporarily') ||
+    lowerError.includes('internal error') ||
+    lowerError.includes('timeout') ||
+    lowerError.includes('service unavailable') ||
+    lowerError.includes('503') ||
+    lowerError.includes('502') ||
+    lowerError.includes('429') ||
+    lowerError.includes('overloaded')
+  );
+}
+
 export interface LlamaParseUploadResponse {
   id: string;
   status: 'PENDING' | 'SUCCESS' | 'ERROR';
@@ -112,19 +132,23 @@ export async function uploadToLlamaParse(
 
 /**
  * Poll LlamaParse job status until completion
+ * Now with transient error retry support
  * @param jobId - Job ID from upload
  * @param apiKey - LlamaParse API key
- * @param maxAttempts - Maximum polling attempts (default: 60)
- * @param pollInterval - Interval between polls in ms (default: 5000)
+ * @param maxAttempts - Maximum polling attempts (default: 120)
+ * @param pollInterval - Interval between polls in ms (default: 2000)
  * @returns Job status when completed
  */
 export async function pollJobUntilComplete(
   jobId: string,
   apiKey: string,
-  maxAttempts: number = 120, // AUMENTATO: 120 attempts × 2s = 4 minuti (era 60 = 2min)
+  maxAttempts: number = 120, // 120 attempts × 2s = 4 minuti
   pollInterval: number = 2000
 ): Promise<LlamaParseJobStatus> {
   console.log(`[LlamaParse] Polling job ${jobId} (max ${maxAttempts} attempts, ${(maxAttempts * pollInterval / 1000).toFixed(0)}s timeout)...`);
+
+  let transientRetryCount = 0;
+  const maxTransientRetries = 3;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Retry with backoff ONLY for network/5xx errors, NOT for PENDING status
@@ -148,7 +172,21 @@ export async function pollJobUntilComplete(
     }
 
     if (status.status === 'ERROR') {
-      throw new Error(`LlamaParse job failed: ${status.error || 'Unknown error'}`);
+      const errorMessage = status.error || 'Unknown error';
+      
+      // ✅ FIX 2: Retry transient errors instead of immediately throwing
+      if (isTransientLlamaParseError(errorMessage) && transientRetryCount < maxTransientRetries) {
+        transientRetryCount++;
+        const retryDelay = pollInterval * 2 * transientRetryCount; // Exponential backoff
+        console.log(`[LlamaParse] ⚠️ Transient error detected: "${errorMessage}"`);
+        console.log(`[LlamaParse] Retrying in ${retryDelay}ms (transient retry ${transientRetryCount}/${maxTransientRetries})`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+        continue; // Retry instead of throw
+      }
+      
+      // Permanent error - throw
+      console.error(`[LlamaParse] Job ${jobId} failed permanently: ${errorMessage}`);
+      throw new Error(`LlamaParse job failed: ${errorMessage}`);
     }
 
     // PENDING: polling costante, NON backoff esponenziale
