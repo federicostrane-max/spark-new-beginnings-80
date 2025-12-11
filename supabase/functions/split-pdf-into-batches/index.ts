@@ -184,6 +184,21 @@ serve(async (req) => {
 
     console.log(`[Split PDF] Successfully created ${totalBatches} batches for document ${documentId}`);
 
+    // ✅ Update document status to 'processing' now that batches are ready
+    await supabase
+      .from('pipeline_a_hybrid_documents')
+      .update({ 
+        status: 'processing',
+        processing_metadata: {
+          total_pages: totalPages,
+          total_batches: totalBatches,
+          processing_started_at: new Date().toISOString(),
+        }
+      })
+      .eq('id', documentId);
+
+    console.log(`[Split PDF] ✅ Document status updated to 'processing'`);
+
     // ===== EVENT-DRIVEN: Trigger first batch immediately (no cron wait) =====
     const { data: firstJob, error: firstJobError } = await supabase
       .from('processing_jobs')
