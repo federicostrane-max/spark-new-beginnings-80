@@ -979,6 +979,7 @@ export type Database = {
           platform: string
           progress: number | null
           result: Json | null
+          start_url: string | null
           started_at: string | null
           status: string
           task_data: Json | null
@@ -1001,6 +1002,7 @@ export type Database = {
           platform: string
           progress?: number | null
           result?: Json | null
+          start_url?: string | null
           started_at?: string | null
           status?: string
           task_data?: Json | null
@@ -1023,6 +1025,7 @@ export type Database = {
           platform?: string
           progress?: number | null
           result?: Json | null
+          start_url?: string | null
           started_at?: string | null
           status?: string
           task_data?: Json | null

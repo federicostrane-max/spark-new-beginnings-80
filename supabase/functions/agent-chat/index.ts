@@ -4102,7 +4102,8 @@ ${knowledgeContext}${searchResultsContext}`;
                     task_description,
                     platform,
                     task_type,
-                    task_data: { start_url },
+                    start_url,                    // ✅ Colonna dedicata
+                    task_data: { start_url },     // Manteniamo anche in task_data per retrocompatibilità
                     status: 'pending',
                     total_steps: steps?.length || 0,
                     completed_steps: 0,
