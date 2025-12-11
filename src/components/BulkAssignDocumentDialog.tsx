@@ -846,19 +846,28 @@ export const BulkAssignDocumentDialog = ({
           insertsByPipeline[key].push(ins);
         });
         
-        // Execute insertions per pipeline - All pipelines use edge function
+        // Execute insertions per pipeline using BULK assignment (background processing)
         for (const [pipelineType, items] of Object.entries(insertsByPipeline)) {
           if (items.length === 0) continue;
           
-          console.log(`Inserting ${items.length} assignments for ${pipelineType}`);
+          console.log(`Bulk inserting ${items.length} assignments for ${pipelineType}`);
           
-          // All pipelines use edge function for assignment
-          for (const item of items) {
-            const pipeline = pipelineType === 'pipeline_a' ? 'a' : pipelineType === 'pipeline_a_hybrid' ? 'a-hybrid' : pipelineType === 'pipeline_b' ? 'b' : 'c';
-            await supabase.functions.invoke('assign-document-to-agent', {
+          // Group by agent for bulk processing
+          const itemsByAgent = items.reduce((acc, item) => {
+            if (!acc[item.agent_id]) acc[item.agent_id] = [];
+            acc[item.agent_id].push(item.document_id);
+            return acc;
+          }, {} as Record<string, string[]>);
+          
+          const pipeline = pipelineType === 'pipeline_a' ? 'a' : pipelineType === 'pipeline_a_hybrid' ? 'a-hybrid' : pipelineType === 'pipeline_b' ? 'b' : 'c';
+          
+          // Single bulk call per agent - processes in background even if user closes dialog
+          for (const [agentId, docIds] of Object.entries(itemsByAgent)) {
+            console.log(`Bulk assign ${docIds.length} docs to agent ${agentId} (${pipeline})`);
+            await supabase.functions.invoke('bulk-assign-documents', {
               body: {
-                agentId: item.agent_id,
-                documentId: item.document_id,
+                agentId,
+                documentIds: docIds,
                 pipeline
               }
             });
