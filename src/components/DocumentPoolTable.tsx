@@ -1705,7 +1705,27 @@ export const DocumentPoolTable = () => {
     }
   };
 
-  const selectedDocuments = documents.filter((d) => selectedDocIds.has(d.id));
+  // Helper: estrai TUTTI i documenti da foldersData (ricorsivo)
+  const getAllDocsFromFolders = (folders: any[]): any[] => {
+    const allDocs: any[] = [];
+    const extractDocs = (folder: any) => {
+      if (folder.documents) {
+        allDocs.push(...folder.documents);
+      }
+      if (folder.children) {
+        folder.children.forEach(extractDocs);
+      }
+    };
+    folders.forEach(extractDocs);
+    return allDocs;
+  };
+
+  // Combina documenti da entrambe le fonti: documents array E foldersData
+  const allAvailableDocs = [...documents, ...getAllDocsFromFolders(foldersData)];
+  // Deduplica per ID
+  const uniqueDocsMap = new Map(allAvailableDocs.map(d => [d.id, d]));
+  
+  const selectedDocuments = Array.from(uniqueDocsMap.values()).filter((d) => selectedDocIds.has(d.id));
   const validatedSelectedDocs = selectedDocuments.filter((d) => d.processing_status === "ready_for_assignment");
   
   // Se c'è una cartella selezionata, considera quella invece del conteggio documenti
