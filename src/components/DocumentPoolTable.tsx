@@ -834,7 +834,7 @@ export const DocumentPoolTable = () => {
       supabase.from('pipeline_a_documents').select('folder').not('folder', 'is', null),
       supabase.from('pipeline_b_documents').select('folder').not('folder', 'is', null).neq('source_type', 'github'),
       supabase.from('pipeline_c_documents').select('folder').not('folder', 'is', null),
-      supabase.from('pipeline_a_hybrid_documents').select('folder').not('folder', 'is', null)
+      supabase.from('pipeline_a_hybrid_documents').select('folder').not('folder', 'is', null).not('source_type', 'in', '("markdown","code")')
     ]);
 
     if (pipelineAFolders.error) throw pipelineAFolders.error;
@@ -879,7 +879,7 @@ export const DocumentPoolTable = () => {
       supabase.from('pipeline_a_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
       supabase.from('pipeline_b_documents').select('*').not('folder', 'is', null).neq('source_type', 'github').order('created_at', { ascending: false }),
       supabase.from('pipeline_c_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
-      supabase.from('pipeline_a_hybrid_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false })
+      supabase.from('pipeline_a_hybrid_documents').select('*').not('folder', 'is', null).not('source_type', 'in', '("markdown","code")').order('created_at', { ascending: false })
     ]);
 
     if (pipelineAWithFolder.error) throw pipelineAWithFolder.error;
