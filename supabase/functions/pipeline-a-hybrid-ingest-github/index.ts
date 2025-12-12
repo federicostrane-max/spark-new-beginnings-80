@@ -137,9 +137,11 @@ serve(async (req) => {
         orgName = orgName.split('/')[0];
       }
       
-      console.log(`[Pipeline A-Hybrid GitHub] Extracted org name: "${orgName}" from input: "${repoUrl}"`);
+      console.log(`[Pipeline A-Hybrid GitHub] Extracted org/user name: "${orgName}" from input: "${repoUrl}"`);
 
-      const orgReposResponse = await fetch(
+      // Try organization API first, then fall back to user API
+      let repos: any[] = [];
+      let orgReposResponse = await fetch(
         `https://api.github.com/orgs/${orgName}/repos?per_page=100`,
         {
           headers: {
@@ -150,12 +152,30 @@ serve(async (req) => {
         }
       );
 
-      if (!orgReposResponse.ok) {
-        throw new Error(`Failed to fetch organization repos: ${orgReposResponse.statusText}`);
-      }
+      if (orgReposResponse.ok) {
+        repos = await orgReposResponse.json();
+        console.log(`[Pipeline A-Hybrid GitHub] Found ${repos.length} repositories in organization ${orgName}`);
+      } else {
+        // Try user repos API as fallback
+        console.log(`[Pipeline A-Hybrid GitHub] Org API failed, trying user API for: ${orgName}`);
+        const userReposResponse = await fetch(
+          `https://api.github.com/users/${orgName}/repos?per_page=100&type=owner`,
+          {
+            headers: {
+              'Authorization': `token ${githubToken}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'User-Agent': GITHUB_USER_AGENT,
+            },
+          }
+        );
 
-      const repos = await orgReposResponse.json();
-      console.log(`[Pipeline A-Hybrid GitHub] Found ${repos.length} repositories in ${orgName}`);
+        if (!userReposResponse.ok) {
+          throw new Error(`Failed to fetch repos for "${orgName}": Not found as organization or user`);
+        }
+        
+        repos = await userReposResponse.json();
+        console.log(`[Pipeline A-Hybrid GitHub] Found ${repos.length} repositories for user ${orgName}`);
+      }
 
       const results = {
         totalRepos: repos.length,
