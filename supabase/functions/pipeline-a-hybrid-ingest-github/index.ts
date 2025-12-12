@@ -123,8 +123,21 @@ serve(async (req) => {
 
     // Handle organization-wide import
     if (importAllOrgRepos) {
-      const orgName = repoUrl;
-      console.log(`[Pipeline A-Hybrid GitHub] Fetching all repos from organization: ${orgName}`);
+      // Extract org name from various input formats (e.g., "org/repo", "org", "https://github.com/org/repo")
+      let orgName = repoUrl.trim();
+      
+      // Remove GitHub URL prefix if present
+      if (orgName.includes('github.com/')) {
+        const match = orgName.match(/github\.com\/([^\/]+)/);
+        if (match) orgName = match[1];
+      }
+      
+      // If input contains "/", take only the first part (org name)
+      if (orgName.includes('/')) {
+        orgName = orgName.split('/')[0];
+      }
+      
+      console.log(`[Pipeline A-Hybrid GitHub] Extracted org name: "${orgName}" from input: "${repoUrl}"`);
 
       const orgReposResponse = await fetch(
         `https://api.github.com/orgs/${orgName}/repos?per_page=100`,
