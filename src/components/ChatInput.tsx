@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe } from "lucide-react";
+import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe, GitBranch, FileCode, FolderOpen, GitPullRequest } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -303,6 +303,26 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
         template = 'Automazione browser: ';
         forcedTool = 'create_browser_task';
         break;
+      case 'github-read':
+        template = 'Leggi file da GitHub: owner/repo path/to/file.js';
+        forcedTool = 'github_read_file';
+        break;
+      case 'github-write':
+        template = 'Scrivi file su GitHub: owner/repo path/to/file.js [descrivi modifiche]';
+        forcedTool = 'github_write_file';
+        break;
+      case 'github-list':
+        template = 'Elenca file repository GitHub: owner/repo';
+        forcedTool = 'github_list_files';
+        break;
+      case 'github-branch':
+        template = 'Crea branch GitHub: owner/repo nome-branch';
+        forcedTool = 'github_create_branch';
+        break;
+      case 'github-pr':
+        template = 'Crea Pull Request GitHub: owner/repo head-branch -> base-branch [titolo e descrizione]';
+        forcedTool = 'github_create_pr';
+        break;
     }
     
     // Set forced tool if applicable
@@ -331,9 +351,17 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       {/* Forced Tool Badge */}
       {pendingForcedTool && (
         <div className="flex gap-2 items-center p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-          <Globe className="h-4 w-4 text-emerald-500" />
+          {pendingForcedTool?.startsWith('github_') ? <GitBranch className="h-4 w-4 text-emerald-500" /> : <Globe className="h-4 w-4 text-emerald-500" />}
           <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
-            🤖 Tool forzato: {pendingForcedTool === 'create_browser_task' ? 'Browser Task' : pendingForcedTool}
+            🤖 Tool forzato: {
+              pendingForcedTool === 'create_browser_task' ? 'Browser Task' :
+              pendingForcedTool === 'github_read_file' ? 'GitHub Read' :
+              pendingForcedTool === 'github_write_file' ? 'GitHub Write' :
+              pendingForcedTool === 'github_list_files' ? 'GitHub List' :
+              pendingForcedTool === 'github_create_branch' ? 'GitHub Branch' :
+              pendingForcedTool === 'github_create_pr' ? 'GitHub PR' :
+              pendingForcedTool
+            }
           </span>
           <Button
             type="button"
@@ -467,6 +495,35 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                   <Globe className="mr-2 h-4 w-4" />
                   Crea Browser Task
                 </DropdownMenuItem>
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <GitBranch className="mr-2 h-4 w-4" />
+                    GitHub Tools
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => insertAgentAction('github-read')}>
+                      <FileCode className="mr-2 h-4 w-4" />
+                      Leggi File
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('github-write')}>
+                      <Edit className="mr-2 h-4 w-4" />
+                      Scrivi/Modifica File
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('github-list')}>
+                      <FolderOpen className="mr-2 h-4 w-4" />
+                      Elenca File Repository
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('github-branch')}>
+                      <GitBranch className="mr-2 h-4 w-4" />
+                      Crea Branch
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('github-pr')}>
+                      <GitPullRequest className="mr-2 h-4 w-4" />
+                      Crea Pull Request
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
