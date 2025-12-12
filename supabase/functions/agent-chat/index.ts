@@ -4194,6 +4194,200 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
               }
             }
             
+            // ============= TOOL: github_read_file =============
+            else if (toolName === 'github_read_file') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: github_read_file`);
+              console.log(`   Repo: ${toolInput.owner}/${toolInput.repo}, Path: ${toolInput.path}`);
+              
+              try {
+                const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/github-repo-tools`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    action: 'read_file',
+                    owner: toolInput.owner,
+                    repo: toolInput.repo,
+                    path: toolInput.path,
+                    branch: toolInput.branch || 'main'
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                toolResult = result;
+                responseText = `📖 File read: \`${toolInput.path}\` (${result.size} bytes)\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                
+              } catch (error) {
+                console.error('❌ Error in github_read_file:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to read file', success: false };
+                responseText = `❌ Errore lettura file: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: github_write_file =============
+            else if (toolName === 'github_write_file') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: github_write_file`);
+              console.log(`   Repo: ${toolInput.owner}/${toolInput.repo}, Path: ${toolInput.path}`);
+              
+              try {
+                const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/github-repo-tools`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    action: 'write_file',
+                    owner: toolInput.owner,
+                    repo: toolInput.repo,
+                    path: toolInput.path,
+                    content: toolInput.content,
+                    message: toolInput.message,
+                    branch: toolInput.branch || 'main'
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                toolResult = result;
+                responseText = `✅ File scritto: \`${result.path}\` ([commit ${result.commit_sha?.slice(0, 7)}](${result.commit_url}))\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                
+              } catch (error) {
+                console.error('❌ Error in github_write_file:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to write file', success: false };
+                responseText = `❌ Errore scrittura file: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: github_list_files =============
+            else if (toolName === 'github_list_files') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: github_list_files`);
+              console.log(`   Repo: ${toolInput.owner}/${toolInput.repo}, Path: ${toolInput.path || '/'}`);
+              
+              try {
+                const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/github-repo-tools`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    action: 'list_files',
+                    owner: toolInput.owner,
+                    repo: toolInput.repo,
+                    path: toolInput.path || '',
+                    branch: toolInput.branch || 'main'
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                toolResult = result;
+                responseText = `📂 Listed ${result.files?.length || 0} files in \`${toolInput.owner}/${toolInput.repo}/${toolInput.path || ''}\`\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                
+              } catch (error) {
+                console.error('❌ Error in github_list_files:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to list files', success: false };
+                responseText = `❌ Errore listing files: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: github_create_branch =============
+            else if (toolName === 'github_create_branch') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: github_create_branch`);
+              console.log(`   Repo: ${toolInput.owner}/${toolInput.repo}, Branch: ${toolInput.newBranch}`);
+              
+              try {
+                const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/github-repo-tools`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    action: 'create_branch',
+                    owner: toolInput.owner,
+                    repo: toolInput.repo,
+                    newBranch: toolInput.newBranch,
+                    fromBranch: toolInput.fromBranch || 'main'
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                toolResult = result;
+                responseText = `🌿 Branch creato: \`${result.branch}\` da \`${result.from_branch}\`\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                
+              } catch (error) {
+                console.error('❌ Error in github_create_branch:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create branch', success: false };
+                responseText = `❌ Errore creazione branch: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: github_create_pr =============
+            else if (toolName === 'github_create_pr') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: github_create_pr`);
+              console.log(`   Repo: ${toolInput.owner}/${toolInput.repo}, PR: ${toolInput.head} → ${toolInput.base || 'main'}`);
+              
+              try {
+                const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/github-repo-tools`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  },
+                  body: JSON.stringify({
+                    action: 'create_pr',
+                    owner: toolInput.owner,
+                    repo: toolInput.repo,
+                    title: toolInput.title,
+                    body: toolInput.body,
+                    head: toolInput.head,
+                    base: toolInput.base || 'main'
+                  })
+                });
+                
+                const result = await response.json();
+                if (result.error) throw new Error(result.error);
+                
+                toolResult = result;
+                responseText = `📝 Pull Request creata: [#${result.number} - ${result.title}](${result.url})\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                
+              } catch (error) {
+                console.error('❌ Error in github_create_pr:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create PR', success: false };
+                responseText = `❌ Errore creazione PR: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
             // ============= FALLBACK: Unknown Tool =============
             else {
               console.warn(`⚠️ [REQ-${context.requestId}] Unknown tool: ${toolName}`);
@@ -4507,6 +4701,91 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 }
               },
               required: ['task_description', 'platform', 'task_type', 'start_url', 'steps']
+            }
+          });
+          
+          // ===== GITHUB REPOSITORY TOOLS =====
+          // Tool: github_read_file - Read file from GitHub repo
+          tools.push({
+            name: 'github_read_file',
+            description: 'Read the content of a file from a GitHub repository. Use for viewing source code, configs, or documentation.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                owner: { type: 'string', description: 'Repository owner (e.g., "federicostrane-max")' },
+                repo: { type: 'string', description: 'Repository name (e.g., "architects-hand-bridge")' },
+                path: { type: 'string', description: 'File path within repo (e.g., "src/bridge/index.js")' },
+                branch: { type: 'string', description: 'Branch name (default: "main")' }
+              },
+              required: ['owner', 'repo', 'path']
+            }
+          });
+          
+          // Tool: github_write_file - Create or update file in GitHub repo
+          tools.push({
+            name: 'github_write_file',
+            description: 'Create or update a file in a GitHub repository. Creates a commit with the changes.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                owner: { type: 'string', description: 'Repository owner' },
+                repo: { type: 'string', description: 'Repository name' },
+                path: { type: 'string', description: 'File path to create/update' },
+                content: { type: 'string', description: 'New file content' },
+                message: { type: 'string', description: 'Commit message describing the change' },
+                branch: { type: 'string', description: 'Target branch (default: "main")' }
+              },
+              required: ['owner', 'repo', 'path', 'content', 'message']
+            }
+          });
+          
+          // Tool: github_list_files - List files and directories in a repo
+          tools.push({
+            name: 'github_list_files',
+            description: 'List files and directories in a GitHub repository path.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                owner: { type: 'string', description: 'Repository owner' },
+                repo: { type: 'string', description: 'Repository name' },
+                path: { type: 'string', description: 'Directory path (empty for root)' },
+                branch: { type: 'string', description: 'Branch name (default: "main")' }
+              },
+              required: ['owner', 'repo']
+            }
+          });
+          
+          // Tool: github_create_branch - Create a new branch
+          tools.push({
+            name: 'github_create_branch',
+            description: 'Create a new branch in a GitHub repository for isolated development.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                owner: { type: 'string', description: 'Repository owner' },
+                repo: { type: 'string', description: 'Repository name' },
+                newBranch: { type: 'string', description: 'Name for the new branch' },
+                fromBranch: { type: 'string', description: 'Source branch (default: "main")' }
+              },
+              required: ['owner', 'repo', 'newBranch']
+            }
+          });
+          
+          // Tool: github_create_pr - Create a Pull Request
+          tools.push({
+            name: 'github_create_pr',
+            description: 'Create a Pull Request to merge changes from one branch to another.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                owner: { type: 'string', description: 'Repository owner' },
+                repo: { type: 'string', description: 'Repository name' },
+                title: { type: 'string', description: 'PR title' },
+                body: { type: 'string', description: 'PR description with details of changes' },
+                head: { type: 'string', description: 'Source branch with changes' },
+                base: { type: 'string', description: 'Target branch (default: "main")' }
+              },
+              required: ['owner', 'repo', 'title', 'body', 'head']
             }
           });
           

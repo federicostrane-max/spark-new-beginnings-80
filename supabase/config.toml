@@ -278,3 +278,7 @@ verify_jwt = false
 [functions.ingest-pdf-from-url]
 verify_jwt = false
 timeout = 120
+
+[functions.github-repo-tools]
+verify_jwt = false
+timeout = 60
