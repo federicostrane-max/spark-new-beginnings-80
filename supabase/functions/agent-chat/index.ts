@@ -3714,6 +3714,7 @@ ${knowledgeContext}${searchResultsContext}`;
 
           // Define tools for all agents (simplified - tools are now optional/secondary)
           let toolCallCount = 0; // Track tool calls for validation
+          let lastExecutedToolName = ''; // Track last tool name for fallback message
           
           const tools = [];
           
@@ -5440,6 +5441,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                         fullResponse = newFullResponse;
                         needsToolResultContinuation = true;
                         toolCallCount++;
+                        lastExecutedToolName = toolUseName || '';
                         
                         // Reset
                         toolUseName = null;
@@ -5554,6 +5556,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   fullResponse = newFullResponse;
                   needsToolResultContinuation = true;
                   toolCallCount++;
+                  lastExecutedToolName = toolUseName || '';
                   
                   // Reset for next tool
                   toolUseName = null;
@@ -5670,6 +5673,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                         fullResponse = newFullResponse;
                         needsToolResultContinuation = true;
                         toolCallCount++;
+                        lastExecutedToolName = currentToolName || toolUseName || '';
                         
                         // Reset
                         toolUseName = null;
@@ -5771,6 +5775,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                       
                       needsToolResultContinuation = true;
                       toolCallCount++;
+                      lastExecutedToolName = toolUseName || '';
                       
                       // Reset tool state
                       toolUseName = null;
@@ -6370,6 +6375,31 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
             if (skipFinalPlaceholderUpdate) {
               console.log(`⏭️ [REQ-${requestId}] Skipping final placeholder update - already deleted by tool`);
             } else {
+              // FALLBACK: If tool executed but no text response, add confirmation message
+              if (fullResponse.trim().length === 0 && toolCallCount > 0) {
+                console.log(`⚠️ [REQ-${requestId}] Empty response after tool execution, adding fallback message`);
+                
+                // Generate contextual fallback message based on tool name
+                const toolConfirmations: Record<string, string> = {
+                  'create_browser_task': '✅ Browser task creato con successo.',
+                  'download_pdf': '✅ Download PDF completato.',
+                  'web_search': '✅ Ricerca web completata.',
+                  'get_agent_knowledge': '✅ Documenti recuperati.',
+                  'consult_agent': '✅ Consultazione agente completata.',
+                  'github_read_file': '✅ File letto da GitHub.',
+                  'github_write_file': '✅ File scritto su GitHub.',
+                  'github_list_files': '✅ Lista file GitHub recuperata.',
+                  'github_create_branch': '✅ Branch GitHub creato.',
+                  'github_create_pr': '✅ Pull Request GitHub creata.',
+                };
+                
+                const fallbackMessage = toolConfirmations[lastExecutedToolName] || 
+                  `✅ Operazione completata (${lastExecutedToolName || 'tool'}).`;
+                
+                fullResponse = fallbackMessage;
+                await sendSSE(JSON.stringify({ type: 'content', text: fallbackMessage }));
+              }
+              
               const finalContentLength = fullResponse.length;
               console.log(`💾 [REQ-${requestId}] Final save: ${finalContentLength} chars`);
               
