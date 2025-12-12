@@ -5,6 +5,43 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Helper function to parse owner/repo from various input formats
+function parseOwnerRepo(owner: string, repo: string): { owner: string; repo: string } {
+  let parsedOwner = owner?.trim() || '';
+  let parsedRepo = repo?.trim() || '';
+  
+  // Case 1: owner contains full repo path like "owner/repo"
+  if (parsedOwner.includes('/') && !parsedRepo) {
+    const parts = parsedOwner.split('/').filter(p => p.length > 0);
+    if (parts.length >= 2) {
+      parsedOwner = parts[0];
+      parsedRepo = parts.slice(1).join('/'); // Handle nested paths
+    }
+  }
+  
+  // Case 2: owner contains URL-like format
+  if (parsedOwner.includes('github.com')) {
+    const match = parsedOwner.match(/github\.com\/([^\/]+)\/([^\/\s]+)/);
+    if (match) {
+      parsedOwner = match[1];
+      parsedRepo = match[2].replace(/\.git$/, '');
+    }
+  }
+  
+  // Case 3: repo contains owner/repo format
+  if (parsedRepo.includes('/') && parsedRepo.split('/').length >= 2) {
+    const parts = parsedRepo.split('/');
+    if (!parsedOwner) {
+      parsedOwner = parts[0];
+      parsedRepo = parts.slice(1).join('/');
+    }
+  }
+  
+  console.log(`📝 [parseOwnerRepo] Input: owner="${owner}", repo="${repo}" → Parsed: owner="${parsedOwner}", repo="${parsedRepo}"`);
+  
+  return { owner: parsedOwner, repo: parsedRepo };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -12,6 +49,9 @@ serve(async (req) => {
 
   const { action, ...params } = await req.json();
   const token = Deno.env.get('GITHUB_TOKEN');
+
+  console.log(`🔧 [GitHub Tools] Action: ${action}`);
+  console.log(`📥 [GitHub Tools] Raw params:`, JSON.stringify(params, null, 2));
 
   if (!token) {
     console.error('❌ GITHUB_TOKEN not configured');
@@ -21,28 +61,40 @@ serve(async (req) => {
     });
   }
 
-  console.log(`🔧 [GitHub Tools] Action: ${action}`);
+  // Parse owner/repo with robust handling
+  const { owner: parsedOwner, repo: parsedRepo } = parseOwnerRepo(params.owner, params.repo);
+  
+  if (!parsedOwner || !parsedRepo) {
+    const errorMsg = `Invalid repository parameters: owner="${params.owner}", repo="${params.repo}". Expected format: owner="username", repo="repository" or owner="username/repository"`;
+    console.error(`❌ ${errorMsg}`);
+    return new Response(JSON.stringify({ error: errorMsg }), {
+      status: 400, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  console.log(`✅ [GitHub Tools] Resolved: ${parsedOwner}/${parsedRepo}`);
 
   try {
     let result;
     
     switch (action) {
       case 'read_file':
-        result = await readFile(token, params.owner, params.repo, params.path, params.branch);
+        result = await readFile(token, parsedOwner, parsedRepo, params.path, params.branch);
         break;
       case 'write_file':
-        result = await writeFile(token, params.owner, params.repo, params.path, 
+        result = await writeFile(token, parsedOwner, parsedRepo, params.path, 
                                  params.content, params.message, params.branch, params.sha);
         break;
       case 'list_files':
-        result = await listFiles(token, params.owner, params.repo, params.path, params.branch);
+        result = await listFiles(token, parsedOwner, parsedRepo, params.path, params.branch);
         break;
       case 'create_branch':
-        result = await createBranch(token, params.owner, params.repo, 
+        result = await createBranch(token, parsedOwner, parsedRepo, 
                                     params.newBranch, params.fromBranch);
         break;
       case 'create_pr':
-        result = await createPullRequest(token, params.owner, params.repo,
+        result = await createPullRequest(token, parsedOwner, parsedRepo,
                                          params.title, params.body, params.head, params.base);
         break;
       default:
