@@ -450,161 +450,159 @@ export const BulkAssignDocumentDialog = ({
     toast.success("Tutti gli agenti deselezionati");
   };
 
-  // Pipeline-aware helper: Get existing assignments
+  // Pipeline-aware helper: Get existing assignments (with batching to avoid URL length limits)
   const getCurrentAssignments = async (documentIds: string[], pipeline: PipelineType) => {
+    const BATCH_SIZE = 50; // Avoid URL length limits
+    const results: Array<{ agent_id: string; document_id: string }> = [];
+    
+    // Helper to fetch and process in batches
+    const fetchBatched = async (
+      fetchChunks: (ids: string[]) => Promise<{ id: string; document_id: string }[]>,
+      fetchAssignments: (chunkIds: string[]) => Promise<{ agent_id: string; chunk_id: string }[]>
+    ) => {
+      for (let i = 0; i < documentIds.length; i += BATCH_SIZE) {
+        const batchDocIds = documentIds.slice(i, i + BATCH_SIZE);
+        const chunks = await fetchChunks(batchDocIds);
+        
+        if (chunks.length === 0) continue;
+        
+        const chunkIds = chunks.map(c => c.id);
+        const chunkToDoc = new Map(chunks.map(c => [c.id, c.document_id]));
+        
+        // Also batch chunk IDs
+        for (let j = 0; j < chunkIds.length; j += BATCH_SIZE) {
+          const batchChunkIds = chunkIds.slice(j, j + BATCH_SIZE);
+          const assignments = await fetchAssignments(batchChunkIds);
+          
+          results.push(...assignments.map(a => ({
+            agent_id: a.agent_id,
+            document_id: chunkToDoc.get(a.chunk_id)!
+          })));
+        }
+      }
+    };
+
     if (pipeline === 'pipeline_a') {
-      const { data } = await supabase
-        .from('pipeline_a_chunks_raw')
-        .select('id, document_id')
-        .in('document_id', documentIds);
-      
-      if (!data) return [];
-      
-      const chunkIds = data.map(c => c.id);
-      const { data: assignments } = await supabase
-        .from('pipeline_a_agent_knowledge')
-        .select('agent_id, chunk_id')
-        .in('chunk_id', chunkIds);
-      
-      const chunkToDoc = new Map(data.map(c => [c.id, c.document_id]));
-      return (assignments || []).map(a => ({
-        agent_id: a.agent_id,
-        document_id: chunkToDoc.get(a.chunk_id)!
-      }));
+      await fetchBatched(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_a_chunks_raw').select('id, document_id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { data } = await supabase.from('pipeline_a_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', chunkIds);
+          return data || [];
+        }
+      );
     } else if (pipeline === 'pipeline_a_hybrid') {
-      const { data } = await supabase
-        .from('pipeline_a_hybrid_chunks_raw')
-        .select('id, document_id')
-        .in('document_id', documentIds);
-      
-      if (!data) return [];
-      
-      const chunkIds = data.map(c => c.id);
-      const { data: assignments } = await supabase
-        .from('pipeline_a_hybrid_agent_knowledge')
-        .select('agent_id, chunk_id')
-        .in('chunk_id', chunkIds);
-      
-      const chunkToDoc = new Map(data.map(c => [c.id, c.document_id]));
-      return (assignments || []).map(a => ({
-        agent_id: a.agent_id,
-        document_id: chunkToDoc.get(a.chunk_id)!
-      }));
+      await fetchBatched(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_a_hybrid_chunks_raw').select('id, document_id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { data } = await supabase.from('pipeline_a_hybrid_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', chunkIds);
+          return data || [];
+        }
+      );
     } else if (pipeline === 'pipeline_b') {
-      const { data } = await supabase
-        .from('pipeline_b_chunks_raw')
-        .select('id, document_id')
-        .in('document_id', documentIds);
-      
-      if (!data) return [];
-      
-      const chunkIds = data.map(c => c.id);
-      const { data: assignments } = await supabase
-        .from('pipeline_b_agent_knowledge')
-        .select('agent_id, chunk_id')
-        .in('chunk_id', chunkIds);
-      
-      const chunkToDoc = new Map(data.map(c => [c.id, c.document_id]));
-      return (assignments || []).map(a => ({
-        agent_id: a.agent_id,
-        document_id: chunkToDoc.get(a.chunk_id)!
-      }));
+      await fetchBatched(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_b_chunks_raw').select('id, document_id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { data } = await supabase.from('pipeline_b_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', chunkIds);
+          return data || [];
+        }
+      );
     } else {
-      const { data } = await supabase
-        .from('pipeline_c_chunks_raw')
-        .select('id, document_id')
-        .in('document_id', documentIds);
-      
-      if (!data) return [];
-      
-      const chunkIds = data.map(c => c.id);
-      const { data: assignments } = await supabase
-        .from('pipeline_c_agent_knowledge')
-        .select('agent_id, chunk_id')
-        .in('chunk_id', chunkIds);
-      
-      const chunkToDoc = new Map(data.map(c => [c.id, c.document_id]));
-      return (assignments || []).map(a => ({
-        agent_id: a.agent_id,
-        document_id: chunkToDoc.get(a.chunk_id)!
-      }));
+      await fetchBatched(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_c_chunks_raw').select('id, document_id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { data } = await supabase.from('pipeline_c_agent_knowledge').select('agent_id, chunk_id').in('chunk_id', chunkIds);
+          return data || [];
+        }
+      );
     }
+    
+    return results;
   };
 
-  // Pipeline-aware helper: Remove assignments
+  // Pipeline-aware helper: Remove assignments (with batching)
   const removeAssignments = async (toDelete: Array<{ agent_id: string; document_id: string }>, pipeline: PipelineType) => {
+    const BATCH_SIZE = 50;
+    const docIds = [...new Set(toDelete.map(x => x.document_id))];
+    const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
+    
+    const deleteFromPipeline = async (
+      fetchChunks: (ids: string[]) => Promise<{ id: string }[]>,
+      deleteAssignments: (chunkIds: string[]) => Promise<void>
+    ) => {
+      const allChunkIds: string[] = [];
+      
+      // Fetch chunks in batches
+      for (let i = 0; i < docIds.length; i += BATCH_SIZE) {
+        const batchDocIds = docIds.slice(i, i + BATCH_SIZE);
+        const chunks = await fetchChunks(batchDocIds);
+        allChunkIds.push(...chunks.map(c => c.id));
+      }
+      
+      if (allChunkIds.length === 0) return;
+      
+      // Delete in batches
+      for (let i = 0; i < allChunkIds.length; i += BATCH_SIZE) {
+        const batchChunkIds = allChunkIds.slice(i, i + BATCH_SIZE);
+        await deleteAssignments(batchChunkIds);
+      }
+    };
+    
     if (pipeline === 'pipeline_a') {
-      const docIds = [...new Set(toDelete.map(x => x.document_id))];
-      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
-      
-      const { data: chunks } = await supabase
-        .from('pipeline_a_chunks_raw')
-        .select('id')
-        .in('document_id', docIds);
-      
-      if (!chunks) return;
-      
-      const { error } = await supabase
-        .from('pipeline_a_agent_knowledge')
-        .delete()
-        .in('agent_id', agentIds)
-        .in('chunk_id', chunks.map(c => c.id));
-      
-      if (error) throw error;
+      await deleteFromPipeline(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_a_chunks_raw').select('id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { error } = await supabase.from('pipeline_a_agent_knowledge').delete().in('agent_id', agentIds).in('chunk_id', chunkIds);
+          if (error) throw error;
+        }
+      );
     } else if (pipeline === 'pipeline_a_hybrid') {
-      const docIds = [...new Set(toDelete.map(x => x.document_id))];
-      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
-      
-      const { data: chunks } = await supabase
-        .from('pipeline_a_hybrid_chunks_raw')
-        .select('id')
-        .in('document_id', docIds);
-      
-      if (!chunks) return;
-      
-      const { error } = await supabase
-        .from('pipeline_a_hybrid_agent_knowledge')
-        .delete()
-        .in('agent_id', agentIds)
-        .in('chunk_id', chunks.map(c => c.id));
-      
-      if (error) throw error;
+      await deleteFromPipeline(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_a_hybrid_chunks_raw').select('id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { error } = await supabase.from('pipeline_a_hybrid_agent_knowledge').delete().in('agent_id', agentIds).in('chunk_id', chunkIds);
+          if (error) throw error;
+        }
+      );
     } else if (pipeline === 'pipeline_b') {
-      const docIds = [...new Set(toDelete.map(x => x.document_id))];
-      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
-      
-      const { data: chunks } = await supabase
-        .from('pipeline_b_chunks_raw')
-        .select('id')
-        .in('document_id', docIds);
-      
-      if (!chunks) return;
-      
-      const { error } = await supabase
-        .from('pipeline_b_agent_knowledge')
-        .delete()
-        .in('agent_id', agentIds)
-        .in('chunk_id', chunks.map(c => c.id));
-      
-      if (error) throw error;
+      await deleteFromPipeline(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_b_chunks_raw').select('id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { error } = await supabase.from('pipeline_b_agent_knowledge').delete().in('agent_id', agentIds).in('chunk_id', chunkIds);
+          if (error) throw error;
+        }
+      );
     } else {
-      const docIds = [...new Set(toDelete.map(x => x.document_id))];
-      const agentIds = [...new Set(toDelete.map(x => x.agent_id))];
-      
-      const { data: chunks } = await supabase
-        .from('pipeline_c_chunks_raw')
-        .select('id')
-        .in('document_id', docIds);
-      
-      if (!chunks) return;
-      
-      const { error } = await supabase
-        .from('pipeline_c_agent_knowledge')
-        .delete()
-        .in('agent_id', agentIds)
-        .in('chunk_id', chunks.map(c => c.id));
-      
-      if (error) throw error;
+      await deleteFromPipeline(
+        async (ids) => {
+          const { data } = await supabase.from('pipeline_c_chunks_raw').select('id').in('document_id', ids);
+          return data || [];
+        },
+        async (chunkIds) => {
+          const { error } = await supabase.from('pipeline_c_agent_knowledge').delete().in('agent_id', agentIds).in('chunk_id', chunkIds);
+          if (error) throw error;
+        }
+      );
     }
   };
 
