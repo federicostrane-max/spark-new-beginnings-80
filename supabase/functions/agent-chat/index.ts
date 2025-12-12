@@ -2871,6 +2871,7 @@ Deno.serve(async (req) => {
     // Wrap logic in async function to support both streaming and non-streaming
     const processRequest = async () => {
         let placeholderMsg: any = null; // Declare outside try block for catch access
+        let skipFinalPlaceholderUpdate = false; // Flag to skip final update when tool inserted direct message
 
         try {
           console.log('='.repeat(80));
@@ -4184,6 +4185,23 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 };
                 
                 console.log(`✅ [REQ-${context.requestId}] Browser task created: ${task.id}`);
+                
+                // 6. DELETE the empty placeholder message since we inserted a direct message
+                // This prevents duplicate/empty messages appearing in the conversation
+                if (placeholderMsg?.id) {
+                  const { error: deleteError } = await context.supabase
+                    .from('agent_messages')
+                    .delete()
+                    .eq('id', placeholderMsg.id);
+                  
+                  if (deleteError) {
+                    console.error(`⚠️ [REQ-${context.requestId}] Failed to delete placeholder:`, deleteError);
+                  } else {
+                    console.log(`🗑️ [REQ-${context.requestId}] Deleted empty placeholder after direct message insert`);
+                    // Set flag to skip final update (closure variable)
+                    skipFinalPlaceholderUpdate = true;
+                  }
+                }
                 
               } catch (error) {
                 console.error('❌ Error in create_browser_task:', error);
@@ -6348,26 +6366,31 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
             }
             
             // Final save with integrity check
-            const finalContentLength = fullResponse.length;
-            console.log(`💾 [REQ-${requestId}] Final save: ${finalContentLength} chars`);
-            
-            await supabase
-              .from('agent_messages')
-              .update({ content: fullResponse, llm_provider: llmProvider })
-              .eq('id', placeholderMsg.id);
-            
-            // Verify integrity
-            const { data: verifyData } = await supabase
-              .from('agent_messages')
-              .select('content')
-              .eq('id', placeholderMsg.id)
-              .single();
-            
-            const savedLength = verifyData?.content?.length || 0;
-            if (savedLength === finalContentLength) {
-              console.log(`✅ [REQ-${requestId}] Stream completed successfully - Integrity verified`);
+            // Skip if placeholder was already deleted (e.g., create_browser_task inserted direct message)
+            if (skipFinalPlaceholderUpdate) {
+              console.log(`⏭️ [REQ-${requestId}] Skipping final placeholder update - already deleted by tool`);
             } else {
-              console.error(`❌ [REQ-${requestId}] Integrity check FAILED: expected ${finalContentLength}, got ${savedLength}`);
+              const finalContentLength = fullResponse.length;
+              console.log(`💾 [REQ-${requestId}] Final save: ${finalContentLength} chars`);
+              
+              await supabase
+                .from('agent_messages')
+                .update({ content: fullResponse, llm_provider: llmProvider })
+                .eq('id', placeholderMsg.id);
+              
+              // Verify integrity
+              const { data: verifyData } = await supabase
+                .from('agent_messages')
+                .select('content')
+                .eq('id', placeholderMsg.id)
+                .single();
+              
+              const savedLength = verifyData?.content?.length || 0;
+              if (savedLength === finalContentLength) {
+                console.log(`✅ [REQ-${requestId}] Stream completed successfully - Integrity verified`);
+              } else {
+                console.error(`❌ [REQ-${requestId}] Integrity check FAILED: expected ${finalContentLength}, got ${savedLength}`);
+              }
             }
             
             clearInterval(keepAliveInterval);
