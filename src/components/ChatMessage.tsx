@@ -152,12 +152,21 @@ export const ChatMessage = ({
   }, []); // Empty deps = solo al mount
 
   // Reset override manuale quando forceExpanded cambia (comando globale)
-  // BUT skip if message was auto-expanded at mount (prevents override)
+  // Smart logic: allow global commands, but protect auto-expanded on initial flash
   useEffect(() => {
+    // Se forceExpanded è TRUE (Espandi tutti), resetta sempre per seguire il comando
+    if (forceExpanded === true) {
+      console.log(`🔓 [Message ${id.slice(0,8)}] Global expand command - resetting override`);
+      setIsManuallyExpanded(null);
+      return;
+    }
+    
+    // Se forceExpanded è FALSE/undefined E il messaggio era auto-espanso, proteggi
     if (autoExpandedRef.current) {
       console.log(`🛡️ [Message ${id.slice(0,8)}] Skipping reset - was auto-expanded`);
-      return; // Don't reset auto-expanded messages
+      return;
     }
+    
     setIsManuallyExpanded(null);
   }, [forceExpanded, id]);
 
