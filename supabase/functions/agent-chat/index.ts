@@ -5889,7 +5889,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,  // Pass tools to continuation
-                  stream: false, // ✅ Disabilitato per debug e coerenza
+                  stream: true, // ✅ Streaming necessario per SSE parsing
                 }),
               });
               
