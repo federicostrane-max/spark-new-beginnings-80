@@ -1,7 +1,21 @@
-import * as pdfjsLib from 'pdfjs-dist';
+// PDF.js module type
+type PDFJSLib = typeof import('pdfjs-dist');
 
-// Configure PDF.js worker - using jsDelivr CDN for better reliability
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// Lazy-loaded pdfjs-dist instance
+let pdfjsLib: PDFJSLib | null = null;
+
+/**
+ * Lazily load pdfjs-dist module
+ */
+async function getPdfJS(): Promise<PDFJSLib> {
+  if (pdfjsLib) return pdfjsLib;
+  
+  pdfjsLib = await import('pdfjs-dist');
+  // Configure PDF.js worker - using jsDelivr CDN for better reliability
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  
+  return pdfjsLib;
+}
 
 /**
  * Extract text from a PDF file
@@ -10,11 +24,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dis
  */
 export async function extractTextFromPDF(file: File): Promise<string> {
   try {
+    // Lazy load pdfjs-dist
+    const pdfjs = await getPdfJS();
+    
     // Convert file to array buffer
     const arrayBuffer = await file.arrayBuffer();
     
     // Load PDF document
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
     
     let fullText = '';
     

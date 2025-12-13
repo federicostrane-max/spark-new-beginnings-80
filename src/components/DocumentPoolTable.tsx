@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -58,17 +58,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { AssignDocumentDialog } from "./AssignDocumentDialog";
-import { DocumentDetailsDialog } from "./DocumentDetailsDialog";
-import { BulkAssignDocumentDialog } from "./BulkAssignDocumentDialog";
-import { CreateFolderDialog } from "./CreateFolderDialog";
-import { AssignToFolderDialog } from "./AssignToFolderDialog";
-import { ManageFoldersDialog } from "./ManageFoldersDialog";
-import { RenameFolderDialog } from "./RenameFolderDialog";
-import { FolderTreeView } from "./FolderTreeView";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DocumentPoolHealthIndicators } from "./DocumentPoolHealthIndicators";
-import { LlamaParseTestResultDialog } from "./LlamaParseTestResultDialog";
+import { FolderTreeView } from "./FolderTreeView";
 import {
   Tooltip,
   TooltipContent,
@@ -85,6 +77,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+// Lazy load heavy dialog components
+const AssignDocumentDialog = lazy(() => import("./AssignDocumentDialog").then(m => ({ default: m.AssignDocumentDialog })));
+const DocumentDetailsDialog = lazy(() => import("./DocumentDetailsDialog").then(m => ({ default: m.DocumentDetailsDialog })));
+const BulkAssignDocumentDialog = lazy(() => import("./BulkAssignDocumentDialog").then(m => ({ default: m.BulkAssignDocumentDialog })));
+const CreateFolderDialog = lazy(() => import("./CreateFolderDialog").then(m => ({ default: m.CreateFolderDialog })));
+const AssignToFolderDialog = lazy(() => import("./AssignToFolderDialog").then(m => ({ default: m.AssignToFolderDialog })));
+const ManageFoldersDialog = lazy(() => import("./ManageFoldersDialog").then(m => ({ default: m.ManageFoldersDialog })));
+const RenameFolderDialog = lazy(() => import("./RenameFolderDialog").then(m => ({ default: m.RenameFolderDialog })));
+const LlamaParseTestResultDialog = lazy(() => import("./LlamaParseTestResultDialog").then(m => ({ default: m.LlamaParseTestResultDialog })));
 
 interface KnowledgeDocument {
   id: string;
@@ -2632,99 +2634,115 @@ export const DocumentPoolTable = () => {
       )}
 
       {/* Details Dialog */}
-      <DocumentDetailsDialog
-        document={docToView}
-        open={detailsDialogOpen}
-        onOpenChange={setDetailsDialogOpen}
-        onRefresh={() => loadDocuments()}
-      />
+      <Suspense fallback={null}>
+        <DocumentDetailsDialog
+          document={docToView}
+          open={detailsDialogOpen}
+          onOpenChange={setDetailsDialogOpen}
+          onRefresh={() => loadDocuments()}
+        />
+      </Suspense>
 
       {/* Assign Dialog */}
       {selectedDoc && (
-        <AssignDocumentDialog
-          document={selectedDoc}
-          open={assignDialogOpen}
-          onOpenChange={setAssignDialogOpen}
-          onAssigned={loadDocuments}
-        />
+        <Suspense fallback={null}>
+          <AssignDocumentDialog
+            document={selectedDoc}
+            open={assignDialogOpen}
+            onOpenChange={setAssignDialogOpen}
+            onAssigned={loadDocuments}
+          />
+        </Suspense>
       )}
 
       {/* Bulk Assign Dialog */}
-      <BulkAssignDocumentDialog
-        documentIds={bulkAssignFolderName ? undefined : Array.from(selectedDocIds)}
-        folderName={bulkAssignFolderName}
-        open={bulkAssignDialogOpen}
-        onOpenChange={(open) => {
-          setBulkAssignDialogOpen(open);
-          if (!open) {
-            setBulkAssignFolderName(undefined); // Reset on close
-          }
-        }}
-        onAssigned={() => {
-          setSelectedDocIds(new Set());
-          setBulkAssignFolderName(undefined);
-          setSelectedFolderForAssignment(undefined);
-          loadDocuments();
-        }}
-      />
+      <Suspense fallback={null}>
+        <BulkAssignDocumentDialog
+          documentIds={bulkAssignFolderName ? undefined : Array.from(selectedDocIds)}
+          folderName={bulkAssignFolderName}
+          open={bulkAssignDialogOpen}
+          onOpenChange={(open) => {
+            setBulkAssignDialogOpen(open);
+            if (!open) {
+              setBulkAssignFolderName(undefined); // Reset on close
+            }
+          }}
+          onAssigned={() => {
+            setSelectedDocIds(new Set());
+            setBulkAssignFolderName(undefined);
+            setSelectedFolderForAssignment(undefined);
+            loadDocuments();
+          }}
+        />
+      </Suspense>
 
       {/* Folder Management Dialogs */}
-      <CreateFolderDialog
-        open={createFolderDialogOpen}
-        onOpenChange={setCreateFolderDialogOpen}
-        existingFolders={availableFolders}
-        onFolderCreated={() => {
-          loadAvailableFolders();
-          loadFolders();
-        }}
-      />
+      <Suspense fallback={null}>
+        <CreateFolderDialog
+          open={createFolderDialogOpen}
+          onOpenChange={setCreateFolderDialogOpen}
+          existingFolders={availableFolders}
+          onFolderCreated={() => {
+            loadAvailableFolders();
+            loadFolders();
+          }}
+        />
+      </Suspense>
 
-      <AssignToFolderDialog
-        open={assignToFolderDialogOpen}
-        onOpenChange={setAssignToFolderDialogOpen}
-        documentIds={docsToAssignToFolder.ids}
-        documentNames={docsToAssignToFolder.names}
-        availableFolders={availableFolders}
-        onAssigned={() => {
-          loadDocuments();
-          loadAvailableFolders();
-          loadFolders();
-          setSelectedDocIds(new Set());
-          setDocsToAssignToFolder({ ids: [], names: [] });
-        }}
-      />
+      <Suspense fallback={null}>
+        <AssignToFolderDialog
+          open={assignToFolderDialogOpen}
+          onOpenChange={setAssignToFolderDialogOpen}
+          documentIds={docsToAssignToFolder.ids}
+          documentNames={docsToAssignToFolder.names}
+          availableFolders={availableFolders}
+          onAssigned={() => {
+            loadDocuments();
+            loadAvailableFolders();
+            loadFolders();
+            setSelectedDocIds(new Set());
+            setDocsToAssignToFolder({ ids: [], names: [] });
+          }}
+        />
+      </Suspense>
 
-      <ManageFoldersDialog
-        open={manageFoldersDialogOpen}
-        onOpenChange={setManageFoldersDialogOpen}
-        folders={getFolderInfo()}
-        onFoldersChanged={() => {
-          loadDocuments();
-          loadAvailableFolders();
-          loadFolders();
-        }}
-      />
+      <Suspense fallback={null}>
+        <ManageFoldersDialog
+          open={manageFoldersDialogOpen}
+          onOpenChange={setManageFoldersDialogOpen}
+          folders={getFolderInfo()}
+          onFoldersChanged={() => {
+            loadDocuments();
+            loadAvailableFolders();
+            loadFolders();
+          }}
+        />
+      </Suspense>
 
-      <RenameFolderDialog
-        open={renameFolderDialogOpen}
-        onOpenChange={setRenameFolderDialogOpen}
-        folderId={folderToRename?.id || ""}
-        currentName={folderToRename?.name || ""}
-        existingFolders={availableFolders}
-        onRenamed={() => {
-          loadDocuments();
-          loadAvailableFolders();
-          loadFolders();
-          setFolderToRename(null);
-        }}
-      />
+      <Suspense fallback={null}>
+        <RenameFolderDialog
+          open={renameFolderDialogOpen}
+          onOpenChange={setRenameFolderDialogOpen}
+          folderId={folderToRename?.id || ""}
+          currentName={folderToRename?.name || ""}
+          existingFolders={availableFolders}
+          onRenamed={() => {
+            loadDocuments();
+            loadAvailableFolders();
+            loadFolders();
+            setFolderToRename(null);
+          }}
+        />
+      </Suspense>
 
       {/* LlamaParse Test Result Dialog */}
-      <LlamaParseTestResultDialog
-        open={showTestDialog}
-        onOpenChange={setShowTestDialog}
-        result={testResult}
-      />
+      <Suspense fallback={null}>
+        <LlamaParseTestResultDialog
+          open={showTestDialog}
+          onOpenChange={setShowTestDialog}
+          result={testResult}
+        />
+      </Suspense>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
