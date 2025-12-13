@@ -137,10 +137,29 @@ export const ChatMessage = ({
 
   const llmBadge = getLLMBadge();
 
-  // Reset override manuale quando forceExpanded cambia (comando globale)
+  // Track if auto-expand already happened to prevent reset from overriding it
+  const autoExpandedRef = useRef(false);
+
+  // FIX 3: Espansione al primo render di messaggi lunghi già completati
+  // MUST run BEFORE reset effect to set autoExpandedRef
   useEffect(() => {
+    const COLLAPSE_THRESHOLD = 1000;
+    if (!isStreaming && content.length > COLLAPSE_THRESHOLD && isManuallyExpanded === null) {
+      console.log(`📖 [Message ${id.slice(0,8)}] Long message detected at mount (${content.length} chars) - auto-expanding`);
+      setIsManuallyExpanded(true);
+      autoExpandedRef.current = true;
+    }
+  }, []); // Empty deps = solo al mount
+
+  // Reset override manuale quando forceExpanded cambia (comando globale)
+  // BUT skip if message was auto-expanded at mount (prevents override)
+  useEffect(() => {
+    if (autoExpandedRef.current) {
+      console.log(`🛡️ [Message ${id.slice(0,8)}] Skipping reset - was auto-expanded`);
+      return; // Don't reset auto-expanded messages
+    }
     setIsManuallyExpanded(null);
-  }, [forceExpanded]);
+  }, [forceExpanded, id]);
 
   // Reset justEnteredSelectionMode when exiting selection mode
   useEffect(() => {
@@ -148,15 +167,6 @@ export const ChatMessage = ({
       justEnteredSelectionMode.current = false;
     }
   }, [selectionMode]);
-
-  // FIX 3: Espansione al primo render di messaggi lunghi già completati
-  useEffect(() => {
-    const COLLAPSE_THRESHOLD = 1000;
-    if (!isStreaming && content.length > COLLAPSE_THRESHOLD && isManuallyExpanded === null) {
-      console.log(`📖 [Message ${id.slice(0,8)}] Long message detected at mount (${content.length} chars) - auto-expanding`);
-      setIsManuallyExpanded(true);
-    }
-  }, []); // Empty deps = solo al mount
 
   // FIX 1: Espansione quando finisce lo streaming con contenuto lungo
   useEffect(() => {
