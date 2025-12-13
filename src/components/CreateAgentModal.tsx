@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { supabase, updateAgentPrompt } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Copy, History, Trash2 } from "lucide-react";
 import { PDFKnowledgeUpload } from "@/components/PDFKnowledgeUpload";
-import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { PromptHistoryDialog } from "@/components/PromptHistoryDialog";
 import { AgentTaskRequirementsView } from "@/components/AgentTaskRequirementsView";
 import { toast } from "sonner";
+
+// Lazy load heavy component
+const KnowledgeBaseManager = lazy(() => import("@/components/KnowledgeBaseManager").then(m => ({ default: m.KnowledgeBaseManager })));
 import {
   AlertDialog,
   AlertDialogAction,

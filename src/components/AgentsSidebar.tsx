@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,14 +7,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw, Search } from "lucide-react";
+import { Plus, LogOut, BookOpen, Trash2, Edit, Database, Settings, AlertCircle, RefreshCw, Search, Loader2 } from "lucide-react";
 import { usePoolDocumentsHealth } from "@/hooks/useAgentHealth";
 import { useMultipleAgentsHealth } from "@/hooks/useMultipleAgentsHealth";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { KnowledgeBaseManager } from "@/components/KnowledgeBaseManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+// Lazy load heavy component
+const KnowledgeBaseManager = lazy(() => import("@/components/KnowledgeBaseManager").then(m => ({ default: m.KnowledgeBaseManager })));
 import {
   AlertDialog,
   AlertDialogAction,
@@ -438,10 +440,12 @@ export const AgentsSidebar = ({
             <DialogTitle>Knowledge Base - {selectedAgentForKB?.name}</DialogTitle>
           </DialogHeader>
           {selectedAgentForKB && (
-            <KnowledgeBaseManager 
-              agentId={selectedAgentForKB.id} 
-              agentName={selectedAgentForKB.name} 
-            />
+            <Suspense fallback={<div className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+              <KnowledgeBaseManager 
+                agentId={selectedAgentForKB.id} 
+                agentName={selectedAgentForKB.name} 
+              />
+            </Suspense>
           )}
         </DialogContent>
       </Dialog>

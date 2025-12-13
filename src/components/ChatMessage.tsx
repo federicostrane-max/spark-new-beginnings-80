@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle, Video } from "lucide-react";
@@ -7,7 +7,9 @@ import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { DeepDiveVideoDialog } from "@/components/DeepDiveVideoDialog";
+
+// Lazy load heavy dialog component
+const DeepDiveVideoDialog = lazy(() => import("@/components/DeepDiveVideoDialog").then(m => ({ default: m.DeepDiveVideoDialog })));
 
 interface VideoDocumentInfo {
   document_id: string;

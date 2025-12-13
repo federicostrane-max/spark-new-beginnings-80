@@ -23,4 +23,15 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-recharts': ['recharts'],
+          'vendor-markdown': ['react-markdown', 'remark-gfm'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+        }
+      }
+    }
+  }
 }));
