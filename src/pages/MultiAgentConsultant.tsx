@@ -82,6 +82,7 @@ export default function MultiAgentConsultant() {
   });
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false); // ✅ Guard anti-double-submit
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -749,6 +750,12 @@ export default function MultiAgentConsultant() {
   };
 
   const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedToolOrConversationId?: string, forceAgent?: Agent) => {
+    // ✅ Guard anti-double-submit
+    if (isSending) {
+      console.warn("⚠️ Double submit prevented - already sending");
+      return;
+    }
+    
     // Detect if third param is forcedTool or forceConversationId
     const isForcedTool = forcedToolOrConversationId && !forcedToolOrConversationId.includes('-');
     const forcedTool = isForcedTool ? forcedToolOrConversationId : undefined;
@@ -757,6 +764,8 @@ export default function MultiAgentConsultant() {
     
     const agent = forceAgent || currentAgent;
     if (!agent) return;
+    
+    setIsSending(true); // ✅ Lock submissions
 
     // ✅ NEW: Use ref for immediate access, fallback to state
     const conversationId = forceConversationId || currentConversationRef.current || currentConversation?.id;
@@ -1056,8 +1065,8 @@ export default function MultiAgentConsultant() {
                   .eq('id', assistantId)
                   .single();
                 
-                if (dbMessage && dbMessage.content.length > accumulatedText.length) {
-                  console.log(`🔄 [RECOVERY] Message in DB is longer (${dbMessage.content.length} vs ${accumulatedText.length}), updating UI`);
+                if (dbMessage && dbMessage.content.length > accumulatedTextRef.current.length) {
+                  console.log(`🔄 [RECOVERY] Message in DB is longer (${dbMessage.content.length} vs ${accumulatedTextRef.current.length}), updating UI`);
                   setMessages(prev => prev.map(msg => 
                     msg.id === assistantId 
                       ? { ...msg, content: dbMessage.content }
@@ -1138,6 +1147,7 @@ export default function MultiAgentConsultant() {
         throttleTimeoutRef.current = null;
       }
       setStreamingConversationId(null);
+      setIsSending(false); // ✅ Unlock submissions
     }
   };
 
