@@ -773,6 +773,7 @@ export default function MultiAgentConsultant() {
     if (!conversationId) {
       console.error("❌ No active conversation - agent might still be loading");
       toast.error("Please wait for the conversation to load");
+      setIsSending(false);
       return;
     }
     
@@ -782,6 +783,7 @@ export default function MultiAgentConsultant() {
       console.error("  Current agent:", agent.id, agent.name);
       console.error("  Conversation agent:", currentConversation.agent_id);
       toast.error("Please try again - conversation is loading");
+      setIsSending(false);
       return;
     }
 
