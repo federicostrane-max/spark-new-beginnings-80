@@ -5063,7 +5063,6 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-4-5',
-                  max_tokens: 16384, // 🔧 INCREASED: 4096 → 16384 (4096 was truncating structured JSON responses)
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
@@ -5884,7 +5883,6 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-4-5',  // Fixed model name
-                  max_tokens: 16384, // 🔧 INCREASED: 4096 → 16384 (consistent with main call)
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
