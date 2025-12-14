@@ -5093,7 +5093,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 },
                 body: JSON.stringify({
                   model: anthropicModel,
-                  max_tokens: 65536,  // Massimo supportato da Claude Sonnet 4
+                  max_tokens: 64000,  // Massimo supportato da Claude Sonnet 4
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
