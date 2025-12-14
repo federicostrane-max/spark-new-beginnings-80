@@ -482,7 +482,8 @@ function isResponseIncomplete(content: string): boolean {
   ];
   
   // Only check sentence patterns if not in a code block context
-  const lastLine = trimmed.split('\n').slice(-1)[0];
+  const lines = trimmed.split('\n');
+  const lastLine = lines[lines.length - 1]?.trim() || '';
   if (!lastLine.includes('```')) {
     for (const pattern of incompleteSentencePatterns) {
       if (pattern.test(trimmed)) {
@@ -492,12 +493,40 @@ function isResponseIncomplete(content: string): boolean {
     }
   }
   
-  // Check 4: Very abrupt endings (content length check)
+  // Check 4: Incomplete Markdown tables
+  
+  // Check if last line looks like an incomplete table row
+  if (lastLine.startsWith('|')) {
+    // Table row doesn't end with | (e.g., "| text" or "| text | more")
+    if (!lastLine.endsWith('|')) {
+      console.log('🔍 [INCOMPLETE] Table row not properly closed with |');
+      return true;
+    }
+    
+    // Check pipe count consistency with header
+    const tableLines = lines.filter(l => l.trim().startsWith('|'));
+    if (tableLines.length >= 2) {
+      const headerPipes = (tableLines[0].match(/\|/g) || []).length;
+      const lastRowPipes = (lastLine.match(/\|/g) || []).length;
+      if (lastRowPipes < headerPipes) {
+        console.log(`🔍 [INCOMPLETE] Table row has fewer pipes (${lastRowPipes}) than header (${headerPipes})`);
+        return true;
+      }
+    }
+  }
+  
+  // Check 5: Ends with table cell that looks incomplete (mid-cell truncation)
+  if (/\|\s*[^|\n]+$/.test(lastLine) && !lastLine.endsWith('|')) {
+    console.log('🔍 [INCOMPLETE] Ends with incomplete table cell');
+    return true;
+  }
+  
+  // Check 6: Very abrupt endings (content length check)
   // If the response is less than expected minimum and doesn't end with punctuation
   const endsWithProperPunctuation = /[.!?]\s*$/.test(trimmed);
   const hasMinimumLength = content.length > 100;
   
-  if (hasMinimumLength && !endsWithProperPunctuation && !trimmed.endsWith('```')) {
+  if (hasMinimumLength && !endsWithProperPunctuation && !trimmed.endsWith('```') && !lastLine.endsWith('|')) {
     console.log('🔍 [INCOMPLETE] No proper ending punctuation');
     return true;
   }
