@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle, Video } from "lucide-react";
+import { Copy, Check, Play, Square, ChevronDown, ChevronUp, Presentation, Sparkles, Loader2, AlertCircle, Video, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useTTS } from "@/contexts/TTSContext";
 import { useNavigate } from "react-router-dom";
@@ -567,27 +568,87 @@ export const ChatMessage = ({
           <div className={cn("mt-3 pt-2 border-t flex gap-2 flex-wrap", isUser ? "border-primary-foreground/20" : "border-border/50")}>
             {/* Show reload button for potentially truncated messages */}
             {isPotentiallyTruncated && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleReloadFullMessage}
-                disabled={reloadingContent}
-                className="h-8 px-2 gap-1 text-xs border-yellow-500/20 bg-yellow-500/5 hover:bg-yellow-500/10"
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
-              >
-                {reloadingContent ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Caricamento...
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle className="h-3 w-3" />
-                    Ricarica completo
-                  </>
-                )}
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReloadFullMessage}
+                  disabled={reloadingContent}
+                  className="h-8 px-2 gap-1 text-xs border-yellow-500/20 bg-yellow-500/5 hover:bg-yellow-500/10"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                >
+                  {reloadingContent ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Caricamento...
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="h-3 w-3" />
+                      Ricarica completo
+                    </>
+                  )}
+                </Button>
+                
+                {/* Regenerate response button */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!id) return;
+                    
+                    try {
+                      const { supabase } = await import("@/integrations/supabase/client");
+                      
+                      // Fetch message details
+                      const { data: msgData } = await supabase
+                        .from('agent_messages')
+                        .select('conversation_id, llm_provider')
+                        .eq('id', id)
+                        .single();
+                      
+                      if (!msgData) {
+                        toast.error("Impossibile trovare il messaggio");
+                        return;
+                      }
+                      
+                      toast.info("Rigenerazione risposta in corso...");
+                      
+                      // Invoke continuation function
+                      const { error } = await supabase.functions.invoke('continue-deepseek-response', {
+                        body: {
+                          messageId: id,
+                          conversationId: msgData.conversation_id,
+                          currentContent: content,
+                          llmProvider: msgData.llm_provider || 'anthropic',
+                          messages: [],  // Will be fetched by function
+                          systemPrompt: '',  // Will be fetched by function
+                          requestId: `regen-${Date.now()}`
+                        }
+                      });
+                      
+                      if (error) {
+                        toast.error("Errore nella rigenerazione");
+                        console.error('Regeneration error:', error);
+                      } else {
+                        toast.success("Rigenerazione avviata, ricarica tra qualche secondo");
+                        setTimeout(() => window.location.reload(), 3000);
+                      }
+                    } catch (err) {
+                      console.error('Regeneration failed:', err);
+                      toast.error("Errore nella rigenerazione");
+                    }
+                  }}
+                  className="h-8 px-2 gap-1 text-xs border-blue-500/20 bg-blue-500/5 hover:bg-blue-500/10"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Rigenera
+                </Button>
+              </>
             )}
             
             {content.length > COLLAPSE_THRESHOLD && (

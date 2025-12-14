@@ -5177,6 +5177,29 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                       }
                     })
                     .eq('id', placeholderMsg.id);
+                  
+                  // 🔄 AUTO-CONTINUATION: Check if response is incomplete and trigger async continuation
+                  if (isResponseIncomplete(fullResponse) && (llmProvider === 'anthropic' || llmProvider === 'deepseek')) {
+                    console.log(`⚠️ [REQ-${requestId}] Response appears INCOMPLETE - triggering async continuation for ${llmProvider}`);
+                    
+                    // Fire-and-forget: trigger continuation in background
+                    supabase.functions.invoke('continue-deepseek-response', {
+                      body: {
+                        messageId: placeholderMsg.id,
+                        conversationId: conversation.id,
+                        currentContent: fullResponse,
+                        agentId: agent.id,
+                        messages: anthropicMessages,
+                        systemPrompt: enhancedSystemPrompt,
+                        requestId,
+                        llmProvider  // Pass provider so continuation uses same model
+                      }
+                    }).catch((err: any) => {
+                      console.error(`❌ [REQ-${requestId}] Failed to trigger continuation:`, err);
+                    });
+                    
+                    console.log(`🚀 [REQ-${requestId}] Continuation triggered in background`);
+                  }
                 }
                 break;
               }

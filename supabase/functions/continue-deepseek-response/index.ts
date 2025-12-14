@@ -98,7 +98,7 @@ async function callDeepSeekForContinuation(
       ],
       temperature: 0.7,
       max_tokens: 8000,
-      stream: false // Non-streaming per semplicità
+      stream: false
     }),
   });
 
@@ -110,7 +110,60 @@ async function callDeepSeekForContinuation(
   const data = await response.json();
   const continuation = data.choices?.[0]?.message?.content || '';
   
-  console.log(`✅ [CONTINUE-${requestId}] Continuation received: ${continuation.length} chars`);
+  console.log(`✅ [CONTINUE-${requestId}] DeepSeek continuation received: ${continuation.length} chars`);
+  return continuation;
+}
+
+/**
+ * Calls Claude for continuation
+ */
+async function callClaudeForContinuation(
+  currentContent: string,
+  messages: Message[],
+  systemPrompt: string,
+  anthropicApiKey: string,
+  requestId: string
+): Promise<string> {
+  console.log(`🔄 [CONTINUE-${requestId}] Requesting continuation from Claude...`);
+  
+  const continuationMessages = [
+    ...messages.map(m => ({
+      role: m.role,
+      content: m.content
+    })),
+    { role: 'assistant', content: currentContent },
+    { 
+      role: 'user', 
+      content: 'Please continue exactly from where you left off. Do not repeat what you already wrote, just continue the response.' 
+    }
+  ];
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicApiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5-20250514',
+      system: systemPrompt,
+      messages: continuationMessages,
+      max_tokens: 8192,
+      temperature: 0.7,
+      stream: false
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Claude API error (${response.status}): ${error}`);
+  }
+
+  const data = await response.json();
+  const continuation = data.content?.[0]?.text || '';
+  
+  console.log(`✅ [CONTINUE-${requestId}] Claude continuation received: ${continuation.length} chars`);
   return continuation;
 }
 
@@ -128,17 +181,25 @@ Deno.serve(async (req) => {
       agentId, 
       messages, 
       systemPrompt,
-      requestId 
+      requestId,
+      llmProvider  // NEW: Support for different providers
     } = await req.json();
 
     console.log(`🚀 [CONTINUE-${requestId}] Starting async continuation for message ${messageId}`);
-    console.log(`📊 [CONTINUE-${requestId}] Current content length: ${currentContent.length} chars`);
+    console.log(`📊 [CONTINUE-${requestId}] Provider: ${llmProvider || 'deepseek'}, Current length: ${currentContent.length} chars`);
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
+    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 
-    if (!DEEPSEEK_API_KEY) {
+    const provider = llmProvider || 'deepseek';
+    
+    // Validate we have the right API key
+    if (provider === 'anthropic' && !ANTHROPIC_API_KEY) {
+      throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+    if (provider === 'deepseek' && !DEEPSEEK_API_KEY) {
       throw new Error('DEEPSEEK_API_KEY not configured');
     }
 
@@ -151,15 +212,27 @@ Deno.serve(async (req) => {
     // Try up to 3 continuations
     while (continuationAttempts < maxAttempts && isResponseIncomplete(fullContent)) {
       try {
-        console.log(`🔄 [CONTINUE-${requestId}] Attempt ${continuationAttempts + 1}/${maxAttempts}`);
+        console.log(`🔄 [CONTINUE-${requestId}] Attempt ${continuationAttempts + 1}/${maxAttempts} using ${provider}`);
         
-        const continuation = await callDeepSeekForContinuation(
-          fullContent,
-          messages,
-          systemPrompt,
-          DEEPSEEK_API_KEY,
-          requestId
-        );
+        let continuation = '';
+        
+        if (provider === 'anthropic') {
+          continuation = await callClaudeForContinuation(
+            fullContent,
+            messages,
+            systemPrompt,
+            ANTHROPIC_API_KEY!,
+            requestId
+          );
+        } else {
+          continuation = await callDeepSeekForContinuation(
+            fullContent,
+            messages,
+            systemPrompt,
+            DEEPSEEK_API_KEY!,
+            requestId
+          );
+        }
 
         fullContent += continuation;
         continuationAttempts++;
