@@ -179,33 +179,101 @@ Deno.serve(async (req) => {
       conversationId,
       currentContent, 
       agentId, 
-      messages, 
-      systemPrompt,
-      requestId,
-      llmProvider  // NEW: Support for different providers
+      messages: providedMessages, 
+      systemPrompt: providedSystemPrompt,
+      requestId: providedRequestId,
+      llmProvider
     } = await req.json();
 
-    console.log(`🚀 [CONTINUE-${requestId}] Starting async continuation for message ${messageId}`);
-    console.log(`📊 [CONTINUE-${requestId}] Provider: ${llmProvider || 'deepseek'}, Current length: ${currentContent.length} chars`);
+    const requestId = providedRequestId || `cont-${Date.now()}`;
+    
+    console.log(`🚀 [CONTINUE-${requestId}] Starting continuation for message ${messageId}`);
+    console.log(`📊 [CONTINUE-${requestId}] Provider: ${llmProvider || 'anthropic'}, Content length: ${currentContent?.length || 0} chars`);
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
     const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 
-    const provider = llmProvider || 'deepseek';
+    const provider = llmProvider || 'anthropic';
     
     // Validate we have the right API key
     if (provider === 'anthropic' && !ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY not configured');
     }
-    if (provider === 'deepseek' && !DEEPSEEK_API_KEY) {
+    if ((provider === 'deepseek' || provider === 'DEEPSEEK') && !DEEPSEEK_API_KEY) {
       throw new Error('DEEPSEEK_API_KEY not configured');
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    let fullContent = currentContent;
+    // Verify message exists first
+    const { data: existingMessage, error: fetchError } = await supabase
+      .from('agent_messages')
+      .select('id, content, conversation_id')
+      .eq('id', messageId)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error(`❌ [CONTINUE-${requestId}] Failed to fetch message:`, fetchError);
+      throw new Error(`Failed to fetch message: ${fetchError.message}`);
+    }
+
+    if (!existingMessage) {
+      console.error(`❌ [CONTINUE-${requestId}] Message ${messageId} not found in database`);
+      throw new Error(`Message ${messageId} not found`);
+    }
+
+    console.log(`✅ [CONTINUE-${requestId}] Found message, current DB length: ${existingMessage.content?.length || 0}`);
+
+    // Use provided content or fall back to DB content
+    let fullContent = currentContent || existingMessage.content || '';
+    
+    // Fetch conversation history if not provided
+    let messages: Message[] = providedMessages || [];
+    let systemPrompt = providedSystemPrompt || '';
+    
+    if (messages.length === 0 || !systemPrompt) {
+      console.log(`📥 [CONTINUE-${requestId}] Fetching conversation context...`);
+      
+      // Get conversation with agent info
+      const { data: conv } = await supabase
+        .from('agent_conversations')
+        .select('agent_id')
+        .eq('id', existingMessage.conversation_id)
+        .single();
+      
+      if (conv?.agent_id) {
+        // Get agent system prompt
+        const { data: agent } = await supabase
+          .from('agents')
+          .select('system_prompt')
+          .eq('id', conv.agent_id)
+          .single();
+        
+        if (agent?.system_prompt) {
+          systemPrompt = agent.system_prompt;
+        }
+      }
+      
+      // Get conversation messages for context
+      const { data: allMessages } = await supabase
+        .from('agent_messages')
+        .select('role, content')
+        .eq('conversation_id', existingMessage.conversation_id)
+        .order('created_at', { ascending: true })
+        .limit(20);
+      
+      if (allMessages) {
+        messages = allMessages.map(m => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content
+        }));
+      }
+      
+      console.log(`📥 [CONTINUE-${requestId}] Loaded ${messages.length} messages, system prompt: ${systemPrompt.length} chars`);
+    }
+
     let continuationAttempts = 0;
     const maxAttempts = 3;
 
@@ -216,7 +284,7 @@ Deno.serve(async (req) => {
         
         let continuation = '';
         
-        if (provider === 'anthropic') {
+        if (provider === 'anthropic' || provider === 'ANTHROPIC') {
           continuation = await callClaudeForContinuation(
             fullContent,
             messages,
@@ -234,23 +302,34 @@ Deno.serve(async (req) => {
           );
         }
 
+        if (!continuation || continuation.length === 0) {
+          console.log(`⚠️ [CONTINUE-${requestId}] Empty continuation received, stopping`);
+          break;
+        }
+
         fullContent += continuation;
         continuationAttempts++;
 
         console.log(`📈 [CONTINUE-${requestId}] New total length: ${fullContent.length} chars`);
 
-        // Update DB immediately after each continuation
-        const { error: updateError } = await supabase
+        // Update DB with verification
+        const { data: updateData, error: updateError } = await supabase
           .from('agent_messages')
           .update({ content: fullContent })
-          .eq('id', messageId);
+          .eq('id', messageId)
+          .select('id');
 
         if (updateError) {
           console.error(`❌ [CONTINUE-${requestId}] DB update failed:`, updateError);
           throw updateError;
         }
 
-        console.log(`✅ [CONTINUE-${requestId}] Continuation ${continuationAttempts} completed and saved`);
+        if (!updateData || updateData.length === 0) {
+          console.error(`❌ [CONTINUE-${requestId}] DB update returned no rows - message may have been deleted`);
+          throw new Error('Message update failed - no rows affected');
+        }
+
+        console.log(`✅ [CONTINUE-${requestId}] Continuation ${continuationAttempts} saved successfully`);
 
       } catch (error) {
         console.error(`❌ [CONTINUE-${requestId}] Continuation ${continuationAttempts + 1} failed:`, error);
