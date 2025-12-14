@@ -5067,8 +5067,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
               
             } else {
               // Default: Anthropic
+              const anthropicModel = aiModel || 'claude-sonnet-4-5';
               console.log('🚀 ROUTING TO ANTHROPIC');
-              console.log(`   Model: claude-sonnet-4-5`);
+              console.log(`   Model: ${anthropicModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               
               if (!ANTHROPIC_API_KEY) {
@@ -5076,7 +5077,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
               }
               
               console.log('🚀 ROUTING TO ANTHROPIC');
-              console.log(`   Model: claude-sonnet-4-5`);
+              console.log(`   Model: ${anthropicModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               console.log(`   API Key present: ${ANTHROPIC_API_KEY ? 'YES' : 'NO'}`);
               console.log(`   API Key prefix: ${ANTHROPIC_API_KEY?.slice(0, 8)}...`);
@@ -5091,7 +5092,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                  model: 'claude-sonnet-4-5',
+                  model: anthropicModel,
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
