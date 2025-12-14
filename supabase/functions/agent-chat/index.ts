@@ -5093,6 +5093,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 },
                 body: JSON.stringify({
                   model: anthropicModel,
+                  max_tokens: 8192,
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
