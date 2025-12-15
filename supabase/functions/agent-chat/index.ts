@@ -5936,7 +5936,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   'anthropic-version': '2023-06-01',
                 },
                 body: JSON.stringify({
-                  model: 'claude-sonnet-4-5',  // Fixed model name
+                  model: aiModel || 'claude-sonnet-4-5', // usa il modello configurato per l'agente anche nella continuazione
                   max_tokens: 64000,  // ✅ Required for Anthropic API
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
