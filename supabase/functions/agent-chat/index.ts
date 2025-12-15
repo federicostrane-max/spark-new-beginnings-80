@@ -2820,6 +2820,15 @@ Deno.serve(async (req) => {
     // Determine which LLM provider to use
     const llmProvider = agent.llm_provider || 'anthropic';
     const aiModel = agent.ai_model || null;
+
+    // Normalize Anthropic model names (Anthropic often requires dated model IDs)
+    const resolvedAnthropicModel = (() => {
+      const raw = aiModel || 'claude-sonnet-4-5-20250514';
+      // Backward-compat: map undated alias to dated model id
+      if (raw === 'claude-sonnet-4-5') return 'claude-sonnet-4-5-20250514';
+      return raw;
+    })();
+
     console.log('🤖 Using LLM Provider:', llmProvider);
     if (aiModel) {
       console.log('🎯 Using AI Model:', aiModel);
@@ -5067,23 +5076,18 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
               
             } else {
               // Default: Anthropic
-              const anthropicModel = aiModel || 'claude-sonnet-4-5';
-              console.log('🚀 ROUTING TO ANTHROPIC');
-              console.log(`   Model: ${anthropicModel}`);
-              console.log(`   Message count: ${anthropicMessages.length}`);
-              
               if (!ANTHROPIC_API_KEY) {
                 throw new Error('ANTHROPIC_API_KEY is required but not set');
               }
-              
+
               console.log('🚀 ROUTING TO ANTHROPIC');
-              console.log(`   Model: ${anthropicModel}`);
+              console.log(`   Model: ${resolvedAnthropicModel}`);
               console.log(`   Message count: ${anthropicMessages.length}`);
               console.log(`   API Key present: ${ANTHROPIC_API_KEY ? 'YES' : 'NO'}`);
               console.log(`   API Key prefix: ${ANTHROPIC_API_KEY?.slice(0, 8)}...`);
               console.log(`   System prompt length: ${enhancedSystemPrompt.length} chars`);
               console.log(`   Tools enabled: ${tools.length} tools`);
-              
+
               response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -5092,20 +5096,20 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   'anthropic-version': '2023-06-01'
                 },
                 body: JSON.stringify({
-                  model: anthropicModel,
+                  model: resolvedAnthropicModel,
                   max_tokens: 64000,  // Massimo supportato da Claude Sonnet 4
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
                   tools: tools,
-                  tool_choice: forcedTool && tools?.some((t: any) => t.name === forcedTool) 
-                    ? { type: "tool", name: forcedTool } 
+                  tool_choice: forcedTool && tools?.some((t: any) => t.name === forcedTool)
+                    ? { type: "tool", name: forcedTool }
                     : { type: "auto" },
                   stream: true // ✅ Riabilitato per compatibilità con parser SSE
                 }),
                 signal: controller.signal
               });
-              
+
               console.log(`   ✅ Response status: ${response.status}`);
               console.log(`   ✅ Response ok: ${response.ok}`);
               console.log(`   ✅ Response headers:`, Object.fromEntries(response.headers.entries()));
@@ -5936,7 +5940,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                   'anthropic-version': '2023-06-01',
                 },
                 body: JSON.stringify({
-                  model: aiModel || 'claude-sonnet-4-5', // usa il modello configurato per l'agente anche nella continuazione
+                  model: resolvedAnthropicModel, // usa sempre un model id valido e consistente
                   max_tokens: 64000,  // ✅ Required for Anthropic API
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
