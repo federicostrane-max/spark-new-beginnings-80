@@ -2821,13 +2821,8 @@ Deno.serve(async (req) => {
     const llmProvider = agent.llm_provider || 'anthropic';
     const aiModel = agent.ai_model || null;
 
-    // Normalize Anthropic model names (Anthropic often requires dated model IDs)
-    const resolvedAnthropicModel = (() => {
-      const raw = aiModel || 'claude-sonnet-4-5-20250514';
-      // Backward-compat: map undated alias to dated model id
-      if (raw === 'claude-sonnet-4-5') return 'claude-sonnet-4-5-20250514';
-      return raw;
-    })();
+    // Use agent's configured model or default to valid alias
+    const resolvedAnthropicModel = aiModel || 'claude-sonnet-4-5';
 
     console.log('🤖 Using LLM Provider:', llmProvider);
     if (aiModel) {
