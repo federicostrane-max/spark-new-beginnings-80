@@ -4857,126 +4857,156 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
             }
           });
           
-          // ===== LUX AUTOMATION TOOLS =====
-          // Tool: create_actor_task - Simple direct input for Lux Actor
-          tools.push({
-            name: 'create_actor_task',
-            description: 'Crea task semplice per Lux Actor. Usa per azioni dirette: click, ricerche web, navigazioni semplici. L\'app desktop Architect\'s Hand Bridge eseguirà l\'azione.',
-            input_schema: {
-              type: 'object',
-              properties: {
-                user_request: { 
-                  type: 'string', 
-                  description: 'Richiesta originale dell\'utente' 
-                },
-                task_description: { 
-                  type: 'string', 
-                  description: 'Descrizione dell\'azione da eseguire (passata direttamente a Lux)' 
-                },
-                platform: { 
-                  type: 'string', 
-                  description: 'Nome del sito/piattaforma (es: "google", "linkedin")' 
-                },
-                start_url: { 
-                  type: 'string', 
-                  description: 'URL iniziale (es: "https://www.google.com")' 
-                }
-              },
-              required: ['user_request', 'task_description']
-            }
-          });
+          // ===== LUX AUTOMATION TOOLS - FILTERED BY LUX_MODE_CONFIG =====
+          // Fetch lux_mode_config to determine which agent has which Lux tool
+          const { data: luxModeConfig } = await supabase
+            .from('lux_mode_config')
+            .select('lux_mode, agent_id');
           
-          // Tool: create_thinker_task - Complex direct input for Lux Thinker
-          tools.push({
-            name: 'create_thinker_task',
-            description: 'Crea task complesso per Lux Thinker. Usa per task multi-step che richiedono ragionamento autonomo. L\'app desktop Architect\'s Hand Bridge eseguirà il task.',
-            input_schema: {
-              type: 'object',
-              properties: {
-                user_request: { 
-                  type: 'string', 
-                  description: 'Richiesta originale dell\'utente' 
-                },
-                task_description: { 
-                  type: 'string', 
-                  description: 'Descrizione completa del task (passata direttamente a Lux Thinker)' 
-                },
-                platform: { 
-                  type: 'string', 
-                  description: 'Nome del sito/piattaforma' 
-                },
-                start_url: { 
-                  type: 'string', 
-                  description: 'URL iniziale' 
-                },
-                complexity: { 
-                  type: 'string', 
-                  enum: ['medium', 'complex'],
-                  description: 'Complessità stimata del task' 
-                }
-              },
-              required: ['user_request', 'task_description']
-            }
-          });
+          // Create map: agent_id -> lux_mode
+          const luxModeMap = new Map<string, string>();
+          if (luxModeConfig) {
+            luxModeConfig.forEach((entry: { lux_mode: string; agent_id: string | null }) => {
+              if (entry.agent_id) {
+                luxModeMap.set(entry.agent_id, entry.lux_mode);
+              }
+            });
+          }
           
-          // Tool: create_tasker_task - Decomposed task with todos for TaskerAgent
-          tools.push({
-            name: 'create_tasker_task',
-            description: 'Crea task con decomposizione in step per Lux TaskerAgent. Usa quando serve controllo fine su ogni step. L\'app desktop eseguirà ogni todo in sequenza.',
-            input_schema: {
-              type: 'object',
-              properties: {
-                user_request: { 
-                  type: 'string', 
-                  description: 'Richiesta originale dell\'utente' 
-                },
-                task_description: { 
-                  type: 'string', 
-                  description: 'Descrizione generale del task' 
-                },
-                platform: { 
-                  type: 'string', 
-                  description: 'Nome del sito/piattaforma' 
-                },
-                start_url: { 
-                  type: 'string', 
-                  description: 'URL iniziale' 
-                },
-                todos: {
-                  type: 'array',
-                  description: 'Lista ordinata di step/todos da eseguire',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      description: { 
-                        type: 'string', 
-                        description: 'Descrizione dello step da eseguire' 
-                      },
-                      action: { 
-                        type: 'string', 
-                        enum: ['click', 'type', 'scroll', 'press', 'wait', 'navigate'], 
-                        description: 'Tipo di azione (opzionale)' 
-                      },
-                      target: { 
-                        type: 'string', 
-                        description: 'Elemento target (opzionale)' 
-                      },
-                      value: { 
-                        type: 'string', 
-                        description: 'Valore (opzionale)' 
-                      },
-                      expected_outcome: { 
-                        type: 'string', 
-                        description: 'Risultato atteso (opzionale)' 
-                      }
-                    },
-                    required: ['description']
+          // Check if current agent is configured for a Lux mode
+          const agentLuxMode = luxModeMap.get(agent.id);
+          console.log(`🔧 [REQ-${requestId}] Agent ${agent.slug} Lux mode: ${agentLuxMode || 'none'}`);
+          
+          // Tool: create_actor_task - ONLY for agent configured as 'actor'
+          if (agentLuxMode === 'actor') {
+            tools.push({
+              name: 'create_actor_task',
+              description: 'DEVI usare questo tool per ogni richiesta. Crea task semplice per Lux Actor. Converti la richiesta in inglese e chiama questo tool.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  user_request: { 
+                    type: 'string', 
+                    description: 'Richiesta originale dell\'utente (non modificata)' 
+                  },
+                  task_description: { 
+                    type: 'string', 
+                    description: 'Istruzione in INGLESE da passare a Lux Actor' 
+                  },
+                  platform: { 
+                    type: 'string', 
+                    description: 'Nome del sito/piattaforma target' 
+                  },
+                  start_url: { 
+                    type: 'string', 
+                    description: 'URL iniziale (opzionale)' 
                   }
-                }
-              },
-              required: ['user_request', 'task_description', 'todos']
-            }
-          });
+                },
+                required: ['user_request', 'task_description']
+              }
+            });
+          }
+          
+          // Tool: create_thinker_task - ONLY for agent configured as 'thinker'
+          if (agentLuxMode === 'thinker') {
+            tools.push({
+              name: 'create_thinker_task',
+              description: 'DEVI usare questo tool per ogni richiesta. Crea task complesso per Lux Thinker. Converti in istruzioni dettagliate in inglese.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  user_request: { 
+                    type: 'string', 
+                    description: 'Richiesta originale dell\'utente (non modificata)' 
+                  },
+                  task_description: { 
+                    type: 'string', 
+                    description: 'Istruzione dettagliata in INGLESE' 
+                  },
+                  platform: { 
+                    type: 'string', 
+                    description: 'Nome del sito/piattaforma' 
+                  },
+                  start_url: { 
+                    type: 'string', 
+                    description: 'URL iniziale' 
+                  },
+                  max_steps: {
+                    type: 'integer',
+                    description: 'Maximum steps (60-100 in base alla complessità)',
+                    default: 100
+                  },
+                  complexity: { 
+                    type: 'string', 
+                    enum: ['medium', 'complex'],
+                    description: 'Complessità stimata del task' 
+                  }
+                },
+                required: ['user_request', 'task_description']
+              }
+            });
+          }
+          
+          // Tool: create_tasker_task - ONLY for agent configured as 'tasker'
+          if (agentLuxMode === 'tasker') {
+            tools.push({
+              name: 'create_tasker_task',
+              description: 'DEVI usare questo tool per ogni richiesta. Crea task con decomposizione in step. Tutti i todos devono essere in INGLESE.',
+              input_schema: {
+                type: 'object',
+                properties: {
+                  user_request: { 
+                    type: 'string', 
+                    description: 'Richiesta originale dell\'utente (non modificata)' 
+                  },
+                  task_description: { 
+                    type: 'string', 
+                    description: 'Obiettivo generale in INGLESE' 
+                  },
+                  platform: { 
+                    type: 'string', 
+                    description: 'Nome del sito/piattaforma' 
+                  },
+                  start_url: { 
+                    type: 'string', 
+                    description: 'URL iniziale' 
+                  },
+                  todos: {
+                    type: 'array',
+                    description: 'Lista ordinata di step/goal in INGLESE',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        description: { 
+                          type: 'string', 
+                          description: 'Descrizione del goal in inglese' 
+                        },
+                        action: { 
+                          type: 'string', 
+                          enum: ['click', 'type', 'scroll', 'press', 'wait', 'navigate'], 
+                          description: 'Tipo di azione (opzionale)' 
+                        },
+                        target: { 
+                          type: 'string', 
+                          description: 'Elemento target (opzionale)' 
+                        },
+                        value: { 
+                          type: 'string', 
+                          description: 'Valore (opzionale)' 
+                        },
+                        expected_outcome: { 
+                          type: 'string', 
+                          description: 'Risultato atteso (opzionale)' 
+                        }
+                      },
+                      required: ['description']
+                    }
+                  }
+                },
+                required: ['user_request', 'task_description', 'todos']
+              }
+            });
+          }
           
           // ===== GITHUB REPOSITORY TOOLS =====
           // Tool: github_read_file - Read file from GitHub repo

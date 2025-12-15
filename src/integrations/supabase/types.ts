@@ -1396,6 +1396,38 @@ export type Database = {
         }
         Relationships: []
       }
+      lux_mode_config: {
+        Row: {
+          agent_id: string | null
+          created_at: string | null
+          id: string
+          lux_mode: string
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id?: string | null
+          created_at?: string | null
+          id?: string
+          lux_mode: string
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string | null
+          created_at?: string | null
+          id?: string
+          lux_mode?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lux_mode_config_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lux_tasks: {
         Row: {
           agent_id: string | null

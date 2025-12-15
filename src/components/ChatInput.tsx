@@ -41,6 +41,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState<number | null>(null);
   const [pendingForcedTool, setPendingForcedTool] = useState<string | null>(null);
+  const [luxConfig, setLuxConfig] = useState<Array<{ lux_mode: string; agent_id: string | null; agents: { slug: string; name: string } | null }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
 
@@ -59,6 +60,21 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     };
     
     fetchAgents();
+  }, []);
+
+  // Fetch Lux mode configuration
+  useEffect(() => {
+    const fetchLuxConfig = async () => {
+      const { data, error } = await supabase
+        .from('lux_mode_config')
+        .select('lux_mode, agent_id, agents(slug, name)');
+      
+      if (!error && data) {
+        setLuxConfig(data as any);
+      }
+    };
+    
+    fetchLuxConfig();
   }, []);
 
   // Detect @agent mentions in input (validate against active agents)
@@ -509,15 +525,30 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                     Lux Automation
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
+                    <DropdownMenuItem onClick={() => {
+                      const actorConfig = luxConfig.find(c => c.lux_mode === 'actor');
+                      if (actorConfig?.agents?.slug) {
+                        window.location.href = `/agent/${actorConfig.agents.slug}`;
+                      }
+                    }}>
                       <Zap className="mr-2 h-4 w-4" />
                       Actor (Semplice)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-thinker')}>
+                    <DropdownMenuItem onClick={() => {
+                      const thinkerConfig = luxConfig.find(c => c.lux_mode === 'thinker');
+                      if (thinkerConfig?.agents?.slug) {
+                        window.location.href = `/agent/${thinkerConfig.agents.slug}`;
+                      }
+                    }}>
                       <Brain className="mr-2 h-4 w-4" />
                       Thinker (Complesso)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-tasker')}>
+                    <DropdownMenuItem onClick={() => {
+                      const taskerConfig = luxConfig.find(c => c.lux_mode === 'tasker');
+                      if (taskerConfig?.agents?.slug) {
+                        window.location.href = `/agent/${taskerConfig.agents.slug}`;
+                      }
+                    }}>
                       <ListChecks className="mr-2 h-4 w-4" />
                       Tasker (Con Step)
                     </DropdownMenuItem>
