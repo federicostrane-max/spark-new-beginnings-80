@@ -5937,6 +5937,7 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 },
                 body: JSON.stringify({
                   model: 'claude-sonnet-4-5',  // Fixed model name
+                  max_tokens: 64000,  // ✅ Required for Anthropic API
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
