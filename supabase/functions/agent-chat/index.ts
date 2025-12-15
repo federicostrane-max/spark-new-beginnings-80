@@ -5989,6 +5989,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                     const parsed = JSON.parse(data);
                     continuationChunks++;
                     
+                    // 🔍 DEBUG: Log EVERY chunk type received
+                    console.log(`🔍 [REQ-${requestId}] Continuation chunk ${continuationChunks}: type=${parsed.type}, delta_type=${parsed.delta?.type || 'N/A'}`);
+                    
                     // Handle text content from continuation
                     if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                       const newText = parsed.delta.text;
@@ -6004,6 +6007,11 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                           .eq('id', placeholderMsg.id);
                         lastUpdateTime = now;
                       }
+                    }
+                    
+                    // 🔍 DEBUG: Check if Anthropic is making another tool call
+                    if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+                      console.log(`⚠️ [REQ-${requestId}] Anthropic is making ANOTHER tool call in continuation: ${parsed.content_block.name}`);
                     }
                     
                     if (parsed.type === 'message_stop') {
