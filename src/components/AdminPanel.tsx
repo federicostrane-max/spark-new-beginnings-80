@@ -13,6 +13,7 @@ import { FilterPromptEditor } from "./FilterPromptEditor";
 import { AlignmentPromptEditor } from "./AlignmentPromptEditor";
 import AlignmentMetricsMonitor from "./AlignmentMetricsMonitor";
 import { AirtopBrowserAutomation } from "./AirtopBrowserAutomation";
+import { LuxModeConfig } from "./LuxModeConfig";
 import { useNavigate } from "react-router-dom";
 
 interface ProcessingResult {
@@ -47,6 +48,7 @@ export const AdminPanel = () => {
     { value: "operations", label: "Operazioni" },
     { value: "filter-prompt", label: "Filter Prompt" },
     { value: "alignment-prompt", label: "Alignment Prompt" },
+    { value: "lux-config", label: "Lux Config" },
     { value: "airtop", label: "Airtop.ai" },
     { value: "docvqa", label: "DocVQA Test" },
     { value: "benchmark", label: "Benchmark" },
@@ -144,7 +146,7 @@ export const AdminPanel = () => {
       </div>
 
       {/* Desktop: Horizontal Tabs */}
-      <TabsList className="hidden md:grid w-full grid-cols-9">
+      <TabsList className="hidden md:grid w-full grid-cols-10">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
             {tab.label}
@@ -339,6 +341,10 @@ export const AdminPanel = () => {
 
       <TabsContent value="alignment-prompt">
         <AlignmentPromptEditor />
+      </TabsContent>
+
+      <TabsContent value="lux-config">
+        <LuxModeConfig />
       </TabsContent>
 
       <TabsContent value="airtop">
