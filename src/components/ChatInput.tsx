@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe, GitBranch, FileCode, FolderOpen, GitPullRequest } from "lucide-react";
+import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe, GitBranch, FileCode, FolderOpen, GitPullRequest, Brain, ListChecks, Play } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
 import { supabase } from "@/integrations/supabase/client";
@@ -299,9 +299,17 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       case 'search-knowledge':
         template = 'cerca knowledge @';
         break;
-      case 'browser-task':
-        template = 'Automazione browser: ';
-        forcedTool = 'create_browser_task';
+      case 'lux-actor':
+        template = 'Azione semplice: ';
+        forcedTool = 'create_actor_task';
+        break;
+      case 'lux-thinker':
+        template = 'Task complesso: ';
+        forcedTool = 'create_thinker_task';
+        break;
+      case 'lux-tasker':
+        template = 'Automazione con step: ';
+        forcedTool = 'create_tasker_task';
         break;
       case 'github-read':
         template = 'Leggi file da GitHub: owner/repo path/to/file.js';
@@ -351,10 +359,14 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       {/* Forced Tool Badge */}
       {pendingForcedTool && (
         <div className="flex gap-2 items-center p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-          {pendingForcedTool?.startsWith('github_') ? <GitBranch className="h-4 w-4 text-emerald-500" /> : <Globe className="h-4 w-4 text-emerald-500" />}
+          {pendingForcedTool?.startsWith('github_') ? <GitBranch className="h-4 w-4 text-emerald-500" /> : 
+           pendingForcedTool?.startsWith('create_') && pendingForcedTool?.includes('_task') ? <Play className="h-4 w-4 text-emerald-500" /> :
+           <Globe className="h-4 w-4 text-emerald-500" />}
           <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
             🤖 Tool forzato: {
-              pendingForcedTool === 'create_browser_task' ? 'Browser Task' :
+              pendingForcedTool === 'create_actor_task' ? 'Lux Actor' :
+              pendingForcedTool === 'create_thinker_task' ? 'Lux Thinker' :
+              pendingForcedTool === 'create_tasker_task' ? 'Lux Tasker' :
               pendingForcedTool === 'github_read_file' ? 'GitHub Read' :
               pendingForcedTool === 'github_write_file' ? 'GitHub Write' :
               pendingForcedTool === 'github_list_files' ? 'GitHub List' :
@@ -491,10 +503,26 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                   Delega Azione ad Altro Agente
                 </DropdownMenuItem>
                 
-                <DropdownMenuItem onClick={() => insertAgentAction('browser-task')}>
-                  <Globe className="mr-2 h-4 w-4" />
-                  Crea Browser Task
-                </DropdownMenuItem>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Play className="mr-2 h-4 w-4" />
+                    Lux Automation
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
+                      <Zap className="mr-2 h-4 w-4" />
+                      Actor (Semplice)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-thinker')}>
+                      <Brain className="mr-2 h-4 w-4" />
+                      Thinker (Complesso)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-tasker')}>
+                      <ListChecks className="mr-2 h-4 w-4" />
+                      Tasker (Con Step)
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
