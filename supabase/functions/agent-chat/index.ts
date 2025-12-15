@@ -4107,95 +4107,50 @@ ${knowledgeContext}${searchResultsContext}`;
               await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
             }
             
-            // ============= TOOL: create_browser_task =============
-            else if (toolName === 'create_browser_task') {
-              console.log(`🛠️ [REQ-${context.requestId}] Tool called: create_browser_task`);
-              
-              // Helper: Format Lux Instruction (deterministic parser)
-              function formatLuxInstruction(step: { action: string; target: string; value?: string }): string {
-                switch (step.action) {
-                  case 'click': return `Click the ${step.target}`;
-                  case 'type': return `Type '${step.value || ''}' in the ${step.target}`;
-                  case 'scroll': return `Scroll ${step.value || 'down'} until you see the ${step.target}`;
-                  case 'press': return `Press ${step.value || 'Enter'} key`;
-                  case 'wait': return `Wait for the ${step.target} to appear`;
-                  case 'navigate': return `Navigate to ${step.value || step.target}`;
-                  default: return `${step.action} on ${step.target}`;
-                }
-              }
+            // ============= TOOL: create_actor_task =============
+            else if (toolName === 'create_actor_task') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: create_actor_task`);
               
               try {
-                const { task_description, platform, task_type, start_url, steps } = toolInput;
+                const { user_request, task_description, platform, start_url } = toolInput;
                 
-                // 1. INSERT browser_tasks with user_id
+                // INSERT lux_tasks with lux_mode='actor'
                 const { data: task, error: taskError } = await context.supabase
-                  .from('browser_tasks')
+                  .from('lux_tasks')
                   .insert({
                     user_id: context.userId,
                     agent_id: context.agent.id,
                     conversation_id: context.conversation.id,
+                    user_request,
                     task_description,
+                    lux_mode: 'actor',
+                    lux_model: 'lux-actor-1',
+                    max_steps: 20,
                     platform,
-                    task_type,
-                    start_url,                    // ✅ Colonna dedicata
-                    task_data: { start_url },     // Manteniamo anche in task_data per retrocompatibilità
-                    status: 'pending',
-                    total_steps: steps?.length || 0,
-                    completed_steps: 0,
-                    progress: 0
+                    start_url,
+                    complexity: 'simple',
+                    status: 'pending'
                   })
                   .select()
                   .single();
                 
                 if (taskError) throw taskError;
                 
-                // 2. INSERT browser_steps with structured data + formatted instruction
-                if (steps && steps.length > 0) {
-                  const stepsToInsert = steps.map((step: { action: string; target: string; value?: string; expected_outcome?: string }, index: number) => ({
-                    task_id: task.id,
-                    step_number: index + 1,
-                    action_type: step.action,           // Structured data
-                    action_target: step.target,         // Structured data
-                    action_value: step.value || null,   // Structured data
-                    instruction: formatLuxInstruction(step),  // Lux instruction
-                    expected_outcome: step.expected_outcome || null,
-                    status: 'pending',
-                    retry_count: 0,
-                    max_retries: 3
-                  }));
-                  
-                  const { error: stepsError } = await context.supabase
-                    .from('browser_steps')
-                    .insert(stepsToInsert);
-                  
-                  if (stepsError) throw stepsError;
-                }
+                // NO lux_todos for Actor mode
                 
-                // 3. Construct formatted message for user
-                const stepsFormatted = steps?.map((s: { action: string; target: string; value?: string }, i: number) => 
-                  `${i + 1}. **${s.action.toUpperCase()}** → ${s.target}${s.value ? ` ("${s.value}")` : ''}`
-                ).join('\n') || '';
-                
-                const directMessage = `✅ **Task di automazione browser creato da ${context.agent.name}!**
+                const directMessage = `✅ **Task Lux Actor creato da ${context.agent.name}!**
 
+**Modalità:** Actor (azione diretta)
 **Task:** ${task_description}
-**Piattaforma:** ${platform}
-**URL iniziale:** ${start_url}
-
----
-
-**Step strutturati (${steps?.length || 0} totali):**
-
-${stepsFormatted}
+**Piattaforma:** ${platform || 'N/A'}
+**URL iniziale:** ${start_url || 'N/A'}
 
 ---
 
 **Per eseguire il task:**
-Assicurati che l'app **Architect's Hand Bridge** sia aperta e connessa sul tuo PC.
-Il task apparirà automaticamente e l'esecuzione partirà.`;
+Assicurati che l'app **Architect's Hand Bridge** sia aperta e connessa.
+Il task apparirà automaticamente e Lux Actor lo eseguirà direttamente.`;
                 
-                // 4. INSERT directly in agent_messages (user receives via Realtime)
-                // DO NOT send via SSE to avoid duplicate messages
                 await context.supabase
                   .from('agent_messages')
                   .insert({
@@ -4204,43 +4159,245 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                     content: directMessage,
                     llm_provider: 'system',
                     metadata: {
-                      source: 'browser_task_tool',
+                      source: 'lux_task_tool',
                       task_id: task.id,
-                      tool_name: 'create_browser_task',
+                      tool_name: 'create_actor_task',
+                      lux_mode: 'actor',
                       agent_name: context.agent.name
                     }
                   });
                 
-                // 5. Return simple result to LLM (message already sent via Realtime)
                 toolResult = {
                   success: true,
                   task_id: task.id,
-                  _note: "Messaggio già inviato all'utente via Realtime. Puoi aggiungere un breve commento se utile."
+                  lux_mode: 'actor',
+                  _note: "Messaggio già inviato all'utente via Realtime."
                 };
                 
-                console.log(`✅ [REQ-${context.requestId}] Browser task created: ${task.id}`);
+                console.log(`✅ [REQ-${context.requestId}] Lux Actor task created: ${task.id}`);
                 
-                // 6. DELETE the empty placeholder message since we inserted a direct message
-                // This prevents duplicate/empty messages appearing in the conversation
                 if (placeholderMsg?.id) {
-                  const { error: deleteError } = await context.supabase
-                    .from('agent_messages')
-                    .delete()
-                    .eq('id', placeholderMsg.id);
-                  
-                  if (deleteError) {
-                    console.error(`⚠️ [REQ-${context.requestId}] Failed to delete placeholder:`, deleteError);
-                  } else {
-                    console.log(`🗑️ [REQ-${context.requestId}] Deleted empty placeholder after direct message insert`);
-                    // Set flag to skip final update (closure variable)
-                    skipFinalPlaceholderUpdate = true;
-                  }
+                  await context.supabase.from('agent_messages').delete().eq('id', placeholderMsg.id);
+                  skipFinalPlaceholderUpdate = true;
                 }
                 
               } catch (error) {
-                console.error('❌ Error in create_browser_task:', error);
-                toolResult = { error: error instanceof Error ? error.message : 'Failed to create browser task', success: false };
-                responseText = `❌ Errore nella creazione del browser task: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                console.error('❌ Error in create_actor_task:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create actor task', success: false };
+                responseText = `❌ Errore nella creazione del task Actor: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: create_thinker_task =============
+            else if (toolName === 'create_thinker_task') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: create_thinker_task`);
+              
+              try {
+                const { user_request, task_description, platform, start_url, complexity } = toolInput;
+                
+                // INSERT lux_tasks with lux_mode='thinker'
+                const { data: task, error: taskError } = await context.supabase
+                  .from('lux_tasks')
+                  .insert({
+                    user_id: context.userId,
+                    agent_id: context.agent.id,
+                    conversation_id: context.conversation.id,
+                    user_request,
+                    task_description,
+                    lux_mode: 'thinker',
+                    lux_model: 'lux-thinker-1',
+                    max_steps: 100,
+                    platform,
+                    start_url,
+                    complexity: complexity || 'complex',
+                    status: 'pending'
+                  })
+                  .select()
+                  .single();
+                
+                if (taskError) throw taskError;
+                
+                // NO lux_todos for Thinker mode
+                
+                const directMessage = `✅ **Task Lux Thinker creato da ${context.agent.name}!**
+
+**Modalità:** Thinker (ragionamento complesso)
+**Task:** ${task_description}
+**Piattaforma:** ${platform || 'N/A'}
+**URL iniziale:** ${start_url || 'N/A'}
+**Complessità:** ${complexity || 'complex'}
+
+---
+
+**Per eseguire il task:**
+Assicurati che l'app **Architect's Hand Bridge** sia aperta e connessa.
+Il task apparirà automaticamente e Lux Thinker lo eseguirà con ragionamento autonomo.`;
+                
+                await context.supabase
+                  .from('agent_messages')
+                  .insert({
+                    conversation_id: context.conversation.id,
+                    role: 'assistant',
+                    content: directMessage,
+                    llm_provider: 'system',
+                    metadata: {
+                      source: 'lux_task_tool',
+                      task_id: task.id,
+                      tool_name: 'create_thinker_task',
+                      lux_mode: 'thinker',
+                      agent_name: context.agent.name
+                    }
+                  });
+                
+                toolResult = {
+                  success: true,
+                  task_id: task.id,
+                  lux_mode: 'thinker',
+                  _note: "Messaggio già inviato all'utente via Realtime."
+                };
+                
+                console.log(`✅ [REQ-${context.requestId}] Lux Thinker task created: ${task.id}`);
+                
+                if (placeholderMsg?.id) {
+                  await context.supabase.from('agent_messages').delete().eq('id', placeholderMsg.id);
+                  skipFinalPlaceholderUpdate = true;
+                }
+                
+              } catch (error) {
+                console.error('❌ Error in create_thinker_task:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create thinker task', success: false };
+                responseText = `❌ Errore nella creazione del task Thinker: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
+            // ============= TOOL: create_tasker_task =============
+            else if (toolName === 'create_tasker_task') {
+              console.log(`🛠️ [REQ-${context.requestId}] Tool called: create_tasker_task`);
+              
+              // Helper: Format Lux Instruction (deterministic parser)
+              function formatLuxInstruction(step: { action?: string; target?: string; value?: string; description: string }): string {
+                if (!step.action) return step.description;
+                switch (step.action) {
+                  case 'click': return `Click the ${step.target}`;
+                  case 'type': return `Type '${step.value || ''}' in the ${step.target}`;
+                  case 'scroll': return `Scroll ${step.value || 'down'} until you see the ${step.target}`;
+                  case 'press': return `Press ${step.value || 'Enter'} key`;
+                  case 'wait': return `Wait for the ${step.target} to appear`;
+                  case 'navigate': return `Navigate to ${step.value || step.target}`;
+                  default: return step.description;
+                }
+              }
+              
+              try {
+                const { user_request, task_description, platform, start_url, todos } = toolInput;
+                
+                // 1. INSERT lux_tasks with lux_mode='tasker'
+                const { data: task, error: taskError } = await context.supabase
+                  .from('lux_tasks')
+                  .insert({
+                    user_id: context.userId,
+                    agent_id: context.agent.id,
+                    conversation_id: context.conversation.id,
+                    user_request,
+                    task_description,
+                    lux_mode: 'tasker',
+                    lux_model: 'lux-actor-1',
+                    max_steps: 60,
+                    platform,
+                    start_url,
+                    complexity: 'medium',
+                    status: 'pending'
+                  })
+                  .select()
+                  .single();
+                
+                if (taskError) throw taskError;
+                
+                // 2. INSERT lux_todos
+                if (todos && todos.length > 0) {
+                  const todosToInsert = todos.map((todo: { description: string; action?: string; target?: string; value?: string; expected_outcome?: string }, index: number) => ({
+                    task_id: task.id,
+                    todo_index: index,
+                    todo_description: todo.description,
+                    instruction: formatLuxInstruction(todo),
+                    action_type: todo.action || null,
+                    action_target: todo.target || null,
+                    action_value: todo.value || null,
+                    expected_outcome: todo.expected_outcome || null,
+                    status: 'pending'
+                  }));
+                  
+                  const { error: todosError } = await context.supabase
+                    .from('lux_todos')
+                    .insert(todosToInsert);
+                  
+                  if (todosError) throw todosError;
+                }
+                
+                // 3. Format todos for message
+                const todosFormatted = todos?.map((t: { description: string; action?: string }, i: number) => 
+                  `${i + 1}. ${t.action ? `**${t.action.toUpperCase()}** → ` : ''}${t.description}`
+                ).join('\n') || '';
+                
+                const directMessage = `✅ **Task Lux Tasker creato da ${context.agent.name}!**
+
+**Modalità:** Tasker (step decompositi)
+**Task:** ${task_description}
+**Piattaforma:** ${platform || 'N/A'}
+**URL iniziale:** ${start_url || 'N/A'}
+
+---
+
+**Todos (${todos?.length || 0} step):**
+
+${todosFormatted}
+
+---
+
+**Per eseguire il task:**
+Assicurati che l'app **Architect's Hand Bridge** sia aperta e connessa.
+TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
+                
+                await context.supabase
+                  .from('agent_messages')
+                  .insert({
+                    conversation_id: context.conversation.id,
+                    role: 'assistant',
+                    content: directMessage,
+                    llm_provider: 'system',
+                    metadata: {
+                      source: 'lux_task_tool',
+                      task_id: task.id,
+                      tool_name: 'create_tasker_task',
+                      lux_mode: 'tasker',
+                      todos_count: todos?.length || 0,
+                      agent_name: context.agent.name
+                    }
+                  });
+                
+                toolResult = {
+                  success: true,
+                  task_id: task.id,
+                  lux_mode: 'tasker',
+                  todos_count: todos?.length || 0,
+                  _note: "Messaggio già inviato all'utente via Realtime."
+                };
+                
+                console.log(`✅ [REQ-${context.requestId}] Lux Tasker task created: ${task.id} with ${todos?.length || 0} todos`);
+                
+                if (placeholderMsg?.id) {
+                  await context.supabase.from('agent_messages').delete().eq('id', placeholderMsg.id);
+                  skipFinalPlaceholderUpdate = true;
+                }
+                
+              } catch (error) {
+                console.error('❌ Error in create_tasker_task:', error);
+                toolResult = { error: error instanceof Error ? error.message : 'Failed to create tasker task', success: false };
+                responseText = `❌ Errore nella creazione del task Tasker: ${error instanceof Error ? error.message : 'Unknown error'}\n`;
                 newFullResponse += responseText;
                 await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
               }
@@ -4700,59 +4857,124 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
             }
           });
           
-          // Tool: create_browser_task - Browser automation via Lux
+          // ===== LUX AUTOMATION TOOLS =====
+          // Tool: create_actor_task - Simple direct input for Lux Actor
           tools.push({
-            name: 'create_browser_task',
-            description: 'Crea un task di automazione browser eseguito dall\'app desktop Architect\'s Hand Bridge via Lux. Usa questo tool quando l\'utente chiede di fare azioni su siti web come ricerche, compilare form, navigare pagine, etc.',
+            name: 'create_actor_task',
+            description: 'Crea task semplice per Lux Actor. Usa per azioni dirette: click, ricerche web, navigazioni semplici. L\'app desktop Architect\'s Hand Bridge eseguirà l\'azione.',
             input_schema: {
               type: 'object',
               properties: {
+                user_request: { 
+                  type: 'string', 
+                  description: 'Richiesta originale dell\'utente' 
+                },
                 task_description: { 
                   type: 'string', 
-                  description: 'Descrizione completa del task da eseguire' 
+                  description: 'Descrizione dell\'azione da eseguire (passata direttamente a Lux)' 
                 },
                 platform: { 
                   type: 'string', 
-                  description: 'Nome del sito/piattaforma (es: "google", "linkedin", "youtube")' 
-                },
-                task_type: { 
-                  type: 'string', 
-                  enum: ['navigation', 'form_fill', 'download', 'scrape', 'click_sequence', 'login', 'search', 'other'],
-                  description: 'Tipo di task' 
+                  description: 'Nome del sito/piattaforma (es: "google", "linkedin")' 
                 },
                 start_url: { 
                   type: 'string', 
-                  description: 'URL iniziale da cui partire (es: "https://www.google.com")' 
+                  description: 'URL iniziale (es: "https://www.google.com")' 
+                }
+              },
+              required: ['user_request', 'task_description']
+            }
+          });
+          
+          // Tool: create_thinker_task - Complex direct input for Lux Thinker
+          tools.push({
+            name: 'create_thinker_task',
+            description: 'Crea task complesso per Lux Thinker. Usa per task multi-step che richiedono ragionamento autonomo. L\'app desktop Architect\'s Hand Bridge eseguirà il task.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                user_request: { 
+                  type: 'string', 
+                  description: 'Richiesta originale dell\'utente' 
                 },
-                steps: {
+                task_description: { 
+                  type: 'string', 
+                  description: 'Descrizione completa del task (passata direttamente a Lux Thinker)' 
+                },
+                platform: { 
+                  type: 'string', 
+                  description: 'Nome del sito/piattaforma' 
+                },
+                start_url: { 
+                  type: 'string', 
+                  description: 'URL iniziale' 
+                },
+                complexity: { 
+                  type: 'string', 
+                  enum: ['medium', 'complex'],
+                  description: 'Complessità stimata del task' 
+                }
+              },
+              required: ['user_request', 'task_description']
+            }
+          });
+          
+          // Tool: create_tasker_task - Decomposed task with todos for TaskerAgent
+          tools.push({
+            name: 'create_tasker_task',
+            description: 'Crea task con decomposizione in step per Lux TaskerAgent. Usa quando serve controllo fine su ogni step. L\'app desktop eseguirà ogni todo in sequenza.',
+            input_schema: {
+              type: 'object',
+              properties: {
+                user_request: { 
+                  type: 'string', 
+                  description: 'Richiesta originale dell\'utente' 
+                },
+                task_description: { 
+                  type: 'string', 
+                  description: 'Descrizione generale del task' 
+                },
+                platform: { 
+                  type: 'string', 
+                  description: 'Nome del sito/piattaforma' 
+                },
+                start_url: { 
+                  type: 'string', 
+                  description: 'URL iniziale' 
+                },
+                todos: {
                   type: 'array',
-                  description: 'Lista ordinata di step da eseguire',
+                  description: 'Lista ordinata di step/todos da eseguire',
                   items: {
                     type: 'object',
                     properties: {
+                      description: { 
+                        type: 'string', 
+                        description: 'Descrizione dello step da eseguire' 
+                      },
                       action: { 
                         type: 'string', 
                         enum: ['click', 'type', 'scroll', 'press', 'wait', 'navigate'], 
-                        description: 'Tipo di azione: click=clicca elemento, type=scrivi testo, scroll=scorri pagina, press=premi tasto, wait=attendi elemento, navigate=vai a URL' 
+                        description: 'Tipo di azione (opzionale)' 
                       },
                       target: { 
                         type: 'string', 
-                        description: 'Descrizione VISIVA dell\'elemento target (es: "blue Sign In button in top right corner", "search input field with placeholder Search Google")' 
+                        description: 'Elemento target (opzionale)' 
                       },
                       value: { 
                         type: 'string', 
-                        description: 'Per type: testo da digitare. Per press: tasto (Enter, Tab, Escape). Per scroll: up/down. Per navigate: URL completo.' 
+                        description: 'Valore (opzionale)' 
                       },
                       expected_outcome: { 
                         type: 'string', 
-                        description: 'Cosa ci aspettiamo dopo questo step (es: "Search results page appears")' 
+                        description: 'Risultato atteso (opzionale)' 
                       }
                     },
-                    required: ['action', 'target']
+                    required: ['description']
                   }
                 }
               },
-              required: ['task_description', 'platform', 'task_type', 'start_url', 'steps']
+              required: ['user_request', 'task_description', 'todos']
             }
           });
           
@@ -6441,7 +6663,9 @@ Il task apparirà automaticamente e l'esecuzione partirà.`;
                 
                 // Generate contextual fallback message based on tool name
                 const toolConfirmations: Record<string, string> = {
-                  'create_browser_task': '✅ Browser task creato con successo.',
+                  'create_actor_task': '✅ Lux Actor task creato con successo.',
+                  'create_thinker_task': '✅ Lux Thinker task creato con successo.',
+                  'create_tasker_task': '✅ Lux Tasker task creato con successo.',
                   'download_pdf': '✅ Download PDF completato.',
                   'web_search': '✅ Ricerca web completata.',
                   'get_agent_knowledge': '✅ Documenti recuperati.',
