@@ -525,30 +525,15 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                     Lux Automation
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
-                    <DropdownMenuItem onClick={() => {
-                      const actorConfig = luxConfig.find(c => c.lux_mode === 'actor');
-                      if (actorConfig?.agents?.slug) {
-                        window.location.href = `/agent/${actorConfig.agents.slug}`;
-                      }
-                    }}>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
                       <Zap className="mr-2 h-4 w-4" />
                       Actor (Semplice)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const thinkerConfig = luxConfig.find(c => c.lux_mode === 'thinker');
-                      if (thinkerConfig?.agents?.slug) {
-                        window.location.href = `/agent/${thinkerConfig.agents.slug}`;
-                      }
-                    }}>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-thinker')}>
                       <Brain className="mr-2 h-4 w-4" />
                       Thinker (Complesso)
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      const taskerConfig = luxConfig.find(c => c.lux_mode === 'tasker');
-                      if (taskerConfig?.agents?.slug) {
-                        window.location.href = `/agent/${taskerConfig.agents.slug}`;
-                      }
-                    }}>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-tasker')}>
                       <ListChecks className="mr-2 h-4 w-4" />
                       Tasker (Con Step)
                     </DropdownMenuItem>
