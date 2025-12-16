@@ -1521,7 +1521,6 @@ export type Database = {
           error_message: string | null
           expected_outcome: string | null
           id: string
-          instruction: string | null
           lux_actions: Json | null
           lux_feedback: Json | null
           max_retries: number | null
@@ -1546,7 +1545,6 @@ export type Database = {
           error_message?: string | null
           expected_outcome?: string | null
           id?: string
-          instruction?: string | null
           lux_actions?: Json | null
           lux_feedback?: Json | null
           max_retries?: number | null
@@ -1571,7 +1569,6 @@ export type Database = {
           error_message?: string | null
           expected_outcome?: string | null
           id?: string
-          instruction?: string | null
           lux_actions?: Json | null
           lux_feedback?: Json | null
           max_retries?: number | null
