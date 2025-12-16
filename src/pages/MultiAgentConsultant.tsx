@@ -796,6 +796,9 @@ export default function MultiAgentConsultant() {
     setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
     
     setStreamingConversationId(conversationId);
+
+    // Keep track of the real backend message id (can differ from our UI placeholder id)
+    let backendMessageId: string | null = null;
     
     // 🔍 Dichiarazione variabili per cleanup (accessibili da catch/finally)
     let timeout: NodeJS.Timeout | undefined;
@@ -849,7 +852,6 @@ export default function MultiAgentConsultant() {
       // 🔍 Diagnostica SSE: tracking timestamp e stalli
       let lastChunkTime = Date.now();
       let chunkCount = 0;
-      let stallDetectionInterval: NodeJS.Timeout;
 
       if (!reader) throw new Error("No reader");
       
@@ -976,6 +978,7 @@ export default function MultiAgentConsultant() {
 
             if (parsed.type === "message_start") {
               lastMessageId = parsed.messageId;
+              backendMessageId = parsed.messageId;
               console.log("📨 Message started:", lastMessageId.slice(0, 8));
               
             } else if (parsed.type === "content" && parsed.text) {
@@ -1012,7 +1015,7 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "switching_to_background") {
               console.log("⏰ Switching to background - accumulated:", accumulatedText.length, "chars");
-              clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
+              if (stallDetectionInterval) clearInterval(stallDetectionInterval);
               accumulatedText = parsed.message;
               
               setMessages((prev) => 
@@ -1023,7 +1026,7 @@ export default function MultiAgentConsultant() {
                 )
               );
               
-              const messageId = lastMessageId || assistantId;
+              const messageId = backendMessageId || lastMessageId || assistantId;
               setupRealtimeSubscription(messageId);
               
               clearTimeout(timeout);
@@ -1032,7 +1035,7 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "complete") {
               console.log("✅ SSE stream completed successfully");
-              clearInterval(stallDetectionInterval); // 🔍 Cleanup interval
+              if (stallDetectionInterval) clearInterval(stallDetectionInterval);
               
               // ✅ FLUSH FINALE: Cancella timeout pendente e forza update con testo completo
               if (throttleTimeoutRef.current) {
@@ -1095,16 +1098,18 @@ export default function MultiAgentConsultant() {
       console.error("❌ SSE stream interrupted:", {
         error: error.message,
         assistantId,
-        conversationId
+        conversationId,
+        backendMessageId
       });
       
       if (stallDetectionInterval) {
         clearInterval(stallDetectionInterval);
       }
       
-      // 🔍 Verifica se il messaggio esiste già nel database
-      console.log("🔍 Checking if assistant message was saved despite streaming error...");
-      const messageExists = await checkMessageExists(assistantId);
+      // 🔍 Verifica se il messaggio esiste già nel database (usa messageId del backend se disponibile)
+      const idToCheck = backendMessageId || assistantId;
+      console.log("🔍 Checking if assistant message was saved despite streaming error...", { idToCheck });
+      const messageExists = await checkMessageExists(idToCheck);
       
       if (messageExists) {
         // ✅ SILENT RECOVERY: Il messaggio esiste, recuperalo dal DB
@@ -1118,20 +1123,22 @@ export default function MultiAgentConsultant() {
           await loadConversation(conversationId);
         }
       } else {
-        // ❌ ERRORE REALE: Il messaggio NON esiste
+        // ❌ ERRORE REALE: Il messaggio NON esiste → mostra errore nel bubble invece di lasciare vuoto
         console.error("❌ Message NOT found in DB, real error occurred");
-        
-        setMessages((prev) => prev.filter((m) => m.id !== assistantId));
-        
-        toast.error("Errore durante l'invio del messaggio", {
-          description: error.message || "Riprova tra qualche secondo"
+
+        const rawMsg = String(error?.message || "Riprova tra qualche secondo");
+        const isBilling = /credit balance is too low|Plans & Billing/i.test(rawMsg);
+        const friendly = isBilling
+          ? "⚠️ Il provider AI per questo agente non ha più credito disponibile. Ricarica il credito o cambia modello/agente." 
+          : `⚠️ Errore: ${rawMsg}`;
+
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: friendly } : m))
+        );
+
+        toast.error("Errore durante la generazione", {
+          description: isBilling ? "Credito insufficiente sul provider AI." : rawMsg,
         });
-        
-        if (conversationId) {
-          setTimeout(() => {
-            loadConversation(conversationId);
-          }, 500);
-        }
       }
     } finally {
       if (stallDetectionInterval) {
