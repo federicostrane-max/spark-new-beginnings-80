@@ -749,26 +749,22 @@ export default function MultiAgentConsultant() {
     }
   };
 
-  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedToolOrConversationId?: string, forceAgent?: Agent) => {
+  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string, luxMode?: string) => {
     // ✅ Guard anti-double-submit
     if (isSending) {
       console.warn("⚠️ Double submit prevented - already sending");
       return;
     }
     
-    // Detect if third param is forcedTool or forceConversationId
-    const isForcedTool = forcedToolOrConversationId && !forcedToolOrConversationId.includes('-');
-    const forcedTool = isForcedTool ? forcedToolOrConversationId : undefined;
-    const forceConversationId = isForcedTool ? undefined : forcedToolOrConversationId;
     if (!session?.access_token) return;
     
-    const agent = forceAgent || currentAgent;
+    const agent = currentAgent;
     if (!agent) return;
     
     setIsSending(true); // ✅ Lock submissions
 
-    // ✅ NEW: Use ref for immediate access, fallback to state
-    const conversationId = forceConversationId || currentConversationRef.current || currentConversation?.id;
+    // ✅ Use ref for immediate access, fallback to state
+    const conversationId = currentConversationRef.current || currentConversation?.id;
 
     if (!conversationId) {
       console.error("❌ No active conversation - agent might still be loading");
@@ -828,6 +824,7 @@ export default function MultiAgentConsultant() {
             agentSlug: agent.slug,
             attachments,
             forcedTool,
+            luxMode,
           }),
           keepalive: true,
           signal: controller.signal
@@ -1238,7 +1235,7 @@ export default function MultiAgentConsultant() {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Send the forwarded message, passing both conversationId and agent explicitly
-    await handleSendMessage(messageContent, undefined, conversationId, agentData);
+    await handleSendMessage(messageContent);
   };
 
   const handleDeleteAllMessages = async () => {

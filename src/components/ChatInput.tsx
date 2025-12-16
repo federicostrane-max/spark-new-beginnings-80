@@ -25,7 +25,7 @@ interface Agent {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string) => void;
+  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string, luxMode?: string) => void;
   disabled?: boolean;
   sendDisabled?: boolean;
   placeholder?: string;
@@ -41,6 +41,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState<number | null>(null);
   const [pendingForcedTool, setPendingForcedTool] = useState<string | null>(null);
+  const [pendingLuxMode, setPendingLuxMode] = useState<string | null>(null);
   const [luxConfig, setLuxConfig] = useState<Array<{ lux_mode: string; agent_id: string | null; agents: { slug: string; name: string } | null }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -143,10 +144,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     if (input.trim() && !disabled) {
       // Close suggestions when submitting
       setShowAgentSuggestions(false);
-      onSend(input.trim(), attachments.length > 0 ? attachments : undefined, pendingForcedTool || undefined);
+      onSend(input.trim(), attachments.length > 0 ? attachments : undefined, pendingForcedTool || undefined, pendingLuxMode || undefined);
       setInput("");
       setAttachments([]);
       setPendingForcedTool(null); // Reset after sending
+      setPendingLuxMode(null); // Reset luxMode after sending
     }
   };
 
@@ -293,6 +295,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const insertAgentAction = (action: string) => {
     let template = '';
     let forcedTool: string | null = null;
+    let luxMode: string | null = null;
     
     switch(action) {
       case 'consult':
@@ -317,15 +320,15 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
         break;
       case 'lux-actor':
         template = 'Azione semplice: ';
-        forcedTool = 'create_actor_task';
+        luxMode = 'actor'; // Pipeline deterministica - NO forcedTool
         break;
       case 'lux-thinker':
         template = 'Task complesso: ';
-        forcedTool = 'create_thinker_task';
+        luxMode = 'thinker'; // Pipeline deterministica - NO forcedTool
         break;
       case 'lux-tasker':
         template = 'Automazione con step: ';
-        forcedTool = 'create_tasker_task';
+        luxMode = 'tasker'; // Pipeline deterministica - NO forcedTool
         break;
       case 'github-read':
         template = 'Leggi file da GitHub: owner/repo path/to/file.js';
@@ -349,8 +352,9 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
         break;
     }
     
-    // Set forced tool if applicable
+    // Set forced tool or luxMode if applicable
     setPendingForcedTool(forcedTool);
+    setPendingLuxMode(luxMode);
     
     // Insert template at cursor position
     const cursorPos = textareaRef.current?.selectionStart || input.length;
@@ -372,17 +376,38 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
 
   return (
     <div className="space-y-2">
-      {/* Forced Tool Badge */}
+      {/* Lux Mode Badge */}
+      {pendingLuxMode && (
+        <div className="flex gap-2 items-center p-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
+          {pendingLuxMode === 'actor' ? <Zap className="h-4 w-4 text-purple-500" /> : 
+           pendingLuxMode === 'thinker' ? <Brain className="h-4 w-4 text-purple-500" /> :
+           <ListChecks className="h-4 w-4 text-purple-500" />}
+          <span className="text-sm text-purple-600 dark:text-purple-400 font-medium">
+            🎮 Lux Pipeline: {
+              pendingLuxMode === 'actor' ? 'Actor (Semplice)' :
+              pendingLuxMode === 'thinker' ? 'Thinker (Complesso)' :
+              pendingLuxMode === 'tasker' ? 'Tasker (Con Step)' :
+              pendingLuxMode
+            }
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 ml-auto"
+            onClick={() => setPendingLuxMode(null)}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+
+      {/* Forced Tool Badge (for non-Lux tools like GitHub) */}
       {pendingForcedTool && (
         <div className="flex gap-2 items-center p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
-          {pendingForcedTool?.startsWith('github_') ? <GitBranch className="h-4 w-4 text-emerald-500" /> : 
-           pendingForcedTool?.startsWith('create_') && pendingForcedTool?.includes('_task') ? <Play className="h-4 w-4 text-emerald-500" /> :
-           <Globe className="h-4 w-4 text-emerald-500" />}
+          <GitBranch className="h-4 w-4 text-emerald-500" />
           <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">
             🤖 Tool forzato: {
-              pendingForcedTool === 'create_actor_task' ? 'Lux Actor' :
-              pendingForcedTool === 'create_thinker_task' ? 'Lux Thinker' :
-              pendingForcedTool === 'create_tasker_task' ? 'Lux Tasker' :
               pendingForcedTool === 'github_read_file' ? 'GitHub Read' :
               pendingForcedTool === 'github_write_file' ? 'GitHub Write' :
               pendingForcedTool === 'github_list_files' ? 'GitHub List' :

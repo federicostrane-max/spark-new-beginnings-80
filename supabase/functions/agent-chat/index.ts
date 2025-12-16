@@ -2275,7 +2275,7 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool, luxMode } = requestBody;
 
     // Server-to-server calls can pass serverUserId directly (for benchmark system)
     let userId: string;
@@ -2329,6 +2329,7 @@ Deno.serve(async (req) => {
     console.log('   Message length:', message.length, 'chars');
     console.log('   Attachments:', attachments?.length || 0);
     console.log('   Forced Tool:', forcedTool || 'auto');
+    console.log('   Lux Mode:', luxMode || 'none');
     console.log('   Timestamp:', new Date().toISOString());
 
     console.log('Processing chat for agent:', agentSlug);
@@ -2448,8 +2449,145 @@ Deno.serve(async (req) => {
     }
 
     // ============================================
-    // DETERMINISTIC @TAG DETECTION SYSTEM
+    // LUX AUTOMATION DETERMINISTIC PIPELINE
     // ============================================
+    if (luxMode && ['actor', 'thinker', 'tasker'].includes(luxMode)) {
+      console.log(`🎮 [REQ-${requestId}] Lux Pipeline activated: ${luxMode}`);
+      
+      // 1. Find the Lux agent configured for this mode
+      const { data: luxConfig } = await supabase
+        .from('lux_mode_config')
+        .select('agent_id, agents(id, slug, system_prompt, ai_model, llm_provider)')
+        .eq('lux_mode', luxMode)
+        .single();
+      
+      if (!luxConfig?.agents) {
+        throw new Error(`No agent configured for Lux mode: ${luxMode}`);
+      }
+      
+      const luxAgent = luxConfig.agents as any;
+      console.log(`🤖 [REQ-${requestId}] Using Lux agent: ${luxAgent.slug}`);
+      
+      // 2. Call Lux agent internally to get structured JSON
+      const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+      const luxResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY || '',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: luxAgent.ai_model || 'claude-sonnet-4-20250514',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: message }],
+          system: luxAgent.system_prompt
+        })
+      });
+      
+      if (!luxResponse.ok) {
+        throw new Error(`Lux agent API call failed: ${luxResponse.status}`);
+      }
+      
+      const luxData = await luxResponse.json();
+      const luxOutput = luxData.content?.[0]?.text || '';
+      console.log(`📝 [REQ-${requestId}] Lux agent response length: ${luxOutput.length}`);
+      
+      // 3. Parse JSON from response
+      const jsonMatch = luxOutput.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) {
+        throw new Error('Lux agent did not return valid JSON block');
+      }
+      
+      const parsedTask = JSON.parse(jsonMatch[1]);
+      console.log(`✅ [REQ-${requestId}] Parsed Lux task:`, parsedTask.task_description?.slice(0, 50));
+      
+      // 4. Determine task config based on mode
+      const taskConfig = {
+        actor: { lux_model: 'lux-actor-1', max_steps: 20, complexity: 'simple' },
+        thinker: { lux_model: 'lux-thinker-1', max_steps: parsedTask.max_steps || 100, complexity: parsedTask.complexity || 'complex' },
+        tasker: { lux_model: 'lux-actor-1', max_steps: 60, complexity: 'medium' },
+      }[luxMode as 'actor' | 'thinker' | 'tasker'];
+      
+      // 5. INSERT into lux_tasks
+      const { data: task, error: taskError } = await supabase
+        .from('lux_tasks')
+        .insert({
+          user_id: userId,
+          agent_id: agent.id,
+          conversation_id: conversation.id,
+          user_request: message,
+          task_description: parsedTask.task_description,
+          lux_mode: luxMode,
+          lux_model: taskConfig.lux_model,
+          max_steps: taskConfig.max_steps,
+          platform: parsedTask.platform,
+          start_url: parsedTask.start_url,
+          complexity: taskConfig.complexity,
+          status: 'pending'
+        })
+        .select()
+        .single();
+      
+      if (taskError) throw taskError;
+      
+      // 6. INSERT todos for Tasker mode
+      if (luxMode === 'tasker' && parsedTask.todos?.length > 0) {
+        const todosToInsert = parsedTask.todos.map((todo: string, index: number) => ({
+          task_id: task.id,
+          todo_index: index,
+          todo_description: todo,
+          instruction: todo,
+          status: 'pending'
+        }));
+        
+        await supabase.from('lux_todos').insert(todosToInsert);
+      }
+      
+      // 7. Save user message
+      await supabase.from('agent_messages').insert({
+        conversation_id: conversation.id,
+        role: 'user',
+        content: message
+      });
+      
+      // 8. Build and save confirmation message
+      const todosFormatted = parsedTask.todos?.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n') || '';
+      const confirmMessage = `✅ **Task Lux ${luxMode.charAt(0).toUpperCase() + luxMode.slice(1)} creato!**
+
+**Task:** ${parsedTask.task_description}
+**Piattaforma:** ${parsedTask.platform || 'browser'}
+**URL iniziale:** ${parsedTask.start_url || 'N/A'}
+${luxMode === 'tasker' && todosFormatted ? `\n**Todos (${parsedTask.todos.length} step):**\n${todosFormatted}` : ''}
+
+---
+**Per eseguire:** Assicurati che **Architect's Hand Bridge** sia aperta e connessa.`;
+
+      await supabase.from('agent_messages').insert({
+        conversation_id: conversation.id,
+        role: 'assistant',
+        content: confirmMessage,
+        llm_provider: 'system',
+        metadata: { source: 'lux_pipeline', task_id: task.id, lux_mode: luxMode }
+      });
+      
+      console.log(`✅ [REQ-${requestId}] Lux task created: ${task.id}`);
+      
+      // Return SSE stream with confirmation
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: confirmMessage })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+        }
+      });
+      
+      return new Response(stream, {
+        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' }
+      });
+    }
+
     
     // Load all valid agent slugs for whitelist validation
     const { data: activeAgents } = await supabase
