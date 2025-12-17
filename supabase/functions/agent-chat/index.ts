@@ -546,9 +546,12 @@ async function triggerAsyncContinuation(
   agentId: string,
   messages: Message[],
   systemPrompt: string,
-  requestId: string
+  requestId: string,
+  llmProvider: string,
+  aiModel?: string
 ): Promise<void> {
   console.log(`🚀 [REQ-${requestId}] Triggering async continuation for message ${messageId}...`);
+  console.log(`📊 [REQ-${requestId}] Provider: ${llmProvider}, Model: ${aiModel || 'default'}`);
   
   // Fire-and-forget: non aspetta il risultato
   supabaseClient.functions.invoke('continue-deepseek-response', {
@@ -559,7 +562,9 @@ async function triggerAsyncContinuation(
       agentId,
       messages,
       systemPrompt,
-      requestId
+      requestId,
+      llmProvider,
+      aiModel
     }
   }).catch((err: any) => {
     console.error(`❌ [REQ-${requestId}] Failed to trigger continuation:`, err);
@@ -6926,7 +6931,9 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                     : m.content
                 })),
                 enhancedSystemPrompt,
-                requestId
+                requestId,
+                llmProvider,
+                aiModel
               );
               
               // Send notification to client

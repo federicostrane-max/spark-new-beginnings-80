@@ -122,9 +122,12 @@ async function callClaudeForContinuation(
   messages: Message[],
   systemPrompt: string,
   anthropicApiKey: string,
-  requestId: string
+  requestId: string,
+  aiModel?: string
 ): Promise<string> {
-  console.log(`🔄 [CONTINUE-${requestId}] Requesting continuation from Claude...`);
+  // Use agent's configured model, fallback to claude-sonnet-4-20250514
+  const claudeModel = aiModel || 'claude-sonnet-4-20250514';
+  console.log(`🔄 [CONTINUE-${requestId}] Requesting continuation from Claude (model: ${claudeModel})...`);
   
   const continuationMessages = [
     ...messages.map(m => ({
@@ -146,7 +149,7 @@ async function callClaudeForContinuation(
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: claudeModel,
       system: systemPrompt,
       messages: continuationMessages,
       max_tokens: 8192,
@@ -182,13 +185,14 @@ Deno.serve(async (req) => {
       messages: providedMessages, 
       systemPrompt: providedSystemPrompt,
       requestId: providedRequestId,
-      llmProvider
+      llmProvider,
+      aiModel
     } = await req.json();
 
     const requestId = providedRequestId || `cont-${Date.now()}`;
     
     console.log(`🚀 [CONTINUE-${requestId}] Starting continuation for message ${messageId}`);
-    console.log(`📊 [CONTINUE-${requestId}] Provider: ${llmProvider || 'anthropic'}, Content length: ${currentContent?.length || 0} chars`);
+    console.log(`📊 [CONTINUE-${requestId}] Provider: ${llmProvider || 'anthropic'}, Model: ${aiModel || 'default'}, Content length: ${currentContent?.length || 0} chars`);
 
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -290,7 +294,8 @@ Deno.serve(async (req) => {
             messages,
             systemPrompt,
             ANTHROPIC_API_KEY!,
-            requestId
+            requestId,
+            aiModel
           );
         } else {
           continuation = await callDeepSeekForContinuation(
