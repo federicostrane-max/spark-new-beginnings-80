@@ -5624,7 +5624,8 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                         messages: anthropicMessages,
                         systemPrompt: enhancedSystemPrompt,
                         requestId,
-                        llmProvider  // Pass provider so continuation uses same model
+                        llmProvider, // Pass provider so continuation uses same model
+                        aiModel // ✅ Ensure continuation uses the same agent-configured model
                       }
                     }).catch((err: any) => {
                       console.error(`❌ [REQ-${requestId}] Failed to trigger continuation:`, err);

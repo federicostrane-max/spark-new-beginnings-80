@@ -1,3 +1,4 @@
+// Force redeploy: 2025-12-18T00:00:00Z
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7';
 
 const corsHeaders = {
@@ -115,6 +116,31 @@ async function callDeepSeekForContinuation(
 }
 
 /**
+ * Resolves short/legacy Claude model names (stored in DB) to valid Anthropic model IDs.
+ */
+function resolveClaudeModel(aiModel?: string): string {
+  const fallback = 'claude-sonnet-4-20250514';
+  if (!aiModel) return fallback;
+
+  // If it already looks versioned (ends with YYYYMMDD), keep it.
+  if (/\d{8}$/.test(aiModel)) return aiModel;
+
+  const MODEL_MAP: Record<string, string> = {
+    // Latest
+    'claude-sonnet-4-5': 'claude-sonnet-4-5',
+    'claude-opus-4-1': 'claude-opus-4-1-20250805',
+
+    // Common legacy/short names
+    'claude-sonnet-4': 'claude-sonnet-4-20250514',
+    'claude-3-7-sonnet': 'claude-3-7-sonnet-20250219',
+    'claude-3-5-haiku': 'claude-3-5-haiku-20241022',
+    'claude-3-5-sonnet': 'claude-3-5-sonnet-20241022',
+  };
+
+  return MODEL_MAP[aiModel] || fallback;
+}
+
+/**
  * Calls Claude for continuation
  */
 async function callClaudeForContinuation(
@@ -125,8 +151,7 @@ async function callClaudeForContinuation(
   requestId: string,
   aiModel?: string
 ): Promise<string> {
-  // Use agent's configured model, fallback to claude-sonnet-4-20250514
-  const claudeModel = aiModel || 'claude-sonnet-4-20250514';
+  const claudeModel = resolveClaudeModel(aiModel);
   console.log(`🔄 [CONTINUE-${requestId}] Requesting continuation from Claude (model: ${claudeModel})...`);
   
   const continuationMessages = [
