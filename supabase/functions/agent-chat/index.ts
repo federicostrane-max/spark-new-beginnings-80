@@ -2511,10 +2511,11 @@ Deno.serve(async (req) => {
       // Actor: lux-actor-1, 20 steps, temp 0.1
       // Thinker: lux-thinker-1, 100 steps, temp 0.5
       // Tasker: lux-actor-1, 60 steps, temp 0.1
+      // KB-optimal: DEFAULT_TEMPERATURE = 0.5 for all modes
       const taskConfig = {
-        actor: { lux_model: 'lux-actor-1', max_steps: 20, temperature: 0.1, complexity: 'simple' },
+        actor: { lux_model: 'lux-actor-1', max_steps: 20, temperature: 0.5, complexity: 'simple' },
         thinker: { lux_model: 'lux-thinker-1', max_steps: parsedTask.max_steps || 100, temperature: 0.5, complexity: parsedTask.complexity || 'complex' },
-        tasker: { lux_model: 'lux-actor-1', max_steps: 60, temperature: 0.1, complexity: 'medium' },
+        tasker: { lux_model: 'lux-actor-1', max_steps: 60, temperature: 0.5, complexity: 'medium' },
       }[luxMode as 'actor' | 'thinker' | 'tasker'];
       
       // 5. INSERT into lux_tasks
