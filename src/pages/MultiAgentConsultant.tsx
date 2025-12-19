@@ -1037,8 +1037,9 @@ export default function MultiAgentConsultant() {
               await reader.cancel();
               break;
               
-            } else if (parsed.type === "complete") {
-              console.log("✅ SSE stream completed successfully");
+            } else if (parsed.type === "complete" || parsed.type === "done") {
+              const isComplete = parsed.type === "complete";
+              console.log(isComplete ? "✅ SSE stream completed successfully" : "✅ SSE stream done");
               if (stallDetectionInterval) clearInterval(stallDetectionInterval);
               
               // ✅ FLUSH FINALE: Cancella timeout pendente e forza update con testo completo
@@ -1057,7 +1058,7 @@ export default function MultiAgentConsultant() {
                     ? { 
                         ...m, 
                         content: finalText, // ✅ Usa testo completo dalla ref
-                        llm_provider: parsed.llmProvider 
+                        llm_provider: isComplete ? parsed.llmProvider : m.llm_provider,
                       } 
                     : m
                 )
@@ -1081,14 +1082,14 @@ export default function MultiAgentConsultant() {
                 }
               }, 1000);
               
-              if (parsed.conversationId && !currentConversation) {
+              if (isComplete && parsed.conversationId && !currentConversation) {
                 setCurrentConversation({
                   id: parsed.conversationId,
                   agent_id: currentAgent.id,
                   title: (text || accumulatedText || "Chat").slice(0, 50)
                 });
               }
-
+              
               // ✅ IMPORTANT: Stop the SSE loop immediately.
               // Some providers keep the connection open; without this, the UI can stay "streaming" forever.
               shouldStopStreaming = true;
