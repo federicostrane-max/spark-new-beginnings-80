@@ -970,12 +970,14 @@ export default function MultiAgentConsultant() {
               continue;
             }
 
-            let parsed;
+            let parsed: any;
             try {
               parsed = JSON.parse(dataStr);
-            } catch (e) {
-              console.warn("⚠️ Skipping invalid JSON:", dataStr.slice(0, 50));
-              continue;
+            } catch {
+              // ✅ IMPORTANT: SSE JSON can be split across chunks.
+              // If parsing fails, re-buffer this line and wait for more data.
+              buffer = `${line}\n${buffer}`;
+              break;
             }
 
             if (parsed.type === "message_start") {
