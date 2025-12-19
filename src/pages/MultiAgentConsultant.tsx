@@ -944,6 +944,8 @@ export default function MultiAgentConsultant() {
         }, 600000);
       };
 
+      let shouldStopStreaming = false;
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1028,9 +1030,11 @@ export default function MultiAgentConsultant() {
               
               const messageId = backendMessageId || lastMessageId || assistantId;
               setupRealtimeSubscription(messageId);
-              
-              clearTimeout(timeout);
-              reader.cancel();
+
+              // ✅ IMPORTANT: Stop the SSE loop immediately.
+              // Some providers keep the connection open; without this, the UI can stay "streaming" forever.
+              shouldStopStreaming = true;
+              await reader.cancel();
               break;
               
             } else if (parsed.type === "complete") {
@@ -1084,6 +1088,12 @@ export default function MultiAgentConsultant() {
                   title: (text || accumulatedText || "Chat").slice(0, 50)
                 });
               }
+
+              // ✅ IMPORTANT: Stop the SSE loop immediately.
+              // Some providers keep the connection open; without this, the UI can stay "streaming" forever.
+              shouldStopStreaming = true;
+              await reader.cancel();
+              break;
               
             } else if (parsed.type === "error") {
               throw new Error(parsed.error || "Unknown error");
@@ -1092,6 +1102,10 @@ export default function MultiAgentConsultant() {
             console.warn("⚠️ Error processing line:", e);
             continue;
           }
+        }
+
+        if (shouldStopStreaming) {
+          break;
         }
       }
     } catch (error: any) {
