@@ -6324,13 +6324,24 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
           
           // ========== TOOL RESULT CONTINUATION FOR ALL PROVIDERS ==========
           
-          // ===== ANTHROPIC CONTINUATION =====
-          if (needsToolResultContinuation && llmProvider === 'anthropic') {
-            console.log(`🔄 [REQ-${requestId}] Continuing with tool results for Anthropic...`);
+          // ===== ANTHROPIC CONTINUATION WITH RECURSIVE TOOL CALL SUPPORT =====
+          const MAX_CONTINUATION_DEPTH = 5;
+          let continuationDepth = 0;
+          
+          while (needsToolResultContinuation && llmProvider === 'anthropic' && continuationDepth < MAX_CONTINUATION_DEPTH) {
+            continuationDepth++;
+            needsToolResultContinuation = false; // Reset for this iteration
+            
+            console.log(`🔄 [REQ-${requestId}] Anthropic continuation #${continuationDepth}/${MAX_CONTINUATION_DEPTH}...`);
             console.log(`   Current anthropicMessages length: ${anthropicMessages.length}`);
             
+            // Reset tool tracking for this continuation
+            let contToolUseName: string | null = null;
+            let contToolUseId: string | null = null;
+            let contToolUseInputJson = '';
+            
             try {
-              // Make second API call with tool results
+              // Make API call with tool results
               const continueResponse = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
@@ -6339,13 +6350,13 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                   'anthropic-version': '2023-06-01',
                 },
                 body: JSON.stringify({
-                  model: resolvedAnthropicModel, // usa sempre un model id valido e consistente
-                  max_tokens: 64000,  // ✅ Required for Anthropic API
+                  model: resolvedAnthropicModel,
+                  max_tokens: 64000,
                   temperature: 0.7,
                   system: enhancedSystemPrompt,
                   messages: anthropicMessages,
-                  tools: tools,  // Pass tools to continuation
-                  stream: true, // ✅ Streaming necessario per SSE parsing
+                  tools: tools,
+                  stream: true,
                 }),
               });
               
@@ -6363,13 +6374,13 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
               let buffer2 = '';
               let continuationChunks = 0;
               
-              console.log(`📡 [REQ-${requestId}] Streaming continuation response...`);
+              console.log(`📡 [REQ-${requestId}] Streaming continuation #${continuationDepth} response...`);
               
               while (true) {
                 const { done, value } = await reader2.read();
                 
                 if (done) {
-                  console.log(`✅ [REQ-${requestId}] Continuation stream ended. Chunks: ${continuationChunks}`);
+                  console.log(`✅ [REQ-${requestId}] Continuation #${continuationDepth} stream ended. Chunks: ${continuationChunks}`);
                   break;
                 }
                 
@@ -6388,9 +6399,6 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                     const parsed = JSON.parse(data);
                     continuationChunks++;
                     
-                    // 🔍 DEBUG: Log EVERY chunk type received
-                    console.log(`🔍 [REQ-${requestId}] Continuation chunk ${continuationChunks}: type=${parsed.type}, delta_type=${parsed.delta?.type || 'N/A'}`);
-                    
                     // Handle text content from continuation
                     if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
                       const newText = parsed.delta.text;
@@ -6408,13 +6416,87 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                       }
                     }
                     
-                    // 🔍 DEBUG: Check if Anthropic is making another tool call
+                    // ✅ Handle tool_use start in continuation
                     if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
-                      console.log(`⚠️ [REQ-${requestId}] Anthropic is making ANOTHER tool call in continuation: ${parsed.content_block.name}`);
+                      contToolUseName = parsed.content_block.name;
+                      contToolUseId = parsed.content_block.id;
+                      contToolUseInputJson = '';
+                      console.log(`🔧 [REQ-${requestId}] Continuation #${continuationDepth} tool call detected: ${contToolUseName}`);
+                    }
+                    
+                    // ✅ Accumulate tool input JSON in continuation
+                    if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
+                      contToolUseInputJson += parsed.delta.partial_json;
+                    }
+                    
+                    // ✅ Execute tool when block stops in continuation
+                    if (parsed.type === 'content_block_stop' && contToolUseId && contToolUseName) {
+                      console.log(`🎯 [REQ-${requestId}] Executing recursive tool call: ${contToolUseName}`);
+                      
+                      try {
+                        const contToolInput = JSON.parse(contToolUseInputJson || '{}');
+                        
+                        // Execute the tool
+                        const { toolResult: contToolResult, newFullResponse } = await executeToolCall(
+                          contToolUseName,
+                          contToolInput,
+                          {
+                            agent,
+                            userId,
+                            conversation,
+                            supabase,
+                            sendSSE,
+                            requestId,
+                            fullResponse,
+                            conversationState,
+                            req
+                          }
+                        );
+                        
+                        fullResponse = newFullResponse;
+                        
+                        // Add tool use and result to messages
+                        anthropicMessages.push({
+                          role: 'assistant',
+                          content: [
+                            {
+                              type: 'tool_use',
+                              id: contToolUseId,
+                              name: contToolUseName,
+                              input: contToolInput
+                            }
+                          ]
+                        });
+                        
+                        anthropicMessages.push({
+                          role: 'user',
+                          content: [
+                            {
+                              type: 'tool_result',
+                              tool_use_id: contToolUseId,
+                              content: JSON.stringify(contToolResult)
+                            }
+                          ]
+                        });
+                        
+                        needsToolResultContinuation = true; // Need another continuation
+                        toolCallCount++;
+                        
+                        console.log(`✅ [REQ-${requestId}] Recursive tool executed, another continuation needed`);
+                        
+                      } catch (jsonError) {
+                        console.error(`❌ [REQ-${requestId}] Error parsing recursive tool input:`, jsonError);
+                        fullResponse += `\n\n❌ Errore nell'esecuzione della ricerca ricorsiva.\n\n`;
+                      }
+                      
+                      // Reset tool state for next potential tool
+                      contToolUseName = null;
+                      contToolUseId = null;
+                      contToolUseInputJson = '';
                     }
                     
                     if (parsed.type === 'message_stop') {
-                      console.log(`🏁 [REQ-${requestId}] Continuation message_stop received`);
+                      console.log(`🏁 [REQ-${requestId}] Continuation #${continuationDepth} message_stop received`);
                     }
                   } catch (e) {
                     console.error('Parse error in continuation:', e);
@@ -6422,14 +6504,21 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                 }
               }
               
-              console.log(`✅ [REQ-${requestId}] Tool result continuation completed. Final response: ${fullResponse.length} chars`);
+              console.log(`✅ [REQ-${requestId}] Continuation #${continuationDepth} completed. Response: ${fullResponse.length} chars`);
               
             } catch (error) {
-              console.error(`❌ [REQ-${requestId}] Error during tool result continuation:`, error);
-              const errorText = `\n\n❌ Errore durante la generazione della risposta finale.\n\n`;
+              console.error(`❌ [REQ-${requestId}] Error during continuation #${continuationDepth}:`, error);
+              const errorText = `\n\n❌ Errore durante la generazione della risposta.\n\n`;
               fullResponse += errorText;
               await sendSSE(JSON.stringify({ type: 'content', text: errorText }));
+              break; // Exit the while loop on error
             }
+          }
+          
+          if (continuationDepth >= MAX_CONTINUATION_DEPTH && needsToolResultContinuation) {
+            console.warn(`⚠️ [REQ-${requestId}] Max continuation depth (${MAX_CONTINUATION_DEPTH}) reached!`);
+            fullResponse += `\n\n⚠️ Limite massimo di ricerche raggiunto.\n\n`;
+            await sendSSE(JSON.stringify({ type: 'content', text: `\n\n⚠️ Limite massimo di ricerche raggiunto.\n\n` }));
           }
           
           // ===== DEEPSEEK CONTINUATION =====
