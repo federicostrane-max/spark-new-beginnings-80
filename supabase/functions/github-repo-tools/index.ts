@@ -188,7 +188,7 @@ serve(async (req) => {
                                  params.content, params.message, params.branch, params.sha);
         break;
       case 'list_files':
-        result = await listFiles(token, parsedOwner, parsedRepo, params.path, params.branch);
+        result = await listFiles(token, parsedOwner, parsedRepo, params.path, params.branch, params.recursive);
         break;
       case 'create_branch':
         result = await createBranch(token, parsedOwner, parsedRepo, 
@@ -350,25 +350,63 @@ async function writeFile(
   }
 }
 
-async function listFiles(token: string, owner: string, repo: string, path: string = '', branch: string = 'main') {
-  console.log(`📂 Listing files: ${owner}/${repo}/${path || '/'} (branch: ${branch})`);
+async function listFiles(
+  token: string, 
+  owner: string, 
+  repo: string, 
+  path: string = '', 
+  branch: string = 'main',
+  recursive: boolean = false
+) {
+  console.log(`📂 Listing files: ${owner}/${repo}/${path || '/'} (branch: ${branch}, recursive: ${recursive})`);
   
   const tokenOwner = await getTokenOwner(token);
+  const isOwnRepo = !!(tokenOwner && owner.toLowerCase() === tokenOwner.toLowerCase());
   
+  // Warn se recursive viene ignorato per path non-root
+  if (recursive && path && path !== '' && path !== '/') {
+    console.log(`⚠️ Recursive flag ignored for non-root path: ${path}`);
+  }
+  
+  // Strategia:
+  // - Per listing ricorsivo su PROPRI repo (root) → /git/trees/ (richiede auth)
+  // - Per tutti gli altri casi → /contents/ (funziona senza auth per repo pubblici)
   let url: string;
   let isTreeRequest = false;
   
-  if (!path || path === '' || path === '/') {
-    // Root directory - use tree API for full recursive listing
+  if (recursive && isOwnRepo && (!path || path === '' || path === '/')) {
+    console.log(`🌳 Using /git/trees/ for recursive listing on own repo`);
     url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
     isTreeRequest = true;
   } else {
-    // Specific directory - use contents API
+    console.log(`📁 Using /contents/ for ${isOwnRepo ? 'own' : 'external'} repo`);
     url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
   }
   
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  
   try {
-    const { response, isOwnRepo } = await smartGitHubFetch(url, token, owner, tokenOwner);
+    let response: Response;
+    
+    if (isTreeRequest) {
+      // /git/trees/ richiede SEMPRE auth
+      response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'User-Agent': 'Lovable-Agent',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        signal: controller.signal
+      });
+    } else {
+      // Usa sempre smartGitHubFetch per /contents/
+      // smartGitHubFetch già gestisce internamente:
+      // - Proprio repo → usa token direttamente
+      // - Repo esterno → prova senza auth, riprova con token se 403/401
+      const result = await smartGitHubFetch(url, token, owner, tokenOwner);
+      response = result.response;
+    }
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -381,37 +419,39 @@ async function listFiles(token: string, owner: string, repo: string, path: strin
     }
     
     const data = await response.json();
+    let files: Array<{name?: string; path: string; type: string; size: number | null; sha: string}>;
     
     if (isTreeRequest) {
-      // Tree API response
-      const files = data.tree.map((item: Record<string, unknown>) => ({
-        path: item.path,
+      // Risposta da /git/trees/
+      files = (data.tree || []).map((item: Record<string, unknown>) => ({
+        name: String(item.path).split('/').pop() || '',
+        path: String(item.path),
         type: item.type === 'blob' ? 'file' : 'dir',
-        size: item.size || null,
-        sha: item.sha
+        size: typeof item.size === 'number' ? item.size : null,
+        sha: String(item.sha)
       }));
-      
       console.log(`✅ Listed ${files.length} items (recursive tree)`);
-      return { files, truncated: data.truncated };
+      return { files, path: path || '/', recursive, truncated: data.truncated };
     } else {
-      // Contents API response
+      // Risposta da /contents/
       const items = Array.isArray(data) ? data : [data];
-      const files = items.map((item: Record<string, unknown>) => ({
-        name: item.name,
-        path: item.path,
-        type: item.type,
-        size: item.size || null,
-        sha: item.sha
+      files = items.map((item: Record<string, unknown>) => ({
+        name: String(item.name),
+        path: String(item.path),
+        type: String(item.type),
+        size: typeof item.size === 'number' ? item.size : null,
+        sha: String(item.sha)
       }));
-      
-      console.log(`✅ Listed ${files.length} items in ${path}`);
-      return { files, path };
+      console.log(`✅ Listed ${files.length} items in ${path || '/'}`);
+      return { files, path: path || '/', recursive };
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('Request timed out after 10 seconds');
     }
     throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
