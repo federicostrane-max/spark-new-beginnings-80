@@ -169,7 +169,8 @@ async function fetchContentsWithBranchFallback(
   sanitizedPath: string,
   branch: string
 ): Promise<Response> {
-  const baseUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${sanitizedPath}`;
+  const contentsBase = `https://api.github.com/repos/${owner}/${repo}/contents`;
+  const baseUrl = sanitizedPath ? `${contentsBase}/${sanitizedPath}` : contentsBase;
 
   // 1) Try requested branch
   let { response } = await smartGitHubFetch(`${baseUrl}?ref=${encodeURIComponent(branch)}`, token, owner, tokenOwner);
@@ -185,6 +186,7 @@ async function fetchContentsWithBranchFallback(
     console.log(`🔁 Retrying /contents/ with default_branch="${def}"`);
     ({ response } = await smartGitHubFetch(`${baseUrl}?ref=${encodeURIComponent(def)}`, token, owner, tokenOwner));
   }
+
   return response;
 }
 
