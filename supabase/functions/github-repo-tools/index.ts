@@ -82,9 +82,14 @@ async function smartGitHubFetch(
     console.log(`🌐 External repo (${owner}), trying unauthenticated first`);
     let response = await fetch(url, { headers, signal: controller.signal });
     
-    // Se rate-limited (403) O unauthorized (401), riprova CON token
-    if (response.status === 403 || response.status === 401) {
-      console.log(`⚠️ Got ${response.status}, retrying with token`);
+    // Se rate-limited (403), unauthorized (401), o "nascosto" (404), riprova CON token
+    if (response.status === 403 || response.status === 401 || response.status === 404) {
+      const reason = response.status === 404 
+        ? 'repo may require auth' 
+        : response.status === 403 
+          ? 'rate limited' 
+          : 'unauthorized';
+      console.log(`⚠️ Got ${response.status} (${reason}), retrying with token`);
       
       // NUOVO controller per il retry (il precedente potrebbe essere parzialmente consumato)
       const retryController = new AbortController();
