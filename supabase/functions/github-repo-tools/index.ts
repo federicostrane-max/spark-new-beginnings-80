@@ -143,6 +143,51 @@ function parseOwnerRepo(owner: string, repo: string): { owner: string; repo: str
   return { owner: parsedOwner, repo: parsedRepo };
 }
 
+
+function sanitizeRepoPath(path: string | null | undefined) {
+  return (path || '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/');
+}
+
+async function getDefaultBranch(
+  token: string,
+  owner: string,
+  repo: string,
+  tokenOwner: string | null
+): Promise<string | null> {
+  const url = `https://api.github.com/repos/${owner}/${repo}`;
+  const { response } = await smartGitHubFetch(url, token, owner, tokenOwner);
+  if (!response.ok) return null;
+  const data = await response.json();
+  return typeof data?.default_branch === 'string' ? data.default_branch : null;
+}
+
+async function fetchContentsWithBranchFallback(
+  token: string,
+  owner: string,
+  repo: string,
+  tokenOwner: string | null,
+  sanitizedPath: string,
+  branch: string
+): Promise<Response> {
+  const baseUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${sanitizedPath}`;
+
+  // 1) Try requested branch
+  let { response } = await smartGitHubFetch(`${baseUrl}?ref=${encodeURIComponent(branch)}`, token, owner, tokenOwner);
+  if (response.ok || response.status !== 404) return response;
+
+  // 2) Try without ref (GitHub will use default branch)
+  ({ response } = await smartGitHubFetch(baseUrl, token, owner, tokenOwner));
+  if (response.ok || response.status !== 404) return response;
+
+  // 3) Resolve default branch explicitly and retry (only if different)
+  const def = await getDefaultBranch(token, owner, repo, tokenOwner);
+  if (def && def !== branch) {
+    console.log(`🔁 Retrying /contents/ with default_branch="${def}"`);
+    ({ response } = await smartGitHubFetch(`${baseUrl}?ref=${encodeURIComponent(def)}`, token, owner, tokenOwner));
+  }
+  return response;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -224,19 +269,19 @@ serve(async (req) => {
 // ============================================
 
 async function readFile(token: string, owner: string, repo: string, path: string, branch: string = 'main') {
-  console.log(`📖 Reading file: ${owner}/${repo}/${path} (branch: ${branch})`);
+  const sanitizedPath = sanitizeRepoPath(path);
+  console.log(`📖 Reading file: ${owner}/${repo}/${sanitizedPath} (branch: ${branch})`);
   
   const tokenOwner = await getTokenOwner(token);
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
   
   try {
-    const { response, isOwnRepo } = await smartGitHubFetch(url, token, owner, tokenOwner);
+    const response = await fetchContentsWithBranchFallback(token, owner, repo, tokenOwner, sanitizedPath, branch);
+    const { isOwnRepo } = { isOwnRepo: !!(tokenOwner && owner.toLowerCase() === tokenOwner.toLowerCase()) };
     
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`❌ GitHub API error: ${response.status} - ${errorText}`);
       
-      // Messaggio errore più chiaro per repo esterni
       const hint = !isOwnRepo 
         ? ' (Note: This may be a private repository you don\'t have access to)'
         : '';
@@ -358,22 +403,22 @@ async function listFiles(
   branch: string = 'main',
   recursive: boolean = false
 ) {
-  // Sanitizza il path: rimuovi slash iniziali/finali e doppi slash
-  const sanitizedPath = (path || '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/');
-  
-  console.log(`📂 Listing files: ${owner}/${repo}/${sanitizedPath || '/'} (branch: ${branch}, recursive: ${recursive})`);
+  const sanitizedPath = sanitizeRepoPath(path);
+  const displayPath = sanitizedPath ? `/${sanitizedPath}` : '/';
+
+  console.log(`📂 Listing files: ${owner}/${repo}${displayPath} (branch: ${branch}, recursive: ${recursive})`);
   
   const tokenOwner = await getTokenOwner(token);
   const isOwnRepo = !!(tokenOwner && owner.toLowerCase() === tokenOwner.toLowerCase());
   
   // Warn se recursive viene ignorato per path non-root
-  if (recursive && sanitizedPath && sanitizedPath !== '') {
-    console.log(`⚠️ Recursive flag ignored for non-root path: ${path}`);
+  if (recursive && sanitizedPath) {
+    console.log(`⚠️ Recursive flag ignored for non-root path: ${sanitizedPath}`);
   }
   
   // Strategia:
   // - Per listing ricorsivo su PROPRI repo (root) → /git/trees/ (richiede auth)
-  // - Per tutti gli altri casi → /contents/ (funziona senza auth per repo pubblici)
+  // - Per tutti gli altri casi → /contents/ (con fallback branch)
   let url: string;
   let isTreeRequest = false;
   
@@ -403,12 +448,8 @@ async function listFiles(
         signal: controller.signal
       });
     } else {
-      // Usa sempre smartGitHubFetch per /contents/
-      // smartGitHubFetch già gestisce internamente:
-      // - Proprio repo → usa token direttamente
-      // - Repo esterno → prova senza auth, riprova con token se 403/401
-      const result = await smartGitHubFetch(url, token, owner, tokenOwner);
-      response = result.response;
+      // /contents/ con fallback su branch (main/master/default)
+      response = await fetchContentsWithBranchFallback(token, owner, repo, tokenOwner, sanitizedPath, branch);
     }
     
     if (!response.ok) {
