@@ -5,6 +5,107 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// ============================================
+// Smart Fetch Helpers for External Repos
+// ============================================
+
+// Cache per evitare chiamate ripetute a /user
+// Nota: potrebbe non persistere tra cold start in Supabase Edge Functions
+let cachedTokenOwner: string | null = null;
+
+async function getTokenOwner(token: string): Promise<string | null> {
+  // Check per token nullo o vuoto
+  if (!token || token.trim() === '') {
+    console.log('⚠️ No token provided, skipping owner detection');
+    return null;
+  }
+  
+  if (cachedTokenOwner !== null) return cachedTokenOwner;
+  
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  
+  try {
+    const response = await fetch('https://api.github.com/user', {
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'Lovable-Agent'
+      },
+      signal: controller.signal
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      cachedTokenOwner = data.login;
+      console.log(`🔑 Token owner: ${cachedTokenOwner}`);
+      return cachedTokenOwner;
+    } else if (response.status === 401) {
+      console.log('⚠️ Token is invalid or expired');
+    }
+  } catch (e) {
+    const errorMsg = e instanceof Error ? (e.name === 'AbortError' ? 'timeout' : e.message) : 'unknown error';
+    console.log('⚠️ Could not determine token owner:', errorMsg);
+  } finally {
+    clearTimeout(timeout);
+  }
+  return null;
+}
+
+async function smartGitHubFetch(
+  url: string, 
+  token: string, 
+  owner: string, 
+  tokenOwner: string | null
+): Promise<{ response: Response; isOwnRepo: boolean }> {
+  const isOwnRepo = !!(tokenOwner && owner.toLowerCase() === tokenOwner.toLowerCase());
+  
+  const headers: Record<string, string> = {
+    'User-Agent': 'Lovable-Agent',
+    'Accept': 'application/vnd.github.v3+json'
+  };
+  
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  
+  try {
+    if (isOwnRepo) {
+      // Per i propri repo, usa sempre il token
+      console.log(`🔐 Own repo detected (${owner}), using authenticated request`);
+      const response = await fetch(url, { 
+        headers: { ...headers, Authorization: `Bearer ${token}` },
+        signal: controller.signal
+      });
+      return { response, isOwnRepo };
+    }
+    
+    // Per repo esterni, prova prima SENZA token
+    console.log(`🌐 External repo (${owner}), trying unauthenticated first`);
+    let response = await fetch(url, { headers, signal: controller.signal });
+    
+    // Se rate-limited (403) O unauthorized (401), riprova CON token
+    if (response.status === 403 || response.status === 401) {
+      console.log(`⚠️ Got ${response.status}, retrying with token`);
+      
+      // NUOVO controller per il retry (il precedente potrebbe essere parzialmente consumato)
+      const retryController = new AbortController();
+      const retryTimeout = setTimeout(() => retryController.abort(), 10000);
+      
+      try {
+        response = await fetch(url, { 
+          headers: { ...headers, Authorization: `Bearer ${token}` },
+          signal: retryController.signal
+        });
+      } finally {
+        clearTimeout(retryTimeout);
+      }
+    }
+    
+    return { response, isOwnRepo };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Helper function to parse owner/repo from various input formats
 function parseOwnerRepo(owner: string, repo: string): { owner: string; repo: string } {
   let parsedOwner = owner?.trim() || '';
@@ -125,42 +226,48 @@ serve(async (req) => {
 async function readFile(token: string, owner: string, repo: string, path: string, branch: string = 'main') {
   console.log(`📖 Reading file: ${owner}/${repo}/${path} (branch: ${branch})`);
   
-  const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
-    { 
-      headers: { 
-        Authorization: `Bearer ${token}`, 
-        'User-Agent': 'Lovable-Agent',
-        'Accept': 'application/vnd.github.v3+json'
-      } 
+  const tokenOwner = await getTokenOwner(token);
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
+  
+  try {
+    const { response, isOwnRepo } = await smartGitHubFetch(url, token, owner, tokenOwner);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ GitHub API error: ${response.status} - ${errorText}`);
+      
+      // Messaggio errore più chiaro per repo esterni
+      const hint = !isOwnRepo 
+        ? ' (Note: This may be a private repository you don\'t have access to)'
+        : '';
+      throw new Error(`GitHub API error: ${response.status} - File not found or access denied${hint}`);
     }
-  );
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`❌ GitHub API error: ${response.status} - ${errorText}`);
-    throw new Error(`GitHub API error: ${response.status} - File not found or access denied`);
+    
+    const data = await response.json();
+    
+    // Handle directory vs file
+    if (Array.isArray(data)) {
+      throw new Error('Path is a directory, not a file. Use list_files instead.');
+    }
+    
+    // Decode base64 content
+    const content = atob(data.content.replace(/\n/g, ''));
+    
+    console.log(`✅ File read: ${data.path} (${data.size} bytes)`);
+    
+    return { 
+      content, 
+      sha: data.sha, 
+      path: data.path, 
+      size: data.size,
+      encoding: data.encoding
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out after 10 seconds');
+    }
+    throw error;
   }
-  
-  const data = await response.json();
-  
-  // Handle directory vs file
-  if (Array.isArray(data)) {
-    throw new Error('Path is a directory, not a file. Use list_files instead.');
-  }
-  
-  // Decode base64 content
-  const content = atob(data.content.replace(/\n/g, ''));
-  
-  console.log(`✅ File read: ${data.path} (${data.size} bytes)`);
-  
-  return { 
-    content, 
-    sha: data.sha, 
-    path: data.path, 
-    size: data.size,
-    encoding: data.encoding
-  };
 }
 
 async function writeFile(
@@ -187,7 +294,7 @@ async function writeFile(
     }
   }
   
-  const body: any = {
+  const body: Record<string, unknown> = {
     message,
     content: btoa(unescape(encodeURIComponent(content))), // Properly encode UTF-8 to base64
     branch
@@ -197,41 +304,56 @@ async function writeFile(
     body.sha = fileSha; // Required for updates
   }
   
-  const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': 'Lovable-Agent',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github.v3+json'
-      },
-      body: JSON.stringify(body)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Lovable-Agent',
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`❌ GitHub write failed: ${response.status} - ${error}`);
+      throw new Error(`GitHub write failed: ${response.status} - ${error}`);
     }
-  );
-  
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`❌ GitHub write failed: ${response.status} - ${error}`);
-    throw new Error(`GitHub write failed: ${response.status} - ${error}`);
+    
+    const result = await response.json();
+    console.log(`✅ File written: ${result.content.path} (commit: ${result.commit.sha.slice(0, 7)})`);
+    
+    return {
+      success: true,
+      path: result.content.path,
+      sha: result.content.sha,
+      commit_sha: result.commit.sha,
+      commit_message: message,
+      commit_url: result.commit.html_url
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out after 10 seconds');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  
-  const result = await response.json();
-  console.log(`✅ File written: ${result.content.path} (commit: ${result.commit.sha.slice(0, 7)})`);
-  
-  return {
-    success: true,
-    path: result.content.path,
-    sha: result.content.sha,
-    commit_sha: result.commit.sha,
-    commit_message: message,
-    commit_url: result.commit.html_url
-  };
 }
 
 async function listFiles(token: string, owner: string, repo: string, path: string = '', branch: string = 'main') {
   console.log(`📂 Listing files: ${owner}/${repo}/${path || '/'} (branch: ${branch})`);
+  
+  const tokenOwner = await getTokenOwner(token);
   
   let url: string;
   let isTreeRequest = false;
@@ -244,116 +366,135 @@ async function listFiles(token: string, owner: string, repo: string, path: strin
     // Specific directory - use contents API
     url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
   }
+  
+  try {
+    const { response, isOwnRepo } = await smartGitHubFetch(url, token, owner, tokenOwner);
     
-  const response = await fetch(url, {
-    headers: { 
-      Authorization: `Bearer ${token}`, 
-      'User-Agent': 'Lovable-Agent',
-      'Accept': 'application/vnd.github.v3+json'
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ GitHub API error: ${response.status} - ${errorText}`);
+      
+      const hint = !isOwnRepo 
+        ? ' (Note: This may be a private repository you don\'t have access to)'
+        : '';
+      throw new Error(`GitHub API error: ${response.status} - Directory not found or access denied${hint}`);
     }
-  });
-  
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`❌ GitHub API error: ${response.status} - ${errorText}`);
-    throw new Error(`GitHub API error: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  
-  if (isTreeRequest) {
-    // Tree API response
-    const files = data.tree.map((item: any) => ({
-      path: item.path,
-      type: item.type === 'blob' ? 'file' : 'dir',
-      size: item.size || null,
-      sha: item.sha
-    }));
     
-    console.log(`✅ Listed ${files.length} items (recursive tree)`);
-    return { files, truncated: data.truncated };
-  } else {
-    // Contents API response
-    const items = Array.isArray(data) ? data : [data];
-    const files = items.map((item: any) => ({
-      name: item.name,
-      path: item.path,
-      type: item.type,
-      size: item.size || null,
-      sha: item.sha
-    }));
+    const data = await response.json();
     
-    console.log(`✅ Listed ${files.length} items in ${path}`);
-    return { files, path };
+    if (isTreeRequest) {
+      // Tree API response
+      const files = data.tree.map((item: Record<string, unknown>) => ({
+        path: item.path,
+        type: item.type === 'blob' ? 'file' : 'dir',
+        size: item.size || null,
+        sha: item.sha
+      }));
+      
+      console.log(`✅ Listed ${files.length} items (recursive tree)`);
+      return { files, truncated: data.truncated };
+    } else {
+      // Contents API response
+      const items = Array.isArray(data) ? data : [data];
+      const files = items.map((item: Record<string, unknown>) => ({
+        name: item.name,
+        path: item.path,
+        type: item.type,
+        size: item.size || null,
+        sha: item.sha
+      }));
+      
+      console.log(`✅ Listed ${files.length} items in ${path}`);
+      return { files, path };
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out after 10 seconds');
+    }
+    throw error;
   }
 }
 
 async function createBranch(token: string, owner: string, repo: string, newBranch: string, fromBranch: string = 'main') {
   console.log(`🌿 Creating branch: ${newBranch} from ${fromBranch} in ${owner}/${repo}`);
   
-  // Get SHA of source branch
-  const refResponse = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${fromBranch}`,
-    { 
-      headers: { 
-        Authorization: `Bearer ${token}`, 
-        'User-Agent': 'Lovable-Agent',
-        'Accept': 'application/vnd.github.v3+json'
-      } 
-    }
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   
-  if (!refResponse.ok) {
-    const errorText = await refResponse.text();
-    console.error(`❌ Source branch not found: ${fromBranch} - ${errorText}`);
-    throw new Error(`Source branch not found: ${fromBranch}`);
-  }
-  
-  const refData = await refResponse.json();
-  const sourceSha = refData.object.sha;
-  
-  console.log(`📌 Source branch SHA: ${sourceSha.slice(0, 7)}`);
-  
-  // Create new branch
-  const createResponse = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/refs`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': 'Lovable-Agent',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github.v3+json'
-      },
-      body: JSON.stringify({
-        ref: `refs/heads/${newBranch}`,
-        sha: sourceSha
-      })
-    }
-  );
-  
-  if (!createResponse.ok) {
-    const errorText = await createResponse.text();
-    console.error(`❌ Failed to create branch: ${newBranch} - ${errorText}`);
+  try {
+    // Get SHA of source branch
+    const refResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/refs/heads/${fromBranch}`,
+      { 
+        headers: { 
+          Authorization: `Bearer ${token}`, 
+          'User-Agent': 'Lovable-Agent',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        signal: controller.signal
+      }
+    );
     
-    // Check if branch already exists
-    if (createResponse.status === 422) {
-      throw new Error(`Branch '${newBranch}' already exists`);
+    if (!refResponse.ok) {
+      const errorText = await refResponse.text();
+      console.error(`❌ Source branch not found: ${fromBranch} - ${errorText}`);
+      throw new Error(`Source branch not found: ${fromBranch}`);
     }
     
-    throw new Error(`Failed to create branch: ${newBranch}`);
+    const refData = await refResponse.json();
+    const sourceSha = refData.object.sha;
+    
+    console.log(`📌 Source branch SHA: ${sourceSha.slice(0, 7)}`);
+    
+    // Create new branch
+    const createResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/refs`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Lovable-Agent',
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify({
+          ref: `refs/heads/${newBranch}`,
+          sha: sourceSha
+        }),
+        signal: controller.signal
+      }
+    );
+    
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text();
+      console.error(`❌ Failed to create branch: ${newBranch} - ${errorText}`);
+      
+      // Check if branch already exists
+      if (createResponse.status === 422) {
+        throw new Error(`Branch '${newBranch}' already exists`);
+      }
+      
+      throw new Error(`Failed to create branch: ${newBranch}`);
+    }
+    
+    const result = await createResponse.json();
+    console.log(`✅ Branch created: ${newBranch}`);
+    
+    return {
+      success: true,
+      branch: newBranch,
+      sha: result.object.sha,
+      ref: result.ref,
+      from_branch: fromBranch
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out after 10 seconds');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  
-  const result = await createResponse.json();
-  console.log(`✅ Branch created: ${newBranch}`);
-  
-  return {
-    success: true,
-    branch: newBranch,
-    sha: result.object.sha,
-    ref: result.ref,
-    from_branch: fromBranch
-  };
 }
 
 async function createPullRequest(
@@ -367,48 +508,61 @@ async function createPullRequest(
 ) {
   console.log(`📝 Creating PR: "${title}" (${head} → ${base}) in ${owner}/${repo}`);
   
-  const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/pulls`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'User-Agent': 'Lovable-Agent',
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github.v3+json'
-      },
-      body: JSON.stringify({ title, body, head, base })
-    }
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
   
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`❌ Failed to create PR: ${error}`);
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/pulls`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'Lovable-Agent',
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify({ title, body, head, base }),
+        signal: controller.signal
+      }
+    );
     
-    // Parse common errors
-    if (response.status === 422) {
-      const errorData = JSON.parse(error);
-      if (errorData.errors?.[0]?.message?.includes('No commits')) {
-        throw new Error(`Cannot create PR: No commits between ${base} and ${head}`);
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`❌ Failed to create PR: ${error}`);
+      
+      // Parse common errors
+      if (response.status === 422) {
+        const errorData = JSON.parse(error);
+        if (errorData.errors?.[0]?.message?.includes('No commits')) {
+          throw new Error(`Cannot create PR: No commits between ${base} and ${head}`);
+        }
+        if (errorData.errors?.[0]?.message?.includes('already exists')) {
+          throw new Error(`A pull request already exists for ${head}`);
+        }
       }
-      if (errorData.errors?.[0]?.message?.includes('already exists')) {
-        throw new Error(`A pull request already exists for ${head}`);
-      }
+      
+      throw new Error(`Failed to create PR: ${error}`);
     }
     
-    throw new Error(`Failed to create PR: ${error}`);
+    const result = await response.json();
+    console.log(`✅ PR created: #${result.number} - ${result.html_url}`);
+    
+    return {
+      success: true,
+      number: result.number,
+      title: result.title,
+      url: result.html_url,
+      state: result.state,
+      head: result.head.ref,
+      base: result.base.ref
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Request timed out after 10 seconds');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  
-  const result = await response.json();
-  console.log(`✅ PR created: #${result.number} - ${result.html_url}`);
-  
-  return {
-    success: true,
-    number: result.number,
-    title: result.title,
-    url: result.html_url,
-    state: result.state,
-    head: result.head.ref,
-    base: result.base.ref
-  };
 }
