@@ -358,13 +358,16 @@ async function listFiles(
   branch: string = 'main',
   recursive: boolean = false
 ) {
-  console.log(`📂 Listing files: ${owner}/${repo}/${path || '/'} (branch: ${branch}, recursive: ${recursive})`);
+  // Sanitizza il path: rimuovi slash iniziali/finali e doppi slash
+  const sanitizedPath = (path || '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/');
+  
+  console.log(`📂 Listing files: ${owner}/${repo}/${sanitizedPath || '/'} (branch: ${branch}, recursive: ${recursive})`);
   
   const tokenOwner = await getTokenOwner(token);
   const isOwnRepo = !!(tokenOwner && owner.toLowerCase() === tokenOwner.toLowerCase());
   
   // Warn se recursive viene ignorato per path non-root
-  if (recursive && path && path !== '' && path !== '/') {
+  if (recursive && sanitizedPath && sanitizedPath !== '') {
     console.log(`⚠️ Recursive flag ignored for non-root path: ${path}`);
   }
   
@@ -374,13 +377,13 @@ async function listFiles(
   let url: string;
   let isTreeRequest = false;
   
-  if (recursive && isOwnRepo && (!path || path === '' || path === '/')) {
+  if (recursive && isOwnRepo && !sanitizedPath) {
     console.log(`🌳 Using /git/trees/ for recursive listing on own repo`);
     url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
     isTreeRequest = true;
   } else {
     console.log(`📁 Using /contents/ for ${isOwnRepo ? 'own' : 'external'} repo`);
-    url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
+    url = `https://api.github.com/repos/${owner}/${repo}/contents/${sanitizedPath}?ref=${branch}`;
   }
   
   const controller = new AbortController();
@@ -442,8 +445,8 @@ async function listFiles(
         size: typeof item.size === 'number' ? item.size : null,
         sha: String(item.sha)
       }));
-      console.log(`✅ Listed ${files.length} items in ${path || '/'}`);
-      return { files, path: path || '/', recursive };
+      console.log(`✅ Listed ${files.length} items in ${sanitizedPath || '/'}`);
+      return { files, path: sanitizedPath || '/', recursive };
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
