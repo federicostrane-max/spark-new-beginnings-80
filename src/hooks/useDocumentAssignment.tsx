@@ -32,9 +32,10 @@ export const useDocumentAssignment = () => {
 
   const unassignDocument = async (agentId: string, documentId: string): Promise<boolean> => {
     try {
-      // Step 1: Find all chunk_ids for this document across all pipelines
-      const [pipelineAChunks, pipelineBChunks, pipelineCChunks] = await Promise.all([
+      // Step 1: Find all chunk_ids for this document across all pipelines (including A Hybrid)
+      const [pipelineAChunks, pipelineAHybridChunks, pipelineBChunks, pipelineCChunks] = await Promise.all([
         supabase.from('pipeline_a_chunks_raw').select('id').eq('document_id', documentId),
+        supabase.from('pipeline_a_hybrid_chunks_raw').select('id').eq('document_id', documentId),
         supabase.from('pipeline_b_chunks_raw').select('id').eq('document_id', documentId),
         supabase.from('pipeline_c_chunks_raw').select('id').eq('document_id', documentId)
       ]);
@@ -46,6 +47,17 @@ export const useDocumentAssignment = () => {
         const chunkIds = pipelineAChunks.data.map(c => c.id);
         deletions.push(
           supabase.from('pipeline_a_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', chunkIds)
+        );
+      }
+
+      // Pipeline A Hybrid - dove risiedono la maggior parte dei chunks
+      if (pipelineAHybridChunks.data && pipelineAHybridChunks.data.length > 0) {
+        const chunkIds = pipelineAHybridChunks.data.map(c => c.id);
+        deletions.push(
+          supabase.from('pipeline_a_hybrid_agent_knowledge')
             .delete()
             .eq('agent_id', agentId)
             .in('chunk_id', chunkIds)
