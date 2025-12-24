@@ -143,26 +143,29 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         const promptChanged = previousPromptRef.current !== systemPrompt;
 
         // Update agent metadata (name, description, llm_provider, ai_model)
-        const { data: metadataUpdate, error: metadataError } = await supabase
-          .from("agents")
-          .update({
-            name,
-            description,
-            llm_provider: llmProvider,
-            ai_model: aiModel || getDefaultModelForProvider(llmProvider),
-          })
-          .eq("id", editingAgent.id)
-          .select()
-          .single();
+        // NOTE: some legacy agents may have user_id = NULL, which causes RLS updates to return 0 rows.
+        // We route updates through a backend function that validates ownership and can "claim" legacy agents.
+        const { data: metadataFnData, error: metadataFnError } = await supabase.functions.invoke(
+          "update-agent-metadata",
+          {
+            body: {
+              agentId: editingAgent.id,
+              name,
+              description,
+              llm_provider: llmProvider,
+              ai_model: aiModel || getDefaultModelForProvider(llmProvider),
+            },
+          }
+        );
 
-        if (metadataError) {
-          console.error("[CreateAgentModal] Error updating agent metadata:", metadataError);
+        if (metadataFnError || !metadataFnData?.success) {
+          console.error("[CreateAgentModal] Error updating agent metadata:", metadataFnError || metadataFnData);
           toast.error("Errore durante il salvataggio dei metadati dell'agente");
-          throw metadataError;
+          throw metadataFnError || new Error(metadataFnData?.error || "Metadata update failed");
         }
 
-        let finalData = metadataUpdate;
-
+        const metadataUpdate = metadataFnData.agent as Agent;
+        let finalData: Agent = metadataUpdate;
         // If prompt changed, use the update-agent-prompt function to update it
         if (promptChanged) {
           console.log("[CreateAgentModal] Prompt changed, using update-agent-prompt function");
@@ -182,19 +185,11 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
           console.log("[CreateAgentModal] Prompt updated via function:", promptUpdateData);
 
-          // Re-fetch the agent to get the updated data
-          const { data: refetchedData, error: refetchError } = await supabase
-            .from("agents")
-            .select("*")
-            .eq("id", editingAgent.id)
-            .single();
-
-          if (refetchError) {
-            console.error("[CreateAgentModal] Error refetching agent:", refetchError);
-            throw refetchError;
-          }
-
-          finalData = refetchedData;
+          // Avoid refetch (can fail on legacy RLS / ownership). We already know the new prompt.
+          finalData = {
+            ...metadataUpdate,
+            system_prompt: systemPrompt,
+          };
         } else {
           console.log("[CreateAgentModal] Prompt unchanged, skipping update-agent-prompt");
         }
