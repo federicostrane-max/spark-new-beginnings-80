@@ -32,60 +32,85 @@ export const useDocumentAssignment = () => {
 
   const unassignDocument = async (agentId: string, documentId: string): Promise<boolean> => {
     try {
-      // Step 1: Find all chunk_ids for this document across all pipelines (including A Hybrid)
-      const [pipelineAChunks, pipelineAHybridChunks, pipelineBChunks, pipelineCChunks] = await Promise.all([
-        supabase.from('pipeline_a_chunks_raw').select('id').eq('document_id', documentId),
-        supabase.from('pipeline_a_hybrid_chunks_raw').select('id').eq('document_id', documentId),
-        supabase.from('pipeline_b_chunks_raw').select('id').eq('document_id', documentId),
-        supabase.from('pipeline_c_chunks_raw').select('id').eq('document_id', documentId)
-      ]);
-
-      // Step 2: Delete from agent_knowledge tables using the chunk IDs
-      const deletions = [];
+      // Usa batch delete per evitare limiti URL con troppi chunk_ids
+      // Pipeline A Hybrid - la più comune
+      const { data: hybridChunks, error: hybridError } = await supabase
+        .from('pipeline_a_hybrid_chunks_raw')
+        .select('id')
+        .eq('document_id', documentId);
       
-      if (pipelineAChunks.data && pipelineAChunks.data.length > 0) {
-        const chunkIds = pipelineAChunks.data.map(c => c.id);
-        deletions.push(
-          supabase.from('pipeline_a_agent_knowledge')
-            .delete()
-            .eq('agent_id', agentId)
-            .in('chunk_id', chunkIds)
-        );
-      }
-
-      // Pipeline A Hybrid - dove risiedono la maggior parte dei chunks
-      if (pipelineAHybridChunks.data && pipelineAHybridChunks.data.length > 0) {
-        const chunkIds = pipelineAHybridChunks.data.map(c => c.id);
-        deletions.push(
-          supabase.from('pipeline_a_hybrid_agent_knowledge')
-            .delete()
-            .eq('agent_id', agentId)
-            .in('chunk_id', chunkIds)
-        );
-      }
+      if (hybridError) throw hybridError;
       
-      if (pipelineBChunks.data && pipelineBChunks.data.length > 0) {
-        const chunkIds = pipelineBChunks.data.map(c => c.id);
-        deletions.push(
-          supabase.from('pipeline_b_agent_knowledge')
+      if (hybridChunks && hybridChunks.length > 0) {
+        // Delete in batches of 500 to avoid URL length limits
+        const batchSize = 500;
+        for (let i = 0; i < hybridChunks.length; i += batchSize) {
+          const batch = hybridChunks.slice(i, i + batchSize).map(c => c.id);
+          const { error: deleteError } = await supabase
+            .from('pipeline_a_hybrid_agent_knowledge')
             .delete()
             .eq('agent_id', agentId)
-            .in('chunk_id', chunkIds)
-        );
-      }
-      
-      if (pipelineCChunks.data && pipelineCChunks.data.length > 0) {
-        const chunkIds = pipelineCChunks.data.map(c => c.id);
-        deletions.push(
-          supabase.from('pipeline_c_agent_knowledge')
-            .delete()
-            .eq('agent_id', agentId)
-            .in('chunk_id', chunkIds)
-        );
+            .in('chunk_id', batch);
+          
+          if (deleteError) {
+            console.error(`Error deleting batch ${i / batchSize}:`, deleteError);
+          }
+        }
+        console.log(`Deleted ${hybridChunks.length} chunks from pipeline_a_hybrid_agent_knowledge`);
       }
 
-      if (deletions.length > 0) {
-        await Promise.all(deletions);
+      // Pipeline A (legacy)
+      const { data: pipelineAChunks } = await supabase
+        .from('pipeline_a_chunks_raw')
+        .select('id')
+        .eq('document_id', documentId);
+      
+      if (pipelineAChunks && pipelineAChunks.length > 0) {
+        const batchSize = 500;
+        for (let i = 0; i < pipelineAChunks.length; i += batchSize) {
+          const batch = pipelineAChunks.slice(i, i + batchSize).map(c => c.id);
+          await supabase
+            .from('pipeline_a_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', batch);
+        }
+      }
+
+      // Pipeline B
+      const { data: pipelineBChunks } = await supabase
+        .from('pipeline_b_chunks_raw')
+        .select('id')
+        .eq('document_id', documentId);
+      
+      if (pipelineBChunks && pipelineBChunks.length > 0) {
+        const batchSize = 500;
+        for (let i = 0; i < pipelineBChunks.length; i += batchSize) {
+          const batch = pipelineBChunks.slice(i, i + batchSize).map(c => c.id);
+          await supabase
+            .from('pipeline_b_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', batch);
+        }
+      }
+
+      // Pipeline C
+      const { data: pipelineCChunks } = await supabase
+        .from('pipeline_c_chunks_raw')
+        .select('id')
+        .eq('document_id', documentId);
+      
+      if (pipelineCChunks && pipelineCChunks.length > 0) {
+        const batchSize = 500;
+        for (let i = 0; i < pipelineCChunks.length; i += batchSize) {
+          const batch = pipelineCChunks.slice(i, i + batchSize).map(c => c.id);
+          await supabase
+            .from('pipeline_c_agent_knowledge')
+            .delete()
+            .eq('agent_id', agentId)
+            .in('chunk_id', batch);
+        }
       }
 
       toast.success('Documento rimosso con successo');
