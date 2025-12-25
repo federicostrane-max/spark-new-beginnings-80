@@ -1440,7 +1440,7 @@ export type Database = {
           id: string
           lux_mode: string
           lux_model: string
-          max_steps: number | null
+          max_steps_per_todo: number | null
           platform: string | null
           progress: number | null
           result: string | null
@@ -1464,7 +1464,7 @@ export type Database = {
           id?: string
           lux_mode: string
           lux_model?: string
-          max_steps?: number | null
+          max_steps_per_todo?: number | null
           platform?: string | null
           progress?: number | null
           result?: string | null
@@ -1488,7 +1488,7 @@ export type Database = {
           id?: string
           lux_mode?: string
           lux_model?: string
-          max_steps?: number | null
+          max_steps_per_todo?: number | null
           platform?: string | null
           progress?: number | null
           result?: string | null
