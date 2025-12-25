@@ -311,7 +311,6 @@ serve(async (req) => {
     let filesIngested = 0;
     let filesSkipped = 0;
     let filesFailed = 0;
-    let jobsCreated = 0;
 
     // Process files in batches
     const BATCH_SIZE = 10;
@@ -404,21 +403,17 @@ serve(async (req) => {
 
             console.log(`[Pipeline A-Hybrid GitHub] ✅ Text file ingested (${sourceType}): ${fileName}`);
 
-            // ⚠️ FIX: Create job in queue instead of direct EdgeRuntime.waitUntil
-            const { error: jobError } = await supabase
-              .from('github_processing_jobs')
-              .insert({
-                document_id: doc.id,
-                file_path: file.path,
-                repo_url: repoUrl,
-                status: 'pending',
-              });
-
-            if (jobError) {
-              console.error(`[Pipeline A-Hybrid GitHub] Failed to create job for ${fileName}:`, jobError);
-            } else {
-              jobsCreated++;
-            }
+            // ★ UNIFIED PIPELINE: Trigger processing directly (same as markdown pipeline)
+            // No separate queue - use the same event-driven pattern as PDF and Markdown
+            EdgeRuntime.waitUntil(
+              supabase.functions.invoke('pipeline-a-hybrid-process-chunks', {
+                body: { documentId: doc.id }
+              }).then(() => {
+                console.log(`[Pipeline A-Hybrid GitHub] Triggered processing for ${fileName}`);
+              }).catch((err: Error) => {
+                console.warn(`[Pipeline A-Hybrid GitHub] Failed to trigger processing for ${fileName} (will retry via cron):`, err);
+              })
+            );
 
             filesIngested++;
           } else if (isPdfFile(fileName)) {
@@ -505,22 +500,11 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[Pipeline A-Hybrid GitHub] Ingestion complete: ${filesIngested} ingested, ${filesSkipped} skipped, ${filesFailed} failed, ${jobsCreated} jobs created`);
+    console.log(`[Pipeline A-Hybrid GitHub] Ingestion complete: ${filesIngested} ingested, ${filesSkipped} skipped, ${filesFailed} failed`);
 
-    // ★ EVENT-DRIVEN KICKSTART: Immediately invoke job queue processor
-    // This starts processing without waiting for cron (cron serves as safety net)
-    if (jobsCreated > 0) {
-      console.log(`[Pipeline A-Hybrid GitHub] 🚀 Kickstarting job queue processor for ${jobsCreated} jobs...`);
-      EdgeRuntime.waitUntil(
-        supabase.functions.invoke('process-github-jobs-queue', {
-          body: {},
-        }).then(() => {
-          console.log(`[Pipeline A-Hybrid GitHub] Job queue processor invoked successfully`);
-        }).catch((err: Error) => {
-          console.error(`[Pipeline A-Hybrid GitHub] Failed to invoke job queue processor:`, err);
-        })
-      );
-    }
+    // ★ UNIFIED PIPELINE: No separate job queue needed
+    // Processing is triggered directly via EdgeRuntime.waitUntil for each file
+    // Same pattern as pipeline-a-hybrid-ingest-markdown and split-pdf-into-batches
 
     return new Response(
       JSON.stringify({
@@ -528,7 +512,6 @@ serve(async (req) => {
         filesIngested,
         filesSkipped,
         filesFailed,
-        jobsCreated,
         repository: repoUrl,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
