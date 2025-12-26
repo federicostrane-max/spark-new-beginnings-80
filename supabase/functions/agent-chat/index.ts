@@ -2505,8 +2505,18 @@ Deno.serve(async (req) => {
       }
       
       const parsedTask = JSON.parse(jsonMatch[1]);
-      console.log(`✅ [REQ-${requestId}] Parsed Lux task:`, parsedTask.task_description?.slice(0, 50));
-      
+
+      // Normalize Lux Tasker output (Option B: Lux-style JSON -> DB fields)
+      // - Prompt optimizer returns `instruction`; DB expects `task_description`.
+      // - Keep backward compatibility with older agents.
+      if (!parsedTask.task_description && parsedTask.instruction) {
+        parsedTask.task_description = parsedTask.instruction;
+      }
+
+      console.log(
+        `✅ [REQ-${requestId}] Parsed Lux task:`,
+        parsedTask.task_description?.slice(0, 50)
+      );
       // 4. Determine task config based on mode (matching Lux API requirements)
       // Actor: lux-actor-1, 20 steps, temp 0.1
       // Thinker: lux-thinker-1, 100 steps, temp 0.5
