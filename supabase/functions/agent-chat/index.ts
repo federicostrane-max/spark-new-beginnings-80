@@ -2551,17 +2551,34 @@ Deno.serve(async (req) => {
       
       if (taskError) throw taskError;
       
-      // 6. INSERT todos for Tasker mode
-      if (luxMode === 'tasker' && parsedTask.todos?.length > 0) {
-        const todosToInsert = parsedTask.todos.map((todo: string, index: number) => ({
-          task_id: task.id,
-          todo_index: index,
-          todo_description: todo,
-          instruction: todo,
-          status: 'pending'
-        }));
-        
-        await supabase.from('lux_todos').insert(todosToInsert);
+      // 6. INSERT todos for Tasker mode (with error handling)
+      if (luxMode === 'tasker') {
+        if (!parsedTask.todos || parsedTask.todos.length === 0) {
+          console.warn(`⚠️ [REQ-${requestId}] Tasker mode requested but no todos generated - task may not execute correctly`);
+        } else {
+          const todosToInsert = parsedTask.todos.map((todo: string, index: number) => ({
+            task_id: task.id,
+            todo_index: index,
+            todo_description: todo,
+            status: 'pending'
+          }));
+          
+          const { error: todosError } = await supabase.from('lux_todos').insert(todosToInsert);
+          
+          if (todosError) {
+            console.error(`❌ [REQ-${requestId}] Failed to insert todos for task ${task.id}:`, todosError.message);
+            // Mark task as failed since tasker mode requires todos
+            await supabase.from('lux_tasks')
+              .update({ 
+                status: 'failed', 
+                error_message: `Todos insert failed: ${todosError.message}` 
+              })
+              .eq('id', task.id);
+            throw new Error(`Failed to save todos: ${todosError.message}`);
+          }
+          
+          console.log(`✅ [REQ-${requestId}] Inserted ${todosToInsert.length} todos for task ${task.id}`);
+        }
       }
       
       // 7. Save user message
