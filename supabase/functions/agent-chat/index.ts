@@ -2513,9 +2513,9 @@ Deno.serve(async (req) => {
       // Tasker: lux-actor-1, 60 steps, temp 0.1
       // KB-optimal: DEFAULT_TEMPERATURE = 0.5 for all modes
       const taskConfig = {
-        actor: { lux_model: 'lux-actor-1', max_steps: 20, temperature: 0.5, complexity: 'simple' },
-        thinker: { lux_model: 'lux-thinker-1', max_steps: parsedTask.max_steps || 100, temperature: 0.5, complexity: parsedTask.complexity || 'complex' },
-        tasker: { lux_model: 'lux-actor-1', max_steps: 60, temperature: 0.5, complexity: 'medium' },
+        actor: { lux_model: 'lux-actor-1', max_steps_per_todo: 20, temperature: 0.5, complexity: 'simple' },
+        thinker: { lux_model: 'lux-thinker-1', max_steps_per_todo: parsedTask.max_steps_per_todo || 100, temperature: 0.5, complexity: parsedTask.complexity || 'complex' },
+        tasker: { lux_model: 'lux-actor-1', max_steps_per_todo: parsedTask.max_steps_per_todo || 24, temperature: 0.0, complexity: 'medium' },
       }[luxMode as 'actor' | 'thinker' | 'tasker'];
       
       // 5. INSERT into lux_tasks
@@ -2529,7 +2529,7 @@ Deno.serve(async (req) => {
           task_description: parsedTask.task_description,
           lux_mode: luxMode,
           lux_model: taskConfig.lux_model,
-          max_steps: taskConfig.max_steps,
+          max_steps_per_todo: taskConfig.max_steps_per_todo,
           temperature: taskConfig.temperature,
           platform: parsedTask.platform,
           start_url: parsedTask.start_url,
@@ -4273,7 +4273,7 @@ ${knowledgeContext}${searchResultsContext}`;
                     task_description,
                     lux_mode: 'actor',
                     lux_model: 'lux-actor-1',
-                    max_steps: 20,
+                    max_steps_per_todo: 20,
                     temperature: 0.1,
                     platform,
                     start_url,
@@ -4357,7 +4357,7 @@ Il task apparirà automaticamente e Lux Actor lo eseguirà direttamente.`;
                     task_description,
                     lux_mode: 'thinker',
                     lux_model: 'lux-thinker-1',
-                    max_steps: 100,
+                    max_steps_per_todo: 100,
                     temperature: 0.5,
                     platform,
                     start_url,
@@ -4456,8 +4456,8 @@ Il task apparirà automaticamente e Lux Thinker lo eseguirà con ragionamento au
                     task_description,
                     lux_mode: 'tasker',
                     lux_model: 'lux-actor-1',
-                    max_steps: 60,
-                    temperature: 0.1,
+                    max_steps_per_todo: 24,
+                    temperature: 0.0,
                     platform,
                     start_url,
                     complexity: 'medium',
@@ -5082,10 +5082,10 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                     type: 'string', 
                     description: 'URL iniziale' 
                   },
-                  max_steps: {
+                  max_steps_per_todo: {
                     type: 'integer',
-                    description: 'Maximum steps (60-100 in base alla complessità)',
-                    default: 100
+                    description: 'Maximum steps per todo (default 24 for tasker, 100 for thinker)',
+                    default: 24
                   },
                   complexity: { 
                     type: 'string', 
