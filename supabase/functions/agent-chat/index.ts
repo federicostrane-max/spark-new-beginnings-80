@@ -2454,10 +2454,92 @@ Deno.serve(async (req) => {
     }
 
     // ============================================
+    // COMPUTER USE PROVIDER DETECTION
+    // ============================================
+    const { computerUseProvider, headless, highlightMouse } = requestBody;
+    
+    // ============================================
+    // GEMINI COMPUTER USE DETERMINISTIC PIPELINE
+    // ============================================
+    if (computerUseProvider === 'gemini') {
+      console.log(`🔵 [REQ-${requestId}] Gemini Pipeline activated`);
+      
+      // Gemini doesn't use luxMode - validate and warn if present
+      if (luxMode) {
+        console.warn(`⚠️ [REQ-${requestId}] luxMode="${luxMode}" ignored for Gemini provider`);
+      }
+      
+      // 1. INSERT into lux_tasks with Gemini-specific values
+      const { data: task, error: taskError } = await supabase
+        .from('lux_tasks')
+        .insert({
+          user_id: userId,
+          agent_id: agent.id,
+          conversation_id: conversation.id,
+          user_request: message,
+          task_description: message,  // Gemini uses user message directly
+          computer_use_provider: 'gemini',
+          lux_mode: null,             // Explicitly null for Gemini
+          lux_model: null,            // Not applicable for Gemini
+          headless: headless || false,
+          highlight_mouse: highlightMouse || false,
+          max_steps_per_todo: 15,     // Default for Gemini
+          platform: 'browser',        // Gemini is browser-only
+          status: 'pending'
+        })
+        .select()
+        .single();
+      
+      if (taskError) throw taskError;
+      
+      // 2. Save user message
+      await supabase.from('agent_messages').insert({
+        conversation_id: conversation.id,
+        role: 'user',
+        content: message
+      });
+      
+      // 3. Build and save confirmation message
+      const confirmMessage = `✅ **Task Gemini Computer Use creato!**
+
+**Task:** ${message}
+**Piattaforma:** browser (Playwright)
+**Headless:** ${headless ? 'Sì' : 'No'}
+**Highlight Mouse:** ${highlightMouse ? 'Sì' : 'No'}
+
+---
+**Per eseguire:** Assicurati che **Architect's Hand Bridge** sia aperta e connessa.`;
+
+      await supabase.from('agent_messages').insert({
+        conversation_id: conversation.id,
+        role: 'assistant',
+        content: confirmMessage,
+        llm_provider: 'system',
+        metadata: { source: 'gemini_pipeline', task_id: task.id, provider: 'gemini' }
+      });
+      
+      console.log(`✅ [REQ-${requestId}] Gemini task created: ${task.id}`);
+      
+      // Return SSE stream with confirmation
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: confirmMessage })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+        }
+      });
+      
+      return new Response(stream, {
+        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' }
+      });
+    }
+
+    // ============================================
     // LUX AUTOMATION DETERMINISTIC PIPELINE
     // ============================================
     if (luxMode && ['actor', 'thinker', 'tasker'].includes(luxMode)) {
-      console.log(`🎮 [REQ-${requestId}] Lux Pipeline activated: ${luxMode}`);
+      console.log(`🟢 [REQ-${requestId}] Lux Pipeline activated: ${luxMode}`);
       
       // 1. Find the Lux agent configured for this mode
       const { data: luxConfig } = await supabase
@@ -2537,6 +2619,7 @@ Deno.serve(async (req) => {
           conversation_id: conversation.id,
           user_request: message,
           task_description: parsedTask.task_description,
+          computer_use_provider: 'lux',  // Explicitly set provider
           lux_mode: luxMode,
           lux_model: taskConfig.lux_model,
           max_steps_per_todo: taskConfig.max_steps_per_todo,

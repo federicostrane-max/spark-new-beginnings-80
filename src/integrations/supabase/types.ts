@@ -1433,12 +1433,15 @@ export type Database = {
           agent_id: string | null
           completed_at: string | null
           complexity: string | null
+          computer_use_provider: string | null
           conversation_id: string | null
           created_at: string | null
           error_message: string | null
           execution_summary: Json | null
+          headless: boolean | null
+          highlight_mouse: boolean | null
           id: string
-          lux_mode: string
+          lux_mode: string | null
           lux_model: string
           max_steps_per_todo: number | null
           platform: string | null
@@ -1450,6 +1453,7 @@ export type Database = {
           status: string | null
           task_description: string
           temperature: number | null
+          user_data_dir: string | null
           user_id: string | null
           user_request: string
         }
@@ -1457,12 +1461,15 @@ export type Database = {
           agent_id?: string | null
           completed_at?: string | null
           complexity?: string | null
+          computer_use_provider?: string | null
           conversation_id?: string | null
           created_at?: string | null
           error_message?: string | null
           execution_summary?: Json | null
+          headless?: boolean | null
+          highlight_mouse?: boolean | null
           id?: string
-          lux_mode: string
+          lux_mode?: string | null
           lux_model?: string
           max_steps_per_todo?: number | null
           platform?: string | null
@@ -1474,6 +1481,7 @@ export type Database = {
           status?: string | null
           task_description: string
           temperature?: number | null
+          user_data_dir?: string | null
           user_id?: string | null
           user_request: string
         }
@@ -1481,12 +1489,15 @@ export type Database = {
           agent_id?: string | null
           completed_at?: string | null
           complexity?: string | null
+          computer_use_provider?: string | null
           conversation_id?: string | null
           created_at?: string | null
           error_message?: string | null
           execution_summary?: Json | null
+          headless?: boolean | null
+          highlight_mouse?: boolean | null
           id?: string
-          lux_mode?: string
+          lux_mode?: string | null
           lux_model?: string
           max_steps_per_todo?: number | null
           platform?: string | null
@@ -1498,6 +1509,7 @@ export type Database = {
           status?: string | null
           task_description?: string
           temperature?: number | null
+          user_data_dir?: string | null
           user_id?: string | null
           user_request?: string
         }
