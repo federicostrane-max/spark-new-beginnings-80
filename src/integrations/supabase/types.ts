@@ -1442,7 +1442,7 @@ export type Database = {
           highlight_mouse: boolean | null
           id: string
           lux_mode: string | null
-          lux_model: string
+          lux_model: string | null
           max_steps_per_todo: number | null
           platform: string | null
           progress: number | null
@@ -1470,7 +1470,7 @@ export type Database = {
           highlight_mouse?: boolean | null
           id?: string
           lux_mode?: string | null
-          lux_model?: string
+          lux_model?: string | null
           max_steps_per_todo?: number | null
           platform?: string | null
           progress?: number | null
@@ -1498,7 +1498,7 @@ export type Database = {
           highlight_mouse?: boolean | null
           id?: string
           lux_mode?: string | null
-          lux_model?: string
+          lux_model?: string | null
           max_steps_per_todo?: number | null
           platform?: string | null
           progress?: number | null
