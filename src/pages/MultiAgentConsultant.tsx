@@ -749,7 +749,14 @@ export default function MultiAgentConsultant() {
     }
   };
 
-  const handleSendMessage = async (text: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string, luxMode?: string) => {
+  const handleSendMessage = async (
+    text: string, 
+    attachments?: Array<{ url: string; name: string; type: string }>, 
+    forcedTool?: string, 
+    luxMode?: string,
+    computerUseProvider?: 'lux' | 'gemini',
+    geminiOptions?: { headless?: boolean; highlightMouse?: boolean }
+  ) => {
     // ✅ Guard anti-double-submit
     if (isSending) {
       console.warn("⚠️ Double submit prevented - already sending");
@@ -828,6 +835,9 @@ export default function MultiAgentConsultant() {
             attachments,
             forcedTool,
             luxMode,
+            computerUseProvider,
+            headless: geminiOptions?.headless,
+            highlightMouse: geminiOptions?.highlightMouse,
           }),
           keepalive: true,
           signal: controller.signal

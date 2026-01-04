@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe, GitBranch, FileCode, FolderOpen, GitPullRequest, Brain, ListChecks, Play } from "lucide-react";
+import { Send, X, AtSign, Zap, MessageSquare, Edit, Eye, Globe, GitBranch, FileCode, FolderOpen, GitPullRequest, Brain, ListChecks, Play, Monitor } from "lucide-react";
 import { VoiceInput } from "./VoiceInput";
 import { AttachmentUpload } from "./AttachmentUpload";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,8 +25,17 @@ interface Agent {
   description: string;
 }
 
+type ComputerUseProvider = 'lux' | 'gemini';
+
 interface ChatInputProps {
-  onSend: (message: string, attachments?: Array<{ url: string; name: string; type: string }>, forcedTool?: string, luxMode?: string) => void;
+  onSend: (
+    message: string, 
+    attachments?: Array<{ url: string; name: string; type: string }>, 
+    forcedTool?: string, 
+    luxMode?: string,
+    computerUseProvider?: ComputerUseProvider,
+    geminiOptions?: { headless?: boolean; highlightMouse?: boolean }
+  ) => void;
   disabled?: boolean;
   sendDisabled?: boolean;
   placeholder?: string;
@@ -42,6 +52,8 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   const [mentionStartPos, setMentionStartPos] = useState<number | null>(null);
   const [pendingForcedTool, setPendingForcedTool] = useState<string | null>(null);
   const [pendingLuxMode, setPendingLuxMode] = useState<string | null>(null);
+  const [pendingProvider, setPendingProvider] = useState<ComputerUseProvider | null>(null);
+  const [pendingGeminiOptions, setPendingGeminiOptions] = useState<{ headless: boolean; highlightMouse: boolean }>({ headless: false, highlightMouse: false });
   const [luxConfig, setLuxConfig] = useState<Array<{ lux_mode: string; agent_id: string | null; agents: { slug: string; name: string } | null }>>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -144,11 +156,20 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
     if (input.trim() && !disabled) {
       // Close suggestions when submitting
       setShowAgentSuggestions(false);
-      onSend(input.trim(), attachments.length > 0 ? attachments : undefined, pendingForcedTool || undefined, pendingLuxMode || undefined);
+      onSend(
+        input.trim(), 
+        attachments.length > 0 ? attachments : undefined, 
+        pendingForcedTool || undefined, 
+        pendingLuxMode || undefined,
+        pendingProvider || undefined,
+        pendingProvider === 'gemini' ? pendingGeminiOptions : undefined
+      );
       setInput("");
       setAttachments([]);
-      setPendingForcedTool(null); // Reset after sending
-      setPendingLuxMode(null); // Reset luxMode after sending
+      setPendingForcedTool(null);
+      setPendingLuxMode(null);
+      setPendingProvider(null);
+      setPendingGeminiOptions({ headless: false, highlightMouse: false });
     }
   };
 
@@ -320,15 +341,23 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
         break;
       case 'lux-actor':
         template = 'Azione semplice: ';
-        luxMode = 'actor'; // Pipeline deterministica - NO forcedTool
+        luxMode = 'actor';
+        setPendingProvider('lux');
         break;
       case 'lux-thinker':
         template = 'Task complesso: ';
-        luxMode = 'thinker'; // Pipeline deterministica - NO forcedTool
+        luxMode = 'thinker';
+        setPendingProvider('lux');
         break;
       case 'lux-tasker':
         template = 'Automazione con step: ';
-        luxMode = 'tasker'; // Pipeline deterministica - NO forcedTool
+        luxMode = 'tasker';
+        setPendingProvider('lux');
+        break;
+      case 'gemini':
+        template = 'Task browser: ';
+        setPendingProvider('gemini');
+        setPendingLuxMode(null); // Reset Lux mode
         break;
       case 'github-read':
         template = 'Leggi file da GitHub: owner/repo path/to/file.js';
@@ -376,14 +405,54 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
 
   return (
     <div className="space-y-2">
+      {/* Gemini Provider Badge */}
+      {pendingProvider === 'gemini' && (
+        <div className="flex gap-2 items-center p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
+          <Monitor className="h-4 w-4 text-blue-500" />
+          <span className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+            🔵 Gemini (Browser Dedicato)
+          </span>
+          <div className="flex items-center gap-3 ml-2">
+            <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+              <Switch 
+                checked={pendingGeminiOptions.headless}
+                onCheckedChange={(checked) => setPendingGeminiOptions(prev => ({ ...prev, headless: checked }))}
+                className="scale-75"
+              />
+              Headless
+            </label>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
+              <Switch 
+                checked={pendingGeminiOptions.highlightMouse}
+                onCheckedChange={(checked) => setPendingGeminiOptions(prev => ({ ...prev, highlightMouse: checked }))}
+                className="scale-75"
+              />
+              Highlight
+            </label>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 ml-auto"
+            onClick={() => {
+              setPendingProvider(null);
+              setPendingGeminiOptions({ headless: false, highlightMouse: false });
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+
       {/* Lux Mode Badge */}
-      {pendingLuxMode && (
+      {pendingProvider === 'lux' && pendingLuxMode && (
         <div className="flex gap-2 items-center p-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
           {pendingLuxMode === 'actor' ? <Zap className="h-4 w-4 text-purple-500" /> : 
            pendingLuxMode === 'thinker' ? <Brain className="h-4 w-4 text-purple-500" /> :
            <ListChecks className="h-4 w-4 text-purple-500" />}
           <span className="text-sm text-purple-600 dark:text-purple-400 font-medium">
-            🎮 Lux Pipeline: {
+            🟢 Lux Pipeline: {
               pendingLuxMode === 'actor' ? 'Actor (Semplice)' :
               pendingLuxMode === 'thinker' ? 'Thinker (Complesso)' :
               pendingLuxMode === 'tasker' ? 'Tasker (Con Step)' :
@@ -395,7 +464,10 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
             variant="ghost"
             size="icon"
             className="h-5 w-5 ml-auto"
-            onClick={() => setPendingLuxMode(null)}
+            onClick={() => {
+              setPendingProvider(null);
+              setPendingLuxMode(null);
+            }}
           >
             <X className="h-3 w-3" />
           </Button>
@@ -547,7 +619,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
                     <Play className="mr-2 h-4 w-4" />
-                    Lux Automation
+                    🟢 Lux Automation
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
@@ -564,6 +636,11 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+                
+                <DropdownMenuItem onClick={() => insertAgentAction('gemini')}>
+                  <Monitor className="mr-2 h-4 w-4" />
+                  🔵 Gemini (Browser Dedicato)
+                </DropdownMenuItem>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
