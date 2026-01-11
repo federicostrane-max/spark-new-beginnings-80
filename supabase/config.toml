@@ -282,3 +282,12 @@ timeout = 120
 [functions.github-repo-tools]
 verify_jwt = false
 timeout = 60
+
+# ===== TOOL SERVER (porta 8766) =====
+[functions.tool-server-llm]
+verify_jwt = false
+timeout = 120
+
+[functions.tool-server-vision]
+verify_jwt = false
+timeout = 60
