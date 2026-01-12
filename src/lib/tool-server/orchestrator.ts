@@ -7,7 +7,7 @@ import { toolServerClient } from './client';
 import { sessionManager } from './session-manager';
 import { LoopDetector } from './loop-detector';
 import { ActionCache } from './action-cache';
-import { PLANNER_AGENT_SYSTEM_PROMPT, PLANNER_AGENT_CONFIG } from './agent-prompts';
+import { BROWSER_ORCHESTRATOR_CONFIG } from './agent-prompts';
 import {
   OrchestratorConfig,
   DEFAULT_ORCHESTRATOR_CONFIG,
@@ -61,41 +61,20 @@ export class Orchestrator {
   // PUBLIC API
   // ============================================================
 
-  async executeTask(task: string, startUrl?: string): Promise<OrchestratorState> {
-    this.abortController = new AbortController();
-    this.state = this.createInitialState();
-    this.state.task = task;
-    this.state.started_at = Date.now();
-    this.loopDetector.reset();
-    this.logs = [];
-
-    try {
-      // Phase 1: Initialize Browser
-      await this.initializeBrowser(startUrl);
-
-      // Phase 2: Get DOM and Create Plan
-      await this.createPlan();
-
-      // Phase 3: Execute Plan
-      await this.executePlan();
-
-      // Phase 4: Finalize
-      this.state.status = 'completed';
-      this.state.completed_at = Date.now();
-      this.log('success', 'Task completato con successo');
-
-    } catch (error) {
-      if (this.state.status === 'aborted') {
-        this.log('warn', 'Task interrotto dall\'utente');
-      } else {
-        this.state.status = 'failed';
-        this.state.error = error instanceof Error ? error.message : 'Unknown error';
-        this.log('error', `Task fallito: ${this.state.error}`);
-      }
-    }
-
-    this.notifyStateChange();
-    return this.state;
+  /**
+   * @deprecated Use executePlanFromCloud() instead.
+   * This method previously called a Planner LLM, but now plans should be
+   * created by the Agent (with KB) and passed to executePlanFromCloud().
+   * 
+   * This method is kept for backwards compatibility but will throw an error
+   * guiding users to use the new API.
+   */
+  async executeTask(_task: string, _startUrl?: string): Promise<OrchestratorState> {
+    throw new Error(
+      'executeTask() is deprecated. ' +
+      'Plans should now be created by the Agent (with KB) and passed to executePlanFromCloud(). ' +
+      'Use: orchestrator.executePlanFromCloud(plan, { startUrl })'
+    );
   }
 
   abort(): void {
@@ -244,79 +223,12 @@ export class Orchestrator {
   }
 
   // ============================================================
-  // PHASE 2: PLANNING (ONLY LLM CALL)
+  // PHASE 2: PLANNING - REMOVED
   // ============================================================
-
-  private async createPlan(): Promise<void> {
-    this.checkAbort();
-    this.updateStatus('planning');
-    this.log('info', 'Ottenendo DOM Tree...');
-
-    // Get DOM Tree
-    const domResult = await toolServerClient.getDomTree(this.state.session_id!);
-    if (!domResult.success) {
-      throw new Error('Failed to get DOM tree');
-    }
-
-    this.log('info', 'Chiamata al Planner Agent...');
-
-    // Call Planner Agent (THE ONLY LLM CALL)
-    const plan = await this.callPlannerAgent(
-      this.state.task,
-      domResult.tree,
-      this.state.current_url || ''
-    );
-
-    this.state.plan = plan;
-    this.callbacks.onPlanCreated?.(plan);
-    
-    this.log('success', `Piano creato: ${plan.steps.length} step`);
-    this.log('info', `Obiettivo: ${plan.goal}`);
-  }
-
-  private async callPlannerAgent(task: string, domTree: string, url: string): Promise<Plan> {
-    const userMessage = `Task: ${task}
-
-URL: ${url}
-
-DOM Tree:
-${domTree.slice(0, 15000)}${domTree.length > 15000 ? '\n[...truncated...]' : ''}`;
-
-    try {
-      const { data, error } = await supabase.functions.invoke('tool-server-llm', {
-        body: {
-          messages: [{ role: 'user', content: userMessage }],
-          system_prompt: PLANNER_AGENT_SYSTEM_PROMPT,
-          model: PLANNER_AGENT_CONFIG.model,
-          temperature: PLANNER_AGENT_CONFIG.temperature,
-          max_tokens: PLANNER_AGENT_CONFIG.max_tokens,
-        },
-      });
-
-      if (error) throw error;
-
-      // Parse JSON response
-      const responseText = data.response || data.content || '';
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      
-      if (!jsonMatch) {
-        throw new Error('No JSON found in Planner response');
-      }
-
-      const plan = JSON.parse(jsonMatch[0]) as Plan;
-      
-      // Validate plan structure
-      if (!plan.steps || !Array.isArray(plan.steps)) {
-        throw new Error('Invalid plan structure: missing steps array');
-      }
-
-      return plan;
-
-    } catch (error) {
-      this.log('error', `Planner Agent error: ${error instanceof Error ? error.message : 'Unknown'}`);
-      throw new Error(`Planner failed: ${error instanceof Error ? error.message : 'Unknown'}`);
-    }
-  }
+  // NOTE: The Planner LLM has been removed from the orchestrator.
+  // Plans are now created by the Agent (with KB) and passed to 
+  // executePlanFromCloud(). This reduces LLM calls and improves accuracy.
+  // ============================================================
 
   // ============================================================
   // PHASE 3: PLAN EXECUTION

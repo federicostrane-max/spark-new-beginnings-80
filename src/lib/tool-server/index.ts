@@ -11,7 +11,7 @@ export { sessionManager } from './session-manager';
 export { Orchestrator, createOrchestrator } from './orchestrator';
 export { LoopDetector } from './loop-detector';
 export { ActionCache } from './action-cache';
-export { PLANNER_AGENT_SYSTEM_PROMPT, PLANNER_AGENT_CONFIG } from './agent-prompts';
+export { BROWSER_ORCHESTRATOR_CONFIG, BROWSER_PLANNING_INSTRUCTIONS } from './agent-prompts';
 
 // Types - Tool Server
 export type {
