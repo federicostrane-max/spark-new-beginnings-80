@@ -49,6 +49,43 @@ interface UserIntent {
 }
 
 // ============================================================================
+// PLANNER AGENT SYSTEM PROMPT - For browser_orchestrator tool
+// ============================================================================
+const PLANNER_AGENT_SYSTEM_PROMPT = `Sei il PLANNER AGENT in un sistema di automazione browser.
+
+## IL TUO RUOLO
+Analizzi il DOM/Accessibility Tree e crei un piano strategico per completare il task.
+NON esegui azioni - crei solo il piano che verrà eseguito dal frontend.
+
+## OUTPUT FORMAT (JSON)
+
+{
+  "analysis": "Breve analisi della pagina corrente",
+  "goal": "Obiettivo finale del task",
+  "current_state": "Stato attuale della pagina",
+  "steps": [
+    {
+      "step_number": 1,
+      "action_type": "click" | "type" | "scroll" | "keypress" | "wait" | "navigate",
+      "target_description": "Descrizione visiva dell'elemento (per Vision Agent)",
+      "target_selector_hint": "Hint dal DOM se disponibile",
+      "input_value": "Per type: testo. Per keypress: tasto. Per navigate: URL",
+      "expected_result": "Cosa succede dopo questa azione",
+      "fallback_description": "Descrizione alternativa se la prima fallisce"
+    }
+  ],
+  "success_criteria": "Come verificare che il task sia completato",
+  "potential_obstacles": ["Possibili problemi"]
+}
+
+## REGOLE
+1. Analizza il DOM attentamente - cerca elementi interattivi
+2. Sii SPECIFICO nelle descrizioni target (per Vision Agent)
+3. UN'azione per step - azioni atomiche
+4. Massimo 10 step per piano
+5. Rispondi SOLO con JSON valido`;
+
+// ============================================================================
 // REMOVED: Pattern-based intent analysis is no longer needed
 // Semantic search is now UNCONDITIONAL for every query
 // ============================================================================
@@ -4858,6 +4895,268 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
               }
             }
             
+            // ============= TOOL: tool_server_action =============
+            else if (toolName === 'tool_server_action') {
+              console.log(`🔧 [REQ-${context.requestId}] Tool: tool_server_action - ${toolInput.action}`);
+
+              const command: Record<string, unknown> = {
+                execute_locally: true,
+                tool: 'tool_server_action',
+                action: toolInput.action,
+                params: {} as Record<string, unknown>
+              };
+
+              switch (toolInput.action) {
+                case 'screenshot':
+                  command.params = { scope: toolInput.scope || 'browser', session_id: toolInput.session_id };
+                  break;
+                case 'click':
+                  command.params = {
+                    scope: toolInput.scope || 'browser',
+                    x: toolInput.x, y: toolInput.y,
+                    click_type: toolInput.click_type || 'single',
+                    coordinate_origin: toolInput.coordinate_origin || 'viewport',
+                    session_id: toolInput.session_id
+                  };
+                  break;
+                case 'type':
+                  command.params = {
+                    scope: toolInput.scope || 'browser',
+                    text: toolInput.text,
+                    method: toolInput.method || 'clipboard',
+                    session_id: toolInput.session_id
+                  };
+                  break;
+                case 'scroll':
+                  command.params = {
+                    scope: toolInput.scope || 'browser',
+                    direction: toolInput.direction || 'down',
+                    amount: toolInput.amount || 300,
+                    session_id: toolInput.session_id
+                  };
+                  break;
+                case 'keypress':
+                  command.params = { scope: toolInput.scope || 'browser', key: toolInput.key, session_id: toolInput.session_id };
+                  break;
+                case 'navigate':
+                  command.params = { url: toolInput.url, session_id: toolInput.session_id };
+                  break;
+                case 'browser_start':
+                  command.params = { start_url: toolInput.url, headless: false };
+                  break;
+                case 'browser_stop':
+                  command.params = { session_id: toolInput.session_id };
+                  break;
+                case 'dom_tree':
+                  command.params = { session_id: toolInput.session_id };
+                  break;
+              }
+
+              toolResult = command;
+              responseText = `🔧 Comando locale: **${toolInput.action}**\n`;
+              if (toolInput.action === 'click' && toolInput.x !== undefined) {
+                responseText += `   📍 Coordinate: (${toolInput.x}, ${toolInput.y}) [${toolInput.coordinate_origin || 'viewport'}]\n`;
+              }
+              if (toolInput.action === 'type' && toolInput.text) {
+                responseText += `   ⌨️ Testo: "${toolInput.text.substring(0, 50)}${toolInput.text.length > 50 ? '...' : ''}"\n`;
+              }
+              if (toolInput.action === 'browser_start' && toolInput.url) {
+                responseText += `   🌐 URL: ${toolInput.url}\n`;
+              }
+              newFullResponse += responseText;
+              await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: command }));
+            }
+
+            // ============= TOOL: lux_actor_vision =============
+            else if (toolName === 'lux_actor_vision') {
+              console.log(`👁️ [REQ-${context.requestId}] Tool: lux_actor_vision - "${toolInput.target}"`);
+
+              try {
+                responseText = `👁️ **Lux Vision**: Cerco "${toolInput.target}"...\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+                const { data: visionData, error: visionError } = await context.supabase.functions.invoke(
+                  'tool-server-vision',
+                  { body: { provider: 'lux', image: toolInput.screenshot_base64, task: `Find and locate: ${toolInput.target}` } }
+                );
+
+                if (visionError) throw visionError;
+
+                toolResult = {
+                  success: visionData.success && visionData.x !== undefined,
+                  x: visionData.x ?? null,
+                  y: visionData.y ?? null,
+                  confidence: visionData.confidence ?? null,
+                  coordinate_system: 'lux_sdk',
+                  reasoning: visionData.action || 'Lux Actor response'
+                };
+
+                responseText = toolResult.success 
+                  ? `✅ Trovato a (${toolResult.x}, ${toolResult.y}) [lux_sdk] - Confidence: ${((toolResult.confidence || 0) * 100).toFixed(0)}%\n`
+                  : `❌ Elemento non trovato con Lux Actor\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+              } catch (error) {
+                console.error('❌ Error in lux_actor_vision:', error);
+                toolResult = { success: false, error: error instanceof Error ? error.message : String(error), x: null, y: null, confidence: null, coordinate_system: 'lux_sdk' };
+                responseText = `❌ Errore Lux Vision: ${toolResult.error}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+
+            // ============= TOOL: gemini_computer_use =============
+            else if (toolName === 'gemini_computer_use') {
+              console.log(`🔮 [REQ-${context.requestId}] Tool: gemini_computer_use - "${toolInput.target}"`);
+
+              try {
+                responseText = `🔮 **Gemini Vision**: Cerco "${toolInput.target}"...\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+                const geminiPrompt = `Find the element "${toolInput.target}" in this screenshot.
+${toolInput.context ? `Context: ${toolInput.context}` : ''}
+The viewport is approximately 1280x720 pixels. Coordinates (0,0) are at top-left.
+Respond ONLY with valid JSON: {"x": number, "y": number, "confidence": 0.0-1.0, "reasoning": "brief explanation"}`;
+
+                const { data: visionData, error: visionError } = await context.supabase.functions.invoke(
+                  'tool-server-vision',
+                  { body: { provider: 'gemini', image: toolInput.screenshot_base64, prompt: geminiPrompt } }
+                );
+
+                if (visionError) throw visionError;
+
+                toolResult = {
+                  success: visionData.success && visionData.x !== undefined,
+                  x: visionData.x ?? null,
+                  y: visionData.y ?? null,
+                  confidence: visionData.confidence ?? null,
+                  coordinate_system: 'viewport',
+                  reasoning: visionData.reasoning || 'Gemini Vision response'
+                };
+
+                responseText = toolResult.success
+                  ? `✅ Trovato a (${toolResult.x}, ${toolResult.y}) [viewport] - Confidence: ${((toolResult.confidence || 0) * 100).toFixed(0)}%\n${toolResult.reasoning ? `   💭 ${toolResult.reasoning}\n` : ''}`
+                  : `❌ Elemento non trovato con Gemini Vision\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+              } catch (error) {
+                console.error('❌ Error in gemini_computer_use:', error);
+                toolResult = { success: false, error: error instanceof Error ? error.message : String(error), x: null, y: null, confidence: null, coordinate_system: 'viewport' };
+                responseText = `❌ Errore Gemini Vision: ${toolResult.error}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+
+            // ============= TOOL: browser_orchestrator =============
+            else if (toolName === 'browser_orchestrator') {
+              console.log(`🤖 [REQ-${context.requestId}] Tool: browser_orchestrator - "${toolInput.task}"`);
+
+              try {
+                responseText = `🤖 **Browser Orchestrator** avviato\n📋 Task: ${toolInput.task}\n`;
+                if (toolInput.start_url) responseText += `🌐 URL iniziale: ${toolInput.start_url}\n`;
+                responseText += `\n⏳ Creazione piano con Planner Agent...\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+                // Prepare navigation command if start_url provided
+                let navigationCommand = null;
+                if (toolInput.start_url) {
+                  navigationCommand = {
+                    execute_locally: true,
+                    tool: 'tool_server_action',
+                    action: 'browser_start',
+                    params: { start_url: toolInput.start_url }
+                  };
+                }
+
+                // Build planner message
+                const plannerMessage = `## TASK
+${toolInput.task}
+
+## URL CORRENTE
+${toolInput.current_url || toolInput.start_url || 'Non specificato - il frontend aprirà il browser'}
+
+## DOM/ACCESSIBILITY TREE
+\`\`\`
+${toolInput.current_dom || 'DOM non fornito - il frontend lo recupererà automaticamente dopo aver aperto il browser'}
+\`\`\`
+
+Analizza la situazione e crea un piano strategico per completare il task.
+Rispondi SOLO con JSON valido nel formato specificato.`;
+
+                // Call tool-server-llm for Planner Agent
+                const { data: plannerData, error: plannerError } = await context.supabase.functions.invoke(
+                  'tool-server-llm',
+                  {
+                    body: {
+                      messages: [{ role: 'user', content: plannerMessage }],
+                      tools: [],
+                      system_prompt: PLANNER_AGENT_SYSTEM_PROMPT,
+                      model: 'claude-sonnet-4-20250514',
+                      temperature: 0.2
+                    }
+                  }
+                );
+
+                if (plannerError) throw plannerError;
+
+                // Parse plan from response
+                const plannerResponse = plannerData.response || '';
+                const jsonMatch = plannerResponse.match(/\{[\s\S]*\}/);
+                if (!jsonMatch) {
+                  throw new Error('Planner Agent non ha restituito un piano JSON valido');
+                }
+
+                const plan = JSON.parse(jsonMatch[0]);
+
+                // Build orchestrator command for frontend
+                const orchestratorCommand = {
+                  execute_locally: true,
+                  tool: 'browser_orchestrator',
+                  navigation: navigationCommand,
+                  plan: plan,
+                  config: { 
+                    max_steps: toolInput.max_steps || 10, 
+                    vision_fallback_enabled: true, 
+                    confidence_threshold: 0.7, 
+                    loop_detection_threshold: 3 
+                  }
+                };
+
+                toolResult = orchestratorCommand;
+
+                // Format plan for user
+                responseText = `\n✅ **Piano creato!**\n`;
+                responseText += `📊 Analisi: ${plan.analysis || 'N/A'}\n`;
+                responseText += `🎯 Obiettivo: ${plan.goal || 'N/A'}\n`;
+                responseText += `📝 Steps: ${plan.steps?.length || 0}\n\n`;
+                
+                if (plan.steps && Array.isArray(plan.steps)) {
+                  plan.steps.forEach((step: { step_number?: number; action_type?: string; target_description?: string }, i: number) => {
+                    responseText += `   ${step.step_number || i + 1}. **${step.action_type || 'action'}**: ${step.target_description || 'N/A'}\n`;
+                  });
+                }
+                
+                responseText += `\n⏳ Esecuzione locale in corso...\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+                await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: orchestratorCommand }));
+
+              } catch (error) {
+                console.error('❌ Error in browser_orchestrator:', error);
+                toolResult = { success: false, error: error instanceof Error ? error.message : String(error), execute_locally: false };
+                responseText = `❌ Errore Orchestrator: ${toolResult.error}\n`;
+                newFullResponse += responseText;
+                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+              }
+            }
+            
             // ============= FALLBACK: Unknown Tool =============
             else {
               console.warn(`⚠️ [REQ-${context.requestId}] Unknown tool: ${toolName}`);
@@ -5351,6 +5650,140 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                 base: { type: 'string', description: 'Target branch (default: "main")' }
               },
               required: ['owner', 'repo', 'title', 'body', 'head']
+            }
+          });
+          
+          // ===== BROWSER AUTOMATION TOOLS (4 tools) =====
+          // These tools enable browser automation via local Tool Server
+          
+          // Tool 1: tool_server_action - Execute single browser/desktop actions
+          tools.push({
+            name: 'tool_server_action',
+            description: `Execute a single browser or desktop action via the local Tool Server.
+  
+Available actions:
+- screenshot: Capture current screen/viewport (returns base64 PNG)
+- click: Click at coordinates (x, y) - REQUIRES coordinates from vision tools first
+- type: Type text into focused element
+- scroll: Scroll up/down/left/right
+- keypress: Press a key or combination (Enter, Tab, Escape, etc.)
+- navigate: Navigate browser to URL
+- browser_start: Start a new browser session with optional URL
+- browser_stop: Stop browser session
+- dom_tree: Get accessibility tree of current page
+
+WORKFLOW: For clicking elements, you MUST first:
+1. Call screenshot to capture current state
+2. Call lux_actor_vision OR gemini_computer_use with the screenshot to get coordinates
+3. Then call this tool with action=click and the coordinates
+
+Returns a command for frontend local execution (execute_locally: true).
+Requires Tool Server running locally on port 8766.`,
+            input_schema: {
+              type: 'object',
+              properties: {
+                action: {
+                  type: 'string',
+                  enum: ['screenshot', 'click', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree'],
+                  description: 'The action to perform'
+                },
+                scope: { type: 'string', enum: ['browser', 'desktop'], description: 'Target scope (default: browser)' },
+                x: { type: 'number', description: 'X coordinate for click' },
+                y: { type: 'number', description: 'Y coordinate for click' },
+                click_type: { type: 'string', enum: ['single', 'double', 'right'], description: 'Click type (default: single)' },
+                coordinate_origin: { type: 'string', enum: ['viewport', 'screen', 'lux_sdk'], description: 'Coordinate system (lux_sdk for Lux, viewport for Gemini)' },
+                text: { type: 'string', description: 'Text to type' },
+                method: { type: 'string', enum: ['clipboard', 'keystrokes'], description: 'Typing method' },
+                direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
+                amount: { type: 'number', description: 'Scroll amount in pixels' },
+                key: { type: 'string', description: 'Key to press (Enter, Tab, Escape, etc.)' },
+                url: { type: 'string', description: 'URL for navigate/browser_start' },
+                session_id: { type: 'string', description: 'Browser session ID (auto-managed)' }
+              },
+              required: ['action']
+            }
+          });
+          
+          // Tool 2: lux_actor_vision - Fast element location
+          tools.push({
+            name: 'lux_actor_vision',
+            description: `Find element coordinates using Lux Actor vision model.
+FAST (~1 second). Returns coordinates in lux_sdk coordinate system.
+
+Use this to locate buttons, links, input fields, icons by visual description.
+REQUIRES screenshot_base64 from a previous tool_server_action(action: 'screenshot').
+
+WORKFLOW:
+1. First call tool_server_action with action='screenshot' to get base64 image
+2. Then call this with the screenshot and target description
+3. Use returned coordinates with tool_server_action(action='click', coordinate_origin='lux_sdk')
+
+Returns: { success, x, y, confidence, coordinate_system: 'lux_sdk' }`,
+            input_schema: {
+              type: 'object',
+              properties: {
+                screenshot_base64: { type: 'string', description: 'Base64 PNG screenshot from tool_server_action' },
+                target: { type: 'string', description: 'Visual description of element to find (e.g., "blue Send button", "search input field")' }
+              },
+              required: ['screenshot_base64', 'target']
+            }
+          });
+          
+          // Tool 3: gemini_computer_use - Smart element location (fallback)
+          tools.push({
+            name: 'gemini_computer_use',
+            description: `Find element coordinates using Gemini Vision model.
+SLOWER (~3 seconds) but better at complex UIs and reasoning.
+Returns coordinates in viewport coordinate system.
+
+Use as FALLBACK when lux_actor_vision fails or for complex UIs.
+REQUIRES screenshot_base64 from a previous tool_server_action(action: 'screenshot').
+
+WORKFLOW:
+1. First call tool_server_action with action='screenshot' to get base64 image
+2. Then call this with the screenshot, target, and optional context
+3. Use returned coordinates with tool_server_action(action='click', coordinate_origin='viewport')
+
+Returns: { success, x, y, confidence, reasoning, coordinate_system: 'viewport' }`,
+            input_schema: {
+              type: 'object',
+              properties: {
+                screenshot_base64: { type: 'string', description: 'Base64 PNG screenshot from tool_server_action' },
+                target: { type: 'string', description: 'Description of element to find' },
+                context: { type: 'string', description: 'Additional context about the page or task' }
+              },
+              required: ['screenshot_base64', 'target']
+            }
+          });
+          
+          // Tool 4: browser_orchestrator - Multi-step automation
+          tools.push({
+            name: 'browser_orchestrator',
+            description: `Execute complex browser automation tasks using multi-step orchestrator.
+
+This tool:
+1. Opens a browser session (if start_url provided)
+2. Uses a Planner Agent (LLM) to analyze DOM and create a step-by-step plan
+3. Returns the plan for local execution by frontend
+
+Use for: multi-page forms, complex workflows, automated testing, multi-step tasks.
+
+The frontend will execute the plan locally using:
+- tool_server_action for browser interactions
+- lux_actor_vision/gemini_computer_use for element location
+
+Returns: { execute_locally: true, plan: {...}, config: {...} }
+Requires Tool Server running locally on port 8766.`,
+            input_schema: {
+              type: 'object',
+              properties: {
+                task: { type: 'string', description: 'The task to execute (e.g., "Open Gmail, click Compose, write email to test@example.com")' },
+                start_url: { type: 'string', description: 'Initial URL to open (optional)' },
+                current_dom: { type: 'string', description: 'Current DOM/accessibility tree (optional, will be fetched if not provided)' },
+                current_url: { type: 'string', description: 'Current URL if browser already open (optional)' },
+                max_steps: { type: 'number', description: 'Maximum steps in plan (default: 10)' }
+              },
+              required: ['task']
             }
           });
           
@@ -7056,6 +7489,10 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                   'github_list_files': '✅ Lista file GitHub recuperata.',
                   'github_create_branch': '✅ Branch GitHub creato.',
                   'github_create_pr': '✅ Pull Request GitHub creata.',
+                  'tool_server_action': '✅ Comando browser inviato al frontend.',
+                  'lux_actor_vision': '✅ Ricerca visiva Lux completata.',
+                  'gemini_computer_use': '✅ Ricerca visiva Gemini completata.',
+                  'browser_orchestrator': '✅ Piano di automazione browser creato.',
                 };
                 
                 const fallbackMessage = toolConfirmations[lastExecutedToolName] || 
