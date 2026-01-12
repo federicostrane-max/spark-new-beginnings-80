@@ -13,7 +13,7 @@ import ExportSelectedMessagesPDF from "@/components/ExportSelectedMessagesPDF";
 import { CreateAgentModal } from "@/components/CreateAgentModal";
 import { ForwardMessageDialog } from "@/components/ForwardMessageDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Database, AlertCircle } from "lucide-react";
+import { Loader2, Menu, Forward, X, Edit, ChevronsDown, ChevronsUp, Trash2, Database, AlertCircle, Monitor } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+// Browser automation imports
+import { toolServerClient, sessionManager, Orchestrator, Plan } from "@/lib/tool-server";
 
 interface Agent {
   id: string;
@@ -101,6 +103,13 @@ export default function MultiAgentConsultant() {
     totalChars: number;
     chunks: number;
     status: string;
+  } | null>(null);
+  // Browser automation local execution state
+  const [localExecutionStatus, setLocalExecutionStatus] = useState<{
+    active: boolean;
+    tool: string;
+    status: string;
+    stepInfo?: string;
   } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
@@ -749,6 +758,170 @@ export default function MultiAgentConsultant() {
     }
   };
 
+  // ============================================================
+  // LOCAL TOOL EXECUTION FUNCTIONS (Browser Automation)
+  // ============================================================
+
+  /**
+   * Execute a single tool_server_action locally via ToolServer.exe
+   * Called when SSE sends tool_execute_locally with tool: 'tool_server_action'
+   */
+  const executeLocalToolServerAction = async (command: {
+    action: string;
+    params: Record<string, unknown>;
+  }): Promise<{ success: boolean; data?: unknown; error?: string }> => {
+    const { action, params } = command;
+    const sessionId = sessionManager.sessionId;
+    
+    console.log(`🔧 [LOCAL] Executing: ${action}`, params);
+    
+    try {
+      switch (action) {
+        case 'browser_start': {
+          const startResult = await toolServerClient.browserStart(
+            (params.start_url as string) || 'about:blank',
+            { headless: params.headless as boolean }
+          );
+          if (startResult.session_id) {
+            sessionManager.captureFromToolResult({ session_id: startResult.session_id });
+          }
+          return { success: startResult.success, data: startResult };
+        }
+        
+        case 'browser_stop':
+          return await toolServerClient.browserStop((params.session_id as string) || sessionId!);
+        
+        case 'screenshot': {
+          const screenshotResult = await toolServerClient.screenshot({
+            scope: (params.scope as 'browser' | 'desktop') || 'browser',
+            session_id: (params.session_id as string) || sessionId || undefined,
+            optimize_for: 'lux',
+          });
+          return { 
+            success: screenshotResult.success, 
+            data: {
+              image_base64: screenshotResult.original?.image_base64,
+              width: screenshotResult.original?.width,
+              height: screenshotResult.original?.height,
+            }
+          };
+        }
+        
+        case 'dom_tree': {
+          const domResult = await toolServerClient.getDomTree((params.session_id as string) || sessionId!);
+          return { success: domResult.success, data: { tree: domResult.tree } };
+        }
+        
+        case 'click':
+          return await toolServerClient.click({
+            scope: (params.scope as 'browser' | 'desktop') || 'browser',
+            session_id: (params.session_id as string) || sessionId || undefined,
+            x: params.x as number,
+            y: params.y as number,
+            coordinate_origin: (params.coordinate_origin as 'viewport' | 'lux_sdk') || 'viewport',
+            click_type: (params.click_type as 'single' | 'double' | 'right') || 'single',
+          });
+        
+        case 'type':
+          return await toolServerClient.type({
+            scope: (params.scope as 'browser' | 'desktop') || 'browser',
+            session_id: (params.session_id as string) || sessionId || undefined,
+            text: params.text as string,
+            method: (params.method as 'keystrokes' | 'clipboard') || 'clipboard',
+          });
+        
+        case 'scroll':
+          return await toolServerClient.scroll({
+            scope: (params.scope as 'browser' | 'desktop') || 'browser',
+            session_id: (params.session_id as string) || sessionId || undefined,
+            direction: (params.direction as 'up' | 'down') || 'down',
+            amount: (params.amount as number) || 300,
+          });
+        
+        case 'keypress':
+          // Note: params uses 'key' but API uses 'keys'
+          return await toolServerClient.keypress({
+            scope: (params.scope as 'browser' | 'desktop') || 'browser',
+            session_id: (params.session_id as string) || sessionId || undefined,
+            keys: (params.key as string) || (params.keys as string) || 'Enter',
+          });
+        
+        case 'navigate':
+          return await toolServerClient.browserNavigate(
+            (params.session_id as string) || sessionId!,
+            params.url as string
+          );
+        
+        default:
+          return { success: false, error: `Unknown action: ${action}` };
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`❌ [LOCAL] Action ${action} failed:`, errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
+
+  /**
+   * Execute a pre-generated plan locally via the Orchestrator.
+   * Called when SSE sends tool_execute_locally with tool: 'browser_orchestrator'
+   */
+  const executeLocalOrchestratorPlan = async (command: {
+    task?: string;
+    navigation?: { action: string; params: Record<string, unknown> };
+    plan: Plan;
+    config?: Record<string, unknown>;
+  }): Promise<{ success: boolean; state?: unknown; error?: string }> => {
+    const { navigation, plan, config } = command;
+    
+    console.log(`🤖 [LOCAL] Executing orchestrator plan with ${plan?.steps?.length || 0} steps`);
+    
+    try {
+      // Create orchestrator instance with callbacks for UI updates
+      const orchestrator = new Orchestrator(config || {}, {
+        onStateChange: (state) => {
+          setLocalExecutionStatus({
+            active: true,
+            tool: 'browser_orchestrator',
+            status: state.status,
+            stepInfo: `Step ${state.current_step_index + 1}/${plan?.steps?.length || 0}`,
+          });
+        },
+        onStepStart: (step, index) => {
+          console.log(`📍 [Orchestrator] Starting step ${index + 1}: ${step.action_type}`);
+          setLocalExecutionStatus({
+            active: true,
+            tool: 'browser_orchestrator',
+            status: 'executing',
+            stepInfo: `Step ${index + 1}: ${step.target_description.slice(0, 50)}`,
+          });
+        },
+        onStepComplete: (execution, index) => {
+          console.log(`${execution.success ? '✅' : '❌'} [Orchestrator] Step ${index + 1} completed`);
+        },
+        onLog: (entry) => {
+          console.log(`[Orchestrator ${entry.level}] ${entry.message}`);
+        },
+      });
+
+      // Execute the pre-generated plan
+      const result = await orchestrator.executePlanFromCloud(plan, {
+        sessionId: sessionManager.sessionId || undefined,
+        navigation: navigation,
+      });
+
+      return { 
+        success: result.status === 'completed', 
+        state: result,
+        error: result.error,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`❌ [LOCAL] Orchestrator failed:`, errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  };
+
   const handleSendMessage = async (
     text: string, 
     attachments?: Array<{ url: string; name: string; type: string }>, 
@@ -1110,6 +1283,60 @@ export default function MultiAgentConsultant() {
               
             } else if (parsed.type === "error") {
               throw new Error(parsed.error || "Unknown error");
+              
+            } else if (parsed.type === "tool_execute_locally") {
+              // ============================================================
+              // BROWSER AUTOMATION: Execute tool locally via ToolServer.exe
+              // ============================================================
+              const command = parsed.data;
+              console.log(`🔧 [LOCAL EXEC] Received command:`, command.tool, command.action || '');
+              
+              // Show execution status in UI
+              setLocalExecutionStatus({
+                active: true,
+                tool: command.tool,
+                status: `Executing ${command.tool}...`,
+              });
+              
+              try {
+                let result: { success: boolean; data?: unknown; error?: string };
+                
+                if (command.tool === 'tool_server_action') {
+                  // Execute single action via toolServerClient
+                  result = await executeLocalToolServerAction({
+                    action: command.action,
+                    params: command.params || {},
+                  });
+                  
+                } else if (command.tool === 'browser_orchestrator') {
+                  // Execute pre-generated plan via Orchestrator
+                  result = await executeLocalOrchestratorPlan({
+                    task: command.task,
+                    navigation: command.navigation,
+                    plan: command.plan,
+                    config: command.config,
+                  });
+                  
+                } else {
+                  result = { success: false, error: `Unknown local tool: ${command.tool}` };
+                }
+                
+                // Log result
+                if (result.success) {
+                  console.log(`✅ [LOCAL EXEC] ${command.tool} completed successfully`);
+                  toast.success(`Browser action completed: ${command.action || command.tool}`);
+                } else {
+                  console.error(`❌ [LOCAL EXEC] ${command.tool} failed:`, result.error);
+                  toast.error(`Browser action failed: ${result.error}`);
+                }
+                
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+                console.error(`❌ [LOCAL EXEC] Error:`, errorMsg);
+                toast.error(`Local execution error: ${errorMsg}`);
+              } finally {
+                setLocalExecutionStatus(null);
+              }
             }
           } catch (e) {
             console.warn("⚠️ Error processing line:", e);
@@ -1540,6 +1767,24 @@ export default function MultiAgentConsultant() {
                   <div className="text-xs opacity-80">
                     {backgroundProgress.totalChars.toLocaleString()} characters
                     {backgroundProgress.status === 'generating' && ' (updating in real-time)'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Browser Automation Local Execution Indicator */}
+            {localExecutionStatus && (
+              <div className="fixed bottom-20 right-4 bg-amber-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 max-w-sm z-50">
+                <Monitor className="h-4 w-4 flex-shrink-0" />
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                <div className="text-sm">
+                  <div className="font-medium">
+                    {localExecutionStatus.tool === 'browser_orchestrator' 
+                      ? 'Executing Browser Automation...' 
+                      : `Executing: ${localExecutionStatus.tool}`}
+                  </div>
+                  <div className="text-xs opacity-80">
+                    {localExecutionStatus.stepInfo || localExecutionStatus.status}
                   </div>
                 </div>
               </div>

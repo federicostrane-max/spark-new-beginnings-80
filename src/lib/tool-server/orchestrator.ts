@@ -112,6 +112,109 @@ export class Orchestrator {
     return [...this.logs];
   }
 
+  /**
+   * Execute a pre-generated plan from the cloud.
+   * This method is used when the Planner Agent runs in the cloud and sends
+   * the plan to the frontend for local execution via SSE tool_execute_locally.
+   */
+  async executePlanFromCloud(
+    plan: Plan,
+    options?: {
+      sessionId?: string;
+      startUrl?: string;
+      navigation?: { action: string; params: Record<string, unknown> };
+    }
+  ): Promise<OrchestratorState> {
+    this.abortController = new AbortController();
+    this.state = this.createInitialState();
+    this.state.task = plan.goal || 'Execute cloud-generated plan';
+    this.state.plan = plan;
+    this.state.started_at = Date.now();
+    this.loopDetector.reset();
+    this.logs = [];
+
+    try {
+      // Phase 1: Handle browser session
+      if (options?.sessionId) {
+        // Use existing session
+        this.state.session_id = options.sessionId;
+        sessionManager.captureFromToolResult({ session_id: options.sessionId });
+        this.log('info', `Using existing session: ${options.sessionId.slice(0, 8)}...`);
+      } else if (options?.startUrl) {
+        // Start new browser
+        await this.initializeBrowser(options.startUrl);
+      } else if (options?.navigation) {
+        // Execute navigation action first
+        this.log('info', 'Executing initial navigation...');
+        const navResult = await this.executeNavigationAction(options.navigation);
+        if (!navResult.success) {
+          throw new Error(`Navigation failed: ${navResult.error}`);
+        }
+      }
+
+      // Phase 2: Execute the pre-generated plan
+      this.callbacks.onPlanCreated?.(plan);
+      this.log('success', `Executing cloud plan: ${plan.steps.length} steps`);
+      this.log('info', `Goal: ${plan.goal}`);
+      
+      await this.executePlanSteps();
+
+      // Phase 3: Finalize
+      this.state.status = 'completed';
+      this.state.completed_at = Date.now();
+      this.log('success', 'Plan executed successfully');
+
+    } catch (error) {
+      if (this.state.status === 'aborted') {
+        this.log('warn', 'Plan execution aborted by user');
+      } else {
+        this.state.status = 'failed';
+        this.state.error = error instanceof Error ? error.message : 'Unknown error';
+        this.log('error', `Plan execution failed: ${this.state.error}`);
+      }
+    }
+
+    this.notifyStateChange();
+    return this.state;
+  }
+
+  private async executeNavigationAction(
+    navigation: { action: string; params: Record<string, unknown> }
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      switch (navigation.action) {
+        case 'browser_start':
+          const startResult = await toolServerClient.browserStart(
+            (navigation.params.start_url as string) || 'about:blank',
+            { headless: navigation.params.headless as boolean }
+          );
+          if (startResult.success && startResult.session_id) {
+            this.state.session_id = startResult.session_id;
+            this.state.current_url = navigation.params.start_url as string;
+            sessionManager.captureFromToolResult({ session_id: startResult.session_id });
+          }
+          return { success: startResult.success };
+
+        case 'navigate':
+          if (!this.state.session_id) {
+            return { success: false, error: 'No session for navigation' };
+          }
+          return await toolServerClient.browserNavigate(
+            this.state.session_id,
+            navigation.params.url as string
+          );
+
+        default:
+          return { success: false, error: `Unknown navigation action: ${navigation.action}` };
+      }
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown' 
+      };
+    }
+  }
+
   // ============================================================
   // PHASE 1: BROWSER INITIALIZATION
   // ============================================================
@@ -220,6 +323,14 @@ ${domTree.slice(0, 15000)}${domTree.length > 15000 ? '\n[...truncated...]' : ''}
   // ============================================================
 
   private async executePlan(): Promise<void> {
+    await this.executePlanSteps();
+  }
+
+  /**
+   * Internal method to execute plan steps.
+   * Used by both executeTask() and executePlanFromCloud().
+   */
+  private async executePlanSteps(): Promise<void> {
     if (!this.state.plan || this.state.plan.steps.length === 0) {
       this.log('info', 'Nessuno step da eseguire - obiettivo già raggiunto');
       return;
