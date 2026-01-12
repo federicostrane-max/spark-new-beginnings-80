@@ -151,6 +151,19 @@ async function executeToolServerAction(
         session_id: sessionId,
       });
 
+    case 'element_rect':
+    case 'browser_element_rect':
+      if (!sessionId) throw new Error('session_id required for element_rect');
+      return toolServerClient.getElementRect({
+        session_id: sessionId,
+        selector: input.selector,
+        text: input.text,
+        role: input.role,
+        test_id: input.test_id,
+        label: input.label,
+        placeholder: input.placeholder,
+      });
+
     default:
       throw new Error(`Unknown action: ${input.action}`);
   }
