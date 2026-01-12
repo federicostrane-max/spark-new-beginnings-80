@@ -2586,26 +2586,93 @@ Deno.serve(async (req) => {
       
       // 2. Call Lux agent internally to get structured JSON
       const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
-      const luxResponse = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY || '',
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: luxAgent.ai_model || 'claude-sonnet-4-20250514',
-          max_tokens: 2000,
-          messages: [{ role: 'user', content: message }],
-          system: luxAgent.system_prompt
-        })
-      });
-      
-      if (!luxResponse.ok) {
-        throw new Error(`Lux agent API call failed: ${luxResponse.status}`);
+      if (!ANTHROPIC_API_KEY) {
+        const msg = 'ANTHROPIC_API_KEY not configured';
+        console.error(`❌ [REQ-${requestId}] ${msg}`);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: msg })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+            controller.close();
+          }
+        });
+        return new Response(stream, {
+          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+        });
       }
-      
-      const luxData = await luxResponse.json();
+
+      const retryableStatuses = new Set([429, 500, 502, 503, 504, 522, 524, 529]);
+      const maxAttempts = 4;
+
+      const callLuxPromptOptimizer = async (): Promise<
+        | { kind: 'ok'; response: Response }
+        | { kind: 'sse_error'; response: Response }
+      > => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          const luxResponse = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: luxAgent.ai_model || 'claude-sonnet-4-20250514',
+              max_tokens: 2000,
+              messages: [{ role: 'user', content: message }],
+              system: luxAgent.system_prompt
+            }),
+            signal: AbortSignal.timeout(30000)
+          });
+
+          if (luxResponse.ok) return { kind: 'ok', response: luxResponse };
+
+          const status = luxResponse.status;
+          const canRetry = retryableStatuses.has(status) && attempt < maxAttempts;
+          console.error(`❌ [REQ-${requestId}] Lux agent API call failed (attempt ${attempt}/${maxAttempts}): ${status}`);
+
+          if (!canRetry) {
+            // Return SSE error (200 OK) so the client can show the error without treating it as a hard network failure.
+            const encoder = new TextEncoder();
+            const stream = new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      type: 'error',
+                      error: `Lux agent API overloaded/unavailable (HTTP ${status}). Please retry in a moment.`
+                    })}\n\n`
+                  )
+                );
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                controller.close();
+              }
+            });
+            return {
+              kind: 'sse_error',
+              response: new Response(stream, {
+                headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' },
+              })
+            };
+          }
+
+          // Exponential backoff with small jitter
+          const base = 500 * Math.pow(2, attempt - 1);
+          const jitter = Math.floor(Math.random() * 250);
+          await new Promise((r) => setTimeout(r, base + jitter));
+        }
+
+        // Should never reach here
+        throw new Error('Lux agent API call failed after retries');
+      };
+
+      const luxCall = await callLuxPromptOptimizer();
+      if (luxCall.kind === 'sse_error') {
+        return luxCall.response;
+      }
+
+      const luxData = await luxCall.response.json();
       const luxOutput = luxData.content?.[0]?.text || '';
       console.log(`📝 [REQ-${requestId}] Lux agent response length: ${luxOutput.length}`);
       
