@@ -28,6 +28,7 @@ export interface PlanStep {
   step_number: number;
   action_type: 'click' | 'type' | 'scroll' | 'navigate' | 'wait' | 'keypress';
   target_description: string;
+  dom_selector?: string;  // Optional CSS selector for DOM lookup
   input_value?: string;
   fallback_description?: string;
   expected_outcome?: string;
@@ -180,4 +181,59 @@ export interface VerificationResult {
   method: 'vision_only' | 'vision_dom_verified' | 'dom_fallback';
   vision_in_bounds?: boolean;
   dom_center?: { x: number; y: number };
+}
+
+// ============================================================
+// DOM ELEMENT RECT (for Triple Verification)
+// ============================================================
+
+export interface DomElementRect {
+  found: boolean;
+  visible: boolean;
+  x: number;       // Center X (ready for click)
+  y: number;       // Center Y (ready for click)
+  width: number;
+  height: number;
+}
+
+// ============================================================
+// TRIPLE VERIFICATION TYPES (DOM + Lux + Gemini)
+// ============================================================
+
+export type TripleVerificationPattern =
+  | 'all_agree'              // DOM + Lux + Gemini agree (<50px)
+  | 'vision_agree_dom_far'   // Lux+Gemini agree, DOM far (50-150px) → warning, use vision
+  | 'vision_agree_dom_very_far' // Lux+Gemini agree, DOM very far (>150px) → retry
+  | 'vision_disagree'        // Lux and Gemini disagree (>50px) → retry
+  | 'dom_one_vision'         // DOM + 1 vision agree
+  | 'dom_only'               // Only DOM finds element → don't click (hidden)
+  | 'vision_only'            // Only vision finds (no DOM) → warning, proceed
+  | 'none_found';            // Nothing found → fail
+
+export interface TripleVerificationResult {
+  dom: DomElementRect | null;
+  lux: VisionResult;
+  gemini: VisionResult;
+  
+  // Analysis
+  verification: {
+    pattern: TripleVerificationPattern;
+    proceed: boolean;
+    confidence: number;
+    warning?: string;
+  };
+  
+  // Final coordinates to use
+  final_coordinates: {
+    x: number;
+    y: number;
+    source: 'all_avg' | 'vision_avg' | 'dom' | 'lux' | 'gemini';
+  } | null;
+  
+  // Distances for debugging
+  distances: {
+    lux_gemini: number;
+    dom_lux: number;
+    dom_gemini: number;
+  };
 }
