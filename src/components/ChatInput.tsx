@@ -339,6 +339,23 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       case 'search-knowledge':
         template = 'cerca knowledge @';
         break;
+      case 'tool-server-action':
+        template = 'Esegui azione browser: ';
+        forcedTool = 'tool_server_action';
+        break;
+      case 'lux-vision':
+        template = 'Trova elemento visivamente: ';
+        forcedTool = 'lux_actor_vision';
+        break;
+      case 'gemini-vision':
+        template = 'Trova elemento (Gemini): ';
+        forcedTool = 'gemini_computer_use';
+        break;
+      case 'browser-orchestrator':
+        template = 'Esegui automazione browser (crea il piano!): ';
+        forcedTool = 'browser_orchestrator';
+        break;
+      // Legacy Lux modes (manteniamo per compatibilità)
       case 'lux-actor':
         template = 'Azione semplice: ';
         luxMode = 'actor';
@@ -618,29 +635,40 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    <Play className="mr-2 h-4 w-4" />
-                    🟢 Lux Automation
+                    <Monitor className="mr-2 h-4 w-4" />
+                    🖥️ Browser Automation (4 Tools)
                   </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
-                      <Zap className="mr-2 h-4 w-4" />
-                      Actor (Semplice)
+                  <DropdownMenuSubContent className="w-72">
+                    <DropdownMenuItem onClick={() => insertAgentAction('tool-server-action')}>
+                      <Play className="mr-2 h-4 w-4 text-green-500" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">tool_server_action</span>
+                        <span className="text-xs text-muted-foreground">Azioni singole: click, type, screenshot</span>
+                      </div>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-thinker')}>
-                      <Brain className="mr-2 h-4 w-4" />
-                      Thinker (Complesso)
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-vision')}>
+                      <Eye className="mr-2 h-4 w-4 text-purple-500" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">lux_actor_vision</span>
+                        <span className="text-xs text-muted-foreground">Vision veloce (~1s) - Trova elementi</span>
+                      </div>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => insertAgentAction('lux-tasker')}>
-                      <ListChecks className="mr-2 h-4 w-4" />
-                      Tasker (Con Step)
+                    <DropdownMenuItem onClick={() => insertAgentAction('gemini-vision')}>
+                      <Brain className="mr-2 h-4 w-4 text-blue-500" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">gemini_computer_use</span>
+                        <span className="text-xs text-muted-foreground">Vision smart (~3s) - Fallback complesso</span>
+                      </div>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('browser-orchestrator')}>
+                      <ListChecks className="mr-2 h-4 w-4 text-orange-500" />
+                      <div className="flex flex-col">
+                        <span className="font-medium">browser_orchestrator</span>
+                        <span className="text-xs text-muted-foreground">Esegue piano multi-step (tu lo crei!)</span>
+                      </div>
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
-                
-                <DropdownMenuItem onClick={() => insertAgentAction('gemini')}>
-                  <Monitor className="mr-2 h-4 w-4" />
-                  🔵 Gemini (Browser Dedicato)
-                </DropdownMenuItem>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
