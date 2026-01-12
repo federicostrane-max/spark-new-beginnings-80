@@ -21,6 +21,9 @@ import {
   ActionRecord,
   LogEntry,
   LogLevel,
+  DomForPlanningResult,
+  DualVisionResult,
+  VisionConsensus,
 } from './orchestrator-types';
 
 export class Orchestrator {
@@ -89,6 +92,42 @@ export class Orchestrator {
 
   getLogs(): LogEntry[] {
     return [...this.logs];
+  }
+
+  // ============================================================
+  // DOM ANALYSIS FOR PLANNING (Step 1: Agente chiama questo)
+  // ============================================================
+
+  /**
+   * Step 1 del flusso: L'Agente chiama questo per ottenere la struttura del sito
+   * PRIMA di creare il piano. L'Agente studia il DOM + KB e poi crea il piano.
+   */
+  async getDomForPlanning(startUrl: string): Promise<DomForPlanningResult> {
+    this.log('info', `Getting DOM for planning: ${startUrl}`);
+    
+    // 1. Inizializza browser se necessario
+    if (!this.state.session_id) {
+      await this.initializeBrowser(startUrl);
+    } else if (startUrl && this.state.current_url !== startUrl) {
+      // Navigate to new URL if different
+      await toolServerClient.browserNavigate(this.state.session_id, startUrl);
+      this.state.current_url = startUrl;
+    }
+    
+    // 2. Ottieni DOM tree
+    const { tree, success } = await toolServerClient.getDomTree(this.state.session_id!);
+    
+    if (!success || !tree) {
+      throw new Error('Failed to retrieve DOM tree for planning');
+    }
+    
+    this.log('success', `DOM retrieved: ${tree.length} characters`);
+    
+    return {
+      dom_tree: tree,
+      session_id: this.state.session_id!,
+      current_url: this.state.current_url!,
+    };
   }
 
   /**
@@ -346,13 +385,25 @@ export class Orchestrator {
             reasoning: 'From cache',
           };
         } else {
-          // Vision: Try Lux first, then Gemini as fallback
-          visionResult = await this.callLuxVision(screenshot, targetDesc);
+          // ============================================================
+          // DUAL VISION: Lux + Gemini in PARALLEL
+          // ============================================================
+          const dualVision = await this.callDualVision(screenshot, targetDesc, step.expected_outcome);
           
-          if (!visionResult.found || visionResult.confidence < this.config.confidenceThreshold) {
-            this.log('warn', 'Lux Vision non ha trovato target, provo Gemini...');
-            visionResult = await this.callGeminiVision(screenshot, targetDesc, step.expected_outcome);
+          // Log dual vision results
+          this.log('info', `Dual Vision: agree=${dualVision.consensus.agree}, ` +
+            `distance=${dualVision.consensus.distance_px}px, ` +
+            `conf=${dualVision.consensus.confidence.toFixed(2)}`);
+          
+          // Warning if vision models disagree significantly
+          if (!dualVision.consensus.agree && dualVision.consensus.lux_found && dualVision.consensus.gemini_found) {
+            this.log('warn', `⚠️ Vision MISMATCH! ` +
+              `Lux: (${dualVision.lux.x},${dualVision.lux.y}) conf=${dualVision.lux.confidence.toFixed(2)} | ` +
+              `Gemini: (${dualVision.gemini.x},${dualVision.gemini.y}) conf=${dualVision.gemini.confidence.toFixed(2)}`);
           }
+          
+          // Use the preferred result (highest confidence when both found)
+          visionResult = dualVision.preferred;
         }
 
         execution.vision_result = visionResult;
@@ -362,7 +413,7 @@ export class Orchestrator {
           continue;
         }
 
-        // Execute the action
+        // Execute the action via toolServerClient (SEMPRE - mai tramite vision tools)
         const actionResult = await this.executeAction(step, visionResult);
         execution.action_result = actionResult;
         execution.success = actionResult.success;
@@ -394,6 +445,89 @@ export class Orchestrator {
     }
 
     return this.finalizeExecution(execution, startTime);
+  }
+
+  // ============================================================
+  // DUAL VISION: Lux + Gemini in Parallel
+  // ============================================================
+
+  private async callDualVision(
+    screenshot: string,
+    target: string,
+    context?: string
+  ): Promise<DualVisionResult> {
+    // Call BOTH vision models in parallel
+    const [luxResult, geminiResult] = await Promise.all([
+      this.callLuxVision(screenshot, target),
+      this.callGeminiVision(screenshot, target, context),
+    ]);
+
+    this.log('debug', `Lux: found=${luxResult.found} (${luxResult.x}, ${luxResult.y}) conf=${luxResult.confidence}`);
+    this.log('debug', `Gemini: found=${geminiResult.found} (${geminiResult.x}, ${geminiResult.y}) conf=${geminiResult.confidence}`);
+
+    const consensus = this.calculateConsensus(luxResult, geminiResult);
+    const preferred = this.selectPreferredResult(luxResult, geminiResult, consensus);
+
+    return {
+      lux: luxResult,
+      gemini: geminiResult,
+      consensus,
+      preferred,
+    };
+  }
+
+  private calculateConsensus(lux: VisionResult, gemini: VisionResult): VisionConsensus {
+    const lux_found = lux.found && lux.x !== null && lux.y !== null;
+    const gemini_found = gemini.found && gemini.x !== null && gemini.y !== null;
+
+    if (!lux_found || !gemini_found) {
+      return {
+        agree: false,
+        distance_px: -1,
+        confidence: lux_found ? lux.confidence : (gemini_found ? gemini.confidence : 0),
+        lux_found,
+        gemini_found,
+      };
+    }
+
+    // Calculate euclidean distance
+    const dx = (lux.x ?? 0) - (gemini.x ?? 0);
+    const dy = (lux.y ?? 0) - (gemini.y ?? 0);
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Consider "agreement" if distance < 50px
+    const AGREEMENT_THRESHOLD = 50;
+
+    return {
+      agree: distance < AGREEMENT_THRESHOLD,
+      distance_px: Math.round(distance),
+      confidence: (lux.confidence + gemini.confidence) / 2,
+      lux_found,
+      gemini_found,
+    };
+  }
+
+  private selectPreferredResult(
+    lux: VisionResult,
+    gemini: VisionResult,
+    consensus: VisionConsensus
+  ): VisionResult {
+    // If both found, use the one with higher confidence
+    if (consensus.lux_found && consensus.gemini_found) {
+      // If they agree, prefer Lux (faster, specialized for UI)
+      if (consensus.agree) {
+        return lux.confidence >= gemini.confidence ? lux : gemini;
+      }
+      // If they disagree, still use the higher confidence one but log it
+      return lux.confidence >= gemini.confidence ? lux : gemini;
+    }
+    
+    // If only one found, use that one
+    if (consensus.lux_found) return lux;
+    if (consensus.gemini_found) return gemini;
+    
+    // Neither found - return lux with found=false
+    return lux;
   }
 
   // ============================================================

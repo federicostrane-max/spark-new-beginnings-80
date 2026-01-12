@@ -14,6 +14,7 @@ import {
   Plan,
   PlanStep,
   StepExecution,
+  DomForPlanningResult,
 } from '@/lib/tool-server/orchestrator-types';
 
 export interface UseOrchestratorReturn {
@@ -24,9 +25,12 @@ export interface UseOrchestratorReturn {
   isIdle: boolean;
   
   // Actions
+  /** Step 1: Get DOM tree for Agent to analyze and create plan */
+  getDomForPlanning: (startUrl: string) => Promise<DomForPlanningResult>;
+  /** Step 2: Execute the plan created by Agent */
+  executePlan: (plan: Plan, startUrl?: string) => Promise<void>;
   /** @deprecated Use executePlan instead - plans now come from the Agent */
   executeTask: (task: string, startUrl?: string) => Promise<void>;
-  executePlan: (plan: Plan, startUrl?: string) => Promise<void>;
   abort: () => void;
   reset: () => void;
   
@@ -56,11 +60,36 @@ export function useOrchestrator(
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const orchestratorRef = useRef<Orchestrator | null>(null);
 
-  // NEW: Execute a pre-built plan (from Agent with KB)
-  const executePlan = useCallback(async (plan: Plan, startUrl?: string) => {
+  // ============================================================
+  // Step 1: GET DOM FOR PLANNING
+  // L'Agente chiama questo per ottenere la struttura del sito
+  // prima di creare il piano
+  // ============================================================
+  const getDomForPlanning = useCallback(async (startUrl: string): Promise<DomForPlanningResult> => {
     setLogs([]);
     
     const orchestrator = createOrchestrator(config, {
+      onStateChange: (newState) => setState(newState),
+      onLog: (entry) => setLogs(prev => [...prev, entry]),
+    });
+
+    orchestratorRef.current = orchestrator;
+
+    return await orchestrator.getDomForPlanning(startUrl);
+  }, [config]);
+
+  // ============================================================
+  // Step 2: EXECUTE PLAN
+  // L'Agente passa il piano creato dopo aver studiato DOM + KB
+  // ============================================================
+  const executePlan = useCallback(async (plan: Plan, startUrl?: string) => {
+    // Don't reset logs if we already have them from getDomForPlanning
+    if (logs.length === 0) {
+      setLogs([]);
+    }
+    
+    // Reuse existing orchestrator if available (from getDomForPlanning)
+    const orchestrator = orchestratorRef.current || createOrchestrator(config, {
       onStateChange: (newState) => setState(newState),
       onLog: (entry) => setLogs(prev => [...prev, entry]),
       onPlanCreated: (p: Plan) => console.log('[Orchestrator] Plan received:', p),
@@ -75,7 +104,7 @@ export function useOrchestrator(
     } catch (error) {
       console.error('[Orchestrator] Error:', error);
     }
-  }, [config]);
+  }, [config, logs.length]);
 
   // DEPRECATED: This now throws - use executePlan instead
   const executeTask = useCallback(async (_task: string, _startUrl?: string) => {
@@ -109,8 +138,9 @@ export function useOrchestrator(
     logs,
     isRunning,
     isIdle,
-    executeTask,
+    getDomForPlanning,
     executePlan,
+    executeTask,
     abort,
     reset,
     progress,
