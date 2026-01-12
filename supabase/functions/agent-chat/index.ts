@@ -49,41 +49,12 @@ interface UserIntent {
 }
 
 // ============================================================================
-// PLANNER AGENT SYSTEM PROMPT - For browser_orchestrator tool
+// PLANNER AGENT SYSTEM PROMPT - REMOVED
 // ============================================================================
-const PLANNER_AGENT_SYSTEM_PROMPT = `Sei il PLANNER AGENT in un sistema di automazione browser.
-
-## IL TUO RUOLO
-Analizzi il DOM/Accessibility Tree e crei un piano strategico per completare il task.
-NON esegui azioni - crei solo il piano che verrà eseguito dal frontend.
-
-## OUTPUT FORMAT (JSON)
-
-{
-  "analysis": "Breve analisi della pagina corrente",
-  "goal": "Obiettivo finale del task",
-  "current_state": "Stato attuale della pagina",
-  "steps": [
-    {
-      "step_number": 1,
-      "action_type": "click" | "type" | "scroll" | "keypress" | "wait" | "navigate",
-      "target_description": "Descrizione visiva dell'elemento (per Vision Agent)",
-      "target_selector_hint": "Hint dal DOM se disponibile",
-      "input_value": "Per type: testo. Per keypress: tasto. Per navigate: URL",
-      "expected_result": "Cosa succede dopo questa azione",
-      "fallback_description": "Descrizione alternativa se la prima fallisce"
-    }
-  ],
-  "success_criteria": "Come verificare che il task sia completato",
-  "potential_obstacles": ["Possibili problemi"]
-}
-
-## REGOLE
-1. Analizza il DOM attentamente - cerca elementi interattivi
-2. Sii SPECIFICO nelle descrizioni target (per Vision Agent)
-3. UN'azione per step - azioni atomiche
-4. Massimo 10 step per piano
-5. Rispondi SOLO con JSON valido`;
+// NOTE: The Planner LLM has been removed from browser_orchestrator.
+// Now the Agent (with its KB) creates the plan directly and passes it to the tool.
+// This reduces LLM calls (from 2 to 1) and improves plan accuracy.
+// ============================================================================
 
 // ============================================================================
 // REMOVED: Pattern-based intent analysis is no longer needed
@@ -5054,16 +5025,61 @@ Respond ONLY with valid JSON: {"x": number, "y": number, "confidence": 0.0-1.0, 
             }
 
             // ============= TOOL: browser_orchestrator =============
+            // NOTE: This tool now receives a PRE-BUILT plan from the Agent (which has KB).
+            // No more Planner LLM call - just validate and forward to frontend.
             else if (toolName === 'browser_orchestrator') {
-              console.log(`🤖 [REQ-${context.requestId}] Tool: browser_orchestrator - "${toolInput.task}"`);
+              console.log(`🤖 [REQ-${context.requestId}] Tool: browser_orchestrator - Executing pre-built plan`);
 
               try {
-                responseText = `🤖 **Browser Orchestrator** avviato\n📋 Task: ${toolInput.task}\n`;
-                if (toolInput.start_url) responseText += `🌐 URL iniziale: ${toolInput.start_url}\n`;
-                responseText += `\n⏳ Creazione piano con Planner Agent...\n`;
+                const plan = toolInput.plan;
+                
+                // ========== VALIDATE PLAN STRUCTURE ==========
+                if (!plan || typeof plan !== 'object') {
+                  throw new Error('Invalid plan: must provide a plan object');
+                }
+                
+                if (!plan.steps || !Array.isArray(plan.steps)) {
+                  throw new Error('Invalid plan: must have "steps" array');
+                }
+                
+                if (plan.steps.length === 0) {
+                  throw new Error('Invalid plan: steps array is empty');
+                }
+                
+                if (plan.steps.length > 20) {
+                  throw new Error('Invalid plan: too many steps (max 20)');
+                }
+                
+                // Validate each step
+                const validActions = ['click', 'type', 'scroll', 'keypress', 'wait', 'navigate'];
+                for (const step of plan.steps) {
+                  if (!step.action_type || !step.target_description) {
+                    throw new Error(`Invalid step ${step.step_number || '?'}: missing action_type or target_description`);
+                  }
+                  if (!validActions.includes(step.action_type)) {
+                    throw new Error(`Invalid action_type "${step.action_type}" in step ${step.step_number || '?'}. Valid: ${validActions.join(', ')}`);
+                  }
+                }
+                
+                // ========== BUILD RESPONSE ==========
+                responseText = `🤖 **Browser Orchestrator**\n`;
+                responseText += `🎯 Obiettivo: ${plan.goal || 'N/A'}\n`;
+                if (plan.analysis) responseText += `📊 Analisi: ${plan.analysis}\n`;
+                if (toolInput.start_url) responseText += `🌐 URL: ${toolInput.start_url}\n`;
+                responseText += `📝 Steps: ${plan.steps.length}\n\n`;
+                
+                plan.steps.forEach((step: any, i: number) => {
+                  const stepNum = step.step_number || i + 1;
+                  responseText += `   ${stepNum}. **${step.action_type}**: ${step.target_description}`;
+                  if (step.input_value) responseText += ` → "${step.input_value}"`;
+                  responseText += `\n`;
+                });
+                
+                responseText += `\n⏳ Esecuzione locale in corso...\n`;
                 newFullResponse += responseText;
                 await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
-
+                
+                // ========== BUILD ORCHESTRATOR COMMAND ==========
                 // Prepare navigation command if start_url provided
                 let navigationCommand = null;
                 if (toolInput.start_url) {
@@ -5074,78 +5090,21 @@ Respond ONLY with valid JSON: {"x": number, "y": number, "confidence": 0.0-1.0, 
                     params: { start_url: toolInput.start_url }
                   };
                 }
-
-                // Build planner message
-                const plannerMessage = `## TASK
-${toolInput.task}
-
-## URL CORRENTE
-${toolInput.current_url || toolInput.start_url || 'Non specificato - il frontend aprirà il browser'}
-
-## DOM/ACCESSIBILITY TREE
-\`\`\`
-${toolInput.current_dom || 'DOM non fornito - il frontend lo recupererà automaticamente dopo aver aperto il browser'}
-\`\`\`
-
-Analizza la situazione e crea un piano strategico per completare il task.
-Rispondi SOLO con JSON valido nel formato specificato.`;
-
-                // Call tool-server-llm for Planner Agent
-                const { data: plannerData, error: plannerError } = await context.supabase.functions.invoke(
-                  'tool-server-llm',
-                  {
-                    body: {
-                      messages: [{ role: 'user', content: plannerMessage }],
-                      tools: [],
-                      system_prompt: PLANNER_AGENT_SYSTEM_PROMPT,
-                      model: 'claude-sonnet-4-20250514',
-                      temperature: 0.2
-                    }
-                  }
-                );
-
-                if (plannerError) throw plannerError;
-
-                // Parse plan from response
-                const plannerResponse = plannerData.response || '';
-                const jsonMatch = plannerResponse.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) {
-                  throw new Error('Planner Agent non ha restituito un piano JSON valido');
-                }
-
-                const plan = JSON.parse(jsonMatch[0]);
-
-                // Build orchestrator command for frontend
+                
                 const orchestratorCommand = {
                   execute_locally: true,
                   tool: 'browser_orchestrator',
                   navigation: navigationCommand,
                   plan: plan,
-                  config: { 
-                    max_steps: toolInput.max_steps || 10, 
-                    vision_fallback_enabled: true, 
-                    confidence_threshold: 0.7, 
-                    loop_detection_threshold: 3 
+                  config: toolInput.config || {
+                    max_steps: 10,
+                    vision_fallback_enabled: true,
+                    confidence_threshold: 0.7,
+                    loop_detection_threshold: 3
                   }
                 };
-
+                
                 toolResult = orchestratorCommand;
-
-                // Format plan for user
-                responseText = `\n✅ **Piano creato!**\n`;
-                responseText += `📊 Analisi: ${plan.analysis || 'N/A'}\n`;
-                responseText += `🎯 Obiettivo: ${plan.goal || 'N/A'}\n`;
-                responseText += `📝 Steps: ${plan.steps?.length || 0}\n\n`;
-                
-                if (plan.steps && Array.isArray(plan.steps)) {
-                  plan.steps.forEach((step: { step_number?: number; action_type?: string; target_description?: string }, i: number) => {
-                    responseText += `   ${step.step_number || i + 1}. **${step.action_type || 'action'}**: ${step.target_description || 'N/A'}\n`;
-                  });
-                }
-                
-                responseText += `\n⏳ Esecuzione locale in corso...\n`;
-                newFullResponse += responseText;
-                await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
                 await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: orchestratorCommand }));
 
               } catch (error) {
@@ -5756,34 +5715,77 @@ Returns: { success, x, y, confidence, reasoning, coordinate_system: 'viewport' }
             }
           });
           
-          // Tool 4: browser_orchestrator - Multi-step automation
+          // Tool 4: browser_orchestrator - Multi-step automation (Plan Executor)
           tools.push({
             name: 'browser_orchestrator',
-            description: `Execute complex browser automation tasks using multi-step orchestrator.
+            description: `Execute a browser automation plan on the local machine.
 
-This tool:
-1. Opens a browser session (if start_url provided)
-2. Uses a Planner Agent (LLM) to analyze DOM and create a step-by-step plan
-3. Returns the plan for local execution by frontend
+This tool EXECUTES plans that YOU create. You must provide the complete plan.
+Use your knowledge base to create accurate plans for specific websites.
 
-Use for: multi-page forms, complex workflows, automated testing, multi-step tasks.
+IMPORTANT: YOU are the planner! Use your KB knowledge about the target site
+to create precise step descriptions.
 
-The frontend will execute the plan locally using:
-- tool_server_action for browser interactions
-- lux_actor_vision/gemini_computer_use for element location
+Plan structure you must provide:
+{
+  "analysis": "Brief analysis of what needs to be done",
+  "goal": "The end goal",
+  "steps": [
+    {
+      "step_number": 1,
+      "action_type": "click|type|scroll|keypress|wait|navigate",
+      "target_description": "Visual description for Vision Agent (be specific! use colors, positions, text)",
+      "input_value": "For type: text to type. For keypress: key name (Enter, Tab). For navigate: URL",
+      "fallback_description": "Alternative description if first fails",
+      "expected_result": "What should happen after this step"
+    }
+  ],
+  "success_criteria": "How to verify task completion"
+}
 
-Returns: { execute_locally: true, plan: {...}, config: {...} }
+Returns: { execute_locally: true, plan: {...} }
 Requires Tool Server running locally on port 8766.`,
             input_schema: {
               type: 'object',
               properties: {
-                task: { type: 'string', description: 'The task to execute (e.g., "Open Gmail, click Compose, write email to test@example.com")' },
+                plan: {
+                  type: 'object',
+                  description: 'The execution plan YOU created with steps to execute',
+                  properties: {
+                    analysis: { type: 'string', description: 'Brief analysis of current situation' },
+                    goal: { type: 'string', description: 'The end goal to achieve' },
+                    steps: {
+                      type: 'array',
+                      description: 'Array of action steps',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          step_number: { type: 'number' },
+                          action_type: { type: 'string', enum: ['click', 'type', 'scroll', 'keypress', 'wait', 'navigate'] },
+                          target_description: { type: 'string', description: 'Visual description of element (for Vision Agent)' },
+                          input_value: { type: 'string', description: 'Text/key/URL for type/keypress/navigate actions' },
+                          fallback_description: { type: 'string', description: 'Alternative target description' },
+                          expected_result: { type: 'string', description: 'Expected outcome of this step' }
+                        },
+                        required: ['step_number', 'action_type', 'target_description']
+                      }
+                    },
+                    success_criteria: { type: 'string', description: 'How to verify task is complete' }
+                  },
+                  required: ['goal', 'steps']
+                },
                 start_url: { type: 'string', description: 'Initial URL to open (optional)' },
-                current_dom: { type: 'string', description: 'Current DOM/accessibility tree (optional, will be fetched if not provided)' },
-                current_url: { type: 'string', description: 'Current URL if browser already open (optional)' },
-                max_steps: { type: 'number', description: 'Maximum steps in plan (default: 10)' }
+                config: {
+                  type: 'object',
+                  description: 'Execution configuration',
+                  properties: {
+                    max_steps: { type: 'number', description: 'Max steps to execute (default: 10)' },
+                    vision_fallback_enabled: { type: 'boolean', description: 'Use Gemini as fallback (default: true)' },
+                    confidence_threshold: { type: 'number', description: 'Min confidence for vision (default: 0.7)' }
+                  }
+                }
               },
-              required: ['task']
+              required: ['plan']
             }
           });
           

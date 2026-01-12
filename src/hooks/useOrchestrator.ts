@@ -24,7 +24,9 @@ export interface UseOrchestratorReturn {
   isIdle: boolean;
   
   // Actions
+  /** @deprecated Use executePlan instead - plans now come from the Agent */
   executeTask: (task: string, startUrl?: string) => Promise<void>;
+  executePlan: (plan: Plan, startUrl?: string) => Promise<void>;
   abort: () => void;
   reset: () => void;
   
@@ -54,35 +56,32 @@ export function useOrchestrator(
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const orchestratorRef = useRef<Orchestrator | null>(null);
 
-  const executeTask = useCallback(async (task: string, startUrl?: string) => {
+  // NEW: Execute a pre-built plan (from Agent with KB)
+  const executePlan = useCallback(async (plan: Plan, startUrl?: string) => {
     setLogs([]);
     
     const orchestrator = createOrchestrator(config, {
-      onStateChange: (newState) => {
-        setState(newState);
-      },
-      onLog: (entry) => {
-        setLogs(prev => [...prev, entry]);
-      },
-      onPlanCreated: (plan: Plan) => {
-        console.log('[Orchestrator] Plan created:', plan);
-      },
-      onStepStart: (step: PlanStep, index: number) => {
-        console.log(`[Orchestrator] Starting step ${index + 1}:`, step);
-      },
-      onStepComplete: (execution: StepExecution, index: number) => {
-        console.log(`[Orchestrator] Completed step ${index + 1}:`, execution);
-      },
+      onStateChange: (newState) => setState(newState),
+      onLog: (entry) => setLogs(prev => [...prev, entry]),
+      onPlanCreated: (p: Plan) => console.log('[Orchestrator] Plan received:', p),
+      onStepStart: (step: PlanStep, index: number) => console.log(`[Orchestrator] Starting step ${index + 1}:`, step),
+      onStepComplete: (execution: StepExecution, index: number) => console.log(`[Orchestrator] Completed step ${index + 1}:`, execution),
     });
 
     orchestratorRef.current = orchestrator;
 
     try {
-      await orchestrator.executeTask(task, startUrl);
+      await orchestrator.executePlanFromCloud(plan, { startUrl });
     } catch (error) {
       console.error('[Orchestrator] Error:', error);
     }
   }, [config]);
+
+  // DEPRECATED: This now throws - use executePlan instead
+  const executeTask = useCallback(async (_task: string, _startUrl?: string) => {
+    console.warn('[Orchestrator] executeTask is deprecated. Use executePlan with a pre-built plan.');
+    throw new Error('executeTask is deprecated. Plans should now be created by the Agent and passed to executePlan().');
+  }, []);
 
   const abort = useCallback(() => {
     orchestratorRef.current?.abort();
@@ -111,6 +110,7 @@ export function useOrchestrator(
     isRunning,
     isIdle,
     executeTask,
+    executePlan,
     abort,
     reset,
     progress,
