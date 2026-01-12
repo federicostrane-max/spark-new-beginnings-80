@@ -126,3 +126,58 @@ export interface OrchestratorCallbacks {
   onStepComplete?: (execution: StepExecution, index: number) => void;
   onPlanCreated?: (plan: Plan) => void;
 }
+
+// ============================================================
+// DOM ANALYSIS TYPES (Pre-Planning)
+// ============================================================
+
+export interface DomAnalysis {
+  raw_tree: string;        // DOM tree completo per analisi dell'Agente
+  timestamp: number;
+  url: string | null;
+}
+
+export interface DomForPlanningResult {
+  dom_tree: string;
+  session_id: string;
+  current_url: string;
+}
+
+// ============================================================
+// DUAL VISION TYPES (Lux + Gemini in Parallel)
+// ============================================================
+
+export interface DualVisionResult {
+  lux: VisionResult;
+  gemini: VisionResult;
+  consensus: VisionConsensus;
+  preferred: VisionResult;
+}
+
+export interface VisionConsensus {
+  agree: boolean;           // true se distanza < threshold
+  distance_px: number;      // distanza euclidea tra le due coordinate
+  confidence: number;       // confidence media combinata
+  lux_found: boolean;
+  gemini_found: boolean;
+}
+
+// ============================================================
+// VERIFICATION TYPES (Vision vs DOM)
+// ============================================================
+
+export interface DomCoordinates {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  center_x: number;
+  center_y: number;
+}
+
+export interface VerificationResult {
+  verified: boolean;
+  method: 'vision_only' | 'vision_dom_verified' | 'dom_fallback';
+  vision_in_bounds?: boolean;
+  dom_center?: { x: number; y: number };
+}
