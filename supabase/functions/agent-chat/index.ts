@@ -2639,70 +2639,153 @@ Deno.serve(async (req) => {
         tasker: { lux_model: 'lux-actor-1', max_steps_per_todo: parsedTask.max_steps_per_todo || 24, temperature: 0.0, complexity: 'medium' },
       }[luxMode as 'actor' | 'thinker' | 'tasker'];
       
-      // 5. INSERT into lux_tasks
-      const { data: task, error: taskError } = await supabase
-        .from('lux_tasks')
-        .insert({
-          user_id: userId,
-          agent_id: agent.id,
+      // ============================================================
+      // PLATFORM BRANCHING: Desktop vs Browser execution
+      // ============================================================
+      const platform = parsedTask.platform || 'browser';
+      
+      if (platform === 'desktop') {
+        // ============================================================
+        // DESKTOP EXECUTION: Send SSE for local execution via tool_server.py
+        // No DB save - real-time execution in frontend
+        // ============================================================
+        console.log(`🖥️ [REQ-${requestId}] Desktop platform detected - sending SSE for local execution`);
+        
+        // Save user message first
+        await supabase.from('agent_messages').insert({
           conversation_id: conversation.id,
-          user_request: message,
+          role: 'user',
+          content: message
+        });
+        
+        // Build desktop execution command
+        const desktopCommand = {
+          execute_locally: true,
+          tool: 'desktop_lux_automation',
+          mode: luxMode,
           task_description: parsedTask.task_description,
-          computer_use_provider: 'lux',  // Explicitly set provider
-          lux_mode: luxMode,
-          lux_model: taskConfig.lux_model,
-          max_steps_per_todo: taskConfig.max_steps_per_todo,
-          temperature: taskConfig.temperature,
-          platform: parsedTask.platform,
+          todos: parsedTask.todos || [],
           start_url: parsedTask.start_url,
-          complexity: taskConfig.complexity,
-          status: 'pending'
-        })
-        .select()
-        .single();
-      
-      if (taskError) throw taskError;
-      
-      // 6. INSERT todos for Tasker mode (with error handling)
-      if (luxMode === 'tasker') {
-        if (!parsedTask.todos || parsedTask.todos.length === 0) {
-          console.warn(`⚠️ [REQ-${requestId}] Tasker mode requested but no todos generated - task may not execute correctly`);
-        } else {
-          const todosToInsert = parsedTask.todos.map((todo: string, index: number) => ({
-            task_id: task.id,
-            todo_index: index,
-            todo_description: todo,
-            status: 'pending'
-          }));
-          
-          const { error: todosError } = await supabase.from('lux_todos').insert(todosToInsert);
-          
-          if (todosError) {
-            console.error(`❌ [REQ-${requestId}] Failed to insert todos for task ${task.id}:`, todosError.message);
-            // Mark task as failed since tasker mode requires todos
-            await supabase.from('lux_tasks')
-              .update({ 
-                status: 'failed', 
-                error_message: `Todos insert failed: ${todosError.message}` 
-              })
-              .eq('id', task.id);
-            throw new Error(`Failed to save todos: ${todosError.message}`);
+          config: {
+            model: taskConfig.lux_model,
+            max_steps: luxMode === 'actor' ? 20 : luxMode === 'thinker' ? 100 : 200,
+            max_steps_per_todo: taskConfig.max_steps_per_todo,
+            temperature: taskConfig.temperature
           }
-          
-          console.log(`✅ [REQ-${requestId}] Inserted ${todosToInsert.length} todos for task ${task.id}`);
+        };
+        
+        // Build confirmation message for UI
+        const todosFormatted = parsedTask.todos?.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n') || '';
+        const confirmMessage = `🖥️ **Desktop Automation - ${luxMode.charAt(0).toUpperCase() + luxMode.slice(1)} Mode**
+
+**Task:** ${parsedTask.task_description}
+${luxMode === 'tasker' && todosFormatted ? `\n**Todos (${parsedTask.todos.length} step):**\n${todosFormatted}` : ''}
+
+---
+⏳ *Esecuzione in corso via tool_server.py...*`;
+
+        // Save assistant message
+        await supabase.from('agent_messages').insert({
+          conversation_id: conversation.id,
+          role: 'assistant',
+          content: confirmMessage,
+          llm_provider: 'system',
+          metadata: { 
+            source: 'desktop_lux_automation', 
+            lux_mode: luxMode,
+            platform: 'desktop'
+          }
+        });
+        
+        // Return SSE stream with command for local execution
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            // First send content for UI display
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: confirmMessage })}\n\n`));
+            // Then send command for local execution
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'tool_execute_locally', data: desktopCommand })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+            controller.close();
+          }
+        });
+        
+        console.log(`✅ [REQ-${requestId}] Desktop automation SSE sent for mode: ${luxMode}`);
+        
+        return new Response(stream, {
+          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' }
+        });
+        
+      } else {
+        // ============================================================
+        // BROWSER EXECUTION: Save to lux_tasks for desktop app polling
+        // Original flow - unchanged
+        // ============================================================
+        console.log(`🌐 [REQ-${requestId}] Browser platform detected - saving to lux_tasks`);
+        
+        // 5. INSERT into lux_tasks
+        const { data: task, error: taskError } = await supabase
+          .from('lux_tasks')
+          .insert({
+            user_id: userId,
+            agent_id: agent.id,
+            conversation_id: conversation.id,
+            user_request: message,
+            task_description: parsedTask.task_description,
+            computer_use_provider: 'lux',
+            lux_mode: luxMode,
+            lux_model: taskConfig.lux_model,
+            max_steps_per_todo: taskConfig.max_steps_per_todo,
+            temperature: taskConfig.temperature,
+            platform: parsedTask.platform,
+            start_url: parsedTask.start_url,
+            complexity: taskConfig.complexity,
+            status: 'pending'
+          })
+          .select()
+          .single();
+        
+        if (taskError) throw taskError;
+        
+        // 6. INSERT todos for Tasker mode (with error handling)
+        if (luxMode === 'tasker') {
+          if (!parsedTask.todos || parsedTask.todos.length === 0) {
+            console.warn(`⚠️ [REQ-${requestId}] Tasker mode requested but no todos generated - task may not execute correctly`);
+          } else {
+            const todosToInsert = parsedTask.todos.map((todo: string, index: number) => ({
+              task_id: task.id,
+              todo_index: index,
+              todo_description: todo,
+              status: 'pending'
+            }));
+            
+            const { error: todosError } = await supabase.from('lux_todos').insert(todosToInsert);
+            
+            if (todosError) {
+              console.error(`❌ [REQ-${requestId}] Failed to insert todos for task ${task.id}:`, todosError.message);
+              await supabase.from('lux_tasks')
+                .update({ 
+                  status: 'failed', 
+                  error_message: `Todos insert failed: ${todosError.message}` 
+                })
+                .eq('id', task.id);
+              throw new Error(`Failed to save todos: ${todosError.message}`);
+            }
+            
+            console.log(`✅ [REQ-${requestId}] Inserted ${todosToInsert.length} todos for task ${task.id}`);
+          }
         }
-      }
-      
-      // 7. Save user message
-      await supabase.from('agent_messages').insert({
-        conversation_id: conversation.id,
-        role: 'user',
-        content: message
-      });
-      
-      // 8. Build and save confirmation message
-      const todosFormatted = parsedTask.todos?.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n') || '';
-      const confirmMessage = `✅ **Task Lux ${luxMode.charAt(0).toUpperCase() + luxMode.slice(1)} creato!**
+        
+        // 7. Save user message
+        await supabase.from('agent_messages').insert({
+          conversation_id: conversation.id,
+          role: 'user',
+          content: message
+        });
+        
+        // 8. Build and save confirmation message
+        const todosFormatted = parsedTask.todos?.map((t: string, i: number) => `${i + 1}. ${t}`).join('\n') || '';
+        const confirmMessage = `✅ **Task Lux ${luxMode.charAt(0).toUpperCase() + luxMode.slice(1)} creato!**
 
 **Task:** ${parsedTask.task_description}
 **Piattaforma:** ${parsedTask.platform || 'browser'}
@@ -2712,29 +2795,30 @@ ${luxMode === 'tasker' && todosFormatted ? `\n**Todos (${parsedTask.todos.length
 ---
 **Per eseguire:** Assicurati che **Architect's Hand Bridge** sia aperta e connessa.`;
 
-      await supabase.from('agent_messages').insert({
-        conversation_id: conversation.id,
-        role: 'assistant',
-        content: confirmMessage,
-        llm_provider: 'system',
-        metadata: { source: 'lux_pipeline', task_id: task.id, lux_mode: luxMode }
-      });
-      
-      console.log(`✅ [REQ-${requestId}] Lux task created: ${task.id}`);
-      
-      // Return SSE stream with confirmation
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: confirmMessage })}\n\n`));
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-          controller.close();
-        }
-      });
-      
-      return new Response(stream, {
-        headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' }
-      });
+        await supabase.from('agent_messages').insert({
+          conversation_id: conversation.id,
+          role: 'assistant',
+          content: confirmMessage,
+          llm_provider: 'system',
+          metadata: { source: 'lux_pipeline', task_id: task.id, lux_mode: luxMode }
+        });
+        
+        console.log(`✅ [REQ-${requestId}] Lux task created: ${task.id}`);
+        
+        // Return SSE stream with confirmation
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: confirmMessage })}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+            controller.close();
+          }
+        });
+        
+        return new Response(stream, {
+          headers: { ...corsHeaders, 'Content-Type': 'text/event-stream' }
+        });
+      }
     }
 
     

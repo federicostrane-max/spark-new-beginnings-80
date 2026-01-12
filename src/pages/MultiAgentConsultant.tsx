@@ -1317,6 +1317,76 @@ export default function MultiAgentConsultant() {
                     config: command.config,
                   });
                   
+                } else if (command.tool === 'desktop_lux_automation') {
+                  // ============================================================
+                  // DESKTOP LUX AUTOMATION: Execute via DesktopOrchestrator
+                  // ============================================================
+                  console.log('🖥️ [LOCAL] Executing desktop_lux_automation:', command.mode);
+                  
+                  setLocalExecutionStatus({
+                    active: true,
+                    tool: 'desktop_lux_automation',
+                    status: `Desktop ${command.mode} mode starting...`,
+                    stepInfo: command.task_description?.slice(0, 50)
+                  });
+                  
+                  try {
+                    // Dynamic import to avoid bundling if not used
+                    const { createDesktopOrchestrator } = await import('@/lib/desktop-automation');
+                    
+                    const orchestrator = createDesktopOrchestrator({
+                      onStep: (stepIndex, action) => {
+                        setLocalExecutionStatus(prev => prev ? {
+                          ...prev,
+                          status: `Step ${stepIndex}: ${action.type}`,
+                          stepInfo: action.text?.slice(0, 30) || `(${action.coordinate?.[0]}, ${action.coordinate?.[1]})`
+                        } : null);
+                      },
+                      onTodoStart: (todoIndex, desc) => {
+                        toast.info(`📌 Todo ${todoIndex + 1}: ${desc.slice(0, 50)}...`);
+                      },
+                      onTodoComplete: (todoIndex, desc, success) => {
+                        if (success) {
+                          toast.success(`✅ Todo ${todoIndex + 1} completato`);
+                        } else {
+                          toast.warning(`⚠️ Todo ${todoIndex + 1} non completato`);
+                        }
+                      },
+                      onLog: (msg, level) => {
+                        console.log(`[Desktop ${level}] ${msg}`);
+                      },
+                      onComplete: (taskResult) => {
+                        console.log('🏁 Desktop automation completed:', taskResult);
+                      }
+                    });
+                    
+                    const taskResult = await orchestrator.execute({
+                      mode: command.mode,
+                      task_description: command.task_description,
+                      todos: command.todos,
+                      start_url: command.start_url,
+                      config: command.config
+                    });
+                    
+                    result = { 
+                      success: taskResult.success, 
+                      data: taskResult,
+                      error: taskResult.error
+                    };
+                    
+                    if (taskResult.success) {
+                      toast.success(taskResult.message);
+                    } else {
+                      toast.error(taskResult.message);
+                    }
+                    
+                  } catch (desktopError) {
+                    console.error('❌ [LOCAL] desktop_lux_automation failed:', desktopError);
+                    const errMsg = desktopError instanceof Error ? desktopError.message : 'Unknown error';
+                    toast.error(`Desktop automation failed: ${errMsg}`);
+                    result = { success: false, error: errMsg };
+                  }
+                  
                 } else if (command.tool === 'browser_get_dom') {
                   // Execute DOM retrieval and send result back to agent
                   console.log('🌐 [LOCAL] Executing browser_get_dom:', command.url);
@@ -1372,8 +1442,6 @@ export default function MultiAgentConsultant() {
                       throw new Error(`Failed to send DOM result: ${response.status}`);
                     }
                     
-                    // Process the SSE response from this call (agent will now create plan)
-                    // The response continues the conversation
                     toast.success('Page structure analyzed, creating plan...');
                     
                     result = { success: true, data: { element_count: domResult.element_count } };

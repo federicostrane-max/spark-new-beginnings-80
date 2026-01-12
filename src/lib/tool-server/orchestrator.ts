@@ -903,6 +903,27 @@ export class Orchestrator {
   // VISION FUNCTIONS (NO LLM - Direct API calls)
   // ============================================================
 
+  // ============================================================
+  // COORDINATE CONVERSION CONSTANTS
+  // Lux API returns coordinates in 1260x700 space (lux_sdk)
+  // Browser viewport is typically 1280x720 (viewport)
+  // ============================================================
+  private static readonly LUX_SDK_WIDTH = 1260;
+  private static readonly LUX_SDK_HEIGHT = 700;
+  private static readonly VIEWPORT_WIDTH = 1280;
+  private static readonly VIEWPORT_HEIGHT = 720;
+
+  /**
+   * Convert Lux SDK coordinates (1260x700) to viewport coordinates (1280x720).
+   * Used for browser automation where we need viewport-relative clicks.
+   */
+  private luxToViewport(x: number, y: number): { x: number; y: number } {
+    return {
+      x: Math.round(x * Orchestrator.VIEWPORT_WIDTH / Orchestrator.LUX_SDK_WIDTH),
+      y: Math.round(y * Orchestrator.VIEWPORT_HEIGHT / Orchestrator.LUX_SDK_HEIGHT),
+    };
+  }
+
   private async callLuxVision(screenshot: string, target: string): Promise<VisionResult> {
     try {
       const { data, error } = await supabase.functions.invoke('tool-server-vision', {
@@ -915,12 +936,23 @@ export class Orchestrator {
 
       if (error) throw error;
 
+      // Convert Lux coordinates to viewport coordinates for browser use
+      let finalX = data.x ?? null;
+      let finalY = data.y ?? null;
+
+      if (finalX !== null && finalY !== null) {
+        const converted = this.luxToViewport(finalX, finalY);
+        this.log('info', `🔄 Lux coords (${finalX}, ${finalY}) → viewport (${converted.x}, ${converted.y})`);
+        finalX = converted.x;
+        finalY = converted.y;
+      }
+
       return {
-        found: data.success && data.x !== undefined,
-        x: data.x ?? null,
-        y: data.y ?? null,
+        found: data.success && finalX !== undefined,
+        x: finalX,
+        y: finalY,
         confidence: data.confidence ?? 0,
-        coordinate_system: 'lux_sdk',
+        coordinate_system: 'viewport',  // Now returns viewport coordinates
         reasoning: data.action || null,
       };
 
@@ -931,7 +963,7 @@ export class Orchestrator {
         x: null,
         y: null,
         confidence: 0,
-        coordinate_system: 'lux_sdk',
+        coordinate_system: 'viewport',
         reasoning: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
       };
     }
