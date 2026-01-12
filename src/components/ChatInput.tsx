@@ -657,7 +657,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                       <Brain className="mr-2 h-4 w-4 text-blue-500" />
                       <div className="flex flex-col">
                         <span className="font-medium">gemini_computer_use</span>
-                        <span className="text-xs text-muted-foreground">Vision smart (~3s) - Fallback complesso</span>
+                        <span className="text-xs text-muted-foreground">Vision Gemini (~3s) - Trova coordinate con ragionamento</span>
                       </div>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => insertAgentAction('browser-orchestrator')}>
@@ -669,6 +669,32 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
                     </DropdownMenuItem>
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+                
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Play className="mr-2 h-4 w-4" />
+                    🟢 Lux Automation
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-actor')}>
+                      <Zap className="mr-2 h-4 w-4" />
+                      Actor (Semplice)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-thinker')}>
+                      <Brain className="mr-2 h-4 w-4" />
+                      Thinker (Complesso)
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => insertAgentAction('lux-tasker')}>
+                      <ListChecks className="mr-2 h-4 w-4" />
+                      Tasker (Con Step)
+                    </DropdownMenuItem>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                
+                <DropdownMenuItem onClick={() => insertAgentAction('gemini')}>
+                  <Monitor className="mr-2 h-4 w-4" />
+                  🔵 Gemini (Browser Dedicato)
+                </DropdownMenuItem>
                 
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
