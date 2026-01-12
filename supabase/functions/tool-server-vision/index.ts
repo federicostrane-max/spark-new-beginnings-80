@@ -16,6 +16,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Viewport defaults for coordinate denormalization
+const DEFAULT_VIEWPORT_WIDTH = 1280;
+const DEFAULT_VIEWPORT_HEIGHT = 720;
+
+/**
+ * Convert Gemini normalized coordinates (0-999) to viewport pixels.
+ * Gemini 2.5 Computer Use outputs coords in 0-999 range that need to be
+ * denormalized to the actual viewport dimensions.
+ */
+function normalizedToViewport(
+  x: number,
+  y: number,
+  viewportWidth = DEFAULT_VIEWPORT_WIDTH,
+  viewportHeight = DEFAULT_VIEWPORT_HEIGHT
+): { x: number; y: number } {
+  return {
+    x: Math.round(x / 1000 * viewportWidth),
+    y: Math.round(y / 1000 * viewportHeight),
+  };
+}
+
 // ────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────
@@ -31,16 +52,22 @@ interface GeminiRequest {
   provider: 'gemini';
   image: string;
   prompt: string;
+  viewport_width?: number;   // For denormalizing Gemini coordinates
+  viewport_height?: number;  // For denormalizing Gemini coordinates
 }
 
 interface VisionResponse {
   success: boolean;
   x?: number;
   y?: number;
+  x_normalized?: number;     // Raw normalized coords (0-999) before denormalization
+  y_normalized?: number;     // Raw normalized coords (0-999) before denormalization
+  was_denormalized?: boolean; // True if coords were converted from 0-999 to viewport
   confidence?: number;
   reasoning?: string;
   action?: string;
   error?: string;
+  coordinate_system?: 'viewport' | 'lux_sdk';
 }
 
 // ────────────────────────────────────────────────────────────
@@ -175,7 +202,8 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
 
   const startTime = Date.now();
 
-  const model = 'gemini-2.0-flash';
+  // Use Gemini 2.5 Computer Use for better element localization
+  const model = 'gemini-2.5-flash-preview-05-20';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
@@ -241,12 +269,38 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
       };
     }
 
+    const rawX = Math.round(coords.x);
+    const rawY = Math.round(coords.y);
+
+    // Check if coordinates look like normalized (0-999 range)
+    // Gemini Computer Use models return coords in 0-999 normalized space
+    const looksNormalized = rawX <= 999 && rawY <= 999 && rawX >= 0 && rawY >= 0;
+    
+    let finalX = rawX;
+    let finalY = rawY;
+    
+    if (looksNormalized) {
+      // Denormalize from 0-999 to viewport pixels
+      const viewportWidth = request.viewport_width ?? DEFAULT_VIEWPORT_WIDTH;
+      const viewportHeight = request.viewport_height ?? DEFAULT_VIEWPORT_HEIGHT;
+      
+      const converted = normalizedToViewport(rawX, rawY, viewportWidth, viewportHeight);
+      finalX = converted.x;
+      finalY = converted.y;
+      
+      console.log(`🔄 [${requestId}] Gemini: normalized(${rawX}, ${rawY}) → viewport(${finalX}, ${finalY})`);
+    }
+
     return {
       success: true,
-      x: Math.round(coords.x),
-      y: Math.round(coords.y),
+      x: finalX,
+      y: finalY,
+      x_normalized: looksNormalized ? rawX : undefined,
+      y_normalized: looksNormalized ? rawY : undefined,
+      was_denormalized: looksNormalized,
       confidence: coords.confidence || 0.8,
       reasoning: coords.reasoning || coords.explanation,
+      coordinate_system: 'viewport',
     };
 
   } catch (parseError) {

@@ -554,11 +554,27 @@ export class Orchestrator {
       this.callGeminiVision(screenshot, target, context),
     ]);
 
-    // Log individual results
-    this.log('debug', `DOM: found=${domResult?.found ?? false}, visible=${domResult?.visible ?? false}, ` +
-      `pos=(${domResult?.x ?? 'N/A'}, ${domResult?.y ?? 'N/A'})`);
-    this.log('debug', `Lux: found=${luxResult.found} (${luxResult.x}, ${luxResult.y}) conf=${luxResult.confidence}`);
-    this.log('debug', `Gemini: found=${geminiResult.found} (${geminiResult.x}, ${geminiResult.y}) conf=${geminiResult.confidence}`);
+    // Log individual results with coordinate system info
+    this.log('info', `📍 Triple Verification Results:`);
+    this.log('info', `  DOM:    ${domResult?.found ? `(${domResult.x}, ${domResult.y}) visible=${domResult.visible} [viewport]` : 'NOT FOUND'}`);
+    this.log('info', `  Lux:    ${luxResult.found ? `(${luxResult.x}, ${luxResult.y}) conf=${(luxResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'}`);
+    this.log('info', `  Gemini: ${geminiResult.found ? `(${geminiResult.x}, ${geminiResult.y}) conf=${(geminiResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'}`);
+
+    // Log distances for debug
+    if (luxResult.found && geminiResult.found) {
+      const distLG = Math.sqrt(
+        Math.pow((luxResult.x ?? 0) - (geminiResult.x ?? 0), 2) +
+        Math.pow((luxResult.y ?? 0) - (geminiResult.y ?? 0), 2)
+      );
+      this.log('debug', `  Distance Lux↔Gemini: ${distLG.toFixed(1)}px`);
+    }
+    if (domResult?.found && luxResult.found) {
+      const distDL = Math.sqrt(
+        Math.pow(domResult.x - (luxResult.x ?? 0), 2) +
+        Math.pow(domResult.y - (luxResult.y ?? 0), 2)
+      );
+      this.log('debug', `  Distance DOM↔Lux: ${distDL.toFixed(1)}px`);
+    }
 
     // Analyze the pattern
     const analysis = this.analyzeTriplePattern(domResult, luxResult, geminiResult);
@@ -912,6 +928,7 @@ export class Orchestrator {
   private static readonly LUX_SDK_HEIGHT = 700;
   private static readonly VIEWPORT_WIDTH = 1280;
   private static readonly VIEWPORT_HEIGHT = 720;
+  private static readonly NORMALIZED_COORD_MAX = 999;
 
   /**
    * Convert Lux SDK coordinates (1260x700) to viewport coordinates (1280x720).
@@ -921,6 +938,17 @@ export class Orchestrator {
     return {
       x: Math.round(x * Orchestrator.VIEWPORT_WIDTH / Orchestrator.LUX_SDK_WIDTH),
       y: Math.round(y * Orchestrator.VIEWPORT_HEIGHT / Orchestrator.LUX_SDK_HEIGHT),
+    };
+  }
+
+  /**
+   * Convert Gemini normalized coordinates (0-999) to viewport coordinates.
+   * Used as fallback if edge function doesn't convert.
+   */
+  private normalizedToViewport(x: number, y: number): { x: number; y: number } {
+    return {
+      x: Math.round(x / 1000 * Orchestrator.VIEWPORT_WIDTH),
+      y: Math.round(y / 1000 * Orchestrator.VIEWPORT_HEIGHT),
     };
   }
 
@@ -980,15 +1008,36 @@ Rispondi SOLO con JSON: {"x": numero, "y": numero, "confidence": 0.0-1.0, "reaso
           provider: 'gemini',
           image: screenshot,
           prompt,
+          viewport_width: Orchestrator.VIEWPORT_WIDTH,
+          viewport_height: Orchestrator.VIEWPORT_HEIGHT,
         },
       });
 
       if (error) throw error;
 
+      // L'edge function già converte, ma fallback se coordinate sembrano normalized
+      let finalX = data.x ?? null;
+      let finalY = data.y ?? null;
+
+      if (finalX !== null && finalY !== null) {
+        // Rileva se sono ancora normalized (0-999) e non viewport
+        const looksNormalized = finalX <= Orchestrator.NORMALIZED_COORD_MAX && 
+                                 finalY <= Orchestrator.NORMALIZED_COORD_MAX &&
+                                 data.coordinate_system !== 'viewport' &&
+                                 !data.was_denormalized;
+        
+        if (looksNormalized) {
+          const converted = this.normalizedToViewport(finalX, finalY);
+          this.log('info', `🔄 Gemini fallback: normalized(${finalX}, ${finalY}) → viewport(${converted.x}, ${converted.y})`);
+          finalX = converted.x;
+          finalY = converted.y;
+        }
+      }
+
       return {
-        found: data.success && data.x !== undefined,
-        x: data.x ?? null,
-        y: data.y ?? null,
+        found: data.success && finalX !== null,
+        x: finalX,
+        y: finalY,
         confidence: data.confidence ?? 0,
         coordinate_system: 'viewport',
         reasoning: data.reasoning || null,

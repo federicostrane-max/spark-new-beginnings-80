@@ -120,6 +120,10 @@ class ToolServerClient {
     session_id: string;
     selector?: string;
     text?: string;
+    role?: string;
+    test_id?: string;
+    label?: string;
+    placeholder?: string;
   }): Promise<{
     success: boolean;
     found: boolean;

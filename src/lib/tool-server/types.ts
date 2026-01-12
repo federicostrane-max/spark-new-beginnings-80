@@ -25,7 +25,9 @@ export type ToolServerActionType =
   | 'click'
   | 'type'
   | 'scroll'
-  | 'keypress';
+  | 'keypress'
+  | 'element_rect'
+  | 'browser_element_rect';
 
 export interface ToolServerActionInput {
   action: ToolServerActionType;
@@ -53,6 +55,13 @@ export interface ToolServerActionInput {
   
   // Per browser_navigate
   url?: string;
+  
+  // Per element_rect (DOM element search)
+  selector?: string;
+  role?: string;
+  test_id?: string;
+  label?: string;
+  placeholder?: string;
 }
 
 export interface ToolServerResponse {
