@@ -22,8 +22,9 @@ import {
   LogEntry,
   LogLevel,
   DomForPlanningResult,
-  DualVisionResult,
-  VisionConsensus,
+  DomElementRect,
+  TripleVerificationResult,
+  TripleVerificationPattern,
 } from './orchestrator-types';
 
 export class Orchestrator {
@@ -350,7 +351,7 @@ export class Orchestrator {
         return this.finalizeExecution(execution, startTime);
       }
 
-      // For actions that need coordinates, try vision
+      // For actions that need coordinates, use TRIPLE VERIFICATION
       for (let retry = 0; retry <= this.config.maxRetries; retry++) {
         execution.retries = retry;
         
@@ -361,6 +362,7 @@ export class Orchestrator {
         if (retry > 0) {
           execution.used_fallback = true;
           this.log('warn', `Retry ${retry} con fallback: ${targetDesc}`);
+          await this.sleep(500); // Brief pause before retry
         }
 
         // Take screenshot
@@ -370,70 +372,56 @@ export class Orchestrator {
           continue;
         }
 
-        // Try to get coordinates from cache first
-        const cached = this.actionCache.get(this.state.current_url || '', targetDesc);
-        let visionResult: VisionResult;
-
-        if (cached && cached.success_count >= 2) {
-          this.log('debug', 'Usando coordinate dalla cache');
-          visionResult = {
-            found: true,
-            x: cached.x,
-            y: cached.y,
-            confidence: 1,
-            coordinate_system: cached.coordinate_system,
-            reasoning: 'From cache',
-          };
-        } else {
-          // ============================================================
-          // DUAL VISION: Lux + Gemini in PARALLEL
-          // ============================================================
-          const dualVision = await this.callDualVision(screenshot, targetDesc, step.expected_outcome);
-          
-          // Log dual vision results
-          this.log('info', `Dual Vision: agree=${dualVision.consensus.agree}, ` +
-            `distance=${dualVision.consensus.distance_px}px, ` +
-            `conf=${dualVision.consensus.confidence.toFixed(2)}`);
-          
-          // Warning if vision models disagree significantly
-          if (!dualVision.consensus.agree && dualVision.consensus.lux_found && dualVision.consensus.gemini_found) {
-            this.log('warn', `⚠️ Vision MISMATCH! ` +
-              `Lux: (${dualVision.lux.x},${dualVision.lux.y}) conf=${dualVision.lux.confidence.toFixed(2)} | ` +
-              `Gemini: (${dualVision.gemini.x},${dualVision.gemini.y}) conf=${dualVision.gemini.confidence.toFixed(2)}`);
-          }
-          
-          // Use the preferred result (highest confidence when both found)
-          visionResult = dualVision.preferred;
+        // ============================================================
+        // TRIPLE VERIFICATION: DOM + Lux + Gemini in PARALLEL
+        // ============================================================
+        const tripleResult = await this.verifyCoordinatesTriple(
+          screenshot,
+          targetDesc,
+          step.dom_selector,
+          step.expected_outcome
+        );
+        
+        // Log verification result
+        this.log('info', `Triple Verify: pattern=${tripleResult.verification.pattern}, ` +
+          `proceed=${tripleResult.verification.proceed}, conf=${tripleResult.verification.confidence.toFixed(2)}`);
+        
+        if (tripleResult.verification.warning) {
+          this.log('warn', `⚠️ ${tripleResult.verification.warning}`);
         }
-
-        execution.vision_result = visionResult;
-
-        if (!visionResult.found || visionResult.x === null || visionResult.y === null) {
-          this.log('warn', `Elemento non trovato: ${targetDesc}`);
+        
+        // If verification says don't proceed → retry
+        if (!tripleResult.verification.proceed) {
+          this.log('warn', `Verifica fallita: ${tripleResult.verification.pattern}. Retry...`);
           continue;
         }
+        
+        // We have verified coordinates
+        const coords = tripleResult.final_coordinates!;
+        this.log('debug', `Using coordinates: (${coords.x}, ${coords.y}) from ${coords.source}`);
+        
+        // Create VisionResult for compatibility
+        const visionResult: VisionResult = {
+          found: true,
+          x: coords.x,
+          y: coords.y,
+          confidence: tripleResult.verification.confidence,
+          coordinate_system: 'viewport', // Always viewport after triple verification
+          reasoning: `Triple verified: ${tripleResult.verification.pattern}`,
+        };
+        execution.vision_result = visionResult;
 
-        // Execute the action via toolServerClient (SEMPRE - mai tramite vision tools)
-        const actionResult = await this.executeAction(step, visionResult);
+        // Execute the action via toolServerClient
+        const actionResult = await this.executeActionWithCoords(step, coords.x, coords.y);
         execution.action_result = actionResult;
         execution.success = actionResult.success;
 
         // Record action for loop detection
         this.recordAction(step, visionResult, actionResult.success);
 
-        // Update cache
         if (actionResult.success) {
-          this.actionCache.recordSuccess(
-            this.state.current_url || '',
-            targetDesc,
-            visionResult.x,
-            visionResult.y,
-            visionResult.coordinate_system
-          );
           this.log('success', `Azione completata: ${step.action_type}`);
           break;
-        } else {
-          this.actionCache.recordFailure(this.state.current_url || '', targetDesc);
         }
       }
 
@@ -448,86 +436,365 @@ export class Orchestrator {
   }
 
   // ============================================================
-  // DUAL VISION: Lux + Gemini in Parallel
+  // TRIPLE VERIFICATION: DOM + Lux + Gemini
   // ============================================================
 
-  private async callDualVision(
+  private async verifyCoordinatesTriple(
     screenshot: string,
     target: string,
+    selector?: string,
     context?: string
-  ): Promise<DualVisionResult> {
-    // Call BOTH vision models in parallel
-    const [luxResult, geminiResult] = await Promise.all([
+  ): Promise<TripleVerificationResult> {
+    // Call all 3 sources IN PARALLEL
+    const [domResult, luxResult, geminiResult] = await Promise.all([
+      this.getDomElementRect(selector, target),
       this.callLuxVision(screenshot, target),
       this.callGeminiVision(screenshot, target, context),
     ]);
 
+    // Log individual results
+    this.log('debug', `DOM: found=${domResult?.found ?? false}, visible=${domResult?.visible ?? false}, ` +
+      `pos=(${domResult?.x ?? 'N/A'}, ${domResult?.y ?? 'N/A'})`);
     this.log('debug', `Lux: found=${luxResult.found} (${luxResult.x}, ${luxResult.y}) conf=${luxResult.confidence}`);
     this.log('debug', `Gemini: found=${geminiResult.found} (${geminiResult.x}, ${geminiResult.y}) conf=${geminiResult.confidence}`);
 
-    const consensus = this.calculateConsensus(luxResult, geminiResult);
-    const preferred = this.selectPreferredResult(luxResult, geminiResult, consensus);
-
+    // Analyze the pattern
+    const analysis = this.analyzeTriplePattern(domResult, luxResult, geminiResult);
+    
+    // Make decision based on pattern
+    const decision = this.makeTripleDecision(analysis, domResult, luxResult, geminiResult);
+    
     return {
+      dom: domResult,
       lux: luxResult,
       gemini: geminiResult,
-      consensus,
-      preferred,
+      verification: {
+        pattern: analysis.type,
+        proceed: decision.proceed,
+        confidence: decision.confidence,
+        warning: decision.warning,
+      },
+      final_coordinates: decision.coordinates,
+      distances: analysis.distances,
     };
   }
 
-  private calculateConsensus(lux: VisionResult, gemini: VisionResult): VisionConsensus {
-    const lux_found = lux.found && lux.x !== null && lux.y !== null;
-    const gemini_found = gemini.found && gemini.x !== null && gemini.y !== null;
-
-    if (!lux_found || !gemini_found) {
+  private async getDomElementRect(
+    selector?: string,
+    textContent?: string
+  ): Promise<DomElementRect | null> {
+    if (!this.state.session_id) return null;
+    
+    try {
+      const result = await toolServerClient.getElementRect({
+        session_id: this.state.session_id,
+        selector,
+        text: textContent,
+      });
+      
+      if (!result.success || !result.found) {
+        return null;
+      }
+      
+      // ToolServer already returns x,y as center coordinates
       return {
-        agree: false,
-        distance_px: -1,
-        confidence: lux_found ? lux.confidence : (gemini_found ? gemini.confidence : 0),
-        lux_found,
-        gemini_found,
+        found: result.found,
+        visible: result.visible,
+        x: result.x,
+        y: result.y,
+        width: result.width,
+        height: result.height,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private analyzeTriplePattern(
+    dom: DomElementRect | null,
+    lux: VisionResult,
+    gemini: VisionResult
+  ): { type: TripleVerificationPattern; distances: { lux_gemini: number; dom_lux: number; dom_gemini: number } } {
+    
+    const THRESHOLD_AGREE = 50;      // Considered "same"
+    const THRESHOLD_WARNING = 150;   // Threshold for overlay warning
+    
+    const luxFound = lux.found && lux.x !== null && lux.y !== null;
+    const geminiFound = gemini.found && gemini.x !== null && gemini.y !== null;
+    const domFound = dom !== null && dom.visible;
+    
+    // Calculate distances
+    const dist = {
+      lux_gemini: -1,
+      dom_lux: -1,
+      dom_gemini: -1,
+    };
+    
+    if (luxFound && geminiFound) {
+      dist.lux_gemini = Math.sqrt(
+        Math.pow((lux.x ?? 0) - (gemini.x ?? 0), 2) +
+        Math.pow((lux.y ?? 0) - (gemini.y ?? 0), 2)
+      );
+    }
+    
+    if (domFound && luxFound) {
+      dist.dom_lux = Math.sqrt(
+        Math.pow(dom.x - (lux.x ?? 0), 2) +
+        Math.pow(dom.y - (lux.y ?? 0), 2)
+      );
+    }
+    
+    if (domFound && geminiFound) {
+      dist.dom_gemini = Math.sqrt(
+        Math.pow(dom.x - (gemini.x ?? 0), 2) +
+        Math.pow(dom.y - (gemini.y ?? 0), 2)
+      );
+    }
+    
+    // Determine pattern
+    let type: TripleVerificationPattern;
+    
+    if (!domFound && !luxFound && !geminiFound) {
+      type = 'none_found';
+    } else if (domFound && !luxFound && !geminiFound) {
+      type = 'dom_only';
+    } else if (!domFound && (luxFound || geminiFound)) {
+      // Vision finds but DOM doesn't
+      if (luxFound && geminiFound && dist.lux_gemini < THRESHOLD_AGREE) {
+        type = 'vision_only';
+      } else if (luxFound && geminiFound) {
+        type = 'vision_disagree';
+      } else {
+        type = 'vision_only';
+      }
+    } else if (luxFound && geminiFound) {
+      const visionAgree = dist.lux_gemini < THRESHOLD_AGREE;
+      
+      if (visionAgree && domFound) {
+        const avgDomDist = (dist.dom_lux + dist.dom_gemini) / 2;
+        if (avgDomDist < THRESHOLD_AGREE) {
+          type = 'all_agree';
+        } else if (avgDomDist < THRESHOLD_WARNING) {
+          type = 'vision_agree_dom_far';
+        } else {
+          type = 'vision_agree_dom_very_far';
+        }
+      } else if (visionAgree && !domFound) {
+        type = 'vision_only';
+      } else {
+        type = 'vision_disagree';
+      }
+    } else if (domFound && (luxFound || geminiFound)) {
+      type = 'dom_one_vision';
+    } else {
+      type = 'vision_only';
+    }
+    
+    return { type, distances: dist };
+  }
+
+  private makeTripleDecision(
+    analysis: { type: TripleVerificationPattern; distances: { lux_gemini: number; dom_lux: number; dom_gemini: number } },
+    dom: DomElementRect | null,
+    lux: VisionResult,
+    gemini: VisionResult
+  ): {
+    proceed: boolean;
+    coordinates: { x: number; y: number; source: 'all_avg' | 'vision_avg' | 'dom' | 'lux' | 'gemini' } | null;
+    confidence: number;
+    warning?: string;
+  } {
+    switch (analysis.type) {
+      case 'all_agree': {
+        // All 3 agree → average of all 3 coordinates
+        const x = Math.round((dom!.x + (lux.x ?? 0) + (gemini.x ?? 0)) / 3);
+        const y = Math.round((dom!.y + (lux.y ?? 0) + (gemini.y ?? 0)) / 3);
+        return {
+          proceed: true,
+          coordinates: { x, y, source: 'all_avg' },
+          confidence: 1.0,
+        };
+      }
+      
+      case 'vision_agree_dom_far': {
+        // Vision agree, DOM far → warning overlay, use vision avg
+        const x = Math.round(((lux.x ?? 0) + (gemini.x ?? 0)) / 2);
+        const y = Math.round(((lux.y ?? 0) + (gemini.y ?? 0)) / 2);
+        return {
+          proceed: true,
+          coordinates: { x, y, source: 'vision_avg' },
+          confidence: 0.8,
+          warning: `Possible overlay: DOM at (${dom?.x},${dom?.y}), Vision at (${x},${y}). ` +
+                   `Avg distance: ${Math.round((analysis.distances.dom_lux + analysis.distances.dom_gemini) / 2)}px`,
+        };
+      }
+      
+      case 'vision_agree_dom_very_far': {
+        // Vision agree, DOM very far → DON'T proceed, retry
+        return {
+          proceed: false,
+          coordinates: null,
+          confidence: 0.3,
+          warning: `DOM molto distante dalla vision (>150px). Possibile elemento nascosto o scroll necessario.`,
+        };
+      }
+      
+      case 'vision_disagree': {
+        // Vision disagree → DON'T proceed, retry
+        return {
+          proceed: false,
+          coordinates: null,
+          confidence: 0.2,
+          warning: `Lux e Gemini discordano: Lux(${lux.x},${lux.y}) vs Gemini(${gemini.x},${gemini.y}). ` +
+                   `Distanza: ${Math.round(analysis.distances.lux_gemini)}px`,
+        };
+      }
+      
+      case 'dom_one_vision': {
+        // DOM + 1 vision → use average of those 2 (2/3 agreement)
+        const luxDist = analysis.distances.dom_lux;
+        const geminiDist = analysis.distances.dom_gemini;
+        
+        // Choose the vision closer to DOM
+        if (luxDist >= 0 && (geminiDist < 0 || luxDist < geminiDist)) {
+          const x = Math.round((dom!.x + (lux.x ?? 0)) / 2);
+          const y = Math.round((dom!.y + (lux.y ?? 0)) / 2);
+          return {
+            proceed: true,
+            coordinates: { x, y, source: 'vision_avg' },
+            confidence: 0.75,
+            warning: 'Only DOM + Lux found element',
+          };
+        } else if (geminiDist >= 0) {
+          const x = Math.round((dom!.x + (gemini.x ?? 0)) / 2);
+          const y = Math.round((dom!.y + (gemini.y ?? 0)) / 2);
+          return {
+            proceed: true,
+            coordinates: { x, y, source: 'vision_avg' },
+            confidence: 0.75,
+            warning: 'Only DOM + Gemini found element',
+          };
+        }
+        return { proceed: false, coordinates: null, confidence: 0 };
+      }
+      
+      case 'dom_only': {
+        // Only DOM finds → element probably hidden, DON'T click
+        return {
+          proceed: false,
+          coordinates: null,
+          confidence: 0,
+          warning: 'Element exists in DOM but not visible to vision. Likely hidden or covered.',
+        };
+      }
+      
+      case 'vision_only': {
+        // Only vision finds → proceed with caution
+        const luxFound = lux.found && lux.x !== null;
+        const geminiFound = gemini.found && gemini.x !== null;
+        
+        if (luxFound && geminiFound && analysis.distances.lux_gemini < 50) {
+          const x = Math.round(((lux.x ?? 0) + (gemini.x ?? 0)) / 2);
+          const y = Math.round(((lux.y ?? 0) + (gemini.y ?? 0)) / 2);
+          return {
+            proceed: true,
+            coordinates: { x, y, source: 'vision_avg' },
+            confidence: 0.7,
+            warning: 'Element not in DOM but both vision models agree. Proceeding with caution.',
+          };
+        } else if (luxFound) {
+          return {
+            proceed: true,
+            coordinates: { x: lux.x!, y: lux.y!, source: 'lux' },
+            confidence: lux.confidence * 0.6,
+            warning: 'Only Lux found element, DOM not available',
+          };
+        } else if (geminiFound) {
+          return {
+            proceed: true,
+            coordinates: { x: gemini.x!, y: gemini.y!, source: 'gemini' },
+            confidence: gemini.confidence * 0.6,
+            warning: 'Only Gemini found element, DOM not available',
+          };
+        }
+        return { proceed: false, coordinates: null, confidence: 0 };
+      }
+      
+      case 'none_found':
+      default:
+        return {
+          proceed: false,
+          coordinates: null,
+          confidence: 0,
+          warning: 'No source found the element',
+        };
+    }
+  }
+
+  // ============================================================
+  // ACTION EXECUTION WITH COORDS
+  // ============================================================
+
+  private async executeActionWithCoords(
+    step: PlanStep,
+    x: number,
+    y: number
+  ): Promise<{ success: boolean; error?: string }> {
+    const sessionId = this.state.session_id!;
+
+    try {
+      switch (step.action_type) {
+        case 'click':
+          return await toolServerClient.click({
+            scope: 'browser',
+            session_id: sessionId,
+            x,
+            y,
+            coordinate_origin: 'viewport',
+          });
+
+        case 'type':
+          // First click to focus
+          await toolServerClient.click({
+            scope: 'browser',
+            session_id: sessionId,
+            x,
+            y,
+            coordinate_origin: 'viewport',
+          });
+          await this.sleep(200);
+          
+          return await toolServerClient.type({
+            scope: 'browser',
+            session_id: sessionId,
+            text: step.input_value || '',
+          });
+
+        case 'scroll':
+          const direction = step.target_description.toLowerCase().includes('up') ? 'up' : 'down';
+          return await toolServerClient.scroll({
+            scope: 'browser',
+            session_id: sessionId,
+            direction,
+            amount: 300,
+          });
+
+        case 'keypress':
+          return await toolServerClient.keypress({
+            scope: 'browser',
+            session_id: sessionId,
+            keys: step.input_value || 'Enter',
+          });
+
+        default:
+          return { success: false, error: `Unknown action type: ${step.action_type}` };
+      }
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown' 
       };
     }
-
-    // Calculate euclidean distance
-    const dx = (lux.x ?? 0) - (gemini.x ?? 0);
-    const dy = (lux.y ?? 0) - (gemini.y ?? 0);
-    const distance = Math.sqrt(dx * dx + dy * dy);
-
-    // Consider "agreement" if distance < 50px
-    const AGREEMENT_THRESHOLD = 50;
-
-    return {
-      agree: distance < AGREEMENT_THRESHOLD,
-      distance_px: Math.round(distance),
-      confidence: (lux.confidence + gemini.confidence) / 2,
-      lux_found,
-      gemini_found,
-    };
-  }
-
-  private selectPreferredResult(
-    lux: VisionResult,
-    gemini: VisionResult,
-    consensus: VisionConsensus
-  ): VisionResult {
-    // If both found, use the one with higher confidence
-    if (consensus.lux_found && consensus.gemini_found) {
-      // If they agree, prefer Lux (faster, specialized for UI)
-      if (consensus.agree) {
-        return lux.confidence >= gemini.confidence ? lux : gemini;
-      }
-      // If they disagree, still use the higher confidence one but log it
-      return lux.confidence >= gemini.confidence ? lux : gemini;
-    }
-    
-    // If only one found, use that one
-    if (consensus.lux_found) return lux;
-    if (consensus.gemini_found) return gemini;
-    
-    // Neither found - return lux with found=false
-    return lux;
   }
 
   // ============================================================
@@ -602,71 +869,6 @@ Rispondi SOLO con JSON: {"x": numero, "y": numero, "confidence": 0.0-1.0, "reaso
         confidence: 0,
         coordinate_system: 'viewport',
         reasoning: `Error: ${err instanceof Error ? err.message : 'Unknown'}`,
-      };
-    }
-  }
-
-  // ============================================================
-  // ACTION EXECUTION
-  // ============================================================
-
-  private async executeAction(
-    step: PlanStep, 
-    vision: VisionResult
-  ): Promise<{ success: boolean; error?: string }> {
-    const sessionId = this.state.session_id!;
-
-    try {
-      switch (step.action_type) {
-        case 'click':
-          return await toolServerClient.click({
-            scope: 'browser',
-            session_id: sessionId,
-            x: vision.x!,
-            y: vision.y!,
-            coordinate_origin: vision.coordinate_system,
-          });
-
-        case 'type':
-          // First click to focus
-          await toolServerClient.click({
-            scope: 'browser',
-            session_id: sessionId,
-            x: vision.x!,
-            y: vision.y!,
-            coordinate_origin: vision.coordinate_system,
-          });
-          await this.sleep(200);
-          
-          return await toolServerClient.type({
-            scope: 'browser',
-            session_id: sessionId,
-            text: step.input_value || '',
-          });
-
-        case 'scroll':
-          const direction = step.target_description.toLowerCase().includes('up') ? 'up' : 'down';
-          return await toolServerClient.scroll({
-            scope: 'browser',
-            session_id: sessionId,
-            direction,
-            amount: 300,
-          });
-
-        case 'keypress':
-          return await toolServerClient.keypress({
-            scope: 'browser',
-            session_id: sessionId,
-            keys: step.input_value || 'Enter',
-          });
-
-        default:
-          return { success: false, error: `Unknown action type: ${step.action_type}` };
-      }
-    } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown' 
       };
     }
   }

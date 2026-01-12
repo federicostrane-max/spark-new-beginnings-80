@@ -116,6 +116,23 @@ class ToolServerClient {
     return this.get(`/browser/dom/tree?session_id=${sessionId}`);
   }
 
+  async getElementRect(options: {
+    session_id: string;
+    selector?: string;
+    text?: string;
+  }): Promise<{
+    success: boolean;
+    found: boolean;
+    visible: boolean;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    bounding_box?: { x: number; y: number; width: number; height: number };
+  }> {
+    return this.post('/browser/dom/element_rect', options);
+  }
+
   // ──────────────────────────────────────────────────────────
   // Screenshot
   // ──────────────────────────────────────────────────────────
