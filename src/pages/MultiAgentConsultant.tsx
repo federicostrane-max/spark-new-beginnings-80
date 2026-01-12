@@ -1317,6 +1317,73 @@ export default function MultiAgentConsultant() {
                     config: command.config,
                   });
                   
+                } else if (command.tool === 'browser_get_dom') {
+                  // Execute DOM retrieval and send result back to agent
+                  console.log('🌐 [LOCAL] Executing browser_get_dom:', command.url);
+                  
+                  setLocalExecutionStatus({
+                    active: true,
+                    tool: 'browser_get_dom',
+                    status: 'Analyzing page structure...',
+                  });
+                  
+                  try {
+                    // Create orchestrator if needed
+                    const orchestrator = new Orchestrator();
+                    
+                    // Timeout 30 seconds
+                    const domResult = await Promise.race([
+                      orchestrator.getDomForPlanning(command.url),
+                      new Promise<never>((_, reject) => 
+                        setTimeout(() => reject(new Error('DOM timeout (30s)')), 30000)
+                      )
+                    ]) as { dom_tree: string; session_id: string; current_url: string; element_count: number };
+                    
+                    console.log(`✅ [LOCAL] DOM retrieved: ${domResult.element_count} elements`);
+                    
+                    // Send DOM back to agent silently (auto-continuation)
+                    const domPayload = {
+                      dom_tree: domResult.dom_tree,
+                      session_id: domResult.session_id,
+                      url: domResult.current_url,
+                      timestamp: Date.now()
+                    };
+                    
+                    // Call agent-chat with domResult (silent message)
+                    const response = await fetch(
+                      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
+                      {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${session?.access_token}`,
+                        },
+                        body: JSON.stringify({
+                          message: '', // Empty - content is in domResult
+                          conversationId: currentConversation?.id || streamingConversationId,
+                          agentSlug: currentAgent?.slug,
+                          domResult: domPayload,
+                          silent: true
+                        }),
+                      }
+                    );
+                    
+                    if (!response.ok) {
+                      throw new Error(`Failed to send DOM result: ${response.status}`);
+                    }
+                    
+                    // Process the SSE response from this call (agent will now create plan)
+                    // The response continues the conversation
+                    toast.success('Page structure analyzed, creating plan...');
+                    
+                    result = { success: true, data: { element_count: domResult.element_count } };
+                    
+                  } catch (domError) {
+                    console.error('❌ [LOCAL] browser_get_dom failed:', domError);
+                    toast.error(`Failed to analyze page: ${domError instanceof Error ? domError.message : 'Unknown error'}`);
+                    result = { success: false, error: domError instanceof Error ? domError.message : 'Unknown error' };
+                  }
+                  
                 } else {
                   result = { success: false, error: `Unknown local tool: ${command.tool}` };
                 }
@@ -1324,7 +1391,9 @@ export default function MultiAgentConsultant() {
                 // Log result
                 if (result.success) {
                   console.log(`✅ [LOCAL EXEC] ${command.tool} completed successfully`);
-                  toast.success(`Browser action completed: ${command.action || command.tool}`);
+                  if (command.tool !== 'browser_get_dom') {
+                    toast.success(`Browser action completed: ${command.action || command.tool}`);
+                  }
                 } else {
                   console.error(`❌ [LOCAL EXEC] ${command.tool} failed:`, result.error);
                   toast.error(`Browser action failed: ${result.error}`);

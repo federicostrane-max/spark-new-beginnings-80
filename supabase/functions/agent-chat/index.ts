@@ -40,6 +40,14 @@ interface ContinuationResult {
   attempts: number;
 }
 
+// DOM result payload for browser_get_dom bidirectional flow
+interface DomResultPayload {
+  dom_tree: string;
+  session_id: string;
+  url: string;
+  timestamp: number;
+}
+
 interface UserIntent {
   type: 'SEARCH_REQUEST' | 'DOWNLOAD_COMMAND' | 'FILTER_REQUEST' | 'SEMANTIC_QUESTION' | 'UNKNOWN';
   topic?: string;
@@ -2288,7 +2296,20 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool, luxMode } = requestBody;
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool, luxMode, domResult, silent } = requestBody as {
+      conversationId?: string;
+      message: string;
+      agentSlug: string;
+      attachments?: Attachment[];
+      skipSystemValidation?: boolean;
+      stream?: boolean;
+      serverUserId?: string;
+      documentFilter?: string;
+      forcedTool?: string;
+      luxMode?: string;
+      domResult?: DomResultPayload;
+      silent?: boolean;
+    };
 
     // Server-to-server calls can pass serverUserId directly (for benchmark system)
     let userId: string;
@@ -3554,7 +3575,7 @@ Il prompt deve essere pronto all'uso direttamente.`;
           // DETERMINISTIC WORKFLOW: CHECK USER INPUT
           // ========================================
           
-          const conversationState = await getConversationState(conversationId, supabase);
+          const conversationState = await getConversationState(conversation.id, supabase);
           let systemManagedSearch = false;
           let systemSearchResults: SearchResult[] | null = null;
           
@@ -3628,14 +3649,14 @@ Il prompt deve essere pronto all'uso direttamente.`;
                 }
                 
                 // Clear waiting state
-                await updateConversationState(conversationId, {
+                await updateConversationState(conversation.id, {
                   waitingForConfirmation: false,
                   lastProposedQuery: null
                 }, supabase);
               } else if (isNewQueryRequest(message)) {
                 console.log(`🔄 [WORKFLOW] User requested different query`);
                 // Reset state and let agent propose new query
-                await updateConversationState(conversationId, {
+                await updateConversationState(conversation.id, {
                   waitingForConfirmation: false,
                   lastProposedQuery: null,
                   lastSearchResults: null
@@ -4004,9 +4025,35 @@ You are an expert AI assistant. When answering:
 ${knowledgeContext}${searchResultsContext}`;
 
           // Add mention instruction if @agent tags were detected
-          const enhancedSystemPrompt = mentions.length > 0 
+          let enhancedSystemPrompt = mentions.length > 0 
             ? baseSystemPrompt + mentionInstruction
             : baseSystemPrompt;
+          
+          // ============================================================
+          // BROWSER_GET_DOM: Inject DOM result if present in request
+          // ============================================================
+          if (domResult) {
+            console.log(`📄 [REQ-${requestId}] DOM Result received for ${domResult.url}`);
+            
+            // Add DOM to the system prompt with anti-loop flag
+            const domAddition = `
+
+[BROWSER DOM STRUCTURE - RECEIVED]
+URL: ${domResult.url}
+Session ID: ${domResult.session_id}
+Captured: ${new Date(domResult.timestamp).toISOString()}
+
+Interactive Elements:
+${domResult.dom_tree}
+
+---
+IMPORTANT: You now have the DOM structure. Create your automation plan using browser_orchestrator.
+DO NOT call browser_get_dom again - you already have the structure.
+Use the selectors and element descriptions above to create precise steps with dom_selector values.
+`;
+            enhancedSystemPrompt += domAddition;
+            console.log(`🌐 [REQ-${requestId}] DOM context injected (${domResult.dom_tree.length} chars)`);
+          }
           
           // 🤖 DIAGNOSTIC: Log context size before LLM call
           console.log(`🤖 [REQ-${requestId}] Calling ${llmProvider} with ${enhancedSystemPrompt?.length || 0} chars context`);
@@ -4939,6 +4986,39 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
               await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: command }));
             }
 
+            // ============= TOOL: browser_get_dom =============
+            else if (toolName === 'browser_get_dom') {
+              console.log(`🌐 [REQ-${context.requestId}] Tool: browser_get_dom - ${toolInput.url}`);
+
+              const url = toolInput.url;
+              const waitForSelector = toolInput.wait_for_selector;
+
+              responseText = `🌐 **Analyzing page structure**\n`;
+              responseText += `📍 URL: ${url}\n`;
+              responseText += `⏳ Retrieving DOM... This will take a few seconds.\n`;
+              newFullResponse += responseText;
+              await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
+
+              // Send command to frontend to execute locally
+              const domCommand = {
+                execute_locally: true,
+                tool: 'browser_get_dom',
+                url: url,
+                wait_for_selector: waitForSelector,
+                request_id: context.requestId
+              };
+
+              await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: domCommand }));
+
+              // Tool result - indicates frontend will execute and send DOM back
+              toolResult = {
+                success: true,
+                status: 'pending',
+                message: 'DOM request sent to frontend. Wait for DOM structure in next message.',
+                instruction: 'The DOM will be provided in the next user message. Do not proceed until you receive it.'
+              };
+            }
+
             // ============= TOOL: lux_actor_vision =============
             else if (toolName === 'lux_actor_vision') {
               console.log(`👁️ [REQ-${context.requestId}] Tool: lux_actor_vision - "${toolInput.target}"`);
@@ -5715,7 +5795,43 @@ Returns: { success, x, y, confidence, reasoning, coordinate_system: 'viewport' }
             }
           });
           
-          // Tool 4: browser_orchestrator - Multi-step automation (Plan Executor)
+          // Tool 4: browser_get_dom - Get DOM structure for planning
+          tools.push({
+            name: 'browser_get_dom',
+            description: `Retrieve the DOM structure of a webpage for planning browser automation.
+
+WHEN TO USE:
+- Call this FIRST when you need to automate browser actions
+- Before creating a browser_orchestrator plan
+- When you need to find exact selectors for elements
+
+WHAT YOU GET:
+- List of interactive elements (buttons, links, inputs, etc.)
+- CSS selectors and aria-labels for precise targeting
+- Current page URL and session ID
+
+IMPORTANT:
+- This tool triggers a LOCAL action - the frontend will analyze the page
+- The DOM will be returned to you in the NEXT message
+- After receiving DOM, use browser_orchestrator to create your plan
+- DO NOT call this tool twice for the same page`,
+            input_schema: {
+              type: 'object',
+              properties: {
+                url: { 
+                  type: 'string', 
+                  description: 'Full URL to navigate and analyze (e.g., "https://mail.google.com")' 
+                },
+                wait_for_selector: {
+                  type: 'string',
+                  description: 'Optional: CSS selector to wait for before capturing DOM'
+                }
+              },
+              required: ['url']
+            }
+          });
+          
+          // Tool 5: browser_orchestrator - Multi-step automation (Plan Executor)
           tools.push({
             name: 'browser_orchestrator',
             description: `Execute a browser automation plan on the local machine.
@@ -5724,7 +5840,8 @@ This tool EXECUTES plans that YOU create. You must provide the complete plan.
 Use your knowledge base to create accurate plans for specific websites.
 
 IMPORTANT: YOU are the planner! Use your KB knowledge about the target site
-to create precise step descriptions.
+to create precise step descriptions. If you called browser_get_dom first,
+use the DOM structure to create accurate dom_selector values.
 
 Plan structure you must provide:
 {
@@ -5735,6 +5852,7 @@ Plan structure you must provide:
       "step_number": 1,
       "action_type": "click|type|scroll|keypress|wait|navigate",
       "target_description": "Visual description for Vision Agent (be specific! use colors, positions, text)",
+      "dom_selector": "CSS selector from DOM (optional but recommended for precision)",
       "input_value": "For type: text to type. For keypress: key name (Enter, Tab). For navigate: URL",
       "fallback_description": "Alternative description if first fails",
       "expected_result": "What should happen after this step"
@@ -5763,6 +5881,7 @@ Requires Tool Server running locally on port 8766.`,
                           step_number: { type: 'number' },
                           action_type: { type: 'string', enum: ['click', 'type', 'scroll', 'keypress', 'wait', 'navigate'] },
                           target_description: { type: 'string', description: 'Visual description of element (for Vision Agent)' },
+                          dom_selector: { type: 'string', description: 'CSS selector from DOM (for precise targeting)' },
                           input_value: { type: 'string', description: 'Text/key/URL for type/keypress/navigate actions' },
                           fallback_description: { type: 'string', description: 'Alternative target description' },
                           expected_result: { type: 'string', description: 'Expected outcome of this step' }
@@ -6604,7 +6723,7 @@ Requires Tool Server running locally on port 8766.`,
                         const proposedQuery = detectProposedQuery(fullResponse);
                         if (proposedQuery && !conversationState.lastProposedQuery) {
                           console.log(`🎯 [WORKFLOW] Detected proposed query in agent response: "${proposedQuery}"`);
-                          await updateConversationState(conversationId, {
+                          await updateConversationState(conversation.id, {
                             lastProposedQuery: proposedQuery,
                             waitingForConfirmation: true
                           }, supabase);
@@ -6827,7 +6946,7 @@ Requires Tool Server running locally on port 8766.`,
                       // Update if we find a query AND (no previous query OR new query is longer/more complete)
                       if (proposedQuery && (!conversationState.lastProposedQuery || proposedQuery.length > conversationState.lastProposedQuery.length)) {
                         console.log(`🎯 [WORKFLOW] Updated proposed query in agent response: "${proposedQuery}"`);
-                        await updateConversationState(conversationId, {
+                        await updateConversationState(conversation.id, {
                           lastProposedQuery: proposedQuery,
                           waitingForConfirmation: true
                         }, supabase);

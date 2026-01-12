@@ -103,7 +103,7 @@ export class Orchestrator {
    * Step 1 del flusso: L'Agente chiama questo per ottenere la struttura del sito
    * PRIMA di creare il piano. L'Agente studia il DOM + KB e poi crea il piano.
    */
-  async getDomForPlanning(startUrl: string): Promise<DomForPlanningResult> {
+  async getDomForPlanning(startUrl: string): Promise<DomForPlanningResult & { element_count: number }> {
     this.log('info', `Getting DOM for planning: ${startUrl}`);
     
     // 1. Inizializza browser se necessario
@@ -115,6 +115,9 @@ export class Orchestrator {
       this.state.current_url = startUrl;
     }
     
+    // Wait for page load
+    await this.sleep(2000);
+    
     // 2. Ottieni DOM tree
     const { tree, success } = await toolServerClient.getDomTree(this.state.session_id!);
     
@@ -122,13 +125,112 @@ export class Orchestrator {
       throw new Error('Failed to retrieve DOM tree for planning');
     }
     
-    this.log('success', `DOM retrieved: ${tree.length} characters`);
+    // 3. Filtra elementi interattivi
+    const filteredDom = this.filterDomForPlanning(tree);
+    
+    // 4. Comprimi a max 8000 caratteri
+    const maxChars = 8000;
+    let compressedDom = filteredDom;
+    
+    if (compressedDom.length > maxChars) {
+      const lines = compressedDom.split('\n');
+      let result = '';
+      let charCount = 0;
+      
+      for (const line of lines) {
+        if (charCount + line.length + 1 > maxChars - 100) {
+          result += '\n... [TRUNCATED - too many elements]';
+          break;
+        }
+        result += line + '\n';
+        charCount += line.length + 1;
+      }
+      compressedDom = result;
+    }
+    
+    const elementCount = (compressedDom.match(/\[.*?\]|<.*?>/g) || []).length;
+    
+    this.log('success', `DOM retrieved: ${tree.length} chars raw → ${compressedDom.length} chars filtered (${elementCount} elements)`);
     
     return {
-      dom_tree: tree,
+      dom_tree: compressedDom,
       session_id: this.state.session_id!,
       current_url: this.state.current_url!,
+      element_count: elementCount,
     };
+  }
+
+  /**
+   * Filtra DOM per mantenere solo elementi interattivi e rilevanti.
+   */
+  private filterDomForPlanning(rawDom: string): string {
+    const lines = rawDom.split('\n');
+    const filteredLines: string[] = [];
+    
+    // Pattern per elementi interattivi
+    const interactivePatterns = [
+      /\[button\]/i,
+      /\[link\]/i,
+      /\[textbox\]/i,
+      /\[combobox\]/i,
+      /\[checkbox\]/i,
+      /\[radio\]/i,
+      /\[menuitem\]/i,
+      /\[tab\]/i,
+      /\[searchbox\]/i,
+      /<button/i,
+      /<a /i,
+      /<input/i,
+      /<textarea/i,
+      /<select/i,
+      /<form/i,
+      /type=["']?submit/i,
+      /type=["']?button/i,
+      /role=/i,
+      /aria-label=/i,
+      /data-action=/i,
+      /data-testid=/i,
+      /onclick/i,
+    ];
+    
+    // Pattern per elementi da escludere
+    const excludePatterns = [
+      /<style/i,
+      /<script/i,
+      /display:\s*none/i,
+      /visibility:\s*hidden/i,
+      /opacity:\s*0[^.]/i,
+    ];
+    
+    for (const line of lines) {
+      // Salta linee vuote
+      if (!line.trim()) continue;
+      
+      // Salta elementi nascosti
+      if (excludePatterns.some(p => p.test(line))) continue;
+      
+      // Mantieni elementi interattivi
+      if (interactivePatterns.some(p => p.test(line))) {
+        // Pulisci la linea (rimuovi spazi extra)
+        const cleanLine = line.replace(/\s+/g, ' ').trim();
+        if (cleanLine.length > 10) { // Ignora linee troppo corte
+          filteredLines.push(cleanLine);
+        }
+      }
+      
+      // Mantieni anche container con aria-label (spesso sono cliccabili)
+      if (/aria-label=/.test(line) && line.includes('"')) {
+        const cleanLine = line.replace(/\s+/g, ' ').trim();
+        if (!filteredLines.includes(cleanLine)) {
+          filteredLines.push(cleanLine);
+        }
+      }
+    }
+    
+    // Rimuovi duplicati
+    const uniqueLines = [...new Set(filteredLines)];
+    
+    return uniqueLines.join('\n');
   }
 
   /**
