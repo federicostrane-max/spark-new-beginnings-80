@@ -5,18 +5,16 @@
 import { DEFAULT_CONFIG, ToolServerConfig, ToolServerResponse } from './types';
 
 class ToolServerClient {
-  private config: ToolServerConfig;
+  private timeout: number;
 
   constructor(config: Partial<ToolServerConfig> = {}) {
-    this.config = { 
-      ...DEFAULT_CONFIG, 
-      ...config,
-      baseUrl: this.getBaseUrl()
-    };
+    // Non memorizzare baseUrl - verrà calcolato dinamicamente ad ogni richiesta
+    this.timeout = config.timeout ?? DEFAULT_CONFIG.timeout;
   }
 
   // ──────────────────────────────────────────────────────────
   // URL Configuration (localStorage > env > default)
+  // Chiamato AD OGNI richiesta per leggere sempre il valore corrente
   // ──────────────────────────────────────────────────────────
 
   private getBaseUrl(): string {
@@ -38,15 +36,16 @@ class ToolServerClient {
     return 'http://127.0.0.1:8766';
   }
 
+  // Salva solo in localStorage - la prossima richiesta userà automaticamente il nuovo URL
   public updateBaseUrl(newUrl: string): void {
-    this.config.baseUrl = newUrl;
     if (typeof window !== 'undefined') {
       localStorage.setItem('toolServerUrl', newUrl);
     }
   }
 
+  // Ritorna sempre il valore corrente (dinamico)
   public getConfiguredUrl(): string {
-    return this.config.baseUrl;
+    return this.getBaseUrl();
   }
 
   public async testConnection(): Promise<{
@@ -55,7 +54,8 @@ class ToolServerClient {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${this.config.baseUrl}/status`, {
+      const baseUrl = this.getBaseUrl(); // Legge dinamicamente ad ogni chiamata
+      const response = await fetch(`${baseUrl}/status`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
@@ -82,10 +82,11 @@ class ToolServerClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const url = `${this.config.baseUrl}${endpoint}`;
+    const baseUrl = this.getBaseUrl(); // Legge dinamicamente ad ogni richiesta
+    const url = `${baseUrl}${endpoint}`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
       const response = await fetch(url, {
