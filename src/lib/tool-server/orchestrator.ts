@@ -126,7 +126,9 @@ export class Orchestrator {
     }
     
     // 3. Filtra elementi interattivi
-    const filteredDom = this.filterDomForPlanning(tree);
+    // Tool Server v8.4.2: tree è un oggetto JSON (accessibility tree)
+    const treeString = typeof tree === 'string' ? tree : JSON.stringify(tree, null, 2);
+    const filteredDom = this.filterDomForPlanning(treeString);
     
     // 4. Comprimi a max 8000 caratteri
     const maxChars = 8000;
