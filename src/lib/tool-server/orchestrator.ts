@@ -918,13 +918,14 @@ export class Orchestrator {
   // ============================================================
   // VISION FUNCTIONS (NO LLM - Direct API calls)
   // ============================================================
-  // NOTA: Tutte le conversioni coordinate avvengono nell'edge function
-  // tool-server-vision. L'Orchestrator riceve sempre coordinate viewport.
+  // Tool Server v8.4.1: viewport = lux_sdk (1260×700, 1:1 mapping)
+  // Lux coordinates are used directly (no conversion).
+  // Gemini normalized (0-999) is denormalized to 1260×700 viewport.
   // ============================================================
 
-  // Viewport reference dimensions (for edge function calls)
-  private static readonly VIEWPORT_WIDTH = 1280;
-  private static readonly VIEWPORT_HEIGHT = 720;
+  // Viewport reference dimensions (aligned with Tool Server v8.4.1)
+  private static readonly VIEWPORT_WIDTH = 1260;
+  private static readonly VIEWPORT_HEIGHT = 700;
 
 
   private async callLuxVision(screenshot: string, target: string): Promise<VisionResult> {

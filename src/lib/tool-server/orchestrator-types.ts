@@ -1,6 +1,9 @@
 // ============================================================
 // ORCHESTRATOR TYPES - Multi-Agent Orchestrator System
 // ============================================================
+// Tool Server v8.4.1: viewport = lux_sdk (1260×700, 1:1 mapping)
+// All coordinates are normalized to viewport space before comparison.
+// ============================================================
 
 // Configuration
 export interface OrchestratorConfig {
