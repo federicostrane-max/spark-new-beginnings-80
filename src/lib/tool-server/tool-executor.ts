@@ -1,5 +1,6 @@
 // ============================================================
 // Tool Executor - Esegue tool nel frontend
+// CRITICAL: Blocca azioni locali se Tool Server non configurato
 // ============================================================
 
 import { toolServerClient } from './client';
@@ -30,8 +31,18 @@ export async function executeToolUse(
     switch (name) {
       // ════════════════════════════════════════════════════
       // LOCAL: Tool Server Actions (eseguite nel browser)
+      // CRITICAL: Blocca se non configurato!
       // ════════════════════════════════════════════════════
       case 'tool_server_action':
+        // ⛔ GUARD: Blocca TUTTE le azioni locali se non configurato
+        if (!toolServerClient.isConfigured()) {
+          console.warn('⛔ Tool Server non configurato, blocco azione:', input);
+          result = {
+            success: false,
+            error: 'Tool Server non configurato. Apri le impostazioni (icona 🟡 in alto) e salva il tuo URL ngrok.',
+          };
+          break;
+        }
         result = await executeToolServerAction(input as unknown as ToolServerActionInput, sessionId);
         break;
 

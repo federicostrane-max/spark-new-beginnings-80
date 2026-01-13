@@ -264,12 +264,22 @@ export function useToolServerAgent(
   // ════════════════════════════════════════════════════════
 
   const sendMessage = useCallback(async (userMessage: string): Promise<void> => {
-    // Check connection first
-    const isConnected = await checkConnection();
-    if (!isConnected) {
+    // Check if configured first
+    if (!toolServerClient.isConfigured()) {
       setState(prev => ({
         ...prev,
-        error: 'Tool Server non raggiungibile. Verifica che sia in esecuzione su http://127.0.0.1:8766'
+        error: 'Tool Server non configurato. Apri le impostazioni e salva il tuo URL ngrok.'
+      }));
+      return;
+    }
+    
+    // Check connection
+    const isConnected = await checkConnection();
+    if (!isConnected) {
+      const configuredUrl = toolServerClient.getConfiguredUrl();
+      setState(prev => ({
+        ...prev,
+        error: `Tool Server non raggiungibile all'URL: ${configuredUrl}. Verifica che ngrok sia attivo.`
       }));
       return;
     }
