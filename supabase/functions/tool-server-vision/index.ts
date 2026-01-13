@@ -216,7 +216,7 @@ async function callLuxActor(request: LuxRequest, requestId: string): Promise<Vis
   const rawX = data.x;
   const rawY = data.y;
 
-  // Convert lux_sdk (1260x700) → viewport (1280x720)
+  // Convert lux_sdk (1260×700) → viewport (1260×700) [1:1 in v8.4.1]
   const viewportWidth = request.viewport_width ?? DEFAULT_VIEWPORT_WIDTH;
   const viewportHeight = request.viewport_height ?? DEFAULT_VIEWPORT_HEIGHT;
   const converted = luxToViewport(rawX, rawY, viewportWidth, viewportHeight);
