@@ -8,7 +8,7 @@ export interface ToolServerConfig {
 }
 
 export const DEFAULT_CONFIG: ToolServerConfig = {
-  baseUrl: 'http://127.0.0.1:8766',
+  baseUrl: import.meta.env.VITE_TOOL_SERVER_URL || 'http://127.0.0.1:8766',
   timeout: 30000
 };
 
