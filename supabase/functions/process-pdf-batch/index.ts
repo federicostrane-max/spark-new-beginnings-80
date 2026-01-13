@@ -1,7 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
-import { extractJsonWithLayoutAndCallback, downloadJobImage } from "../_shared/llamaParseClient.ts";
+import { 
+  extractJsonWithLayoutAndCallback, 
+  downloadJobImage,
+  validateCreditsBeforeProcessing,
+  estimateCreditsNeeded
+} from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements } from "../_shared/markdownElementParser.ts";
 
@@ -112,6 +117,59 @@ serve(async (req) => {
 
     const batchPdfBuffer = new Uint8Array(await batchBlob.arrayBuffer());
     console.log(`[Process Batch] Downloaded batch (${batchPdfBuffer.length} bytes)`);
+
+    // ===== PHASE 0: CREDIT CHECK BEFORE PROCESSING =====
+    const pagesInBatch = job.page_end - job.page_start + 1;
+    const extractionModeForCredits = forcePremium ? 'multimodal' : 'basic';
+    const estimatedCredits = estimateCreditsNeeded(pagesInBatch, extractionModeForCredits);
+
+    console.log(`[Process Batch] Credit check: ${estimatedCredits} credits for ${pagesInBatch} pages (mode: ${extractionModeForCredits})`);
+
+    try {
+      const creditCheck = await validateCreditsBeforeProcessing(llamaApiKey, estimatedCredits);
+      console.log(`[Process Batch] ✓ Credit check passed. Remaining: ${creditCheck.remaining}`);
+      
+      if (creditCheck.warning) {
+        // Store warning in job metadata for visibility
+        await supabase
+          .from('processing_jobs')
+          .update({ 
+            metadata: { 
+              ...(job.metadata || {}), 
+              credit_warning: creditCheck.warning 
+            } 
+          })
+          .eq('id', savedJobId);
+      }
+    } catch (creditError: any) {
+      console.error(`[Process Batch] ❌ Credit check failed:`, creditError.message);
+      
+      // Mark job as blocked due to insufficient credits
+      await supabase
+        .from('processing_jobs')
+        .update({
+          status: 'blocked',
+          error_message: creditError.message,
+          metadata: {
+            ...(job.metadata || {}),
+            blocked_reason: 'insufficient_credits',
+            estimated_credits_needed: estimatedCredits,
+            credits_available: creditError.remaining
+          }
+        })
+        .eq('id', savedJobId);
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'INSUFFICIENT_CREDITS',
+          message: creditError.message,
+          estimatedCreditsNeeded: estimatedCredits,
+          creditsAvailable: creditError.remaining
+        }),
+        { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // ===== PHASE 1: JSON EXTRACTION (mode-aware) =====
     // Pass anthropicKey as vendor API key for multimodal OCR when forcePremium is enabled
