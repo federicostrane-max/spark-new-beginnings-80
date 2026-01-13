@@ -4,6 +4,26 @@
 
 import { DEFAULT_CONFIG, ToolServerConfig, ToolServerResponse } from './types';
 
+// ──────────────────────────────────────────────────────────
+// URL Normalization Helper
+// ──────────────────────────────────────────────────────────
+
+function normalizeToolServerUrl(input: string): string {
+  if (!input) return '';
+  let url = input.trim();
+  // Rimuove trailing slash
+  while (url.endsWith('/')) {
+    url = url.slice(0, -1);
+  }
+  return url;
+}
+
+// ──────────────────────────────────────────────────────────
+// Tool Server URL Change Event
+// ──────────────────────────────────────────────────────────
+
+export const TOOL_SERVER_URL_CHANGED_EVENT = 'toolServerUrlChanged';
+
 class ToolServerClient {
   private timeout: number;
 
@@ -21,25 +41,46 @@ class ToolServerClient {
     // 1. localStorage (URL ngrok configurato dall'utente)
     if (typeof window !== 'undefined') {
       const savedUrl = localStorage.getItem('toolServerUrl');
-      if (savedUrl && savedUrl.trim()) {
-        return savedUrl.trim();
+      const normalized = normalizeToolServerUrl(savedUrl || '');
+      if (normalized) {
+        return normalized;
       }
     }
     
     // 2. Variabile d'ambiente (per sviluppo locale)
     const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
     if (envUrl) {
-      return envUrl;
+      return normalizeToolServerUrl(envUrl);
     }
     
-    // 3. Default localhost
+    // 3. Default localhost (SOLO se non c'è URL configurato)
     return 'http://127.0.0.1:8766';
   }
 
-  // Salva solo in localStorage - la prossima richiesta userà automaticamente il nuovo URL
+  // Verifica se c'è un URL configurato (non default)
+  public isConfigured(): boolean {
+    if (typeof window !== 'undefined') {
+      const savedUrl = localStorage.getItem('toolServerUrl');
+      const normalized = normalizeToolServerUrl(savedUrl || '');
+      if (normalized) return true;
+    }
+    const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
+    return !!envUrl;
+  }
+
+  // Salva in localStorage + emette evento per aggiornamento immediato UI
   public updateBaseUrl(newUrl: string): void {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('toolServerUrl', newUrl);
+      const normalized = normalizeToolServerUrl(newUrl);
+      if (normalized) {
+        localStorage.setItem('toolServerUrl', normalized);
+      } else {
+        localStorage.removeItem('toolServerUrl');
+      }
+      // Emetti evento per aggiornamento immediato della UI
+      window.dispatchEvent(new CustomEvent(TOOL_SERVER_URL_CHANGED_EVENT, { 
+        detail: { url: normalized || null } 
+      }));
     }
   }
 
@@ -52,24 +93,28 @@ class ToolServerClient {
     connected: boolean;
     version?: string;
     error?: string;
+    urlUsed?: string;
   }> {
+    const baseUrl = this.getBaseUrl();
+    
     try {
-      const baseUrl = this.getBaseUrl(); // Legge dinamicamente ad ogni chiamata
       const response = await fetch(`${baseUrl}/status`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
       
       if (!response.ok) {
-        return { connected: false, error: `HTTP ${response.status}` };
+        return { connected: false, error: `HTTP ${response.status}`, urlUsed: baseUrl };
       }
       
       const data = await response.json();
-      return { connected: true, version: data.version };
+      return { connected: true, version: data.version, urlUsed: baseUrl };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Connection failed';
       return { 
         connected: false, 
-        error: error instanceof Error ? error.message : 'Connection failed' 
+        error: `${errorMessage} (URL: ${baseUrl})`,
+        urlUsed: baseUrl
       };
     }
   }
@@ -82,7 +127,7 @@ class ToolServerClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const baseUrl = this.getBaseUrl(); // Legge dinamicamente ad ogni richiesta
+    const baseUrl = this.getBaseUrl();
     const url = `${baseUrl}${endpoint}`;
     
     const controller = new AbortController();
@@ -101,7 +146,7 @@ class ToolServerClient {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`Tool Server error: ${response.status} ${response.statusText}`);
+        throw new Error(`Tool Server error: ${response.status} ${response.statusText} (URL: ${baseUrl})`);
       }
 
       return await response.json();
@@ -109,7 +154,12 @@ class ToolServerClient {
       clearTimeout(timeoutId);
       
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Tool Server timeout - verifica che sia in esecuzione');
+        throw new Error(`Tool Server timeout (URL: ${baseUrl}) - verifica che sia in esecuzione`);
+      }
+      
+      // Aggiungi URL all'errore per debugging
+      if (error instanceof Error && !error.message.includes('URL:')) {
+        throw new Error(`${error.message} (URL: ${baseUrl})`);
       }
       
       throw error;
