@@ -1,7 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
-import { extractJsonWithLayoutAndCallback, pollJobUntilComplete, getJsonResult, type LlamaParseJsonResult } from "../_shared/llamaParseClient.ts";
+import { 
+  extractJsonWithLayoutAndCallback, 
+  pollJobUntilComplete, 
+  getJsonResult, 
+  validateCreditsBeforeProcessing,
+  estimateCreditsNeeded,
+  type LlamaParseJsonResult 
+} from "../_shared/llamaParseClient.ts";
 import { reconstructFromLlamaParse } from "../_shared/documentReconstructor.ts";
 import { parseMarkdownElements, type ParsedNode } from "../_shared/markdownElementParser.ts";
 import { detectOCRIssues, enhanceWithVisionAPI, enhanceWithClaudePDF, buildEnhancedSuperDocument } from "../_shared/visionEnhancer.ts";
@@ -441,6 +448,42 @@ serve(async (req) => {
         } else {
           // PDF PATH: LlamaParse + Context-Aware Visual Enrichment
           const pdfBuffer = new Uint8Array(await fileData.arrayBuffer());
+
+          // ===== CREDIT CHECK BEFORE LLAMAPARSE =====
+          // Estimate pages based on file size (average ~50KB per page for PDF with images)
+          const estimatedPages = doc.page_count || Math.max(1, Math.ceil(pdfBuffer.length / (50 * 1024)));
+          const estimatedCredits = estimateCreditsNeeded(estimatedPages, 'multimodal');
+          
+          console.log(`[Pipeline A-Hybrid Process] Credit check: ${estimatedCredits} credits for ~${estimatedPages} pages`);
+          
+          try {
+            const creditCheck = await validateCreditsBeforeProcessing(llamaCloudKey, estimatedCredits);
+            if (creditCheck.warning) {
+              console.warn(`[Pipeline A-Hybrid Process] ⚠️ ${creditCheck.warning}`);
+              // Store warning in trace report metadata
+              (traceReport.context_analysis as any).credit_warning = creditCheck.warning;
+            }
+          } catch (creditError: any) {
+            console.error(`[Pipeline A-Hybrid Process] ❌ Credit check failed:`, creditError.message);
+            
+            // Mark document as blocked
+            await supabase
+              .from('pipeline_a_hybrid_documents')
+              .update({
+                status: 'blocked',
+                error_message: `INSUFFICIENT_CREDITS: ${creditError.message}`,
+                processing_metadata: {
+                  ...doc.processing_metadata,
+                  blocked_reason: 'insufficient_credits',
+                  estimated_credits_needed: estimatedCredits,
+                  credits_available: creditError.remaining
+                }
+              })
+              .eq('id', doc.id);
+            
+            failedCount++;
+            continue; // Skip to next document
+          }
 
           // ===== LOGICA RESUME POLLING + PERSISTENZA IMMEDIATA =====
           console.log(`[Pipeline A-Hybrid Process] Starting LlamaParse for ${doc.file_name}, size: ${pdfBuffer.length} bytes`);

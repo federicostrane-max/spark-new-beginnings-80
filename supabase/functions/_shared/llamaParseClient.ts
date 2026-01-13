@@ -481,3 +481,144 @@ export async function downloadJobImage(
     return new Uint8Array(arrayBuffer);
   }, 3, 1000, 'LlamaParse downloadImage');
 }
+
+// ===== CREDIT MONITORING =====
+
+export interface LlamaCloudUsageMetrics {
+  total_credits_used: number;
+  credits_remaining: number;
+  period_start: string;
+  period_end: string;
+  plan_name?: string;
+  breakdown?: {
+    parsing?: number;
+    extraction?: number;
+    [key: string]: number | undefined;
+  };
+}
+
+export interface CreditValidationResult {
+  sufficient: boolean;
+  warning?: string;
+  remaining: number;
+  estimated: number;
+  plan?: string;
+}
+
+/**
+ * Check LlamaCloud credit balance before processing
+ * @param apiKey - LlamaParse API key
+ * @returns Usage metrics including remaining credits
+ */
+export async function checkCreditsBalance(apiKey: string): Promise<LlamaCloudUsageMetrics> {
+  console.log('[LlamaParse] Checking credit balance...');
+  
+  return retryWithBackoff(async () => {
+    const response = await fetch('https://api.cloud.llamaindex.ai/api/v1/usage', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // Don't throw on 404 - API might not be available, return default values
+      if (response.status === 404) {
+        console.warn('[LlamaParse] Usage API not available (404), assuming unlimited credits');
+        return {
+          total_credits_used: 0,
+          credits_remaining: 999999,
+          period_start: new Date().toISOString(),
+          period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          plan_name: 'unknown'
+        };
+      }
+      throw new Error(`Failed to fetch usage metrics (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[LlamaParse] Credits remaining: ${data.credits_remaining ?? 'unknown'}`);
+    
+    return data;
+  }, 2, 1000, 'LlamaParse checkCredits');
+}
+
+/**
+ * Estimate credits needed for a PDF based on page count and extraction mode
+ * 
+ * LlamaParse v2 Tiers:
+ * - Fast: 1 credit/page (simple text extraction)
+ * - Cost Effective: 3 credits/page (balanced)
+ * - Agentic: 10 credits/page (complex layouts, tables, graphs)
+ * - Agentic Plus: 45 credits/page (maximum precision)
+ * 
+ * @param pageCount - Number of pages in the PDF
+ * @param extractionMode - 'basic' (2 credits), 'premium' (4 credits), 'multimodal' (11 credits)
+ * @returns Estimated credits needed
+ */
+export function estimateCreditsNeeded(
+  pageCount: number, 
+  extractionMode: 'basic' | 'premium' | 'multimodal' = 'basic'
+): number {
+  const creditsPerPage: Record<string, number> = {
+    basic: 2,      // Fast (1) + layout extraction (1)
+    premium: 4,    // Cost Effective (3) + layout (1)
+    multimodal: 11 // Agentic (10) + layout (1)
+  };
+  
+  return pageCount * creditsPerPage[extractionMode];
+}
+
+/**
+ * Validate sufficient credits before processing a batch
+ * @param apiKey - LlamaParse API key
+ * @param estimatedCredits - Estimated credits needed for the job
+ * @param warningThreshold - Percentage threshold for low credit warning (default: 20%)
+ * @throws Error with code 'INSUFFICIENT_CREDITS' if credits are insufficient
+ * @returns Validation result with remaining credits and optional warning
+ */
+export async function validateCreditsBeforeProcessing(
+  apiKey: string,
+  estimatedCredits: number,
+  warningThreshold: number = 0.2
+): Promise<CreditValidationResult> {
+  const usage = await checkCreditsBalance(apiKey);
+  const remaining = usage.credits_remaining ?? 999999; // Default to high if not available
+  
+  // Check if credits are sufficient
+  if (remaining < estimatedCredits) {
+    const error = new Error(
+      `INSUFFICIENT_CREDITS: Need ${estimatedCredits} credits but only ${remaining} available. ` +
+      `Please upgrade your LlamaCloud plan at https://cloud.llamaindex.ai or wait for credit refresh.`
+    );
+    (error as any).code = 'INSUFFICIENT_CREDITS';
+    (error as any).remaining = remaining;
+    (error as any).estimated = estimatedCredits;
+    throw error;
+  }
+  
+  // Calculate warning threshold
+  const totalCredits = remaining + (usage.total_credits_used ?? 0);
+  const percentageRemaining = totalCredits > 0 ? remaining / totalCredits : 1;
+  
+  const warning = percentageRemaining < warningThreshold
+    ? `LOW_CREDITS_WARNING: Only ${remaining} credits remaining (${(percentageRemaining * 100).toFixed(1)}% of period allocation). ` +
+      `Consider upgrading your LlamaCloud plan.`
+    : undefined;
+  
+  if (warning) {
+    console.warn(`[LlamaParse] ⚠️ ${warning}`);
+  } else {
+    console.log(`[LlamaParse] ✓ Credit check passed: ${remaining} remaining, ${estimatedCredits} needed`);
+  }
+  
+  return { 
+    sufficient: true, 
+    warning, 
+    remaining, 
+    estimated: estimatedCredits,
+    plan: usage.plan_name 
+  };
+}

@@ -1,6 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { extractMarkdownFromPDF } from "../_shared/llamaParseClient.ts";
+import { 
+  extractMarkdownFromPDF,
+  validateCreditsBeforeProcessing,
+  estimateCreditsNeeded
+} from "../_shared/llamaParseClient.ts";
 import { parseMarkdownElements } from "../_shared/markdownElementParser.ts";
 
 declare const EdgeRuntime: any;
@@ -182,6 +186,40 @@ serve(async (req) => {
           const pdfBuffer = new Uint8Array(arrayBuffer);
 
           console.log(`[Pipeline A Process] Processing ${doc.file_name} (${pdfBuffer.length} bytes)`);
+
+          // ===== CREDIT CHECK BEFORE LLAMAPARSE =====
+          // Estimate 20 pages for unknown PDFs (will be refined after parsing)
+          const estimatedPages = doc.page_count || 20;
+          const estimatedCredits = estimateCreditsNeeded(estimatedPages, 'multimodal');
+          
+          console.log(`[Pipeline A Process] Credit check: ${estimatedCredits} credits for ~${estimatedPages} pages`);
+          
+          try {
+            const creditCheck = await validateCreditsBeforeProcessing(llamaApiKey, estimatedCredits);
+            if (creditCheck.warning) {
+              console.warn(`[Pipeline A Process] ⚠️ ${creditCheck.warning}`);
+            }
+          } catch (creditError: any) {
+            console.error(`[Pipeline A Process] ❌ Credit check failed:`, creditError.message);
+            
+            // Mark document as blocked
+            await supabase
+              .from('pipeline_a_documents')
+              .update({
+                status: 'blocked',
+                error_message: `INSUFFICIENT_CREDITS: ${creditError.message}`,
+              })
+              .eq('id', doc.id);
+            
+            results.failed++;
+            results.details.push({
+              documentId: doc.id,
+              fileName: doc.file_name,
+              status: 'blocked',
+              error: 'Insufficient LlamaParse credits',
+            });
+            continue; // Skip to next document
+          }
 
           // CORE PIPELINE A: Extract Markdown with LlamaParse
           const result = await extractMarkdownFromPDF(
