@@ -88,11 +88,12 @@ class ToolServerClient {
     viewport_width?: number;
     viewport_height?: number;
   }): Promise<{ session_id: string; success: boolean }> {
+    // Tool Server v8.4.1: viewport = lux_sdk (1260×700)
     return this.post('/browser/start', {
       start_url: startUrl,
       headless: options?.headless ?? false,
-      viewport_width: options?.viewport_width ?? 1280,
-      viewport_height: options?.viewport_height ?? 720,
+      viewport_width: options?.viewport_width ?? 1260,
+      viewport_height: options?.viewport_height ?? 700,
     });
   }
 
@@ -162,9 +163,10 @@ class ToolServerClient {
     x: number;
     y: number;
     session_id?: string;
-    coordinate_origin?: 'viewport' | 'lux_sdk';
+    coordinate_origin?: 'viewport' | 'lux_sdk' | 'normalized';
     click_type?: 'single' | 'double' | 'right';
   }): Promise<ToolServerResponse> {
+    // Tool Server v8.4.1: viewport = lux_sdk (1:1), 'normalized' for Gemini raw coords
     return this.post('/click', {
       scope: options.scope,
       x: options.x,

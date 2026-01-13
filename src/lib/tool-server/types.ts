@@ -38,9 +38,11 @@ export interface ToolServerActionInput {
   start_url?: string;
   
   // Per click
+  // Tool Server v8.4.1: viewport = lux_sdk (1:1 mapping)
+  // 'normalized' is for Gemini raw 0-999 coordinates
   x?: number;
   y?: number;
-  coordinate_origin?: 'viewport' | 'lux_sdk';
+  coordinate_origin?: 'viewport' | 'lux_sdk' | 'normalized';
   click_type?: 'single' | 'double' | 'right';
   
   // Per type

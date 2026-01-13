@@ -4,11 +4,11 @@
 // Proxy per chiamate a Lux Actor API e Gemini Vision API.
 // Usato dal frontend per localizzare elementi visivamente.
 //
-// TUTTE LE CONVERSIONI COORDINATE AVVENGONO QUI!
-// L'Orchestrator riceve sempre coordinate viewport (1280x720).
+// Tool Server v8.4.1: Viewport = Lux SDK (1260×700, 1:1 mapping)
+// L'Orchestrator riceve sempre coordinate viewport.
 //
 // Provider supportati:
-// - lux: Lux Actor API (veloce ~1s, output lux_sdk → convertito a viewport)
+// - lux: Lux Actor API (veloce ~1s, output 1260×700 = viewport diretto)
 // - gemini: Gemini Vision API (lento ~3s, output 0-999 → convertito a viewport)
 // ============================================================
 
@@ -22,18 +22,19 @@ const corsHeaders = {
 // ────────────────────────────────────────────────────────────
 // COORDINATE SYSTEM CONSTANTS
 // ────────────────────────────────────────────────────────────
-// Lux API returns coordinates in 1260x700 space (lux_sdk)
+// Tool Server v8.4.1: viewport = lux_sdk (1:1 mapping)
+// Lux API returns coordinates in 1260×700 space = viewport
 // Gemini Computer Use returns normalized 0-999 coordinates
-// Browser viewport is typically 1280x720 (viewport)
 // ────────────────────────────────────────────────────────────
 const LUX_SDK_WIDTH = 1260;
 const LUX_SDK_HEIGHT = 700;
-const DEFAULT_VIEWPORT_WIDTH = 1280;
-const DEFAULT_VIEWPORT_HEIGHT = 720;
+const DEFAULT_VIEWPORT_WIDTH = 1260;  // Aligned with Lux SDK & Tool Server v8.4.1
+const DEFAULT_VIEWPORT_HEIGHT = 700;  // Aligned with Lux SDK & Tool Server v8.4.1
 
 /**
- * Convert Lux SDK coordinates (1260x700) to viewport coordinates (1280x720).
- * Formula from orchestrator.ts: x * VIEWPORT_WIDTH / LUX_SDK_WIDTH
+ * Convert Lux SDK coordinates to viewport coordinates.
+ * In v8.4.1: viewport = lux_sdk (1:1 mapping, no conversion needed).
+ * This function is kept for API consistency but returns input unchanged.
  */
 function luxToViewport(
   x: number,
@@ -41,6 +42,12 @@ function luxToViewport(
   viewportWidth = DEFAULT_VIEWPORT_WIDTH,
   viewportHeight = DEFAULT_VIEWPORT_HEIGHT
 ): { x: number; y: number } {
+  // v8.4.1: viewport = lux_sdk, 1:1 mapping
+  // No conversion needed when dimensions match
+  if (viewportWidth === LUX_SDK_WIDTH && viewportHeight === LUX_SDK_HEIGHT) {
+    return { x, y };
+  }
+  // Fallback for custom viewport sizes
   return {
     x: Math.round(x * viewportWidth / LUX_SDK_WIDTH),
     y: Math.round(y * viewportHeight / LUX_SDK_HEIGHT),
