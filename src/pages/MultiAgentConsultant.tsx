@@ -111,6 +111,8 @@ export default function MultiAgentConsultant() {
     status: string;
     stepInfo?: string;
   } | null>(null);
+  // Tool Server connection status
+  const [toolServerStatus, setToolServerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const currentConversationRef = useRef<string | null>(null);
@@ -256,6 +258,18 @@ export default function MultiAgentConsultant() {
       }
     }
   }, [streamingConversationId, messages, preGenerateAudio]);
+
+  // Tool Server connection check (every 30s)
+  useEffect(() => {
+    const checkToolServer = async () => {
+      const result = await toolServerClient.testConnection();
+      setToolServerStatus(result.connected ? 'connected' : 'disconnected');
+    };
+    
+    checkToolServer();
+    const interval = setInterval(checkToolServer, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Realtime subscription for long responses AND message updates
   useEffect(() => {
@@ -1779,6 +1793,22 @@ export default function MultiAgentConsultant() {
                                   ? `${unsyncedDocsCount} ${unsyncedDocsCount === 1 ? 'documento con problemi di sincronizzazione' : 'documenti con problemi di sincronizzazione'}`
                                   : 'Modifica agente'
                                 }
+                              </TooltipContent>
+                            </Tooltip>
+                            {/* Tool Server Status Indicator */}
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted cursor-pointer">
+                                  <div className={`w-2 h-2 rounded-full ${
+                                    toolServerStatus === 'connected' ? 'bg-green-500' :
+                                    toolServerStatus === 'disconnected' ? 'bg-red-500' :
+                                    'bg-yellow-500 animate-pulse'
+                                  }`} />
+                                  <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                Tool Server: {toolServerStatus === 'connected' ? '🟢 Connesso' : toolServerStatus === 'disconnected' ? '🔴 Non connesso' : '🟡 Verifica...'}
                               </TooltipContent>
                             </Tooltip>
                        </div>

@@ -29,8 +29,9 @@ class ToolServerClient {
     }
     
     // 2. Variabile d'ambiente (per sviluppo locale)
-    if (typeof import !== 'undefined' && import.meta?.env?.VITE_TOOL_SERVER_URL) {
-      return import.meta.env.VITE_TOOL_SERVER_URL;
+    const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
+    if (envUrl) {
+      return envUrl;
     }
     
     // 3. Default localhost
@@ -44,7 +45,7 @@ class ToolServerClient {
     }
   }
 
-  public getCurrentUrl(): string {
+  public getConfiguredUrl(): string {
     return this.config.baseUrl;
   }
 
