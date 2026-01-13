@@ -48,6 +48,9 @@ Available actions:
 - browser_start: Start browser with initial URL (returns session_id)
 - screenshot: Capture screen (browser or desktop), returns base64 image
 - dom_tree: Get Accessibility Tree of the page (text structure)
+- element_rect: Get precise X,Y coordinates of a DOM element by selector/text/role/label/placeholder
+  Returns: { x, y, width, height, found, visible, enabled }
+  Use this to get exact coordinates after analyzing DOM tree (no vision needed!)
 - click: Click at specific coordinates
 - type: Type text into focused element
 - scroll: Scroll page (up/down)
@@ -55,19 +58,24 @@ Available actions:
 - browser_navigate: Navigate to URL
 - browser_stop: Close browser session
 
-WORKFLOW:
+WORKFLOW (DOM-based, no vision):
 1. browser_start → get session_id
 2. dom_tree → understand page structure
-3. screenshot → see current state
-4. Use lux_actor_vision or gemini_computer_use to find coordinates
-5. click/type/scroll/keypress to interact
-6. Repeat as needed`,
+3. element_rect → get precise coordinates of target element
+4. click/type/scroll/keypress to interact
+5. Repeat as needed
+
+WORKFLOW (vision-based):
+1. browser_start → get session_id
+2. screenshot → capture current state
+3. Use lux_actor_vision or gemini_computer_use to find coordinates
+4. click/type/scroll/keypress to interact`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['screenshot', 'dom_tree', 'click', 'type', 'scroll', 'keypress',
+          enum: ['screenshot', 'dom_tree', 'element_rect', 'click', 'type', 'scroll', 'keypress',
                  'browser_start', 'browser_navigate', 'browser_stop'],
           description: 'Action to execute'
         },
@@ -92,12 +100,17 @@ WORKFLOW:
           enum: ['single', 'double', 'right'],
           description: 'Click type (default: single)'
         },
-        text: { type: 'string', description: 'Text to type' },
+        text: { type: 'string', description: 'Text to type, OR text content to find element (for element_rect)' },
         direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction' },
         amount: { type: 'number', description: 'Scroll amount in pixels (default: 500)' },
         keys: { type: 'string', description: 'Keys to press (e.g., "Enter", "Control+A")' },
         start_url: { type: 'string', description: 'Initial URL for browser_start' },
-        url: { type: 'string', description: 'URL for browser_navigate' }
+        url: { type: 'string', description: 'URL for browser_navigate' },
+        // element_rect parameters
+        selector: { type: 'string', description: 'CSS selector for element_rect (e.g., "button.submit", "#login-btn")' },
+        role: { type: 'string', description: 'ARIA role to find element (e.g., "button", "textbox", "link")' },
+        label: { type: 'string', description: 'Accessible label/aria-label to find element' },
+        placeholder: { type: 'string', description: 'Input placeholder text to find element' }
       },
       required: ['action']
     }
