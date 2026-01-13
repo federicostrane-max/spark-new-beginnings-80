@@ -115,7 +115,10 @@ class ToolServerClient {
     try {
       const response = await fetch(`${baseUrl}/status`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers: { 
+          'Accept': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        }
       });
       
       if (!response.ok) {
@@ -154,6 +157,7 @@ class ToolServerClient {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
           ...options.headers,
         },
         signal: controller.signal,
