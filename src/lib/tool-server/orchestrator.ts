@@ -918,39 +918,14 @@ export class Orchestrator {
   // ============================================================
   // VISION FUNCTIONS (NO LLM - Direct API calls)
   // ============================================================
+  // NOTA: Tutte le conversioni coordinate avvengono nell'edge function
+  // tool-server-vision. L'Orchestrator riceve sempre coordinate viewport.
+  // ============================================================
 
-  // ============================================================
-  // COORDINATE CONVERSION CONSTANTS
-  // Lux API returns coordinates in 1260x700 space (lux_sdk)
-  // Browser viewport is typically 1280x720 (viewport)
-  // ============================================================
-  private static readonly LUX_SDK_WIDTH = 1260;
-  private static readonly LUX_SDK_HEIGHT = 700;
+  // Viewport reference dimensions (for edge function calls)
   private static readonly VIEWPORT_WIDTH = 1280;
   private static readonly VIEWPORT_HEIGHT = 720;
-  private static readonly NORMALIZED_COORD_MAX = 999;
 
-  /**
-   * Convert Lux SDK coordinates (1260x700) to viewport coordinates (1280x720).
-   * Used for browser automation where we need viewport-relative clicks.
-   */
-  private luxToViewport(x: number, y: number): { x: number; y: number } {
-    return {
-      x: Math.round(x * Orchestrator.VIEWPORT_WIDTH / Orchestrator.LUX_SDK_WIDTH),
-      y: Math.round(y * Orchestrator.VIEWPORT_HEIGHT / Orchestrator.LUX_SDK_HEIGHT),
-    };
-  }
-
-  /**
-   * Convert Gemini normalized coordinates (0-999) to viewport coordinates.
-   * Used as fallback if edge function doesn't convert.
-   */
-  private normalizedToViewport(x: number, y: number): { x: number; y: number } {
-    return {
-      x: Math.round(x / 1000 * Orchestrator.VIEWPORT_WIDTH),
-      y: Math.round(y / 1000 * Orchestrator.VIEWPORT_HEIGHT),
-    };
-  }
 
   private async callLuxVision(screenshot: string, target: string): Promise<VisionResult> {
     try {
@@ -959,28 +934,27 @@ export class Orchestrator {
           provider: 'lux',
           image: screenshot,
           task: `Find and locate: ${target}`,
+          viewport_width: Orchestrator.VIEWPORT_WIDTH,
+          viewport_height: Orchestrator.VIEWPORT_HEIGHT,
         },
       });
 
       if (error) throw error;
 
-      // Convert Lux coordinates to viewport coordinates for browser use
-      let finalX = data.x ?? null;
-      let finalY = data.y ?? null;
+      // Edge function già converte lux_sdk → viewport, nessuna conversione necessaria
+      const finalX = data.x ?? null;
+      const finalY = data.y ?? null;
 
-      if (finalX !== null && finalY !== null) {
-        const converted = this.luxToViewport(finalX, finalY);
-        this.log('info', `🔄 Lux coords (${finalX}, ${finalY}) → viewport (${converted.x}, ${converted.y})`);
-        finalX = converted.x;
-        finalY = converted.y;
+      if (data.was_converted) {
+        this.log('info', `🔄 Lux: raw(${data.x_raw}, ${data.y_raw}) → viewport(${finalX}, ${finalY})`);
       }
 
       return {
-        found: data.success && finalX !== undefined,
+        found: data.success && finalX !== null,
         x: finalX,
         y: finalY,
         confidence: data.confidence ?? 0,
-        coordinate_system: 'viewport',  // Now returns viewport coordinates
+        coordinate_system: 'viewport',
         reasoning: data.action || null,
       };
 
@@ -1015,23 +989,12 @@ Rispondi SOLO con JSON: {"x": numero, "y": numero, "confidence": 0.0-1.0, "reaso
 
       if (error) throw error;
 
-      // L'edge function già converte, ma fallback se coordinate sembrano normalized
-      let finalX = data.x ?? null;
-      let finalY = data.y ?? null;
+      // Edge function già converte normalized (0-999) → viewport, nessuna conversione necessaria
+      const finalX = data.x ?? null;
+      const finalY = data.y ?? null;
 
-      if (finalX !== null && finalY !== null) {
-        // Rileva se sono ancora normalized (0-999) e non viewport
-        const looksNormalized = finalX <= Orchestrator.NORMALIZED_COORD_MAX && 
-                                 finalY <= Orchestrator.NORMALIZED_COORD_MAX &&
-                                 data.coordinate_system !== 'viewport' &&
-                                 !data.was_denormalized;
-        
-        if (looksNormalized) {
-          const converted = this.normalizedToViewport(finalX, finalY);
-          this.log('info', `🔄 Gemini fallback: normalized(${finalX}, ${finalY}) → viewport(${converted.x}, ${converted.y})`);
-          finalX = converted.x;
-          finalY = converted.y;
-        }
+      if (data.was_converted) {
+        this.log('info', `🔄 Gemini: raw(${data.x_raw}, ${data.y_raw}) → viewport(${finalX}, ${finalY})`);
       }
 
       return {

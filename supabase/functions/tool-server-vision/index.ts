@@ -4,9 +4,12 @@
 // Proxy per chiamate a Lux Actor API e Gemini Vision API.
 // Usato dal frontend per localizzare elementi visivamente.
 //
+// TUTTE LE CONVERSIONI COORDINATE AVVENGONO QUI!
+// L'Orchestrator riceve sempre coordinate viewport (1280x720).
+//
 // Provider supportati:
-// - lux: Lux Actor API (veloce ~1s, coordinate lux_sdk)
-// - gemini: Gemini Vision API (lento ~3s, coordinate viewport)
+// - lux: Lux Actor API (veloce ~1s, output lux_sdk → convertito a viewport)
+// - gemini: Gemini Vision API (lento ~3s, output 0-999 → convertito a viewport)
 // ============================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -16,14 +19,38 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Viewport defaults for coordinate denormalization
+// ────────────────────────────────────────────────────────────
+// COORDINATE SYSTEM CONSTANTS
+// ────────────────────────────────────────────────────────────
+// Lux API returns coordinates in 1260x700 space (lux_sdk)
+// Gemini Computer Use returns normalized 0-999 coordinates
+// Browser viewport is typically 1280x720 (viewport)
+// ────────────────────────────────────────────────────────────
+const LUX_SDK_WIDTH = 1260;
+const LUX_SDK_HEIGHT = 700;
 const DEFAULT_VIEWPORT_WIDTH = 1280;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
 
 /**
+ * Convert Lux SDK coordinates (1260x700) to viewport coordinates (1280x720).
+ * Formula from orchestrator.ts: x * VIEWPORT_WIDTH / LUX_SDK_WIDTH
+ */
+function luxToViewport(
+  x: number,
+  y: number,
+  viewportWidth = DEFAULT_VIEWPORT_WIDTH,
+  viewportHeight = DEFAULT_VIEWPORT_HEIGHT
+): { x: number; y: number } {
+  return {
+    x: Math.round(x * viewportWidth / LUX_SDK_WIDTH),
+    y: Math.round(y * viewportHeight / LUX_SDK_HEIGHT),
+  };
+}
+
+/**
  * Convert Gemini normalized coordinates (0-999) to viewport pixels.
- * Gemini 2.5 Computer Use outputs coords in 0-999 range that need to be
- * denormalized to the actual viewport dimensions.
+ * Gemini 2.5 Computer Use outputs coords in 0-999 range.
+ * Formula from orchestrator.ts: x / 1000 * VIEWPORT_WIDTH
  */
 function normalizedToViewport(
   x: number,
@@ -46,6 +73,8 @@ interface LuxRequest {
   image: string;
   task: string;
   model?: string;
+  viewport_width?: number;   // For converting lux_sdk to viewport
+  viewport_height?: number;  // For converting lux_sdk to viewport
 }
 
 interface GeminiRequest {
@@ -58,16 +87,17 @@ interface GeminiRequest {
 
 interface VisionResponse {
   success: boolean;
-  x?: number;
-  y?: number;
-  x_normalized?: number;     // Raw normalized coords (0-999) before denormalization
-  y_normalized?: number;     // Raw normalized coords (0-999) before denormalization
-  was_denormalized?: boolean; // True if coords were converted from 0-999 to viewport
+  x?: number;                  // Final viewport coordinates
+  y?: number;                  // Final viewport coordinates
+  x_raw?: number;              // Raw coords before conversion
+  y_raw?: number;              // Raw coords before conversion
+  was_converted?: boolean;     // True if coords were converted to viewport
   confidence?: number;
   reasoning?: string;
   action?: string;
   error?: string;
-  coordinate_system?: 'viewport' | 'lux_sdk';
+  coordinate_system: 'viewport';  // Always viewport after conversion
+  source_system?: 'lux_sdk' | 'normalized_0_999';  // Original coord system
 }
 
 // ────────────────────────────────────────────────────────────
@@ -171,20 +201,37 @@ async function callLuxActor(request: LuxRequest, requestId: string): Promise<Vis
     return {
       success: false,
       error: 'Lux did not return valid coordinates. Element may not be visible.',
+      coordinate_system: 'viewport',
     };
   }
 
+  // Raw Lux coordinates in lux_sdk space (1260x700)
+  const rawX = data.x;
+  const rawY = data.y;
+
+  // Convert lux_sdk (1260x700) → viewport (1280x720)
+  const viewportWidth = request.viewport_width ?? DEFAULT_VIEWPORT_WIDTH;
+  const viewportHeight = request.viewport_height ?? DEFAULT_VIEWPORT_HEIGHT;
+  const converted = luxToViewport(rawX, rawY, viewportWidth, viewportHeight);
+
+  console.log(`🔄 [${requestId}] Lux: lux_sdk(${rawX}, ${rawY}) → viewport(${converted.x}, ${converted.y})`);
+
   return {
     success: true,
-    x: data.x,
-    y: data.y,
+    x: converted.x,
+    y: converted.y,
+    x_raw: rawX,
+    y_raw: rawY,
+    was_converted: true,
     confidence: data.confidence || 1.0,
     action: data.action,
+    coordinate_system: 'viewport',
+    source_system: 'lux_sdk',
   };
 }
 
 // ════════════════════════════════════════════════════════════
-// GEMINI VISION API
+// GEMINI VISION API (Computer Use Model)
 // ════════════════════════════════════════════════════════════
 
 async function callGeminiVision(request: GeminiRequest, requestId: string): Promise<VisionResponse> {
@@ -202,8 +249,8 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
 
   const startTime = Date.now();
 
-  // Use Gemini 2.5 Computer Use for better element localization
-  const model = 'gemini-2.5-flash-preview-05-20';
+  // Use Gemini 2.5 Computer Use model - outputs normalized 0-999 coordinates
+  const model = 'gemini-2.5-computer-use-preview-10-2025';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const response = await fetch(url, {
@@ -245,6 +292,7 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
     return {
       success: false,
       error: 'Gemini returned empty response',
+      coordinate_system: 'viewport',
     };
   }
 
@@ -255,6 +303,7 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
       success: false,
       error: 'Could not parse coordinates from Gemini response',
       reasoning: text,
+      coordinate_system: 'viewport',
     };
   }
 
@@ -266,41 +315,32 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
         success: false,
         error: 'Gemini returned invalid coordinates',
         reasoning: text,
+        coordinate_system: 'viewport',
       };
     }
 
+    // Gemini Computer Use ALWAYS returns normalized 0-999 coordinates
     const rawX = Math.round(coords.x);
     const rawY = Math.round(coords.y);
 
-    // Check if coordinates look like normalized (0-999 range)
-    // Gemini Computer Use models return coords in 0-999 normalized space
-    const looksNormalized = rawX <= 999 && rawY <= 999 && rawX >= 0 && rawY >= 0;
-    
-    let finalX = rawX;
-    let finalY = rawY;
-    
-    if (looksNormalized) {
-      // Denormalize from 0-999 to viewport pixels
-      const viewportWidth = request.viewport_width ?? DEFAULT_VIEWPORT_WIDTH;
-      const viewportHeight = request.viewport_height ?? DEFAULT_VIEWPORT_HEIGHT;
-      
-      const converted = normalizedToViewport(rawX, rawY, viewportWidth, viewportHeight);
-      finalX = converted.x;
-      finalY = converted.y;
-      
-      console.log(`🔄 [${requestId}] Gemini: normalized(${rawX}, ${rawY}) → viewport(${finalX}, ${finalY})`);
-    }
+    // Convert normalized (0-999) → viewport pixels
+    const viewportWidth = request.viewport_width ?? DEFAULT_VIEWPORT_WIDTH;
+    const viewportHeight = request.viewport_height ?? DEFAULT_VIEWPORT_HEIGHT;
+    const converted = normalizedToViewport(rawX, rawY, viewportWidth, viewportHeight);
+
+    console.log(`🔄 [${requestId}] Gemini: normalized(${rawX}, ${rawY}) → viewport(${converted.x}, ${converted.y})`);
 
     return {
       success: true,
-      x: finalX,
-      y: finalY,
-      x_normalized: looksNormalized ? rawX : undefined,
-      y_normalized: looksNormalized ? rawY : undefined,
-      was_denormalized: looksNormalized,
+      x: converted.x,
+      y: converted.y,
+      x_raw: rawX,
+      y_raw: rawY,
+      was_converted: true,
       confidence: coords.confidence || 0.8,
       reasoning: coords.reasoning || coords.explanation,
       coordinate_system: 'viewport',
+      source_system: 'normalized_0_999',
     };
 
   } catch (parseError) {
@@ -309,6 +349,7 @@ async function callGeminiVision(request: GeminiRequest, requestId: string): Prom
       success: false,
       error: 'Failed to parse JSON from Gemini response',
       reasoning: text,
+      coordinate_system: 'viewport',
     };
   }
 }
