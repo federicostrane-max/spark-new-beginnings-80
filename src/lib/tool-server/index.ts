@@ -5,7 +5,7 @@
 // ============================================================
 
 // Core client and utilities
-export { toolServerClient, ToolServerClient } from './client';
+export { toolServerClient, ToolServerClient, TOOL_SERVER_URL_CHANGED_EVENT } from './client';
 export { executeToolUse } from './tool-executor';
 export { sessionManager } from './session-manager';
 

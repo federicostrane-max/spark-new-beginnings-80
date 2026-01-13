@@ -30,7 +30,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 // Browser automation imports
-import { toolServerClient, sessionManager, Orchestrator, Plan } from "@/lib/tool-server";
+import { toolServerClient, sessionManager, Orchestrator, Plan, TOOL_SERVER_URL_CHANGED_EVENT } from "@/lib/tool-server";
+import { ToolServerSettings } from "@/components/ToolServerSettings";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface Agent {
   id: string;
@@ -111,8 +113,9 @@ export default function MultiAgentConsultant() {
     status: string;
     stepInfo?: string;
   } | null>(null);
-  // Tool Server connection status
-  const [toolServerStatus, setToolServerStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
+  // Tool Server connection status (ora include 'not_configured')
+  const [toolServerStatus, setToolServerStatus] = useState<'connected' | 'disconnected' | 'not_configured' | 'checking'>('checking');
+  const [showToolServerDialog, setShowToolServerDialog] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const currentConversationRef = useRef<string | null>(null);
@@ -259,16 +262,38 @@ export default function MultiAgentConsultant() {
     }
   }, [streamingConversationId, messages, preGenerateAudio]);
 
-  // Tool Server connection check (every 30s)
+  // Tool Server connection check (ogni 30s + event-driven)
   useEffect(() => {
     const checkToolServer = async () => {
+      // Prima verifica: URL è configurato?
+      if (!toolServerClient.isConfigured()) {
+        setToolServerStatus('not_configured');
+        return; // NON fare fetch a localhost se non configurato
+      }
+      
+      // URL configurato → testa la connessione
+      setToolServerStatus('checking');
       const result = await toolServerClient.testConnection();
       setToolServerStatus(result.connected ? 'connected' : 'disconnected');
     };
     
+    // Check iniziale
     checkToolServer();
+    
+    // Polling ogni 30s come fallback
     const interval = setInterval(checkToolServer, 30000);
-    return () => clearInterval(interval);
+    
+    // Event listener per aggiornamento immediato dopo Save
+    const handleUrlChanged = () => {
+      console.log('[TOOL SERVER] URL changed, checking connection...');
+      checkToolServer();
+    };
+    window.addEventListener(TOOL_SERVER_URL_CHANGED_EVENT, handleUrlChanged);
+    
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener(TOOL_SERVER_URL_CHANGED_EVENT, handleUrlChanged);
+    };
   }, []);
 
   // Realtime subscription for long responses AND message updates
@@ -1795,20 +1820,30 @@ export default function MultiAgentConsultant() {
                                 }
                               </TooltipContent>
                             </Tooltip>
-                            {/* Tool Server Status Indicator */}
+                            {/* Tool Server Status Indicator - CLICCABILE */}
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted cursor-pointer">
+                                <div 
+                                  className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted cursor-pointer"
+                                  onClick={() => setShowToolServerDialog(true)}
+                                >
                                   <div className={`w-2 h-2 rounded-full ${
                                     toolServerStatus === 'connected' ? 'bg-green-500' :
                                     toolServerStatus === 'disconnected' ? 'bg-red-500' :
+                                    toolServerStatus === 'not_configured' ? 'bg-yellow-500' :
                                     'bg-yellow-500 animate-pulse'
                                   }`} />
                                   <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent>
-                                Tool Server: {toolServerStatus === 'connected' ? '🟢 Connesso' : toolServerStatus === 'disconnected' ? '🔴 Non connesso' : '🟡 Verifica...'}
+                                <div className="text-xs">
+                                  {toolServerStatus === 'connected' && '🟢 Tool Server connesso'}
+                                  {toolServerStatus === 'disconnected' && '🔴 Tool Server non connesso'}
+                                  {toolServerStatus === 'not_configured' && '🟡 Tool Server non configurato'}
+                                  {toolServerStatus === 'checking' && '⏳ Verifica in corso...'}
+                                  <div className="text-muted-foreground mt-1">Clicca per configurare</div>
+                                </div>
                               </TooltipContent>
                             </Tooltip>
                        </div>
@@ -2031,6 +2066,16 @@ export default function MultiAgentConsultant() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      {/* Tool Server Settings Dialog */}
+      <Dialog open={showToolServerDialog} onOpenChange={setShowToolServerDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Tool Server Configuration</DialogTitle>
+          </DialogHeader>
+          <ToolServerSettings />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
