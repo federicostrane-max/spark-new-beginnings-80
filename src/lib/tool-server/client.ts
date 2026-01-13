@@ -25,6 +25,15 @@ export function normalizeToolServerUrl(input: string): string {
 
 export const TOOL_SERVER_URL_CHANGED_EVENT = 'toolServerUrlChanged';
 
+// ──────────────────────────────────────────────────────────
+// Headers comuni per tutte le richieste
+// CRITICAL: ngrok-skip-browser-warning bypassa la pagina di warning
+// ──────────────────────────────────────────────────────────
+const COMMON_HEADERS = {
+  'Accept': 'application/json',
+  'ngrok-skip-browser-warning': 'true',
+};
+
 class ToolServerClient {
   private timeout: number;
 
@@ -115,10 +124,7 @@ class ToolServerClient {
     try {
       const response = await fetch(`${baseUrl}/status`, {
         method: 'GET',
-        headers: { 
-          'Accept': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        }
+        headers: { ...COMMON_HEADERS }
       });
       
       if (!response.ok) {
@@ -157,7 +163,7 @@ class ToolServerClient {
         ...options,
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
+          ...COMMON_HEADERS,
           ...options.headers,
         },
         signal: controller.signal,
