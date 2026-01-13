@@ -113,7 +113,12 @@ class ToolServerClient {
   // DOM / Accessibility Tree
   // ──────────────────────────────────────────────────────────
 
-  async getDomTree(sessionId: string): Promise<{ tree: string; success: boolean }> {
+  async getDomTree(sessionId: string): Promise<{ 
+    success: boolean;
+    tree: Record<string, unknown> | null;
+    url?: string;
+    error?: string;
+  }> {
     return this.get(`/browser/dom/tree?session_id=${sessionId}`);
   }
 
