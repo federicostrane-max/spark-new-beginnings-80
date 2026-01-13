@@ -1,26 +1,11 @@
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Server, CheckCircle, XCircle, AlertCircle, RefreshCw, ExternalLink } from "lucide-react";
+import { Loader2, Server, CheckCircle, XCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { toolServerClient } from "@/lib/tool-server";
-
-// ──────────────────────────────────────────────────────────
-// Normalizzazione URL (coerente con client.ts)
-// ──────────────────────────────────────────────────────────
-
-function normalizeToolServerUrl(input: string): string {
-  if (!input) return '';
-  let url = input.trim();
-  // Rimuove trailing slash
-  while (url.endsWith('/')) {
-    url = url.slice(0, -1);
-  }
-  return url;
-}
+import { toolServerClient, normalizeToolServerUrl } from "@/lib/tool-server";
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'not_configured' | 'testing';
 

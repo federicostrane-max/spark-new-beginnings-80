@@ -1,14 +1,15 @@
 // ============================================================
-// HTTP Client per Tool Server (127.0.0.1:8766)
+// HTTP Client per Tool Server (ngrok URL configurato dall'utente)
+// CRITICAL: MAI fallback a localhost - se non configurato, errore!
 // ============================================================
 
 import { DEFAULT_CONFIG, ToolServerConfig, ToolServerResponse } from './types';
 
 // ──────────────────────────────────────────────────────────
-// URL Normalization Helper
+// URL Normalization Helper (EXPORTED per riuso)
 // ──────────────────────────────────────────────────────────
 
-function normalizeToolServerUrl(input: string): string {
+export function normalizeToolServerUrl(input: string): string {
   if (!input) return '';
   let url = input.trim();
   // Rimuove trailing slash
@@ -33,11 +34,11 @@ class ToolServerClient {
   }
 
   // ──────────────────────────────────────────────────────────
-  // URL Configuration (localStorage > env > default)
-  // Chiamato AD OGNI richiesta per leggere sempre il valore corrente
+  // URL Configuration (localStorage > env > NULL)
+  // CRITICAL: Ritorna NULL se non configurato, MAI localhost!
   // ──────────────────────────────────────────────────────────
 
-  private getBaseUrl(): string {
+  private getBaseUrl(): string | null {
     // 1. localStorage (URL ngrok configurato dall'utente)
     if (typeof window !== 'undefined') {
       const savedUrl = localStorage.getItem('toolServerUrl');
@@ -50,22 +51,26 @@ class ToolServerClient {
     // 2. Variabile d'ambiente (per sviluppo locale)
     const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
     if (envUrl) {
-      return normalizeToolServerUrl(envUrl);
+      const normalized = normalizeToolServerUrl(envUrl);
+      if (normalized) return normalized;
     }
     
-    // 3. Default localhost (SOLO se non c'è URL configurato)
-    return 'http://127.0.0.1:8766';
+    // 3. NESSUN FALLBACK A LOCALHOST - ritorna null
+    return null;
   }
 
-  // Verifica se c'è un URL configurato (non default)
-  public isConfigured(): boolean {
-    if (typeof window !== 'undefined') {
-      const savedUrl = localStorage.getItem('toolServerUrl');
-      const normalized = normalizeToolServerUrl(savedUrl || '');
-      if (normalized) return true;
+  // Helper interno: lancia errore se non configurato
+  private getBaseUrlOrThrow(): string {
+    const url = this.getBaseUrl();
+    if (!url) {
+      throw new Error('Tool Server non configurato. Apri le impostazioni e salva il tuo URL ngrok.');
     }
-    const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
-    return !!envUrl;
+    return url;
+  }
+
+  // Verifica se c'è un URL configurato
+  public isConfigured(): boolean {
+    return this.getBaseUrl() !== null;
   }
 
   // Salva in localStorage + emette evento per aggiornamento immediato UI
@@ -84,18 +89,28 @@ class ToolServerClient {
     }
   }
 
-  // Ritorna sempre il valore corrente (dinamico)
-  public getConfiguredUrl(): string {
+  // Ritorna URL configurato o null se non configurato
+  public getConfiguredUrl(): string | null {
     return this.getBaseUrl();
   }
 
+  // CRITICAL: Se non configurato, ritorna errore SENZA fare fetch
   public async testConnection(): Promise<{
     connected: boolean;
     version?: string;
     error?: string;
-    urlUsed?: string;
+    urlUsed?: string | null;
   }> {
     const baseUrl = this.getBaseUrl();
+    
+    // Se non configurato, ritorna subito senza fare fetch
+    if (!baseUrl) {
+      return { 
+        connected: false, 
+        error: 'Tool Server non configurato', 
+        urlUsed: null 
+      };
+    }
     
     try {
       const response = await fetch(`${baseUrl}/status`, {
@@ -120,14 +135,15 @@ class ToolServerClient {
   }
 
   // ──────────────────────────────────────────────────────────
-  // HTTP Methods
+  // HTTP Methods - CRITICAL: usa getBaseUrlOrThrow()
   // ──────────────────────────────────────────────────────────
 
   private async request<T = ToolServerResponse>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const baseUrl = this.getBaseUrl();
+    // Lancia errore se non configurato - NESSUNA fetch a localhost
+    const baseUrl = this.getBaseUrlOrThrow();
     const url = `${baseUrl}${endpoint}`;
     
     const controller = new AbortController();
@@ -154,7 +170,7 @@ class ToolServerClient {
       clearTimeout(timeoutId);
       
       if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Tool Server timeout (URL: ${baseUrl}) - verifica che sia in esecuzione`);
+        throw new Error(`Tool Server timeout (URL: ${baseUrl}) - verifica che ngrok sia in esecuzione`);
       }
       
       // Aggiungi URL all'errore per debugging
