@@ -1347,6 +1347,51 @@ export default function MultiAgentConsultant() {
                     params: command.params || {},
                   });
                   
+                  // Per azioni che richiedono risultato (dom_tree, screenshot), invia al backend
+                  if (['dom_tree', 'screenshot'].includes(command.action) && result.success) {
+                    console.log(`📤 [LOCAL] Sending ${command.action} result back to agent`);
+                    
+                    const toolServerResultPayload = {
+                      action: command.action,
+                      success: result.success,
+                      data: result.data as Record<string, unknown>,
+                      error: result.error,
+                      session_id: (result.data as { session_id?: string })?.session_id || sessionManager.sessionId,
+                      timestamp: Date.now()
+                    };
+                    
+                    try {
+                      const response = await fetch(
+                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/agent-chat`,
+                        {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session?.access_token}`,
+                          },
+                          body: JSON.stringify({
+                            message: '', // Empty - content is in toolServerResult
+                            conversationId: currentConversation?.id || streamingConversationId,
+                            agentSlug: currentAgent?.slug,
+                            toolServerResult: toolServerResultPayload,
+                            silent: true
+                          }),
+                        }
+                      );
+                      
+                      if (!response.ok) {
+                        throw new Error(`Failed to send tool result: ${response.status}`);
+                      }
+                      
+                      const actionLabel = command.action === 'screenshot' ? 'Screenshot captured' : 'DOM structure analyzed';
+                      toast.success(`${actionLabel}, agent continuing...`);
+                      
+                    } catch (sendError) {
+                      console.error(`❌ [LOCAL] Failed to send ${command.action} result:`, sendError);
+                      toast.error(`Failed to send result to agent: ${sendError instanceof Error ? sendError.message : 'Unknown error'}`);
+                    }
+                  }
+                  
                 } else if (command.tool === 'browser_orchestrator') {
                   // Execute pre-generated plan via Orchestrator
                   result = await executeLocalOrchestratorPlan({

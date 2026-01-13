@@ -48,6 +48,25 @@ interface DomResultPayload {
   timestamp: number;
 }
 
+// Tool Server result payload for tool_server_action bidirectional flow
+interface ToolServerResultPayload {
+  action: string;
+  success: boolean;
+  data?: {
+    // Per screenshot
+    image_base64?: string;
+    width?: number;
+    height?: number;
+    // Per dom_tree
+    tree?: string;
+    // Altri dati
+    [key: string]: unknown;
+  };
+  error?: string;
+  session_id?: string;
+  timestamp: number;
+}
+
 interface UserIntent {
   type: 'SEARCH_REQUEST' | 'DOWNLOAD_COMMAND' | 'FILTER_REQUEST' | 'SEMANTIC_QUESTION' | 'UNKNOWN';
   topic?: string;
@@ -2296,7 +2315,7 @@ Deno.serve(async (req) => {
     const requestBody = await req.json();
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
     
-    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool, luxMode, domResult, silent } = requestBody as {
+    const { conversationId, message, agentSlug, attachments, skipSystemValidation, stream, serverUserId, documentFilter, forcedTool, luxMode, domResult, toolServerResult, silent } = requestBody as {
       conversationId?: string;
       message: string;
       agentSlug: string;
@@ -2308,6 +2327,7 @@ Deno.serve(async (req) => {
       forcedTool?: string;
       luxMode?: string;
       domResult?: DomResultPayload;
+      toolServerResult?: ToolServerResultPayload;
       silent?: boolean;
     };
 
@@ -4206,6 +4226,66 @@ Use the selectors and element descriptions above to create precise steps with do
             console.log(`🌐 [REQ-${requestId}] DOM context injected (${domResult.dom_tree.length} chars)`);
           }
           
+          // ============================================================
+          // TOOL_SERVER_ACTION: Inject result if present in request
+          // ============================================================
+          if (toolServerResult) {
+            console.log(`🔧 [REQ-${requestId}] Tool Server Result received: ${toolServerResult.action}`);
+            
+            let resultContent = '';
+            
+            if (toolServerResult.action === 'screenshot' && toolServerResult.data?.image_base64) {
+              // Per screenshot, indica che l'immagine è stata catturata
+              resultContent = `
+[TOOL_SERVER_ACTION RESULT - SCREENSHOT]
+Action: screenshot
+Success: ${toolServerResult.success}
+Dimensions: ${toolServerResult.data.width || 'unknown'}x${toolServerResult.data.height || 'unknown'}
+Session ID: ${toolServerResult.session_id || 'N/A'}
+Timestamp: ${new Date(toolServerResult.timestamp).toISOString()}
+
+The screenshot has been captured successfully. Image data (${Math.round((toolServerResult.data.image_base64.length * 3) / 4 / 1024)} KB) is available.
+Use this visual information to understand the current state of the page and plan your next actions.
+---
+`;
+            } else if (toolServerResult.action === 'dom_tree' && toolServerResult.data?.tree) {
+              resultContent = `
+[TOOL_SERVER_ACTION RESULT - DOM_TREE]
+Action: dom_tree
+Success: ${toolServerResult.success}
+Session ID: ${toolServerResult.session_id || 'N/A'}
+Timestamp: ${new Date(toolServerResult.timestamp).toISOString()}
+
+DOM Structure:
+${toolServerResult.data.tree}
+
+---
+Use this DOM structure to locate elements and plan your next actions.
+DO NOT call tool_server_action with action='dom_tree' again - you already have the structure.
+`;
+            } else if (toolServerResult.error) {
+              resultContent = `
+[TOOL_SERVER_ACTION RESULT - ERROR]
+Action: ${toolServerResult.action}
+Success: false
+Error: ${toolServerResult.error}
+---
+The action failed. Consider retrying or using an alternative approach.
+`;
+            } else {
+              resultContent = `
+[TOOL_SERVER_ACTION RESULT]
+Action: ${toolServerResult.action}
+Success: ${toolServerResult.success}
+Data: ${JSON.stringify(toolServerResult.data || {})}
+---
+`;
+            }
+            
+            enhancedSystemPrompt += resultContent;
+            console.log(`🔧 [REQ-${requestId}] Tool Server Result injected: ${toolServerResult.action} (${resultContent.length} chars)`);
+          }
+          
           // 🤖 DIAGNOSTIC: Log context size before LLM call
           console.log(`🤖 [REQ-${requestId}] Calling ${llmProvider} with ${enhancedSystemPrompt?.length || 0} chars context`);
 
@@ -5121,7 +5201,6 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                   break;
               }
 
-              toolResult = command;
               responseText = `🔧 Comando locale: **${toolInput.action}**\n`;
               if (toolInput.action === 'click' && toolInput.x !== undefined) {
                 responseText += `   📍 Coordinate: (${toolInput.x}, ${toolInput.y}) [${toolInput.coordinate_origin || 'viewport'}]\n`;
@@ -5135,6 +5214,20 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
               newFullResponse += responseText;
               await context.sendSSE(JSON.stringify({ type: 'content', text: responseText }));
               await context.sendSSE(JSON.stringify({ type: 'tool_execute_locally', data: command }));
+              
+              // Per azioni che richiedono risultato (dom_tree, screenshot), imposta pending
+              if (['dom_tree', 'screenshot'].includes(toolInput.action)) {
+                toolResult = {
+                  success: true,
+                  status: 'pending',
+                  action: toolInput.action,
+                  message: `${toolInput.action} request sent to frontend. Wait for result in next message.`,
+                  instruction: `The ${toolInput.action} result will be provided in the next user message. Do not proceed until you receive it.`
+                };
+              } else {
+                // Per altre azioni (click, type, scroll), conferma immediata
+                toolResult = command;
+              }
             }
 
             // ============= TOOL: browser_get_dom =============
