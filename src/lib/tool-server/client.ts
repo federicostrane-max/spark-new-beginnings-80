@@ -8,7 +8,69 @@ class ToolServerClient {
   private config: ToolServerConfig;
 
   constructor(config: Partial<ToolServerConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { 
+      ...DEFAULT_CONFIG, 
+      ...config,
+      baseUrl: this.getBaseUrl()
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // URL Configuration (localStorage > env > default)
+  // ──────────────────────────────────────────────────────────
+
+  private getBaseUrl(): string {
+    // 1. localStorage (URL ngrok configurato dall'utente)
+    if (typeof window !== 'undefined') {
+      const savedUrl = localStorage.getItem('toolServerUrl');
+      if (savedUrl && savedUrl.trim()) {
+        return savedUrl.trim();
+      }
+    }
+    
+    // 2. Variabile d'ambiente (per sviluppo locale)
+    if (typeof import !== 'undefined' && import.meta?.env?.VITE_TOOL_SERVER_URL) {
+      return import.meta.env.VITE_TOOL_SERVER_URL;
+    }
+    
+    // 3. Default localhost
+    return 'http://127.0.0.1:8766';
+  }
+
+  public updateBaseUrl(newUrl: string): void {
+    this.config.baseUrl = newUrl;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('toolServerUrl', newUrl);
+    }
+  }
+
+  public getCurrentUrl(): string {
+    return this.config.baseUrl;
+  }
+
+  public async testConnection(): Promise<{
+    connected: boolean;
+    version?: string;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${this.config.baseUrl}/status`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+      
+      if (!response.ok) {
+        return { connected: false, error: `HTTP ${response.status}` };
+      }
+      
+      const data = await response.json();
+      return { connected: true, version: data.version };
+    } catch (error) {
+      return { 
+        connected: false, 
+        error: error instanceof Error ? error.message : 'Connection failed' 
+      };
+    }
   }
 
   // ──────────────────────────────────────────────────────────
