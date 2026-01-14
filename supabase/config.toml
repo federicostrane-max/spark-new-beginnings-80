@@ -292,6 +292,10 @@ timeout = 120
 verify_jwt = false
 timeout = 60
 
+[functions.tool-server-pair]
+verify_jwt = false
+timeout = 30
+
 # ===== LLAMAPARSE CREDIT MONITORING =====
 [functions.check-llamaparse-credits]
 verify_jwt = false
