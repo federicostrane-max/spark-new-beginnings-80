@@ -2700,6 +2700,63 @@ export type Database = {
           },
         ]
       }
+      tool_server_config: {
+        Row: {
+          device_name: string | null
+          device_secret: string
+          id: string
+          ngrok_url: string | null
+          paired_at: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          device_name?: string | null
+          device_secret?: string
+          id?: string
+          ngrok_url?: string | null
+          paired_at?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          device_name?: string | null
+          device_secret?: string
+          id?: string
+          ngrok_url?: string | null
+          paired_at?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      tool_server_pairing_tokens: {
+        Row: {
+          created_at: string | null
+          expires_at: string | null
+          id: string
+          token: string
+          used: boolean | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          token: string
+          used?: boolean | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          token?: string
+          used?: boolean | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string | null
@@ -2791,6 +2848,7 @@ export type Database = {
         Args: { prompt_id: string }
         Returns: undefined
       }
+      cleanup_expired_pairing_tokens: { Args: never; Returns: undefined }
       cleanup_orphaned_document_links: {
         Args: never
         Returns: {
