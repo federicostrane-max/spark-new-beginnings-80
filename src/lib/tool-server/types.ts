@@ -34,10 +34,10 @@ export interface ToolServerActionInput {
   action: ToolServerActionType;
   scope?: 'browser' | 'desktop';
   session_id?: string;
-  
+
   // Per browser_start
   start_url?: string;
-  
+
   // Per click (coordinate-based)
   // Tool Server v8.4.1: viewport = lux_sdk (1:1 mapping)
   // 'normalized' is for Gemini raw 0-999 coordinates
@@ -48,26 +48,29 @@ export interface ToolServerActionInput {
 
   // Per click_by_ref (ref-based from dom_tree snapshot)
   ref?: string;  // e.g., "e3" from dom_tree output
-  
+
   // Per type
   text?: string;
-  
+
   // Per scroll
   direction?: 'up' | 'down';
   amount?: number;
-  
+
   // Per keypress
   keys?: string;
-  
+
   // Per browser_navigate
   url?: string;
-  
+
   // Per element_rect (DOM element search)
   selector?: string;
   role?: string;
   test_id?: string;
   label?: string;
   placeholder?: string;
+
+  // v10.1.0: Auto-snapshot DOM after action
+  include_snapshot?: boolean;
 }
 
 export interface ToolServerResponse {

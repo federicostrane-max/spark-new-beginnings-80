@@ -161,6 +161,7 @@ async function executeToolServerAction(
         session_id: sessionId,
         coordinate_origin: input.coordinate_origin || 'viewport',
         click_type: input.click_type || 'single',
+        include_snapshot: input.include_snapshot ?? true,  // v10.1.0: Always include snapshot for agent awareness
       });
 
     case 'click_by_ref': {
@@ -170,6 +171,7 @@ async function executeToolServerAction(
         session_id: sessionId,
         ref: input.ref as string,
         click_type: input.click_type || 'single',
+        include_snapshot: input.include_snapshot ?? true,  // v10.1.0: Always include snapshot for agent awareness
       });
     }
 
@@ -179,6 +181,7 @@ async function executeToolServerAction(
         scope: input.scope || 'browser',
         text: input.text,
         session_id: sessionId,
+        include_snapshot: input.include_snapshot ?? true,  // v10.1.0: Always include snapshot for agent awareness
       });
 
     case 'scroll':
@@ -187,6 +190,7 @@ async function executeToolServerAction(
         direction: input.direction || 'down',
         amount: input.amount || 500,
         session_id: sessionId,
+        include_snapshot: input.include_snapshot ?? true,  // v10.1.0: Always include snapshot for agent awareness
       });
 
     case 'keypress':
@@ -195,6 +199,7 @@ async function executeToolServerAction(
         scope: input.scope || 'browser',
         keys: input.keys,
         session_id: sessionId,
+        include_snapshot: input.include_snapshot ?? true,  // v10.1.0: Always include snapshot for agent awareness
       });
 
     case 'element_rect':

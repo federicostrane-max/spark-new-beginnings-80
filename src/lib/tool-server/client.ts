@@ -326,7 +326,8 @@ class ToolServerClient {
     session_id?: string;
     coordinate_origin?: 'viewport' | 'lux_sdk' | 'normalized';
     click_type?: 'single' | 'double' | 'right';
-  }): Promise<ToolServerResponse> {
+    include_snapshot?: boolean;  // v10.1.0: Auto-snapshot DOM after action
+  }): Promise<ToolServerResponse & { snapshot?: string; snapshot_url?: string; snapshot_ref_count?: number }> {
     // Tool Server v8.4.1: viewport = lux_sdk (1:1), 'normalized' for Gemini raw coords
     return this.post('/click', {
       scope: options.scope,
@@ -335,6 +336,7 @@ class ToolServerClient {
       session_id: options.session_id,
       coordinate_origin: options.coordinate_origin ?? 'viewport',
       click_type: options.click_type ?? 'single',
+      include_snapshot: options.include_snapshot ?? false,
     });
   }
 
@@ -346,11 +348,13 @@ class ToolServerClient {
     session_id: string;
     ref: string;  // e.g., "e3"
     click_type?: 'single' | 'double' | 'right';
-  }): Promise<ToolServerResponse> {
+    include_snapshot?: boolean;  // v10.1.0: Auto-snapshot DOM after action
+  }): Promise<ToolServerResponse & { snapshot?: string; snapshot_url?: string; snapshot_ref_count?: number }> {
     return this.post('/click_by_ref', {
       session_id: options.session_id,
       ref: options.ref,
       click_type: options.click_type ?? 'single',
+      include_snapshot: options.include_snapshot ?? false,
     });
   }
 
@@ -359,12 +363,14 @@ class ToolServerClient {
     text: string;
     session_id?: string;
     method?: 'keystrokes' | 'clipboard';
-  }): Promise<ToolServerResponse> {
+    include_snapshot?: boolean;  // v10.1.0: Auto-snapshot DOM after action
+  }): Promise<ToolServerResponse & { snapshot?: string; snapshot_url?: string; snapshot_ref_count?: number }> {
     return this.post('/type', {
       scope: options.scope,
       text: options.text,
       session_id: options.session_id,
       method: options.method ?? 'clipboard',
+      include_snapshot: options.include_snapshot ?? false,
     });
   }
 
@@ -373,12 +379,14 @@ class ToolServerClient {
     direction: 'up' | 'down';
     amount?: number;
     session_id?: string;
-  }): Promise<ToolServerResponse> {
+    include_snapshot?: boolean;  // v10.1.0: Auto-snapshot DOM after action
+  }): Promise<ToolServerResponse & { snapshot?: string; snapshot_url?: string; snapshot_ref_count?: number }> {
     return this.post('/scroll', {
       scope: options.scope,
       direction: options.direction,
       amount: options.amount ?? 500,
       session_id: options.session_id,
+      include_snapshot: options.include_snapshot ?? false,
     });
   }
 
@@ -386,11 +394,13 @@ class ToolServerClient {
     scope: 'browser' | 'desktop';
     keys: string;
     session_id?: string;
-  }): Promise<ToolServerResponse> {
+    include_snapshot?: boolean;  // v10.1.0: Auto-snapshot DOM after action
+  }): Promise<ToolServerResponse & { snapshot?: string; snapshot_url?: string; snapshot_ref_count?: number }> {
     return this.post('/keypress', {
       scope: options.scope,
       keys: options.keys,
       session_id: options.session_id,
+      include_snapshot: options.include_snapshot ?? false,
     });
   }
 }
