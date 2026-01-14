@@ -16,13 +16,14 @@ export const DEFAULT_CONFIG: ToolServerConfig = {
 // Tool Server Actions
 // ============================================================
 
-export type ToolServerActionType = 
+export type ToolServerActionType =
   | 'browser_start'
   | 'browser_stop'
   | 'browser_navigate'
   | 'screenshot'
   | 'dom_tree'
   | 'click'
+  | 'click_by_ref'
   | 'type'
   | 'scroll'
   | 'keypress'
@@ -37,13 +38,16 @@ export interface ToolServerActionInput {
   // Per browser_start
   start_url?: string;
   
-  // Per click
+  // Per click (coordinate-based)
   // Tool Server v8.4.1: viewport = lux_sdk (1:1 mapping)
   // 'normalized' is for Gemini raw 0-999 coordinates
   x?: number;
   y?: number;
   coordinate_origin?: 'viewport' | 'lux_sdk' | 'normalized';
   click_type?: 'single' | 'double' | 'right';
+
+  // Per click_by_ref (ref-based from dom_tree snapshot)
+  ref?: string;  // e.g., "e3" from dom_tree output
   
   // Per type
   text?: string;

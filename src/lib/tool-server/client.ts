@@ -253,13 +253,29 @@ class ToolServerClient {
   // DOM / Accessibility Tree
   // ──────────────────────────────────────────────────────────
 
-  async getDomTree(sessionId: string): Promise<{ 
+  async getDomTree(sessionId: string): Promise<{
     success: boolean;
     tree: Record<string, unknown> | null;
     url?: string;
     error?: string;
   }> {
     return this.get(`/browser/dom/tree?session_id=${sessionId}`);
+  }
+
+  /**
+   * Get page snapshot in text format (Playwright MCP style).
+   * Returns a concise text representation of interactive elements with ref IDs.
+   * Much better for LLM consumption than full DOM tree.
+   */
+  async getSnapshot(sessionId: string): Promise<{
+    success: boolean;
+    url?: string;
+    title?: string;
+    snapshot: string;  // Text representation like "- button 'Submit' [ref=e3]"
+    ref_count: number;
+    error?: string;
+  }> {
+    return this.get(`/browser/snapshot?session_id=${sessionId}&format=text`);
   }
 
   async getElementRect(options: {
@@ -318,6 +334,22 @@ class ToolServerClient {
       y: options.y,
       session_id: options.session_id,
       coordinate_origin: options.coordinate_origin ?? 'viewport',
+      click_type: options.click_type ?? 'single',
+    });
+  }
+
+  /**
+   * Click element by ref ID (from dom_tree/snapshot).
+   * No coordinates needed - uses ref from snapshot like "e3".
+   */
+  async clickByRef(options: {
+    session_id: string;
+    ref: string;  // e.g., "e3"
+    click_type?: 'single' | 'double' | 'right';
+  }): Promise<ToolServerResponse> {
+    return this.post('/click_by_ref', {
+      session_id: options.session_id,
+      ref: options.ref,
       click_type: options.click_type ?? 'single',
     });
   }

@@ -97,9 +97,16 @@ async function executeToolServerAction(
   input: ToolServerActionInput,
   currentSessionId?: string
 ): Promise<Record<string, unknown>> {
-  
+
   // Auto-inject session_id se non fornito
   const sessionId = input.session_id || currentSessionId;
+
+  // 🔍 DEBUG: Log dettagliato per ogni azione
+  console.log(`🔍 [tool-executor] Action: ${input.action}`);
+  console.log(`🔍 [tool-executor] Input session_id: ${input.session_id || 'not provided'}`);
+  console.log(`🔍 [tool-executor] Current session_id: ${currentSessionId || 'not provided'}`);
+  console.log(`🔍 [tool-executor] Using session_id: ${sessionId || 'NONE ⚠️'}`);
+  console.log(`🔍 [tool-executor] Full input:`, input);
 
   switch (input.action) {
     case 'browser_start':
@@ -121,9 +128,27 @@ async function executeToolServerAction(
         optimize_for: 'lux',
       });
 
-    case 'dom_tree':
+    case 'dom_tree': {
       if (!sessionId) throw new Error('session_id required for dom_tree');
-      return toolServerClient.getDomTree(sessionId);
+      // Use text snapshot instead of full DOM tree - much better for LLM
+      const snapshotResult = await toolServerClient.getSnapshot(sessionId);
+      if (!snapshotResult.success) {
+        return {
+          success: false,
+          error: snapshotResult.error || 'Failed to get DOM snapshot',
+        };
+      }
+      // Return formatted for LLM consumption
+      return {
+        success: true,
+        url: snapshotResult.url,
+        title: snapshotResult.title,
+        element_count: snapshotResult.ref_count,
+        // This is the key: pass text snapshot, not JSON blob
+        dom_structure: snapshotResult.snapshot,
+        usage_hint: 'Use ref IDs (e.g., e3) with click_by_ref action, or use element_rect to find coordinates.',
+      };
+    }
 
     case 'click':
       if (input.x === undefined || input.y === undefined) {
@@ -137,6 +162,16 @@ async function executeToolServerAction(
         coordinate_origin: input.coordinate_origin || 'viewport',
         click_type: input.click_type || 'single',
       });
+
+    case 'click_by_ref': {
+      if (!sessionId) throw new Error('session_id required for click_by_ref');
+      if (!input.ref) throw new Error('ref required for click_by_ref (e.g., "e3")');
+      return toolServerClient.clickByRef({
+        session_id: sessionId,
+        ref: input.ref as string,
+        click_type: input.click_type || 'single',
+      });
+    }
 
     case 'type':
       if (!input.text) throw new Error('text required for type');

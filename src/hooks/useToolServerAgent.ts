@@ -55,9 +55,10 @@ const TOOLS = [
 AVAILABLE ACTIONS:
 - browser_start: Open URL in Edge (persistent profile, keeps logins)
 - screenshot: Capture current screen state
-- dom_tree: Get page accessibility tree (text structure)
+- dom_tree: Get page structure with ref IDs (e.g., "- button 'Submit' [ref=e3]")
+- click_by_ref: Click element by ref ID (e.g., ref="e3") - NO coordinates needed!
 - element_rect: Find element coordinates by selector/text/role
-- click: Click at coordinates
+- click: Click at coordinates (x, y)
 - type: Type text into focused element
 - scroll: Scroll page (up/down)
 - keypress: Press keys (Enter, Tab, Ctrl+A, etc.)
@@ -66,23 +67,23 @@ AVAILABLE ACTIONS:
 - browser_navigate: Go to URL
 - browser_stop: Close browser
 
-COORDINATE SYSTEMS:
+RECOMMENDED WORKFLOW:
+1. browser_start → open URL
+2. dom_tree → get page structure with refs
+3. click_by_ref → click using ref ID (FASTEST, no vision needed!)
+4. type/keypress → input text
+5. screenshot → verify result (if needed)
+
+COORDINATE SYSTEMS (for click action):
 - viewport: Pixel coordinates in ${VIEWPORT_WIDTH}x${VIEWPORT_HEIGHT}
 - lux_sdk: From Lux Actor (1:1 with viewport)
-- normalized: 0-999 range (auto-converted)
-
-WORKFLOW:
-1. browser_start → open URL
-2. dom_tree → understand page
-3. element_rect or vision tool → get coordinates
-4. click/type/scroll → interact
-5. screenshot → verify result`,
+- normalized: 0-999 range (auto-converted)`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['screenshot', 'dom_tree', 'element_rect', 'click', 'type', 'scroll', 'keypress',
+          enum: ['screenshot', 'dom_tree', 'element_rect', 'click', 'click_by_ref', 'type', 'scroll', 'keypress',
                  'hold_key', 'wait', 'browser_start', 'browser_navigate', 'browser_stop'],
           description: 'Action to execute'
         },
@@ -107,6 +108,7 @@ WORKFLOW:
           enum: ['single', 'double', 'right', 'triple'],
           description: 'Click type (default: single)'
         },
+        ref: { type: 'string', description: 'Element ref ID from dom_tree (e.g., "e3") for click_by_ref' },
         text: { type: 'string', description: 'Text to type, or text to find element' },
         direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
         amount: { type: 'number', description: 'Scroll amount in pixels (default: 500)' },
@@ -413,12 +415,20 @@ export function useToolServerAgent(
           }
 
           // Capture session_id if present
+          console.log(`🔍 [useToolServerAgent] Tool result content type:`, typeof toolResult.content);
+          console.log(`🔍 [useToolServerAgent] Tool result content:`, toolResult.content);
+          console.log(`🔍 [useToolServerAgent] Current sessionManager.sessionId BEFORE capture:`, sessionManager.sessionId);
+
           if (
             typeof toolResult.content === 'object' &&
             toolResult.content !== null &&
             'session_id' in toolResult.content
           ) {
+            console.log(`🔍 [useToolServerAgent] Found session_id in result:`, (toolResult.content as Record<string, unknown>).session_id);
             sessionManager.captureFromToolResult(toolResult.content as Record<string, unknown>);
+            console.log(`🔍 [useToolServerAgent] sessionManager.sessionId AFTER capture:`, sessionManager.sessionId);
+          } else {
+            console.log(`🔍 [useToolServerAgent] No session_id in result`);
           }
 
           // ══════════════════════════════════════════════════
