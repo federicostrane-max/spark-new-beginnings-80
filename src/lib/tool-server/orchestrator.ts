@@ -1261,10 +1261,10 @@ Rispondi SOLO con JSON: {"x": numero, "y": numero, "confidence": 0.0-1.0, "reaso
           success_count: procedure.success_count,
           fail_count: procedure.fail_count,
           last_success: procedure.last_success,
-          steps: procedure.steps,
+          steps: JSON.parse(JSON.stringify(procedure.steps)),
           goal: procedure.goal,
           success_criteria: procedure.success_criteria,
-        })
+        } as any)
         .select()
         .single();
 

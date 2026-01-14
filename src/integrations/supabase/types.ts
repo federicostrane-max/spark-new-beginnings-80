@@ -923,6 +923,66 @@ export type Database = {
           },
         ]
       }
+      execution_logs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          environment: Json
+          execution_id: string
+          mode: string
+          procedure_id: string | null
+          started_at: string
+          stats: Json
+          status: string
+          steps: Json
+          task_description: string
+          user_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          environment?: Json
+          execution_id: string
+          mode: string
+          procedure_id?: string | null
+          started_at?: string
+          stats?: Json
+          status?: string
+          steps?: Json
+          task_description: string
+          user_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          environment?: Json
+          execution_id?: string
+          mode?: string
+          procedure_id?: string | null
+          started_at?: string
+          stats?: Json
+          status?: string
+          steps?: Json
+          task_description?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "execution_logs_procedure_id_fkey"
+            columns: ["procedure_id"]
+            isOneToOne: false
+            referencedRelation: "procedure_stats"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "execution_logs_procedure_id_fkey"
+            columns: ["procedure_id"]
+            isOneToOne: false
+            referencedRelation: "saved_procedures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       filter_agent_prompts: {
         Row: {
           created_at: string | null
@@ -2590,6 +2650,63 @@ export type Database = {
         }
         Relationships: []
       }
+      saved_procedures: {
+        Row: {
+          created_at: string
+          description: string | null
+          fail_count: number
+          goal: string
+          id: string
+          last_fail: string | null
+          last_success: string | null
+          learned_at: string
+          name: string
+          project_id: string | null
+          steps: Json
+          success_count: number
+          success_criteria: string | null
+          updated_at: string
+          url_pattern: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          fail_count?: number
+          goal: string
+          id: string
+          last_fail?: string | null
+          last_success?: string | null
+          learned_at?: string
+          name: string
+          project_id?: string | null
+          steps?: Json
+          success_count?: number
+          success_criteria?: string | null
+          updated_at?: string
+          url_pattern: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          fail_count?: number
+          goal?: string
+          id?: string
+          last_fail?: string | null
+          last_success?: string | null
+          learned_at?: string
+          name?: string
+          project_id?: string | null
+          steps?: Json
+          success_count?: number
+          success_criteria?: string | null
+          updated_at?: string
+          url_pattern?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       search_query_history: {
         Row: {
           agent_id: string
@@ -2837,7 +2954,75 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      discrepancy_report: {
+        Row: {
+          action: string | null
+          confidence: string | null
+          decision: string | null
+          distance_dom_gemini: string | null
+          distance_dom_lux: string | null
+          distance_lux_gemini: string | null
+          dom_found: string | null
+          execution_id: string | null
+          gemini_found: string | null
+          lux_found: string | null
+          started_at: string | null
+          status: string | null
+          step_index: string | null
+          target: string | null
+          task_description: string | null
+          verification_pattern: string | null
+        }
+        Relationships: []
+      }
+      procedure_stats: {
+        Row: {
+          fail_count: number | null
+          goal: string | null
+          id: string | null
+          last_fail: string | null
+          last_success: string | null
+          learned_at: string | null
+          name: string | null
+          success_count: number | null
+          success_rate: number | null
+          total_executions: number | null
+          total_steps: number | null
+          url_pattern: string | null
+          user_id: string | null
+        }
+        Insert: {
+          fail_count?: number | null
+          goal?: string | null
+          id?: string | null
+          last_fail?: string | null
+          last_success?: string | null
+          learned_at?: string | null
+          name?: string | null
+          success_count?: number | null
+          success_rate?: never
+          total_executions?: never
+          total_steps?: never
+          url_pattern?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          fail_count?: number | null
+          goal?: string | null
+          id?: string | null
+          last_fail?: string | null
+          last_success?: string | null
+          learned_at?: string | null
+          name?: string | null
+          success_count?: number | null
+          success_rate?: never
+          total_executions?: never
+          total_steps?: never
+          url_pattern?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       activate_alignment_prompt: {
