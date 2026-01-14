@@ -388,7 +388,29 @@ export function useToolServerAgent(
             sessionManager.sessionId || undefined
           );
 
-          console.log(`📤 Tool result:`, toolResult.is_error ? 'ERROR' : 'SUCCESS');
+          // ══════════════════════════════════════════════════
+          // DEBUG: Log tool result content size and type
+          // ══════════════════════════════════════════════════
+          const resultContent = typeof toolResult.content === 'string' 
+            ? toolResult.content 
+            : JSON.stringify(toolResult.content);
+          
+          console.log(`📤 Tool result for ${toolUse.name}:`, {
+            is_error: toolResult.is_error,
+            content_type: typeof toolResult.content,
+            content_length: resultContent.length,
+            content_preview: resultContent.substring(0, 500) + (resultContent.length > 500 ? '...' : ''),
+          });
+
+          // For dom_tree, log more details
+          if (toolUse.name === 'tool_server_action' && 
+              (toolUse.input as Record<string, unknown>).action === 'dom_tree') {
+            console.log(`🌳 DOM Tree result:`, {
+              full_length: resultContent.length,
+              has_tree: toolResult.content && typeof toolResult.content === 'object' && 'tree' in toolResult.content,
+              tree_type: toolResult.content && typeof toolResult.content === 'object' ? typeof (toolResult.content as Record<string, unknown>).tree : 'N/A',
+            });
+          }
 
           // Capture session_id if present
           if (
@@ -399,15 +421,26 @@ export function useToolServerAgent(
             sessionManager.captureFromToolResult(toolResult.content as Record<string, unknown>);
           }
 
+          // ══════════════════════════════════════════════════
+          // IMPORTANT: Truncate very large DOM trees to prevent
+          // context overflow while keeping useful structure
+          // ══════════════════════════════════════════════════
+          let finalContent = resultContent;
+          const MAX_TOOL_RESULT_CHARS = 50000; // 50KB limit
+          
+          if (resultContent.length > MAX_TOOL_RESULT_CHARS) {
+            console.warn(`⚠️ Tool result truncated from ${resultContent.length} to ${MAX_TOOL_RESULT_CHARS} chars`);
+            finalContent = resultContent.substring(0, MAX_TOOL_RESULT_CHARS) + 
+              '\n... [TRUNCATED - DOM too large, showing first 50KB]';
+          }
+
           // Add tool result to history (as user message per Anthropic format)
           conversationHistory.push({
             role: 'user',
             content: [{
               type: 'tool_result',
               tool_use_id: toolResult.tool_use_id,
-              content: typeof toolResult.content === 'string' 
-                ? toolResult.content 
-                : JSON.stringify(toolResult.content),
+              content: finalContent,
               is_error: toolResult.is_error
             }]
           });

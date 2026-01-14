@@ -143,6 +143,28 @@ serve(async (req) => {
       console.log(`📌 [${requestId}] Session: ${context.current_session_id}`);
     }
 
+    // ══════════════════════════════════════════════════════════
+    // DEBUG: Log tool_result content sizes
+    // ══════════════════════════════════════════════════════════
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'tool_result') {
+            const contentLen = typeof block.content === 'string' 
+              ? block.content.length 
+              : JSON.stringify(block.content).length;
+            console.log(`🔧 [${requestId}] Message[${i}] has tool_result: ${contentLen} chars, is_error=${block.is_error}`);
+            
+            // Check if it's a DOM tree result
+            if (typeof block.content === 'string' && block.content.includes('"tree"')) {
+              console.log(`🌳 [${requestId}] DOM tree detected in tool_result`);
+            }
+          }
+        }
+      }
+    }
+
     const { selectedProvider, selectedModel } = resolveProviderAndModel(provider, model);
     console.log(`🤖 [${requestId}] Using ${selectedProvider}/${selectedModel}`);
 
