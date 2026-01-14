@@ -210,8 +210,10 @@ async function executeLuxActorVision(input: LuxActorInput): Promise<Record<strin
     x: data.x,
     y: data.y,
     confidence: data.confidence || 1.0,
-    coordinate_system: 'lux_sdk',
-    usage_hint: 'Use these coordinates with tool_server_action click and coordinate_origin="lux_sdk"',
+    coordinate_system: 'viewport',  // Edge function already converts lux_sdk → viewport
+    source: 'lux_actor_vision',
+    viewport: { width: 1260, height: 700 },
+    usage_hint: 'Use these coordinates with tool_server_action click and coordinate_origin="viewport"',
   };
 }
 
@@ -222,7 +224,7 @@ async function executeLuxActorVision(input: LuxActorInput): Promise<Record<strin
 async function executeGeminiVision(input: GeminiVisionInput): Promise<Record<string, unknown>> {
   const prompt = `Find the element "${input.target}" in the screenshot.
 ${input.context ? `Context: ${input.context}` : ''}
-Viewport: 1280x720 pixels.
+Viewport: 1260x700 pixels.
 Coordinates (0,0) = top left corner.
 
 Respond ONLY with valid JSON:
@@ -254,7 +256,9 @@ Respond ONLY with valid JSON:
     y: data.y,
     confidence: data.confidence || 0.8,
     reasoning: data.reasoning,
-    coordinate_system: 'viewport',
+    coordinate_system: 'viewport',  // Edge function converts normalized (0-999) → viewport
+    source: 'gemini_computer_use',
+    viewport: { width: 1260, height: 700 },
     usage_hint: 'Use these coordinates with tool_server_action click and coordinate_origin="viewport"',
   };
 }
