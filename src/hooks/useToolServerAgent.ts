@@ -37,106 +37,110 @@ interface UseToolServerAgentReturn extends AgentState {
 }
 
 // ──────────────────────────────────────────────────────────
-// Tool Definitions
+// Tool Definitions - Hybrid (Custom + Claude Native)
 // ──────────────────────────────────────────────────────────
 
+// Viewport dimensions for Claude Computer Use
+const VIEWPORT_WIDTH = 1260;
+const VIEWPORT_HEIGHT = 700;
+
 const TOOLS = [
+  // ════════════════════════════════════════════════════════
+  // CUSTOM TOOLS (Tool Server)
+  // ════════════════════════════════════════════════════════
   {
     name: 'tool_server_action',
     description: `Execute actions on the local desktop app (Tool Server port 8766).
-Available actions:
-- browser_start: Start browser with initial URL (returns session_id)
-- screenshot: Capture screen (browser or desktop), returns base64 image
-- dom_tree: Get Accessibility Tree of the page (text structure)
-- element_rect: Get precise X,Y coordinates of a DOM element by selector/text/role/label/placeholder
-  Returns: { x, y, width, height, found, visible, enabled }
-  Use this to get exact coordinates after analyzing DOM tree (no vision needed!)
-- click: Click at specific coordinates
+
+AVAILABLE ACTIONS:
+- browser_start: Open URL in Edge (persistent profile, keeps logins)
+- screenshot: Capture current screen state
+- dom_tree: Get page accessibility tree (text structure)
+- element_rect: Find element coordinates by selector/text/role
+- click: Click at coordinates
 - type: Type text into focused element
 - scroll: Scroll page (up/down)
-- keypress: Press keys/combinations (e.g., "Enter", "Control+C")
-- browser_navigate: Navigate to URL
-- browser_stop: Close browser session
+- keypress: Press keys (Enter, Tab, Ctrl+A, etc.)
+- hold_key: Hold a key for duration
+- wait: Wait for specified duration (seconds)
+- browser_navigate: Go to URL
+- browser_stop: Close browser
 
-WORKFLOW (DOM-based, no vision):
-1. browser_start → get session_id
-2. dom_tree → understand page structure
-3. element_rect → get precise coordinates of target element
-4. click/type/scroll/keypress to interact
-5. Repeat as needed
+COORDINATE SYSTEMS:
+- viewport: Pixel coordinates in ${VIEWPORT_WIDTH}x${VIEWPORT_HEIGHT}
+- lux_sdk: From Lux Actor (1:1 with viewport)
+- normalized: 0-999 range (auto-converted)
 
-WORKFLOW (vision-based):
-1. browser_start → get session_id
-2. screenshot → capture current state
-3. Use lux_actor_vision or gemini_computer_use to find coordinates
-4. click/type/scroll/keypress to interact`,
+WORKFLOW:
+1. browser_start → open URL
+2. dom_tree → understand page
+3. element_rect or vision tool → get coordinates
+4. click/type/scroll → interact
+5. screenshot → verify result`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['screenshot', 'dom_tree', 'element_rect', 'click', 'type', 'scroll', 'keypress',
-                 'browser_start', 'browser_navigate', 'browser_stop'],
+                 'hold_key', 'wait', 'browser_start', 'browser_navigate', 'browser_stop'],
           description: 'Action to execute'
         },
-        scope: { 
-          type: 'string', 
-          enum: ['browser', 'desktop'],
-          description: 'Scope: browser (viewport only) or desktop (full screen)'
-        },
-        session_id: { 
+        scope: {
           type: 'string',
-          description: 'Browser session ID (auto-managed, usually not needed)'
+          enum: ['browser', 'desktop'],
+          description: 'Scope: browser (viewport) or desktop (full screen)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Browser session ID (auto-managed)'
         },
         x: { type: 'number', description: 'X coordinate for click' },
         y: { type: 'number', description: 'Y coordinate for click' },
-        coordinate_origin: { 
-          type: 'string', 
-          enum: ['viewport', 'lux_sdk'],
-          description: 'Coordinate system: viewport (pixels) or lux_sdk (from Lux Actor)'
+        coordinate_origin: {
+          type: 'string',
+          enum: ['viewport', 'lux_sdk', 'normalized'],
+          description: 'Coordinate system'
         },
-        click_type: { 
-          type: 'string', 
-          enum: ['single', 'double', 'right'],
+        click_type: {
+          type: 'string',
+          enum: ['single', 'double', 'right', 'triple'],
           description: 'Click type (default: single)'
         },
-        text: { type: 'string', description: 'Text to type, OR text content to find element (for element_rect)' },
-        direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction' },
+        text: { type: 'string', description: 'Text to type, or text to find element' },
+        direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
         amount: { type: 'number', description: 'Scroll amount in pixels (default: 500)' },
         keys: { type: 'string', description: 'Keys to press (e.g., "Enter", "Control+A")' },
+        duration: { type: 'number', description: 'Duration in seconds for hold_key/wait' },
         start_url: { type: 'string', description: 'Initial URL for browser_start' },
         url: { type: 'string', description: 'URL for browser_navigate' },
-        // element_rect parameters
-        selector: { type: 'string', description: 'CSS selector for element_rect (e.g., "button.submit", "#login-btn")' },
-        role: { type: 'string', description: 'ARIA role to find element (e.g., "button", "textbox", "link")' },
-        label: { type: 'string', description: 'Accessible label/aria-label to find element' },
-        placeholder: { type: 'string', description: 'Input placeholder text to find element' }
+        selector: { type: 'string', description: 'CSS selector for element_rect' },
+        role: { type: 'string', description: 'ARIA role to find element' },
+        label: { type: 'string', description: 'Accessible label to find element' },
+        placeholder: { type: 'string', description: 'Input placeholder to find element' }
       },
       required: ['action']
     }
   },
+
+  // ════════════════════════════════════════════════════════
+  // VISION TOOLS (Cloud APIs)
+  // ════════════════════════════════════════════════════════
   {
     name: 'lux_actor_vision',
-    description: `Locate elements visually using Lux Actor API (cloud).
-FAST (~1 second). Best for:
-- Finding buttons, links, input fields
-- Desktop apps and standard UI
-- Repetitive actions where speed matters
-
-Returns coordinates in 'lux_sdk' system.
-Use with: tool_server_action click + coordinate_origin="lux_sdk"
-
-Example: After screenshot, call this with target="Compose button" to get coordinates.`,
+    description: `Locate elements visually using Lux Actor API.
+FAST (~1 second). Best for buttons, links, standard UI.
+Returns 'lux_sdk' coordinates → use with coordinate_origin="lux_sdk"`,
     input_schema: {
       type: 'object',
       properties: {
-        screenshot: { 
-          type: 'string', 
-          description: 'Screenshot in base64 (from tool_server_action screenshot, use lux_optimized.image_base64)'
+        screenshot: {
+          type: 'string',
+          description: 'Screenshot in base64'
         },
-        target: { 
-          type: 'string', 
-          description: 'Description of element to find (e.g., "blue Compose button", "search input field")'
+        target: {
+          type: 'string',
+          description: 'Element to find (e.g., "blue Compose button")'
         }
       },
       required: ['screenshot', 'target']
@@ -144,35 +148,33 @@ Example: After screenshot, call this with target="Compose button" to get coordin
   },
   {
     name: 'gemini_computer_use',
-    description: `Locate elements using Gemini Vision API.
-SLOWER (~2-3 seconds) but SMARTER. Best for:
-- Modern web apps with complex UI
-- Elements requiring contextual reasoning
-- When lux_actor_vision fails to find element
-- Ambiguous UI where reasoning helps
-
-Returns coordinates in 'viewport' system.
-Use with: tool_server_action click + coordinate_origin="viewport"`,
+    description: `Locate elements using Gemini Vision.
+SLOWER (~3s) but SMARTER. Best for complex UI, when lux fails.
+Returns 'viewport' coordinates → use with coordinate_origin="viewport"`,
     input_schema: {
       type: 'object',
       properties: {
-        screenshot: { 
-          type: 'string', 
-          description: 'Screenshot in base64'
-        },
-        target: { 
-          type: 'string', 
-          description: 'Description of element to find'
-        },
-        context: { 
-          type: 'string', 
-          description: 'Additional context (e.g., "in the top toolbar", "inside the modal dialog")'
-        }
+        screenshot: { type: 'string', description: 'Screenshot in base64' },
+        target: { type: 'string', description: 'Element to find' },
+        context: { type: 'string', description: 'Additional context' }
       },
       required: ['screenshot', 'target']
     }
   }
 ];
+
+// Note: The native Claude 'computer' tool is added by the edge function
+// when enable_computer_use=true. It provides:
+// - key: Press key combinations
+// - type: Type text
+// - mouse_move: Move cursor
+// - left_click, right_click, middle_click, double_click, triple_click
+// - left_click_drag: Drag from start to end
+// - screenshot: Take screenshot
+// - cursor_position: Get current cursor position
+// - scroll: Scroll in direction
+// - hold_key: Hold key for duration
+// - wait: Wait for duration
 
 // ──────────────────────────────────────────────────────────
 // Hook Implementation
@@ -340,8 +342,15 @@ export function useToolServerAgent(
               model,
               provider,
               context: {
-                current_session_id: sessionManager.sessionId
-              }
+                current_session_id: sessionManager.sessionId,
+                screen_width: VIEWPORT_WIDTH,
+                screen_height: VIEWPORT_HEIGHT,
+              },
+              // Claude Computer Use options
+              enable_computer_use: provider === 'anthropic',
+              enable_prompt_caching: true,
+              enable_token_efficient_tools: true,
+              max_recent_images: 10,
             }
           }
         );

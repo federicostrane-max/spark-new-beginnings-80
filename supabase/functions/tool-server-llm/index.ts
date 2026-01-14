@@ -1,12 +1,14 @@
 // ============================================================
-// Edge Function: tool-server-llm
+// Edge Function: tool-server-llm v2.0.0
 // ============================================================
 // Chiama LLM e restituisce risposta RAW (incluso tool_use).
 // NON esegue tool internamente - lascia al frontend.
 //
-// Differenza con agent-chat:
-// - agent-chat: loop interno, esegue tool, restituisce risposta finale
-// - tool-server-llm: singola chiamata LLM, restituisce tool_use al frontend
+// v2.0.0: Claude Computer Use Native Support
+// - Beta flags per computer-use-2025-01-24
+// - Prompt caching per ridurre costi
+// - Image filtering per vecchi screenshot
+// - System prompt ottimizzato per Windows/Edge
 // ============================================================
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -15,6 +17,21 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// ────────────────────────────────────────────────────────────
+// Constants - Claude Computer Use
+// ────────────────────────────────────────────────────────────
+
+const COMPUTER_USE_BETA_FLAG = "computer-use-2025-01-24";
+const PROMPT_CACHING_BETA_FLAG = "prompt-caching-2024-07-31";
+const TOKEN_EFFICIENT_TOOLS_BETA = "token-efficient-tools-2025-02-19";
+
+// Default viewport dimensions (matching Lux SDK)
+const VIEWPORT_WIDTH = 1260;
+const VIEWPORT_HEIGHT = 700;
+
+// Max images to keep in conversation (older ones are filtered)
+const MAX_RECENT_IMAGES = 10;
 
 // ────────────────────────────────────────────────────────────
 // Types
@@ -61,8 +78,15 @@ interface RequestBody {
   temperature?: number;
   context?: {
     current_session_id?: string;
+    screen_width?: number;
+    screen_height?: number;
     [key: string]: unknown;
   };
+  // Claude Computer Use options
+  enable_computer_use?: boolean;
+  enable_prompt_caching?: boolean;
+  enable_token_efficient_tools?: boolean;
+  max_recent_images?: number;
 }
 
 interface LLMResponse {
@@ -99,6 +123,10 @@ serve(async (req) => {
       max_tokens = 4096,
       temperature = 0.7,
       context,
+      enable_computer_use = true,  // Default: enabled for Anthropic
+      enable_prompt_caching = true,
+      enable_token_efficient_tools = true,
+      max_recent_images = MAX_RECENT_IMAGES,
     } = body;
 
     if (!messages || !Array.isArray(messages)) {
@@ -124,7 +152,23 @@ serve(async (req) => {
 
     switch (selectedProvider) {
       case 'anthropic':
-        llmResponse = await callAnthropic(messages, tools, selectedModel, fullSystemPrompt, max_tokens, temperature, requestId);
+        llmResponse = await callAnthropic(
+          messages,
+          tools,
+          selectedModel,
+          fullSystemPrompt,
+          max_tokens,
+          temperature,
+          requestId,
+          {
+            enableComputerUse: enable_computer_use,
+            enablePromptCaching: enable_prompt_caching,
+            enableTokenEfficientTools: enable_token_efficient_tools,
+            maxRecentImages: max_recent_images,
+            screenWidth: context?.screen_width || VIEWPORT_WIDTH,
+            screenHeight: context?.screen_height || VIEWPORT_HEIGHT,
+          }
+        );
         break;
       case 'openai':
         llmResponse = await callOpenAI(messages, tools, selectedModel, fullSystemPrompt, max_tokens, temperature, requestId);
@@ -201,43 +245,92 @@ function resolveProviderAndModel(
 }
 
 // ────────────────────────────────────────────────────────────
-// System Prompt Builder
+// System Prompt Builder - Optimized for Windows/Edge
 // ────────────────────────────────────────────────────────────
 
 function buildSystemPrompt(customPrompt?: string, context?: Record<string, unknown>): string {
-  const basePrompt = `You are an AI assistant that can control a web browser through a Tool Server.
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 
-CAPABILITIES:
-- Start browser sessions and navigate to URLs
-- Take screenshots to see the current page
-- Get the DOM/Accessibility Tree to understand page structure
-- Click on elements using coordinates
-- Type text into input fields
-- Scroll pages up/down
-- Press keyboard keys and combinations
+  const basePrompt = `<SYSTEM_CAPABILITY>
+* You are controlling a Windows desktop with Microsoft Edge browser through a Tool Server.
+* The browser viewport is ${context?.screen_width || VIEWPORT_WIDTH}x${context?.screen_height || VIEWPORT_HEIGHT} pixels.
+* You can take screenshots, click, type, scroll, and press keys.
+* You have access to both DOM-based and vision-based element location.
+* The current date is ${today}.
+</SYSTEM_CAPABILITY>
 
-WORKFLOW for browser automation tasks:
-1. Start with browser_start to open a URL
-2. Use dom_tree to understand the page structure
-3. Use screenshot to see the current state
-4. Use lux_actor_vision (fast, ~1s) or gemini_computer_use (slower but smarter, ~3s) to find element coordinates
-5. Use click/type/scroll/keypress to interact with elements
-6. Repeat screenshot → vision → action cycle as needed
+<TOOLS_AVAILABLE>
+1. **tool_server_action** - Direct browser/desktop control:
+   - browser_start: Open URL in Edge (persistent profile, keeps logins)
+   - screenshot: Capture current screen state
+   - dom_tree: Get page structure as accessibility tree
+   - element_rect: Find element coordinates by selector/text/role (NO vision needed!)
+   - click: Click at coordinates
+   - type: Type text
+   - scroll: Scroll up/down
+   - keypress: Press keys (Enter, Tab, Ctrl+A, etc.)
+   - hold_key: Hold a key for duration
+   - wait: Wait for specified duration
+   - browser_navigate: Go to URL
+   - browser_stop: Close browser
 
-COORDINATE SYSTEMS:
-- lux_actor_vision returns coordinates in 'lux_sdk' system → use coordinate_origin="lux_sdk" when clicking
-- gemini_computer_use returns coordinates in 'viewport' system → use coordinate_origin="viewport" when clicking
+2. **computer** (Claude native) - Native computer control:
+   - All standard computer use actions with automatic screenshots
 
-IMPORTANT:
-- Always use dom_tree first to understand page structure before taking actions
-- If an action fails, try screenshot + vision again to verify current state
-- Session ID is automatically managed - don't worry about it`;
+3. **lux_actor_vision** - Fast visual element location (~1s):
+   - Returns 'lux_sdk' coordinates
+   - Best for: buttons, links, standard UI elements
+
+4. **gemini_computer_use** - Smart visual element location (~3s):
+   - Returns 'viewport' coordinates
+   - Best for: complex UI, when lux fails
+</TOOLS_AVAILABLE>
+
+<WORKFLOW_DOM_BASED>
+Prefer this when elements have clear selectors/text:
+1. browser_start → open URL
+2. dom_tree → understand page structure
+3. element_rect → get precise coordinates by selector/text/role
+4. click/type/scroll → interact
+5. Repeat as needed
+</WORKFLOW_DOM_BASED>
+
+<WORKFLOW_VISION_BASED>
+Use when DOM approach fails or for visual elements:
+1. browser_start → open URL
+2. screenshot → capture current state
+3. lux_actor_vision OR gemini_computer_use → find element coordinates
+4. click with correct coordinate_origin → interact
+5. screenshot → verify result
+6. Repeat as needed
+</WORKFLOW_VISION_BASED>
+
+<COORDINATE_SYSTEMS>
+- 'viewport': Pixel coordinates in ${context?.screen_width || VIEWPORT_WIDTH}x${context?.screen_height || VIEWPORT_HEIGHT} space
+- 'lux_sdk': Coordinates from Lux Actor (1:1 with viewport)
+- 'normalized': 0-999 range (Gemini raw output, auto-converted)
+IMPORTANT: Always specify coordinate_origin when clicking!
+</COORDINATE_SYSTEMS>
+
+<TIPS>
+* Take a screenshot after every significant action to verify the result
+* If an element is not found, try scrolling or waiting for page load
+* Use dom_tree + element_rect first (faster than vision)
+* For login forms, the browser keeps session cookies - you may already be logged in
+* When typing URLs, use the address bar (usually accessible via Ctrl+L)
+* If a popup appears, handle it before continuing with the main task
+</TIPS>`;
 
   let fullPrompt = customPrompt || basePrompt;
 
   if (context) {
     if (context.current_session_id) {
-      fullPrompt += `\n\nCurrent browser session: ${context.current_session_id}`;
+      fullPrompt += `\n\n<CURRENT_STATE>\nBrowser session active: ${context.current_session_id}\n</CURRENT_STATE>`;
     }
   }
 
@@ -245,8 +338,17 @@ IMPORTANT:
 }
 
 // ════════════════════════════════════════════════════════════
-// ANTHROPIC (Claude)
+// ANTHROPIC (Claude) - With Computer Use Support
 // ════════════════════════════════════════════════════════════
+
+interface AnthropicOptions {
+  enableComputerUse: boolean;
+  enablePromptCaching: boolean;
+  enableTokenEfficientTools: boolean;
+  maxRecentImages: number;
+  screenWidth: number;
+  screenHeight: number;
+}
 
 async function callAnthropic(
   messages: Message[],
@@ -255,36 +357,81 @@ async function callAnthropic(
   systemPrompt: string,
   maxTokens: number,
   temperature: number,
-  requestId: string
+  requestId: string,
+  options: AnthropicOptions
 ): Promise<LLMResponse> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
 
-  const anthropicMessages = convertMessagesToAnthropic(messages);
+  // Build beta flags
+  const betas: string[] = [];
+  if (options.enableComputerUse) {
+    betas.push(COMPUTER_USE_BETA_FLAG);
+  }
+  if (options.enablePromptCaching) {
+    betas.push(PROMPT_CACHING_BETA_FLAG);
+  }
+  if (options.enableTokenEfficientTools) {
+    betas.push(TOKEN_EFFICIENT_TOOLS_BETA);
+  }
 
-  const anthropicTools = tools.map(tool => ({
+  console.log(`🔵 [${requestId}] Betas: ${betas.join(', ') || 'none'}`);
+
+  // Filter old images to save tokens
+  const filteredMessages = filterOldImages(messages, options.maxRecentImages);
+
+  // Convert messages with prompt caching
+  const anthropicMessages = convertMessagesToAnthropic(filteredMessages, options.enablePromptCaching);
+
+  // Build tools array - include native computer tool if enabled
+  const anthropicTools: unknown[] = tools.map(tool => ({
     name: tool.name,
     description: tool.description,
     input_schema: tool.input_schema,
   }));
 
+  // Add native Claude computer tool
+  if (options.enableComputerUse) {
+    anthropicTools.push({
+      type: 'computer_20250124',
+      name: 'computer',
+      display_width_px: options.screenWidth,
+      display_height_px: options.screenHeight,
+    });
+    console.log(`🖥️ [${requestId}] Computer tool: ${options.screenWidth}x${options.screenHeight}`);
+  }
+
+  // Build system with cache control
+  const system = options.enablePromptCaching
+    ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+    : systemPrompt;
+
   console.log(`🔵 [${requestId}] Calling Anthropic API...`);
+
+  const requestBody: Record<string, unknown> = {
+    model,
+    max_tokens: maxTokens,
+    temperature,
+    system,
+    messages: anthropicMessages,
+    tools: anthropicTools,
+  };
+
+  // Add betas header if any
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+  };
+
+  if (betas.length > 0) {
+    headers['anthropic-beta'] = betas.join(',');
+  }
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      system: systemPrompt,
-      messages: anthropicMessages,
-      tools: anthropicTools,
-    }),
+    headers,
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -309,6 +456,11 @@ async function callAnthropic(
     }
   }
 
+  // Log cache performance if available
+  if (data.usage?.cache_creation_input_tokens || data.usage?.cache_read_input_tokens) {
+    console.log(`💾 [${requestId}] Cache: created=${data.usage.cache_creation_input_tokens || 0}, read=${data.usage.cache_read_input_tokens || 0}`);
+  }
+
   return {
     response: textContent || null,
     tool_use: toolUse,
@@ -318,22 +470,75 @@ async function callAnthropic(
   };
 }
 
-function convertMessagesToAnthropic(messages: Message[]): unknown[] {
+// ────────────────────────────────────────────────────────────
+// Image Filtering - Remove old screenshots to save tokens
+// ────────────────────────────────────────────────────────────
+
+function filterOldImages(messages: Message[], maxImages: number): Message[] {
+  if (maxImages <= 0) return messages;
+
+  // Count total images
+  let totalImages = 0;
+  for (const msg of messages) {
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (block.type === 'image' || (block.type === 'tool_result' && typeof block.content === 'object')) {
+          totalImages++;
+        }
+      }
+    }
+  }
+
+  if (totalImages <= maxImages) return messages;
+
+  // Need to filter - keep only most recent images
+  const imagesToRemove = totalImages - maxImages;
+  let removed = 0;
+
+  return messages.map(msg => {
+    if (!Array.isArray(msg.content)) return msg;
+
+    const filteredContent = msg.content.filter(block => {
+      if (block.type === 'image' && removed < imagesToRemove) {
+        removed++;
+        return false; // Remove this image
+      }
+      return true;
+    });
+
+    return { ...msg, content: filteredContent };
+  });
+}
+
+function convertMessagesToAnthropic(messages: Message[], enableCaching: boolean = false): unknown[] {
   const result: unknown[] = [];
 
-  for (const msg of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
     if (msg.role === 'system') continue;
+
+    // For prompt caching, add cache_control to recent user messages
+    const isRecentUserMessage = enableCaching &&
+      msg.role === 'user' &&
+      i >= messages.length - 3; // Last 3 user messages
 
     if (msg.role === 'user' || msg.role === 'assistant') {
       if (Array.isArray(msg.content)) {
-        const blocks = msg.content.map(block => {
+        const blocks = msg.content.map((block, blockIdx) => {
+          const isLastBlock = blockIdx === msg.content.length - 1;
+
           if (block.type === 'tool_result') {
-            return {
+            const result: Record<string, unknown> = {
               type: 'tool_result',
               tool_use_id: block.tool_use_id,
               content: block.content,
               is_error: block.is_error,
             };
+            // Add cache control to last block of recent messages
+            if (isRecentUserMessage && isLastBlock) {
+              result.cache_control = { type: 'ephemeral' };
+            }
+            return result;
           }
           if (block.type === 'image') {
             return {
@@ -341,7 +546,11 @@ function convertMessagesToAnthropic(messages: Message[]): unknown[] {
               source: block.source,
             };
           }
-          return { type: 'text', text: block.text || '' };
+          const textBlock: Record<string, unknown> = { type: 'text', text: block.text || '' };
+          if (isRecentUserMessage && isLastBlock) {
+            textBlock.cache_control = { type: 'ephemeral' };
+          }
+          return textBlock;
         });
         result.push({ role: msg.role, content: blocks });
       } else if (msg.tool_use) {
@@ -352,7 +561,10 @@ function convertMessagesToAnthropic(messages: Message[]): unknown[] {
           ],
         });
       } else {
-        result.push({ role: msg.role, content: msg.content });
+        const content = isRecentUserMessage
+          ? [{ type: 'text', text: msg.content as string, cache_control: { type: 'ephemeral' } }]
+          : msg.content;
+        result.push({ role: msg.role, content });
       }
     }
   }
