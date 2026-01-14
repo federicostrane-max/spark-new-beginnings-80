@@ -77,6 +77,29 @@ export type {
   CachedCoordinate,
   LogEntry,
   LogLevel,
+  // Procedure types
+  ExecutionMode,
+  SavedProcedure,
+  ProcedureStep,
+  // Triple verification types
+  TripleVerificationPattern,
+  TripleVerificationResult,
 } from './orchestrator-types';
 
 export { DEFAULT_ORCHESTRATOR_CONFIG } from './orchestrator-types';
+
+// Orchestrator Logging
+export {
+  ExecutionLogManager,
+  executionLogManager,
+} from './orchestrator-logging';
+
+export type {
+  VerificationLog,
+  StepLog,
+  ExecutionLog,
+  ExecutionStats,
+  SourceResult,
+  DomSourceResult,
+  VisionSourceResult,
+} from './orchestrator-logging';

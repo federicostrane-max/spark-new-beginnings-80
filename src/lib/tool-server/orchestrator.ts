@@ -25,7 +25,15 @@ import {
   DomElementRect,
   TripleVerificationResult,
   TripleVerificationPattern,
+  SavedProcedure,
+  ProcedureStep,
+  ExecutionMode,
 } from './orchestrator-types';
+import {
+  ExecutionLogManager,
+  executionLogManager,
+  VerificationLog,
+} from './orchestrator-logging';
 
 export class Orchestrator {
   private config: OrchestratorConfig;
@@ -36,6 +44,11 @@ export class Orchestrator {
   private abortController: AbortController | null = null;
   private logs: LogEntry[] = [];
 
+  // Logging and procedure learning
+  private logManager: ExecutionLogManager;
+  private learnedSteps: ProcedureStep[] = [];
+  private currentVerificationLog: VerificationLog | null = null;
+
   constructor(
     config: Partial<OrchestratorConfig> = {},
     callbacks: OrchestratorCallbacks = {}
@@ -44,6 +57,7 @@ export class Orchestrator {
     this.callbacks = callbacks;
     this.loopDetector = new LoopDetector(this.config.loopDetectionThreshold);
     this.actionCache = new ActionCache();
+    this.logManager = executionLogManager; // Use singleton
     this.state = this.createInitialState();
   }
 
@@ -246,6 +260,7 @@ export class Orchestrator {
       sessionId?: string;
       startUrl?: string;
       navigation?: { action: string; params: Record<string, unknown> };
+      procedureId?: string;  // If replaying a saved procedure
     }
   ): Promise<OrchestratorState> {
     this.abortController = new AbortController();
@@ -255,6 +270,7 @@ export class Orchestrator {
     this.state.started_at = Date.now();
     this.loopDetector.reset();
     this.logs = [];
+    this.learnedSteps = [];
 
     try {
       // Phase 1: Handle browser session
@@ -275,11 +291,23 @@ export class Orchestrator {
         }
       }
 
+      // Start execution logging if enabled
+      if (this.config.enableLogging) {
+        this.logManager.startExecution({
+          task_description: plan.goal,
+          mode: this.config.mode,
+          procedure_id: options?.procedureId,
+          url: this.state.current_url || options?.startUrl || 'unknown',
+          session_id: this.state.session_id || 'unknown',
+        });
+      }
+
       // Phase 2: Execute the pre-generated plan
       this.callbacks.onPlanCreated?.(plan);
       this.log('success', `Executing cloud plan: ${plan.steps.length} steps`);
       this.log('info', `Goal: ${plan.goal}`);
-      
+      this.log('info', `Mode: ${this.config.mode}`);
+
       await this.executePlanSteps();
 
       // Phase 3: Finalize
@@ -287,13 +315,29 @@ export class Orchestrator {
       this.state.completed_at = Date.now();
       this.log('success', 'Plan executed successfully');
 
+      // Complete logging
+      if (this.config.enableLogging) {
+        const executionLog = this.logManager.completeExecution('completed');
+
+        // Save procedure if in learning mode and enabled
+        if (this.config.mode === 'learning' && this.config.saveProcedures && this.learnedSteps.length > 0) {
+          await this.saveProcedure(plan);
+        }
+      }
+
     } catch (error) {
       if (this.state.status === 'aborted') {
         this.log('warn', 'Plan execution aborted by user');
+        if (this.config.enableLogging) {
+          this.logManager.completeExecution('partial');
+        }
       } else {
         this.state.status = 'failed';
         this.state.error = error instanceof Error ? error.message : 'Unknown error';
         this.log('error', `Plan execution failed: ${this.state.error}`);
+        if (this.config.enableLogging) {
+          this.logManager.completeExecution('failed');
+        }
       }
     }
 
@@ -523,16 +567,35 @@ export class Orchestrator {
         // Record action for loop detection
         this.recordAction(step, visionResult, actionResult.success);
 
+        // Log step execution if enabled
+        if (this.config.enableLogging && this.currentVerificationLog) {
+          this.logManager.logStep({
+            step,
+            verification: this.currentVerificationLog,
+            success: actionResult.success,
+            error: actionResult.error,
+            retries: retry,
+            used_fallback: execution.used_fallback,
+            duration_ms: Date.now() - startTime,
+          });
+        }
+
         if (actionResult.success) {
           this.log('success', `Azione completata: ${step.action_type}`);
+
+          // Learn procedure step if in learning mode
+          if (this.config.mode === 'learning') {
+            this.learnProcedureStep(step, coords, tripleResult);
+          }
+
           break;
         }
       }
 
     } catch (error) {
-      execution.action_result = { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown' 
+      execution.action_result = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown'
       };
     }
 
@@ -549,18 +612,25 @@ export class Orchestrator {
     selector?: string,
     context?: string
   ): Promise<TripleVerificationResult> {
-    // Call all 3 sources IN PARALLEL
+    // Track timing for each call
+    const timings = { dom: 0, lux: 0, gemini: 0 };
+
+    // Call all 3 sources IN PARALLEL with timing
+    const domStart = Date.now();
+    const luxStart = Date.now();
+    const geminiStart = Date.now();
+
     const [domResult, luxResult, geminiResult] = await Promise.all([
-      this.getDomElementRect(selector, target),
-      this.callLuxVision(screenshot, target),
-      this.callGeminiVision(screenshot, target, context),
+      this.getDomElementRect(selector, target).then(r => { timings.dom = Date.now() - domStart; return r; }),
+      this.callLuxVision(screenshot, target).then(r => { timings.lux = Date.now() - luxStart; return r; }),
+      this.callGeminiVision(screenshot, target, context).then(r => { timings.gemini = Date.now() - geminiStart; return r; }),
     ]);
 
     // Log individual results with coordinate system info
     this.log('info', `📍 Triple Verification Results:`);
-    this.log('info', `  DOM:    ${domResult?.found ? `(${domResult.x}, ${domResult.y}) visible=${domResult.visible} [viewport]` : 'NOT FOUND'}`);
-    this.log('info', `  Lux:    ${luxResult.found ? `(${luxResult.x}, ${luxResult.y}) conf=${(luxResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'}`);
-    this.log('info', `  Gemini: ${geminiResult.found ? `(${geminiResult.x}, ${geminiResult.y}) conf=${(geminiResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'}`);
+    this.log('info', `  DOM:    ${domResult?.found ? `(${domResult.x}, ${domResult.y}) visible=${domResult.visible} [viewport]` : 'NOT FOUND'} [${timings.dom}ms]`);
+    this.log('info', `  Lux:    ${luxResult.found ? `(${luxResult.x}, ${luxResult.y}) conf=${(luxResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'} [${timings.lux}ms]`);
+    this.log('info', `  Gemini: ${geminiResult.found ? `(${geminiResult.x}, ${geminiResult.y}) conf=${(geminiResult.confidence * 100).toFixed(0)}% [converted to viewport]` : 'NOT FOUND'} [${timings.gemini}ms]`);
 
     // Log distances for debug
     if (luxResult.found && geminiResult.found) {
@@ -580,10 +650,29 @@ export class Orchestrator {
 
     // Analyze the pattern
     const analysis = this.analyzeTriplePattern(domResult, luxResult, geminiResult);
-    
+
     // Make decision based on pattern
     const decision = this.makeTripleDecision(analysis, domResult, luxResult, geminiResult);
-    
+
+    // Log to ExecutionLogManager if enabled
+    if (this.config.enableLogging) {
+      this.currentVerificationLog = this.logManager.logVerification({
+        target_description: target,
+        dom: domResult,
+        dom_latency_ms: timings.dom,
+        dom_selector: selector,
+        lux: luxResult,
+        lux_latency_ms: timings.lux,
+        gemini: geminiResult,
+        gemini_latency_ms: timings.gemini,
+        distances: analysis.distances,
+        pattern: analysis.type,
+        proceed: decision.proceed,
+        final_coordinates: decision.coordinates,
+        screenshot_b64: screenshot,
+      });
+    }
+
     return {
       dom: domResult,
       lux: luxResult,
@@ -1084,6 +1173,170 @@ Rispondi SOLO con JSON: {"x": numero, "y": numero, "confidence": 0.0-1.0, "reaso
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // ============================================================
+  // PROCEDURE LEARNING
+  // ============================================================
+
+  /**
+   * Learn a procedure step from a successful action execution.
+   * Called when in 'learning' mode after each successful step.
+   */
+  private learnProcedureStep(
+    step: PlanStep,
+    coords: { x: number; y: number; source: string },
+    tripleResult: TripleVerificationResult
+  ): void {
+    // Determine which sources verified this step
+    const verifiedBy: ('dom' | 'lux' | 'gemini')[] = [];
+    if (tripleResult.dom?.found && tripleResult.dom.visible) {
+      verifiedBy.push('dom');
+    }
+    if (tripleResult.lux.found) {
+      verifiedBy.push('lux');
+    }
+    if (tripleResult.gemini.found) {
+      verifiedBy.push('gemini');
+    }
+
+    const procedureStep: ProcedureStep = {
+      action: step.action_type as ProcedureStep['action'],
+      description: step.target_description,
+
+      // Locators
+      selector: step.dom_selector,
+      coordinates: { x: coords.x, y: coords.y },
+
+      // Action-specific data
+      text: step.action_type === 'type' ? step.input_value : undefined,
+      key: step.action_type === 'keypress' ? step.input_value : undefined,
+      url: step.action_type === 'navigate' ? step.input_value : undefined,
+
+      // Learning metadata
+      fallback_description: step.fallback_description,
+      verified_by: verifiedBy,
+      confidence: tripleResult.verification.confidence,
+      learned_at: new Date().toISOString(),
+    };
+
+    this.learnedSteps.push(procedureStep);
+    this.log('debug', `Learned step ${this.learnedSteps.length}: ${step.action_type} → ${step.target_description}`);
+  }
+
+  /**
+   * Save the learned procedure to Supabase.
+   * Called after successful completion in learning mode.
+   */
+  private async saveProcedure(plan: Plan): Promise<SavedProcedure | null> {
+    if (this.learnedSteps.length === 0) {
+      this.log('warn', 'No steps learned, skipping procedure save');
+      return null;
+    }
+
+    const procedure: SavedProcedure = {
+      id: `proc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: this.generateProcedureName(plan.goal),
+      description: plan.goal,
+      learned_at: new Date().toISOString(),
+      url_pattern: this.extractUrlPattern(this.state.current_url || ''),
+      success_count: 1,
+      fail_count: 0,
+      last_success: new Date().toISOString(),
+      steps: [...this.learnedSteps],
+      goal: plan.goal,
+      success_criteria: plan.success_criteria,
+    };
+
+    try {
+      // Save to Supabase
+      const { data, error } = await supabase
+        .from('saved_procedures')
+        .insert({
+          id: procedure.id,
+          name: procedure.name,
+          description: procedure.description,
+          learned_at: procedure.learned_at,
+          url_pattern: procedure.url_pattern,
+          success_count: procedure.success_count,
+          fail_count: procedure.fail_count,
+          last_success: procedure.last_success,
+          steps: procedure.steps,
+          goal: procedure.goal,
+          success_criteria: procedure.success_criteria,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        this.log('error', `Failed to save procedure: ${error.message}`);
+        return null;
+      }
+
+      this.log('success', `Procedure saved: ${procedure.name} (${procedure.steps.length} steps)`);
+      return procedure;
+    } catch (err) {
+      this.log('error', `Error saving procedure: ${err instanceof Error ? err.message : 'Unknown'}`);
+      return null;
+    }
+  }
+
+  /**
+   * Generate a procedure name from the goal.
+   */
+  private generateProcedureName(goal: string): string {
+    // Convert goal to snake_case procedure name
+    return goal
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '_')
+      .slice(0, 50);
+  }
+
+  /**
+   * Extract a URL pattern for matching.
+   */
+  private extractUrlPattern(url: string): string {
+    try {
+      const parsed = new URL(url);
+      // Create pattern: protocol://hostname/path (without query params)
+      return `${parsed.protocol}//${parsed.hostname}${parsed.pathname}`;
+    } catch {
+      return url;
+    }
+  }
+
+  // ============================================================
+  // PUBLIC API: Execution Mode Control
+  // ============================================================
+
+  /**
+   * Set execution mode (learning vs execution)
+   */
+  setMode(mode: ExecutionMode): void {
+    this.config.mode = mode;
+    this.log('info', `Execution mode set to: ${mode}`);
+  }
+
+  /**
+   * Get current execution mode
+   */
+  getMode(): ExecutionMode {
+    return this.config.mode;
+  }
+
+  /**
+   * Get execution log (current or most recent)
+   */
+  getExecutionLog() {
+    return this.logManager.getCurrentLog();
+  }
+
+  /**
+   * Get learned steps from current/last learning session
+   */
+  getLearnedSteps(): ProcedureStep[] {
+    return [...this.learnedSteps];
   }
 }
 

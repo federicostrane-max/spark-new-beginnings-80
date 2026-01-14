@@ -5,6 +5,9 @@
 // All coordinates are normalized to viewport space before comparison.
 // ============================================================
 
+// Execution Mode (defined first as it's used by OrchestratorConfig)
+export type ExecutionMode = 'learning' | 'execution';
+
 // Configuration
 export interface OrchestratorConfig {
   maxRetries: number;
@@ -14,6 +17,11 @@ export interface OrchestratorConfig {
   luxTimeout: number;
   geminiTimeout: number;
   plannerTimeout: number;
+
+  // Execution mode
+  mode: ExecutionMode;
+  enableLogging: boolean;
+  saveProcedures: boolean;  // Auto-save procedures after successful learning
 }
 
 export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
@@ -24,6 +32,11 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   luxTimeout: 10000,
   geminiTimeout: 15000,
   plannerTimeout: 30000,
+
+  // Default: learning mode with logging
+  mode: 'learning',
+  enableLogging: true,
+  saveProcedures: true,
 };
 
 // Plan Types (output from Planner Agent)
@@ -197,6 +210,64 @@ export interface DomElementRect {
   y: number;       // Center Y (ready for click)
   width: number;
   height: number;
+}
+
+// ============================================================
+// SAVED PROCEDURE - Learned Automation Procedure
+// ============================================================
+
+export interface ProcedureStep {
+  action: 'click' | 'type' | 'scroll' | 'keypress' | 'navigate' | 'wait';
+  description: string;
+
+  // Locators (in priority order)
+  selector?: string;           // CSS selector from DOM
+  ref?: string;                // Accessibility ref ID
+  coordinates?: { x: number; y: number }; // Fallback coordinates
+
+  // For type/keypress actions
+  text?: string;
+  key?: string;
+
+  // For scroll action
+  direction?: 'up' | 'down' | 'left' | 'right';
+  amount?: number;
+
+  // For navigate action
+  url?: string;
+
+  // Learning metadata
+  fallback_description?: string;  // Alternative description for vision fallback
+  verified_by: ('dom' | 'lux' | 'gemini')[];
+  confidence: number;
+  learned_at: string;
+}
+
+export interface SavedProcedure {
+  id: string;
+  name: string;
+  description?: string;
+
+  // When/where learned
+  learned_at: string;
+  url_pattern: string;          // Regex pattern to match URLs
+
+  // Usage stats
+  success_count: number;
+  fail_count: number;
+  last_success?: string;
+  last_fail?: string;
+
+  // The steps
+  steps: ProcedureStep[];
+
+  // Original goal
+  goal: string;
+  success_criteria: string;
+
+  // User/project association
+  user_id?: string;
+  project_id?: string;
 }
 
 // ============================================================
