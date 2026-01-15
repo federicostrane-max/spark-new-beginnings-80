@@ -5217,6 +5217,14 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                     session_id: toolInput.session_id
                   };
                   break;
+                case 'click_by_ref':
+                  // Click element by ref ID from dom_tree (e.g., "e3", "e9")
+                  command.params = {
+                    ref: toolInput.ref,
+                    click_type: toolInput.click_type || 'single',
+                    session_id: toolInput.session_id
+                  };
+                  break;
                 case 'type':
                   command.params = {
                     scope: toolInput.scope || 'browser',
@@ -5253,6 +5261,9 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
               responseText = `🔧 Comando locale: **${toolInput.action}**\n`;
               if (toolInput.action === 'click' && toolInput.x !== undefined) {
                 responseText += `   📍 Coordinate: (${toolInput.x}, ${toolInput.y}) [${toolInput.coordinate_origin || 'viewport'}]\n`;
+              }
+              if (toolInput.action === 'click_by_ref' && toolInput.ref) {
+                responseText += `   🎯 Ref: ${toolInput.ref} (from DOM tree)\n`;
               }
               if (toolInput.action === 'type' && toolInput.text) {
                 responseText += `   ⌨️ Testo: "${toolInput.text.substring(0, 50)}${toolInput.text.length > 50 ? '...' : ''}"\n`;
@@ -6016,12 +6027,13 @@ Requires Tool Server running locally on port 8766.`,
               properties: {
                 action: {
                   type: 'string',
-                  enum: ['screenshot', 'click', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree'],
-                  description: 'The action to perform'
+                  enum: ['screenshot', 'click', 'click_by_ref', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree'],
+                  description: 'The action to perform. Use click_by_ref with ref parameter (e.g., ref="e3") for DOM elements.'
                 },
                 scope: { type: 'string', enum: ['browser', 'desktop'], description: 'Target scope (default: browser)' },
-                x: { type: 'number', description: 'X coordinate for click' },
-                y: { type: 'number', description: 'Y coordinate for click' },
+                ref: { type: 'string', description: 'Element ref ID from dom_tree (e.g., "e3", "e9"). Use with click_by_ref action.' },
+                x: { type: 'number', description: 'X coordinate for click (use click_by_ref with ref instead when available)' },
+                y: { type: 'number', description: 'Y coordinate for click (use click_by_ref with ref instead when available)' },
                 click_type: { type: 'string', enum: ['single', 'double', 'right'], description: 'Click type (default: single)' },
                 coordinate_origin: { type: 'string', enum: ['viewport', 'screen', 'lux_sdk'], description: 'Coordinate system (lux_sdk for Lux, viewport for Gemini)' },
                 text: { type: 'string', description: 'Text to type' },

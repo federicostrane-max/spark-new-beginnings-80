@@ -811,8 +811,12 @@ export default function MultiAgentConsultant() {
   }): Promise<{ success: boolean; data?: unknown; error?: string }> => {
     const { action, params } = command;
     const sessionId = sessionManager.sessionId;
-    
+
+    // 🔍 DEBUG: Log dettagliato per tracciare session_id
     console.log(`🔧 [LOCAL] Executing: ${action}`, params);
+    console.log(`🔍 [LOCAL] params.session_id: ${params.session_id || 'not provided'}`);
+    console.log(`🔍 [LOCAL] sessionManager.sessionId: ${sessionId || 'NONE ⚠️'}`);
+    console.log(`🔍 [LOCAL] Using session_id: ${params.session_id || sessionId || 'NONE ⚠️'}`);
     
     try {
       switch (action) {
@@ -860,7 +864,18 @@ export default function MultiAgentConsultant() {
             coordinate_origin: (params.coordinate_origin as 'viewport' | 'lux_sdk') || 'viewport',
             click_type: (params.click_type as 'single' | 'double' | 'right') || 'single',
           });
-        
+
+        case 'click_by_ref':
+          // Click element by ref ID from dom_tree (e.g., "e3", "e9")
+          if (!params.ref) {
+            return { success: false, error: 'ref parameter required for click_by_ref' };
+          }
+          return await toolServerClient.clickByRef({
+            session_id: (params.session_id as string) || sessionId!,
+            ref: params.ref as string,
+            click_type: (params.click_type as 'single' | 'double' | 'right') || 'single',
+          });
+
         case 'type':
           return await toolServerClient.type({
             scope: (params.scope as 'browser' | 'desktop') || 'browser',
@@ -892,11 +907,13 @@ export default function MultiAgentConsultant() {
           );
         
         default:
+          console.warn(`🔍 [LOCAL] Unknown action: ${action}`);
           return { success: false, error: `Unknown action: ${action}` };
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       console.error(`❌ [LOCAL] Action ${action} failed:`, errorMsg);
+      console.error(`🔍 [LOCAL] Error details:`, error);
       return { success: false, error: errorMsg };
     }
   };
@@ -1347,10 +1364,20 @@ export default function MultiAgentConsultant() {
                     params: command.params || {},
                   });
                   
-                  // Per azioni che richiedono risultato (dom_tree, screenshot), invia al backend
-                  if (['dom_tree', 'screenshot'].includes(command.action) && result.success) {
+                  // 🔍 DEBUG: Log risultato dell'esecuzione
+                  console.log(`🔍 [LOCAL] Execution result for ${command.action}:`, {
+                    success: result.success,
+                    hasData: !!result.data,
+                    error: result.error || 'none',
+                  });
+
+                  // Per azioni che richiedono risultato, invia al backend
+                  // CRITICAL: browser_start DEVE essere incluso per comunicare session_id all'agent!
+                  const actionsRequiringResult = ['browser_start', 'dom_tree', 'screenshot'];
+                  if (actionsRequiringResult.includes(command.action) && result.success) {
                     console.log(`📤 [LOCAL] Sending ${command.action} result back to agent`);
-                    
+                    console.log(`🔍 [LOCAL] Result data preview:`, JSON.stringify(result.data).slice(0, 200) + '...');
+
                     const toolServerResultPayload = {
                       action: command.action,
                       success: result.success,
@@ -1382,16 +1409,24 @@ export default function MultiAgentConsultant() {
                       if (!response.ok) {
                         throw new Error(`Failed to send tool result: ${response.status}`);
                       }
-                      
-                      const actionLabel = command.action === 'screenshot' ? 'Screenshot captured' : 'DOM structure analyzed';
+
+                      const actionLabels: Record<string, string> = {
+                        'browser_start': 'Browser started',
+                        'screenshot': 'Screenshot captured',
+                        'dom_tree': 'DOM structure analyzed',
+                      };
+                      const actionLabel = actionLabels[command.action] || command.action;
                       toast.success(`${actionLabel}, agent continuing...`);
                       
                     } catch (sendError) {
                       console.error(`❌ [LOCAL] Failed to send ${command.action} result:`, sendError);
                       toast.error(`Failed to send result to agent: ${sendError instanceof Error ? sendError.message : 'Unknown error'}`);
                     }
+                  } else {
+                    // 🔍 DEBUG: Log per azioni che NON inviano risultato al backend
+                    console.log(`🔍 [LOCAL] Action ${command.action} completed (result NOT sent to agent - only browser_start/dom_tree/screenshot trigger callback)`);
                   }
-                  
+
                 } else if (command.tool === 'browser_orchestrator') {
                   // Execute pre-generated plan via Orchestrator
                   result = await executeLocalOrchestratorPlan({
