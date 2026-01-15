@@ -7,6 +7,7 @@ import { TTSProvider } from "@/contexts/TTSContext";
 import { useAuth } from "@/hooks/useAuth";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toaster } from "@/components/ui/sonner";
+import { AutoPairingProvider } from "@/components/AutoPairingProvider";
 
 // Lazy load all page components
 const MultiAgentConsultant = lazy(() => import("./pages/MultiAgentConsultant"));
@@ -24,12 +25,13 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
   const { user, loading } = useAuth();
-  
+
   if (loading) {
     return <div className="flex h-screen items-center justify-center">Loading...</div>;
   }
-  
-  return user ? <>{children}</> : <Navigate to="/auth" replace />;
+
+  // v10.3.0: AutoPairingProvider fa polling su localhost per auto-pairing Tool Server
+  return user ? <AutoPairingProvider>{children}</AutoPairingProvider> : <Navigate to="/auth" replace />;
 };
 
 const App = () => {
