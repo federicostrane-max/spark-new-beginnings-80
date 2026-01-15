@@ -403,6 +403,146 @@ class ToolServerClient {
       include_snapshot: options.include_snapshot ?? false,
     });
   }
+
+  // ──────────────────────────────────────────────────────────
+  // v10.4.0: Tracing (Playwright-inspired)
+  // ──────────────────────────────────────────────────────────
+
+  async tracingStart(options: {
+    session_id: string;
+    screenshots?: boolean;
+    snapshots?: boolean;
+  }): Promise<{ success: boolean; message?: string; error?: string }> {
+    return this.post('/browser/tracing/start', {
+      session_id: options.session_id,
+      screenshots: options.screenshots ?? true,
+      snapshots: options.snapshots ?? true,
+      sources: false,
+    });
+  }
+
+  async tracingStop(options: {
+    session_id: string;
+    output_path?: string;
+  }): Promise<{ success: boolean; trace_file?: string; hint?: string; error?: string }> {
+    return this.post('/browser/tracing/stop', {
+      session_id: options.session_id,
+      output_path: options.output_path,
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v10.4.0: Console and Network Capture
+  // ──────────────────────────────────────────────────────────
+
+  async getConsoleMessages(options: {
+    session_id: string;
+    types?: string[];
+    limit?: number;
+    clear?: boolean;
+  }): Promise<{
+    success: boolean;
+    count: number;
+    type_counts: Record<string, number>;
+    messages: Array<{ type: string; text: string; timestamp: string }>;
+    error?: string;
+  }> {
+    return this.post('/browser/console', {
+      session_id: options.session_id,
+      types: options.types,
+      limit: options.limit ?? 100,
+      clear: options.clear ?? false,
+    });
+  }
+
+  async getNetworkRequests(options: {
+    session_id: string;
+    types?: string[];
+    status_filter?: string;
+    limit?: number;
+    clear?: boolean;
+  }): Promise<{
+    success: boolean;
+    count: number;
+    status_counts: Record<string, number>;
+    type_counts: Record<string, number>;
+    requests: Array<{
+      method: string;
+      url: string;
+      resource_type: string;
+      status: number | null;
+      timestamp: string;
+    }>;
+    error?: string;
+  }> {
+    return this.post('/browser/network', {
+      session_id: options.session_id,
+      types: options.types,
+      status_filter: options.status_filter,
+      limit: options.limit ?? 100,
+      clear: options.clear ?? false,
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // v10.4.0: Assertion/Verify Actions
+  // ──────────────────────────────────────────────────────────
+
+  async verifyElementVisible(options: {
+    session_id: string;
+    selector?: string;
+    ref?: string;
+    text?: string;
+    timeout?: number;
+  }): Promise<{ success: boolean; passed: boolean; details?: Record<string, unknown>; error?: string }> {
+    return this.post('/browser/verify/element_visible', {
+      session_id: options.session_id,
+      selector: options.selector,
+      ref: options.ref,
+      text: options.text,
+      timeout: options.timeout ?? 5000,
+    });
+  }
+
+  async verifyTextVisible(options: {
+    session_id: string;
+    text: string;
+    exact?: boolean;
+    timeout?: number;
+  }): Promise<{ success: boolean; passed: boolean; details?: Record<string, unknown>; error?: string }> {
+    return this.post('/browser/verify/text_visible', {
+      session_id: options.session_id,
+      text: options.text,
+      exact: options.exact ?? false,
+      timeout: options.timeout ?? 5000,
+    });
+  }
+
+  async verifyUrl(options: {
+    session_id: string;
+    url?: string;
+    url_contains?: string;
+    url_regex?: string;
+  }): Promise<{ success: boolean; passed: boolean; details?: Record<string, unknown>; error?: string }> {
+    return this.post('/browser/verify/url', {
+      session_id: options.session_id,
+      url: options.url,
+      url_contains: options.url_contains,
+      url_regex: options.url_regex,
+    });
+  }
+
+  async verifyTitle(options: {
+    session_id: string;
+    title?: string;
+    title_contains?: string;
+  }): Promise<{ success: boolean; passed: boolean; details?: Record<string, unknown>; error?: string }> {
+    return this.post('/browser/verify/title', {
+      session_id: options.session_id,
+      title: options.title,
+      title_contains: options.title_contains,
+    });
+  }
 }
 
 // Singleton instance

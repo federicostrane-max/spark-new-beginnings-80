@@ -905,7 +905,66 @@ export default function MultiAgentConsultant() {
             (params.session_id as string) || sessionId!,
             params.url as string
           );
-        
+
+        // v10.4.0: Tracing actions
+        case 'tracing_start':
+          return await toolServerClient.tracingStart({
+            session_id: (params.session_id as string) || sessionId!,
+            screenshots: params.screenshots !== false,
+            snapshots: params.snapshots !== false,
+          });
+
+        case 'tracing_stop':
+          return await toolServerClient.tracingStop({
+            session_id: (params.session_id as string) || sessionId!,
+          });
+
+        case 'console_messages':
+          return await toolServerClient.getConsoleMessages({
+            session_id: (params.session_id as string) || sessionId!,
+            limit: (params.limit as number) || 100,
+            clear: (params.clear as boolean) || false,
+          });
+
+        case 'network_requests':
+          return await toolServerClient.getNetworkRequests({
+            session_id: (params.session_id as string) || sessionId!,
+            limit: (params.limit as number) || 100,
+            clear: (params.clear as boolean) || false,
+          });
+
+        // v10.4.0: Assertion/verify actions
+        case 'verify_visible':
+          return await toolServerClient.verifyElementVisible({
+            session_id: (params.session_id as string) || sessionId!,
+            selector: params.selector as string,
+            ref: params.ref as string,
+            text: params.text as string,
+            timeout: (params.timeout as number) || 5000,
+          });
+
+        case 'verify_text':
+          return await toolServerClient.verifyTextVisible({
+            session_id: (params.session_id as string) || sessionId!,
+            text: params.text as string,
+            exact: (params.exact as boolean) || false,
+            timeout: (params.timeout as number) || 5000,
+          });
+
+        case 'verify_url':
+          return await toolServerClient.verifyUrl({
+            session_id: (params.session_id as string) || sessionId!,
+            url: params.url as string,
+            url_contains: params.url_contains as string,
+          });
+
+        case 'verify_title':
+          return await toolServerClient.verifyTitle({
+            session_id: (params.session_id as string) || sessionId!,
+            title: params.title as string,
+            title_contains: params.title_contains as string,
+          });
+
         default:
           console.warn(`🔍 [LOCAL] Unknown action: ${action}`);
           return { success: false, error: `Unknown action: ${action}` };

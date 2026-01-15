@@ -5256,6 +5256,67 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                 case 'dom_tree':
                   command.params = { session_id: toolInput.session_id };
                   break;
+                // v10.4.0: Tracing actions
+                case 'tracing_start':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    screenshots: toolInput.screenshots !== false,
+                    snapshots: toolInput.snapshots !== false,
+                    sources: false
+                  };
+                  break;
+                case 'tracing_stop':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    output_path: null // Use default path
+                  };
+                  break;
+                case 'console_messages':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    limit: toolInput.limit || 100,
+                    clear: toolInput.clear || false
+                  };
+                  break;
+                case 'network_requests':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    limit: toolInput.limit || 100,
+                    clear: toolInput.clear || false
+                  };
+                  break;
+                // v10.4.0: Assertion/verify actions
+                case 'verify_visible':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    selector: toolInput.selector,
+                    ref: toolInput.ref,
+                    text: toolInput.text,
+                    timeout: toolInput.timeout || 5000
+                  };
+                  break;
+                case 'verify_text':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    text: toolInput.text,
+                    exact: toolInput.exact || false,
+                    timeout: toolInput.timeout || 5000
+                  };
+                  break;
+                case 'verify_url':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    url: toolInput.url,
+                    url_contains: toolInput.url_contains
+                  };
+                  break;
+                case 'verify_title':
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    title: toolInput.title,
+                    title_contains: toolInput.title_contains
+                  };
+                  break;
               }
 
               responseText = `🔧 Comando locale: **${toolInput.action}**\n`;
@@ -6027,8 +6088,13 @@ Requires Tool Server running locally on port 8766.`,
               properties: {
                 action: {
                   type: 'string',
-                  enum: ['screenshot', 'click', 'click_by_ref', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree'],
-                  description: 'The action to perform. Use click_by_ref with ref parameter (e.g., ref="e3") for DOM elements.'
+                  enum: [
+                    'screenshot', 'click', 'click_by_ref', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree',
+                    // v10.4.0: Tracing and assertions
+                    'tracing_start', 'tracing_stop', 'console_messages', 'network_requests',
+                    'verify_visible', 'verify_text', 'verify_url', 'verify_title'
+                  ],
+                  description: 'The action to perform. Use click_by_ref with ref parameter (e.g., ref="e3") for DOM elements. Tracing/verify actions for testing.'
                 },
                 scope: { type: 'string', enum: ['browser', 'desktop'], description: 'Target scope (default: browser)' },
                 ref: { type: 'string', description: 'Element ref ID from dom_tree (e.g., "e3", "e9"). Use with click_by_ref action.' },
@@ -6036,12 +6102,22 @@ Requires Tool Server running locally on port 8766.`,
                 y: { type: 'number', description: 'Y coordinate for click (use click_by_ref with ref instead when available)' },
                 click_type: { type: 'string', enum: ['single', 'double', 'right'], description: 'Click type (default: single)' },
                 coordinate_origin: { type: 'string', enum: ['viewport', 'screen', 'lux_sdk'], description: 'Coordinate system (lux_sdk for Lux, viewport for Gemini)' },
-                text: { type: 'string', description: 'Text to type' },
+                text: { type: 'string', description: 'Text to type (for type action) or text to verify (for verify_text action)' },
                 method: { type: 'string', enum: ['clipboard', 'keystrokes'], description: 'Typing method' },
                 direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
                 amount: { type: 'number', description: 'Scroll amount in pixels' },
                 key: { type: 'string', description: 'Key to press (Enter, Tab, Escape, etc.)' },
-                url: { type: 'string', description: 'URL for navigate/browser_start' },
+                url: { type: 'string', description: 'URL for navigate/browser_start or verify_url' },
+                url_contains: { type: 'string', description: 'Partial URL match for verify_url' },
+                title: { type: 'string', description: 'Page title for verify_title' },
+                title_contains: { type: 'string', description: 'Partial title match for verify_title' },
+                selector: { type: 'string', description: 'CSS selector for verify_visible' },
+                exact: { type: 'boolean', description: 'Exact match for verify_text (default: false)' },
+                timeout: { type: 'number', description: 'Timeout in ms for verify actions (default: 5000)' },
+                screenshots: { type: 'boolean', description: 'Include screenshots in trace (for tracing_start)' },
+                snapshots: { type: 'boolean', description: 'Include DOM snapshots in trace (for tracing_start)' },
+                limit: { type: 'number', description: 'Max messages/requests to return (for console_messages/network_requests)' },
+                clear: { type: 'boolean', description: 'Clear messages after returning (for console_messages/network_requests)' },
                 session_id: { type: 'string', description: 'Browser session ID (auto-managed)' }
               },
               required: ['action']
