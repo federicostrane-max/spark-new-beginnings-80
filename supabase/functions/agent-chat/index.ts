@@ -4250,16 +4250,27 @@ Use this visual information to understand the current state of the page and plan
 `;
             } else if (toolServerResult.action === 'dom_tree' && toolServerResult.data?.tree) {
               // FIX: Serialize tree object properly - use text_snapshot if available, otherwise JSON.stringify
-              const treeData = toolServerResult.data.tree;
+              const treeData = toolServerResult.data.tree as unknown;
               let treeString: string;
+              let treeUrl = 'N/A';
+              let treeTitle = 'N/A';
+
               if (typeof treeData === 'string') {
                 treeString = treeData;
-              } else if (treeData.text_snapshot) {
+              } else if (treeData && typeof treeData === 'object') {
+                const treeObj = treeData as Record<string, unknown>;
                 // Playwright MCP style: use text_snapshot for LLM consumption
-                treeString = treeData.text_snapshot;
+                if (typeof treeObj.text_snapshot === 'string') {
+                  treeString = treeObj.text_snapshot;
+                } else {
+                  // Fallback: JSON.stringify the tree object
+                  treeString = JSON.stringify(treeData, null, 2);
+                }
+                // Extract metadata if available
+                if (typeof treeObj.url === 'string') treeUrl = treeObj.url;
+                if (typeof treeObj.title === 'string') treeTitle = treeObj.title;
               } else {
-                // Fallback: JSON.stringify the tree object
-                treeString = JSON.stringify(treeData, null, 2);
+                treeString = String(treeData);
               }
 
               resultContent = `
@@ -4267,8 +4278,8 @@ Use this visual information to understand the current state of the page and plan
 Action: dom_tree
 Success: ${toolServerResult.success}
 Session ID: ${toolServerResult.session_id || 'N/A'}
-URL: ${treeData.url || 'N/A'}
-Title: ${treeData.title || 'N/A'}
+URL: ${treeUrl}
+Title: ${treeTitle}
 Timestamp: ${new Date(toolServerResult.timestamp).toISOString()}
 
 DOM Structure:
