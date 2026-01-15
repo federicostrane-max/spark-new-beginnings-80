@@ -4249,19 +4249,48 @@ Use this visual information to understand the current state of the page and plan
 ---
 `;
             } else if (toolServerResult.action === 'dom_tree' && toolServerResult.data?.tree) {
+              // FIX: Serialize tree object properly - use text_snapshot if available, otherwise JSON.stringify
+              const treeData = toolServerResult.data.tree;
+              let treeString: string;
+              if (typeof treeData === 'string') {
+                treeString = treeData;
+              } else if (treeData.text_snapshot) {
+                // Playwright MCP style: use text_snapshot for LLM consumption
+                treeString = treeData.text_snapshot;
+              } else {
+                // Fallback: JSON.stringify the tree object
+                treeString = JSON.stringify(treeData, null, 2);
+              }
+
               resultContent = `
 [TOOL_SERVER_ACTION RESULT - DOM_TREE]
 Action: dom_tree
 Success: ${toolServerResult.success}
 Session ID: ${toolServerResult.session_id || 'N/A'}
+URL: ${treeData.url || 'N/A'}
+Title: ${treeData.title || 'N/A'}
 Timestamp: ${new Date(toolServerResult.timestamp).toISOString()}
 
 DOM Structure:
-${toolServerResult.data.tree}
+${treeString}
 
 ---
 Use this DOM structure to locate elements and plan your next actions.
 DO NOT call tool_server_action with action='dom_tree' again - you already have the structure.
+`;
+            } else if (toolServerResult.action === 'browser_start' && toolServerResult.success) {
+              // CRITICAL: browser_start deve comunicare chiaramente il session_id
+              const sessionId = toolServerResult.data?.session_id || toolServerResult.session_id;
+              resultContent = `
+[TOOL_SERVER_ACTION RESULT - BROWSER_START]
+Action: browser_start
+Success: true
+Session ID: ${sessionId}
+Timestamp: ${new Date(toolServerResult.timestamp).toISOString()}
+
+✅ Browser started successfully!
+IMPORTANT: Use session_id="${sessionId}" for ALL subsequent browser actions (dom_tree, screenshot, click, type, etc.)
+---
 `;
             } else if (toolServerResult.error) {
               resultContent = `
@@ -4277,6 +4306,7 @@ The action failed. Consider retrying or using an alternative approach.
 [TOOL_SERVER_ACTION RESULT]
 Action: ${toolServerResult.action}
 Success: ${toolServerResult.success}
+Session ID: ${toolServerResult.session_id || 'N/A'}
 Data: ${JSON.stringify(toolServerResult.data || {})}
 ---
 `;
