@@ -337,6 +337,65 @@ async function handleGetConfig(userId: string): Promise<Response> {
   });
 }
 
+// v10.3.0: Auto-pairing - crea credenziali direttamente per il Tool Server
+async function handleCreateAutoPairCredentials(userId: string): Promise<Response> {
+  const supabase = getSupabaseClient();
+
+  // Check if config already exists
+  const { data: existingConfig } = await supabase
+    .from('tool_server_config')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  let config;
+
+  if (existingConfig) {
+    // Update existing config with new device_secret
+    const { data, error } = await supabase
+      .from('tool_server_config')
+      .update({
+        device_secret: crypto.randomUUID(),
+        device_name: 'Desktop (Auto)',
+        paired_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to update config: ${error.message}`);
+    config = data;
+  } else {
+    // Create new config
+    const { data, error } = await supabase
+      .from('tool_server_config')
+      .insert({
+        user_id: userId,
+        device_name: 'Desktop (Auto)',
+        device_secret: crypto.randomUUID(),
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to create config: ${error.message}`);
+    config = data;
+  }
+
+  console.log(`[PAIR] Auto-pair credentials created for user ${userId}`);
+
+  // Return credentials for Tool Server
+  return new Response(JSON.stringify({
+    success: true,
+    user_id: userId,
+    device_secret: config.device_secret,
+    supabase_url: Deno.env.get('SUPABASE_URL'),
+    function_url: `${Deno.env.get('SUPABASE_URL')}/functions/v1/tool-server-pair`,
+  }), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 // ────────────────────────────────────────────────────────────
 // Main Handler
 // ────────────────────────────────────────────────────────────
@@ -385,6 +444,9 @@ serve(async (req) => {
 
       case 'get_config':
         return await handleGetConfig(user.id);
+
+      case 'create_auto_pair_credentials':
+        return await handleCreateAutoPairCredentials(user.id);
 
       default:
         return new Response(JSON.stringify({

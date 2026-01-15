@@ -132,6 +132,96 @@ export const ToolServerSettings = () => {
     return () => clearInterval(timer);
   }, [pairingExpiry]);
 
+  // v10.3.0: Auto-pairing - polling su localhost per rilevare Tool Server
+  useEffect(() => {
+    if (!user) return;
+    if (pairedConfig) return; // Già paired, non serve polling
+
+    const LOCALHOST_URL = 'http://localhost:8766';
+    let isPolling = true;
+
+    const pollLocalhost = async () => {
+      while (isPolling) {
+        try {
+          const response = await fetch(`${LOCALHOST_URL}/pairing_status`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('[ToolServer] Localhost status:', data);
+
+            // Se Tool Server è in attesa di pairing e non è già paired
+            if (data.waiting_for_pairing && !data.paired) {
+              console.log('[ToolServer] Tool Server rilevato, invio credenziali...');
+              await performAutoPairing(LOCALHOST_URL);
+              break; // Esci dal loop dopo il pairing
+            }
+          }
+        } catch (err) {
+          // Tool Server non raggiungibile, continua polling silenziosamente
+        }
+
+        // Aspetta 3 secondi prima del prossimo tentativo
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    };
+
+    pollLocalhost();
+
+    return () => {
+      isPolling = false;
+    };
+  }, [user, pairedConfig]);
+
+  // Funzione per eseguire auto-pairing
+  const performAutoPairing = async (localhostUrl: string) => {
+    try {
+      // Chiama edge function per creare/ottenere credenziali
+      const { data, error } = await supabase.functions.invoke('tool-server-pair', {
+        body: { action: 'create_auto_pair_credentials' }
+      });
+
+      if (error || !data?.success) {
+        console.error('[ToolServer] Failed to get auto-pair credentials:', error || data?.error);
+        return;
+      }
+
+      // Invia credenziali al Tool Server locale
+      const pairResponse = await fetch(`${localhostUrl}/auto_pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: data.user_id,
+          device_secret: data.device_secret,
+          supabase_url: data.supabase_url,
+          function_url: data.function_url
+        })
+      });
+
+      if (pairResponse.ok) {
+        const result = await pairResponse.json();
+        if (result.success) {
+          toast.success("Tool Server collegato automaticamente!");
+          console.log('[ToolServer] Auto-pairing completato:', result);
+
+          // Aggiorna lo stato locale
+          checkPairingStatus();
+
+          // Se abbiamo l'URL ngrok, aggiorna anche quello
+          if (result.ngrok_url) {
+            setUrl(result.ngrok_url);
+            toolServerClient.updateBaseUrl(result.ngrok_url);
+            testConnectionInternal(result.ngrok_url);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[ToolServer] Auto-pairing failed:', err);
+    }
+  };
+
   const checkPairingStatus = async () => {
     try {
       const { data, error } = await supabase.functions.invoke('tool-server-pair', {
