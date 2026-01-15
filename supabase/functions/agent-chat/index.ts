@@ -2972,12 +2972,20 @@ ${luxMode === 'tasker' && todosFormatted ? `\n**Todos (${parsedTask.todos.length
     }
 
     // Save user message (original with @tags) and get ID for potential update
+    // CRITICAL: If toolServerResult is present with empty message, create a synthetic message
+    // This ensures Anthropic API receives a user message (required for alternating user/assistant)
+    let messageToSave = message;
+    if (toolServerResult && (!message || message.trim() === '')) {
+      messageToSave = `[Tool Server Result: ${toolServerResult.action}]`;
+      console.log(`🔧 [REQ-${requestId}] Synthetic user message for toolServerResult: ${messageToSave}`);
+    }
+
     const { data: userMessage, error: userMsgError } = await supabase
       .from('agent_messages')
       .insert({
         conversation_id: conversation.id,
         role: 'user',
-        content: message  // Keep original message with @tags
+        content: messageToSave
       })
       .select('id')
       .single();
