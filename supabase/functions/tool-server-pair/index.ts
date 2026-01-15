@@ -53,7 +53,11 @@ interface GetConfigRequest {
   action: 'get_config';
 }
 
-type RequestBody = GenerateRequest | ValidateRequest | UpdateUrlRequest | DisconnectRequest | GetConfigRequest;
+interface CreateAutoPairCredentialsRequest {
+  action: 'create_auto_pair_credentials';
+}
+
+type RequestBody = GenerateRequest | ValidateRequest | UpdateUrlRequest | DisconnectRequest | GetConfigRequest | CreateAutoPairCredentialsRequest;
 
 // ────────────────────────────────────────────────────────────
 // Helper Functions
