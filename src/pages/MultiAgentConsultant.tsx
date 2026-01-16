@@ -856,9 +856,10 @@ export default function MultiAgentConsultant() {
         }
 
         case 'element_rect': {
-          // Get element coordinates by selector/text/role
+          // Get element coordinates by ref/selector/text/role
           const rectResult = await toolServerClient.getElementRect({
             session_id: (params.session_id as string) || sessionId!,
+            ref: params.ref as string | undefined,  // ref ID from dom_tree (e.g., "e37")
             selector: params.selector as string | undefined,
             text: params.text as string | undefined,
             text_exact: params.exact as boolean | undefined,

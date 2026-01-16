@@ -5257,9 +5257,10 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                   command.params = { session_id: toolInput.session_id };
                   break;
                 case 'element_rect':
-                  // Get element coordinates by selector/text/role
+                  // Get element coordinates by ref/selector/text/role
                   command.params = {
                     session_id: toolInput.session_id,
+                    ref: toolInput.ref,  // ref ID from dom_tree (e.g., "e37")
                     selector: toolInput.selector,
                     text: toolInput.text,
                     text_exact: toolInput.exact || false,
