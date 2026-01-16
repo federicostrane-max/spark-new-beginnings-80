@@ -280,21 +280,32 @@ class ToolServerClient {
 
   async getElementRect(options: {
     session_id: string;
+    ref?: string;              // ref ID from DOM tree (e.g., "e3")
     selector?: string;
     text?: string;
+    text_exact?: boolean;      // exact text match
     role?: string;
+    role_name?: string;        // accessible name for role-based lookup
     test_id?: string;
     label?: string;
     placeholder?: string;
+    index?: number;            // nth element matching (default: 0)
+    must_be_visible?: boolean; // filter for visible only (default: true)
   }): Promise<{
     success: boolean;
     found: boolean;
     visible: boolean;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
+    enabled?: boolean;         // is element enabled/interactive
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
     bounding_box?: { x: number; y: number; width: number; height: number };
+    tag?: string;              // HTML tag name
+    text?: string;             // element text content
+    element_count?: number;    // count of matching elements
+    selector_used?: string;    // actual selector/criteria used
+    error?: string;            // error message if failed
   }> {
     return this.post('/browser/dom/element_rect', options);
   }
