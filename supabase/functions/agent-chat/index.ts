@@ -5256,6 +5256,22 @@ TaskerAgent eseguirà ogni step in sequenza con auto-correzione.`;
                 case 'dom_tree':
                   command.params = { session_id: toolInput.session_id };
                   break;
+                case 'element_rect':
+                  // Get element coordinates by selector/text/role
+                  command.params = {
+                    session_id: toolInput.session_id,
+                    selector: toolInput.selector,
+                    text: toolInput.text,
+                    text_exact: toolInput.exact || false,
+                    role: toolInput.role,
+                    role_name: toolInput.role_name,
+                    test_id: toolInput.test_id,
+                    label: toolInput.label,
+                    placeholder: toolInput.placeholder,
+                    index: toolInput.index || 0,
+                    must_be_visible: true
+                  };
+                  break;
                 // v10.4.0: Tracing actions
                 case 'tracing_start':
                   command.params = {
@@ -6090,11 +6106,12 @@ Requires Tool Server running locally on port 8766.`,
                   type: 'string',
                   enum: [
                     'screenshot', 'click', 'click_by_ref', 'type', 'scroll', 'keypress', 'navigate', 'browser_start', 'browser_stop', 'dom_tree',
+                    'element_rect', // Get element coordinates by selector/text/role
                     // v10.4.0: Tracing and assertions
                     'tracing_start', 'tracing_stop', 'console_messages', 'network_requests',
                     'verify_visible', 'verify_text', 'verify_url', 'verify_title'
                   ],
-                  description: 'The action to perform. Use click_by_ref with ref parameter (e.g., ref="e3") for DOM elements. Tracing/verify actions for testing.'
+                  description: 'The action to perform. Use click_by_ref with ref parameter (e.g., ref="e3") for DOM elements. Use element_rect to get coordinates by selector/text. Tracing/verify actions for testing.'
                 },
                 scope: { type: 'string', enum: ['browser', 'desktop'], description: 'Target scope (default: browser)' },
                 ref: { type: 'string', description: 'Element ref ID from dom_tree (e.g., "e3", "e9"). Use with click_by_ref action.' },
@@ -6111,8 +6128,15 @@ Requires Tool Server running locally on port 8766.`,
                 url_contains: { type: 'string', description: 'Partial URL match for verify_url' },
                 title: { type: 'string', description: 'Page title for verify_title' },
                 title_contains: { type: 'string', description: 'Partial title match for verify_title' },
-                selector: { type: 'string', description: 'CSS selector for verify_visible' },
-                exact: { type: 'boolean', description: 'Exact match for verify_text (default: false)' },
+                selector: { type: 'string', description: 'CSS selector for verify_visible or element_rect' },
+                // element_rect parameters
+                role: { type: 'string', description: 'ARIA role for element_rect (button, link, textbox, etc.)' },
+                role_name: { type: 'string', description: 'Accessible name for role-based lookup in element_rect' },
+                test_id: { type: 'string', description: 'data-testid attribute for element_rect' },
+                label: { type: 'string', description: 'Label text for element_rect' },
+                placeholder: { type: 'string', description: 'Placeholder text for element_rect' },
+                index: { type: 'number', description: 'Index when multiple elements match (default: 0) for element_rect' },
+                exact: { type: 'boolean', description: 'Exact match for verify_text or element_rect text (default: false)' },
                 timeout: { type: 'number', description: 'Timeout in ms for verify actions (default: 5000)' },
                 screenshots: { type: 'boolean', description: 'Include screenshots in trace (for tracing_start)' },
                 snapshots: { type: 'boolean', description: 'Include DOM snapshots in trace (for tracing_start)' },

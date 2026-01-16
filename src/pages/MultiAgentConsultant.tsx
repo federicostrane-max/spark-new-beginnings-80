@@ -854,7 +854,40 @@ export default function MultiAgentConsultant() {
           const domResult = await toolServerClient.getDomTree((params.session_id as string) || sessionId!);
           return { success: domResult.success, data: { tree: domResult.tree } };
         }
-        
+
+        case 'element_rect': {
+          // Get element coordinates by selector/text/role
+          const rectResult = await toolServerClient.getElementRect({
+            session_id: (params.session_id as string) || sessionId!,
+            selector: params.selector as string | undefined,
+            text: params.text as string | undefined,
+            text_exact: params.exact as boolean | undefined,
+            role: params.role as string | undefined,
+            role_name: params.role_name as string | undefined,
+            test_id: params.test_id as string | undefined,
+            label: params.label as string | undefined,
+            placeholder: params.placeholder as string | undefined,
+            index: params.index as number | undefined,
+            must_be_visible: true,
+          });
+          return {
+            success: rectResult.success,
+            data: {
+              found: rectResult.found,
+              visible: rectResult.visible,
+              enabled: rectResult.enabled,
+              x: rectResult.x,
+              y: rectResult.y,
+              bounding_box: rectResult.bounding_box,
+              tag: rectResult.tag,
+              text: rectResult.text,
+              element_count: rectResult.element_count,
+              selector_used: rectResult.selector_used,
+            },
+            error: rectResult.error,
+          };
+        }
+
         case 'click':
           return await toolServerClient.click({
             scope: (params.scope as 'browser' | 'desktop') || 'browser',
