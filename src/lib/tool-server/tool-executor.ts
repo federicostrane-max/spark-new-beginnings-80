@@ -207,12 +207,17 @@ async function executeToolServerAction(
       if (!sessionId) throw new Error('session_id required for element_rect');
       return toolServerClient.getElementRect({
         session_id: sessionId,
+        ref: input.ref,
         selector: input.selector,
         text: input.text,
+        text_exact: input.text_exact,
         role: input.role,
+        role_name: input.role_name,
         test_id: input.test_id,
         label: input.label,
         placeholder: input.placeholder,
+        index: input.index,
+        must_be_visible: input.must_be_visible,
       });
 
     default:

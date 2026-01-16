@@ -65,9 +65,13 @@ export interface ToolServerActionInput {
   // Per element_rect (DOM element search)
   selector?: string;
   role?: string;
+  role_name?: string;       // Accessible name for role-based lookup
   test_id?: string;
   label?: string;
   placeholder?: string;
+  text_exact?: boolean;     // Exact text match (default: false)
+  index?: number;           // nth element matching (default: 0)
+  must_be_visible?: boolean; // Filter for visible only (default: true)
 
   // v10.1.0: Auto-snapshot DOM after action
   include_snapshot?: boolean;
