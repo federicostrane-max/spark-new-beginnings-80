@@ -2974,10 +2974,36 @@ ${luxMode === 'tasker' && todosFormatted ? `\n**Todos (${parsedTask.todos.length
     // Save user message (original with @tags) and get ID for potential update
     // CRITICAL: If toolServerResult is present with empty message, create a synthetic message
     // This ensures Anthropic API receives a user message (required for alternating user/assistant)
+    // FIX: Include actual result content so agent sees it in conversation, not just system prompt
     let messageToSave = message;
     if (toolServerResult && (!message || message.trim() === '')) {
-      messageToSave = `[Tool Server Result: ${toolServerResult.action}]`;
-      console.log(`🔧 [REQ-${requestId}] Synthetic user message for toolServerResult: ${messageToSave}`);
+      if (toolServerResult.action === 'dom_tree' && toolServerResult.data?.tree) {
+        // Extract DOM tree content for the message
+        const treeData = toolServerResult.data.tree as unknown;
+        let treeContent: string;
+        if (typeof treeData === 'string') {
+          treeContent = treeData;
+        } else if (treeData && typeof treeData === 'object') {
+          const treeObj = treeData as Record<string, unknown>;
+          treeContent = typeof treeObj.text_snapshot === 'string'
+            ? treeObj.text_snapshot
+            : JSON.stringify(treeObj, null, 2);
+        } else {
+          treeContent = String(treeData);
+        }
+        messageToSave = `[Tool Server Result: dom_tree]\n\nDOM Structure:\n${treeContent}`;
+        console.log(`🔧 [REQ-${requestId}] DOM tree included in synthetic message (${treeContent.length} chars)`);
+      } else if (toolServerResult.action === 'browser_start' && toolServerResult.success) {
+        const sessionId = toolServerResult.data?.session_id || toolServerResult.session_id;
+        messageToSave = `[Tool Server Result: browser_start]\n\n✅ Browser started successfully!\nSession ID: ${sessionId}\n\nUse this session_id for all subsequent browser actions.`;
+        console.log(`🔧 [REQ-${requestId}] Browser start result in synthetic message`);
+      } else if (toolServerResult.action === 'screenshot' && toolServerResult.data?.image_base64) {
+        messageToSave = `[Tool Server Result: screenshot]\n\n✅ Screenshot captured!\nDimensions: ${toolServerResult.data.width || 'unknown'}x${toolServerResult.data.height || 'unknown'}\n\nThe screenshot is available for analysis.`;
+        console.log(`🔧 [REQ-${requestId}] Screenshot result in synthetic message`);
+      } else {
+        messageToSave = `[Tool Server Result: ${toolServerResult.action}]`;
+        console.log(`🔧 [REQ-${requestId}] Generic synthetic message for toolServerResult: ${messageToSave}`);
+      }
     }
 
     const { data: userMessage, error: userMsgError } = await supabase
