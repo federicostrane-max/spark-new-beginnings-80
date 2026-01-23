@@ -1,6 +1,7 @@
 // ============================================================
 // HTTP Client per Tool Server (ngrok URL configurato dall'utente)
 // CRITICAL: MAI fallback a localhost - se non configurato, errore!
+// v10.6.0: Supporto autenticazione con X-Tool-Token
 // ============================================================
 
 import { DEFAULT_CONFIG, ToolServerConfig, ToolServerResponse } from './types';
@@ -24,6 +25,12 @@ export function normalizeToolServerUrl(input: string): string {
 // ──────────────────────────────────────────────────────────
 
 export const TOOL_SERVER_URL_CHANGED_EVENT = 'toolServerUrlChanged';
+
+// ──────────────────────────────────────────────────────────
+// Security Token Storage Key
+// ──────────────────────────────────────────────────────────
+
+const SECURITY_TOKEN_KEY = 'toolServerSecurityToken';
 
 // ──────────────────────────────────────────────────────────
 // Headers comuni per tutte le richieste
@@ -56,14 +63,14 @@ class ToolServerClient {
         return normalized;
       }
     }
-    
+
     // 2. Variabile d'ambiente (per sviluppo locale)
     const envUrl = import.meta.env.VITE_TOOL_SERVER_URL;
     if (envUrl) {
       const normalized = normalizeToolServerUrl(envUrl);
       if (normalized) return normalized;
     }
-    
+
     // 3. NESSUN FALLBACK A LOCALHOST - ritorna null
     return null;
   }
@@ -92,8 +99,8 @@ class ToolServerClient {
         localStorage.removeItem('toolServerUrl');
       }
       // Emetti evento per aggiornamento immediato della UI
-      window.dispatchEvent(new CustomEvent(TOOL_SERVER_URL_CHANGED_EVENT, { 
-        detail: { url: normalized || null } 
+      window.dispatchEvent(new CustomEvent(TOOL_SERVER_URL_CHANGED_EVENT, {
+        detail: { url: normalized || null }
       }));
     }
   }
@@ -103,40 +110,101 @@ class ToolServerClient {
     return this.getBaseUrl();
   }
 
+  // ──────────────────────────────────────────────────────────
+  // v10.6.0: Security Token Management
+  // ──────────────────────────────────────────────────────────
+
+  // Salva il security token (mostrato all'avvio del Tool Server)
+  public setSecurityToken(token: string): void {
+    if (typeof window !== 'undefined') {
+      if (token && token.trim()) {
+        localStorage.setItem(SECURITY_TOKEN_KEY, token.trim());
+      } else {
+        localStorage.removeItem(SECURITY_TOKEN_KEY);
+      }
+    }
+  }
+
+  // Ritorna il security token salvato
+  public getSecurityToken(): string | null {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(SECURITY_TOKEN_KEY);
+    }
+    return null;
+  }
+
+  // Verifica se il token è configurato
+  public hasSecurityToken(): boolean {
+    return !!this.getSecurityToken();
+  }
+
+  // Headers con token di autenticazione
+  private getAuthHeaders(): Record<string, string> {
+    const token = this.getSecurityToken();
+    if (token) {
+      return { 'X-Tool-Token': token };
+    }
+    return {};
+  }
+
   // CRITICAL: Se non configurato, ritorna errore SENZA fare fetch
   public async testConnection(): Promise<{
     connected: boolean;
     version?: string;
     error?: string;
     urlUsed?: string | null;
+    authRequired?: boolean;  // v10.6.0: indica se serve token
   }> {
     const baseUrl = this.getBaseUrl();
-    
+
     // Se non configurato, ritorna subito senza fare fetch
     if (!baseUrl) {
-      return { 
-        connected: false, 
-        error: 'Tool Server non configurato', 
-        urlUsed: null 
+      return {
+        connected: false,
+        error: 'Tool Server non configurato',
+        urlUsed: null
       };
     }
-    
+
     try {
       const response = await fetch(`${baseUrl}/status`, {
         method: 'GET',
-        headers: { ...COMMON_HEADERS }
+        headers: { ...COMMON_HEADERS, ...this.getAuthHeaders() }
       });
-      
+
+      // v10.6.0: Gestione errore autenticazione
+      if (response.status === 401) {
+        return {
+          connected: false,
+          error: 'Token di sicurezza richiesto. Copia il token dalla console del Tool Server.',
+          urlUsed: baseUrl,
+          authRequired: true
+        };
+      }
+
+      if (response.status === 403) {
+        return {
+          connected: false,
+          error: 'Origine non autorizzata (CORS). Verifica che la Web App sia nella whitelist.',
+          urlUsed: baseUrl
+        };
+      }
+
       if (!response.ok) {
         return { connected: false, error: `HTTP ${response.status}`, urlUsed: baseUrl };
       }
-      
+
       const data = await response.json();
-      return { connected: true, version: data.version, urlUsed: baseUrl };
+      return {
+        connected: true,
+        version: data.version,
+        urlUsed: baseUrl,
+        authRequired: data.auth_required ?? false
+      };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Connection failed';
-      return { 
-        connected: false, 
+      return {
+        connected: false,
         error: `${errorMessage} (URL: ${baseUrl})`,
         urlUsed: baseUrl
       };
@@ -154,7 +222,7 @@ class ToolServerClient {
     // Lancia errore se non configurato - NESSUNA fetch a localhost
     const baseUrl = this.getBaseUrlOrThrow();
     const url = `${baseUrl}${endpoint}`;
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
@@ -164,12 +232,22 @@ class ToolServerClient {
         headers: {
           'Content-Type': 'application/json',
           ...COMMON_HEADERS,
+          ...this.getAuthHeaders(),  // v10.6.0: Include security token
           ...options.headers,
         },
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
+
+      // v10.6.0: Gestione errori di autenticazione
+      if (response.status === 401) {
+        throw new Error('Autenticazione richiesta. Configura il Security Token nelle impostazioni.');
+      }
+
+      if (response.status === 403) {
+        throw new Error('Origine non autorizzata (CORS). La Web App non è nella whitelist del Tool Server.');
+      }
 
       if (!response.ok) {
         throw new Error(`Tool Server error: ${response.status} ${response.statusText} (URL: ${baseUrl})`);
@@ -178,16 +256,16 @@ class ToolServerClient {
       return await response.json();
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`Tool Server timeout (URL: ${baseUrl}) - verifica che ngrok sia in esecuzione`);
       }
-      
+
       // Aggiungi URL all'errore per debugging
       if (error instanceof Error && !error.message.includes('URL:')) {
         throw new Error(`${error.message} (URL: ${baseUrl})`);
       }
-      
+
       throw error;
     }
   }

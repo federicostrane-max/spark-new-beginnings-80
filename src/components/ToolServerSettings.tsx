@@ -12,20 +12,21 @@ import {
 } from "@/components/ui/dialog";
 import {
   Loader2, Server, CheckCircle, XCircle, AlertCircle, RefreshCw,
-  Link2, Unlink, Copy, Monitor, Clock
+  Link2, Unlink, Copy, Monitor, Clock, Shield, Eye, EyeOff
 } from "lucide-react";
 import { toast } from "sonner";
 import { toolServerClient, normalizeToolServerUrl } from "@/lib/tool-server";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 
-type ConnectionStatus = 'connected' | 'disconnected' | 'not_configured' | 'testing';
+type ConnectionStatus = 'connected' | 'disconnected' | 'not_configured' | 'testing' | 'auth_required';
 
 interface ConnectionResult {
   status: ConnectionStatus;
   version?: string;
   error?: string;
   urlUsed?: string;
+  authRequired?: boolean;
 }
 
 interface PairingConfig {
@@ -43,6 +44,10 @@ export const ToolServerSettings = () => {
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // v10.6.0: Security Token state
+  const [securityToken, setSecurityToken] = useState<string>('');
+  const [showSecurityToken, setShowSecurityToken] = useState(false);
+
   // Pairing state
   const [isPairingDialogOpen, setIsPairingDialogOpen] = useState(false);
   const [pairingToken, setPairingToken] = useState<string | null>(null);
@@ -51,10 +56,14 @@ export const ToolServerSettings = () => {
   const [pairedConfig, setPairedConfig] = useState<PairingConfig | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
 
-  // Load saved URL and check pairing status on mount
+  // Load saved URL, security token, and check pairing status on mount
   useEffect(() => {
     const savedUrl = localStorage.getItem('toolServerUrl') || '';
     setUrl(savedUrl);
+
+    // v10.6.0: Load saved security token
+    const savedToken = toolServerClient.getSecurityToken() || '';
+    setSecurityToken(savedToken);
 
     if (savedUrl) {
       testConnectionInternal(savedUrl);
@@ -255,10 +264,37 @@ export const ToolServerSettings = () => {
     setConnectionStatus({ status: 'testing' });
 
     try {
+      // v10.6.0: Include security token in test request
+      const headers: Record<string, string> = { 'Accept': 'application/json' };
+      const token = toolServerClient.getSecurityToken();
+      if (token) {
+        headers['X-Tool-Token'] = token;
+      }
+
       const response = await fetch(`${normalized}/status`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers
       });
+
+      // v10.6.0: Handle auth errors
+      if (response.status === 401) {
+        setConnectionStatus({
+          status: 'auth_required',
+          error: 'Token di sicurezza richiesto. Copia il token dalla console del Tool Server.',
+          urlUsed: normalized,
+          authRequired: true
+        });
+        return;
+      }
+
+      if (response.status === 403) {
+        setConnectionStatus({
+          status: 'disconnected',
+          error: 'Origine non autorizzata (CORS). Questa Web App potrebbe non essere nella whitelist.',
+          urlUsed: normalized
+        });
+        return;
+      }
 
       if (!response.ok) {
         setConnectionStatus({
@@ -273,7 +309,8 @@ export const ToolServerSettings = () => {
       setConnectionStatus({
         status: 'connected',
         version: data.version,
-        urlUsed: normalized
+        urlUsed: normalized,
+        authRequired: data.auth_required
       });
     } catch (error) {
       let errorMessage = 'Connessione fallita';
@@ -374,8 +411,11 @@ export const ToolServerSettings = () => {
       const normalized = normalizeToolServerUrl(url);
       toolServerClient.updateBaseUrl(normalized);
 
+      // v10.6.0: Save security token
+      toolServerClient.setSecurityToken(securityToken);
+
       if (normalized) {
-        toast.success("URL Tool Server salvato!");
+        toast.success("Impostazioni Tool Server salvate!");
         testConnectionInternal(normalized);
       } else {
         toast.info("URL rimosso - Tool Server non configurato");
@@ -416,6 +456,13 @@ export const ToolServerSettings = () => {
             Connesso {connectionStatus.version ? `(${connectionStatus.version})` : ''}
           </Badge>
         );
+      case 'auth_required':
+        return (
+          <Badge variant="outline" className="border-orange-500 text-orange-600">
+            <Shield className="h-3 w-3 mr-1" />
+            Token richiesto
+          </Badge>
+        );
       case 'disconnected':
         return (
           <Badge variant="destructive">
@@ -441,6 +488,20 @@ export const ToolServerSettings = () => {
   };
 
   const getErrorSuggestions = () => {
+    if (connectionStatus.status === 'auth_required') {
+      return (
+        <div className="mt-2 text-xs space-y-1">
+          <p className="font-medium">Per risolvere:</p>
+          <ul className="list-disc list-inside space-y-0.5 text-muted-foreground">
+            <li>Apri la console del Tool Server</li>
+            <li>Copia il Security Token mostrato all'avvio</li>
+            <li>Incollalo nel campo "Security Token" qui sopra</li>
+            <li>Clicca "Save" e riprova la connessione</li>
+          </ul>
+        </div>
+      );
+    }
+
     if (connectionStatus.status !== 'disconnected' || !connectionStatus.error) return null;
 
     return (
@@ -451,6 +512,7 @@ export const ToolServerSettings = () => {
           <li>L'URL deve iniziare con <code className="bg-muted px-1 rounded">https://</code></li>
           <li>Controlla che il Tool Server sia avviato sul PC locale</li>
           <li>L'URL ngrok cambia ad ogni riavvio</li>
+          <li>Assicurati che il Security Token sia corretto</li>
         </ul>
       </div>
     );
@@ -532,6 +594,39 @@ export const ToolServerSettings = () => {
         </p>
       </div>
 
+      {/* v10.6.0: Security Token Input */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium flex items-center gap-2">
+          <Shield className="h-4 w-4" />
+          Security Token
+        </label>
+        <div className="relative">
+          <Input
+            type={showSecurityToken ? "text" : "password"}
+            placeholder="Copia il token dalla console del Tool Server"
+            value={securityToken}
+            onChange={(e) => setSecurityToken(e.target.value)}
+            className="pr-10 font-mono"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+            onClick={() => setShowSecurityToken(!showSecurityToken)}
+          >
+            {showSecurityToken ? (
+              <EyeOff className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <Eye className="h-4 w-4 text-muted-foreground" />
+            )}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Il token viene mostrato all'avvio del Tool Server. Necessario per proteggere il tuo PC.
+        </p>
+      </div>
+
       {/* Status */}
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium">Status:</span>
@@ -546,9 +641,13 @@ export const ToolServerSettings = () => {
       )}
 
       {/* Error message with suggestions */}
-      {connectionStatus.status === 'disconnected' && connectionStatus.error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+      {(connectionStatus.status === 'disconnected' || connectionStatus.status === 'auth_required') && connectionStatus.error && (
+        <Alert variant={connectionStatus.status === 'auth_required' ? 'default' : 'destructive'}>
+          {connectionStatus.status === 'auth_required' ? (
+            <Shield className="h-4 w-4" />
+          ) : (
+            <AlertCircle className="h-4 w-4" />
+          )}
           <AlertDescription>
             <div className="font-medium">{connectionStatus.error}</div>
             {getErrorSuggestions()}
