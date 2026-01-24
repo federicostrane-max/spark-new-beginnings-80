@@ -150,7 +150,7 @@ async function analyzeDocument(
   }
 
   // Combine chunks for analysis
-  const combinedText = chunks.map(c => c.content).join('\n\n---\n\n');
+  const combinedText = chunks.map((c: any) => c.content).join('\n\n---\n\n');
   const truncatedText = combinedText.substring(0, 12000); // ~3000 tokens
 
   console.log(`[Analyze Document] Analyzing ${document?.file_name} with ${chunks.length} chunks (${truncatedText.length} chars)`);
