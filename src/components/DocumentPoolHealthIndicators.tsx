@@ -260,6 +260,14 @@ export const DocumentPoolHealthIndicators = () => {
         .eq('status', 'chunked')
         .limit(10);
 
+      // Tag files with their pipeline for debugging
+      const taggedFiles = [
+        ...(pipelineAChunked || []).map(f => ({ ...f, pipeline: 'A' })),
+        ...(pipelineAHybridChunked || []).map(f => ({ ...f, pipeline: 'A-Hybrid' })),
+        ...(pipelineBChunked || []).map(f => ({ ...f, pipeline: 'B' })),
+        ...(pipelineCChunked || []).map(f => ({ ...f, pipeline: 'C' }))
+      ];
+
       const cronQueueData = {
         processQueue: {
           count: processingData.awaitingCron.count,
@@ -269,7 +277,7 @@ export const DocumentPoolHealthIndicators = () => {
         embeddingQueue: {
           count: (pipelineAChunked?.length || 0) + (pipelineAHybridChunked?.length || 0) + (pipelineBChunked?.length || 0) + (pipelineCChunked?.length || 0),
           nextCronMin: getTimeToNextCron(5),
-          files: [...(pipelineAChunked || []), ...(pipelineAHybridChunked || []), ...(pipelineBChunked || []), ...(pipelineCChunked || [])]
+          files: taggedFiles
         }
       };
 
@@ -634,6 +642,11 @@ export const DocumentPoolHealthIndicators = () => {
                       🔗 {healthData.cronQueue.embeddingQueue.count} in attesa embeddings
                     </p>
                     <p className="text-xs text-muted-foreground">Prossimo cron tra ~{healthData.cronQueue.embeddingQueue.nextCronMin} min (ogni 5 min)</p>
+                    {healthData.cronQueue.embeddingQueue.files.slice(0, 5).map((doc: any, idx: number) => (
+                      <p key={idx} className="text-xs truncate ml-4">
+                        • [{doc.pipeline}] {doc.file_name}
+                      </p>
+                    ))}
                   </div>
                 )}
               </div>
