@@ -329,20 +329,19 @@ serve(async (req) => {
 
     // ============================================================
     // WAITING_ENRICHMENT RECOVERY: Chunks stuck waiting for vision processing
-    // If a chunk is in 'waiting_enrichment' for >30 minutes without a pending job,
-    // mark it as 'ready' with placeholder content (visual description unavailable)
+    // If a chunk is in 'waiting_enrichment' for >10 minutes without a pending job,
+    // mark it as 'pending' with placeholder content (visual description unavailable)
+    // Reduced from 30 to 10 minutes for faster recovery
     // ============================================================
-    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-
     const { data: stuckEnrichmentChunks } = await supabase
       .from('pipeline_a_hybrid_chunks_raw')
       .select('id, document_id, content')
       .eq('embedding_status', 'waiting_enrichment')
-      .lt('updated_at', thirtyMinutesAgo)
+      .lt('updated_at', tenMinutesAgo)
       .limit(50);
 
     if (stuckEnrichmentChunks && stuckEnrichmentChunks.length > 0) {
-      console.log(`[Pipeline A-Hybrid Embeddings] Found ${stuckEnrichmentChunks.length} chunks stuck in 'waiting_enrichment' for >30 min`);
+      console.log(`[Pipeline A-Hybrid Embeddings] Found ${stuckEnrichmentChunks.length} chunks stuck in 'waiting_enrichment' for >10 min`);
 
       for (const chunk of stuckEnrichmentChunks) {
         // Check if there's a pending job in visual_enrichment_queue for this chunk

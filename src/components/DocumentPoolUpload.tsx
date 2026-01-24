@@ -35,7 +35,7 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
   const [duplicatesDialogOpen, setDuplicatesDialogOpen] = useState(false);
   const [duplicatesList, setDuplicatesList] = useState<File[]>([]);
   const [newFilesList, setNewFilesList] = useState<File[]>([]);
-  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a' | 'pipeline_a_hybrid' | 'pipeline_b'>('pipeline_a');
+  const [selectedPipeline, setSelectedPipeline] = useState<'pipeline_a_hybrid' | 'pipeline_b'>('pipeline_a_hybrid');
   const [inputKey, setInputKey] = useState(0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,14 +90,9 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       toast.info("Verifica duplicati in corso...", { duration: 2000 });
       console.log('🔍 CHECKING FOR DUPLICATES:', selectedFiles.map(f => f.name));
 
-      // Check all pipelines: A, A-Hybrid, B
+      // Check pipelines A-Hybrid and B for duplicates
       // Exclude failed documents to allow re-upload
-      const [pipelineAResult, pipelineAHybridResult, pipelineBResult] = await Promise.all([
-        supabase
-          .from('pipeline_a_documents')
-          .select('file_name')
-          .in('file_name', selectedFiles.map(f => f.name))
-          .neq('status', 'failed'),
+      const [pipelineAHybridResult, pipelineBResult] = await Promise.all([
         supabase
           .from('pipeline_a_hybrid_documents')
           .select('file_name')
@@ -110,9 +105,6 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           .neq('status', 'failed')
       ]);
 
-      if (pipelineAResult.error) {
-        throw new Error(`Errore verifica duplicati (Pipeline A): ${pipelineAResult.error.message}`);
-      }
       if (pipelineAHybridResult.error) {
         throw new Error(`Errore verifica duplicati (Pipeline A-Hybrid): ${pipelineAHybridResult.error.message}`);
       }
@@ -121,7 +113,6 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       }
 
       const existingFileNames = new Set([
-        ...(pipelineAResult.data?.map(d => d.file_name) || []),
         ...(pipelineAHybridResult.data?.map(d => d.file_name) || []),
         ...(pipelineBResult.data?.map(d => d.file_name) || [])
       ]);
@@ -169,8 +160,8 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
           console.log(`\n=== [${fileIndex + 1}/${totalFiles}] STARTING: ${file.name} ===`);
           console.log(`File size: ${(file.size / 1024 / 1024).toFixed(2)}MB`);
           
-          const pipelineName = selectedPipeline === 'pipeline_a' ? 'Pipeline A' : selectedPipeline === 'pipeline_a_hybrid' ? 'Pipeline A-Hybrid' : 'Pipeline B';
-          const edgeFunctionName = selectedPipeline === 'pipeline_a' ? 'pipeline-a-ingest-pdf' : selectedPipeline === 'pipeline_a_hybrid' ? 'pipeline-a-hybrid-ingest-pdf' : 'pipeline-b-ingest-pdf';
+          const pipelineName = selectedPipeline === 'pipeline_a_hybrid' ? 'Pipeline A-Hybrid' : 'Pipeline B';
+          const edgeFunctionName = selectedPipeline === 'pipeline_a_hybrid' ? 'pipeline-a-hybrid-ingest-pdf' : 'pipeline-b-ingest-pdf';
           
           console.log(`Uploading "${file.name}" to ${pipelineName}...`);
           
@@ -312,23 +303,12 @@ export const DocumentPoolUpload = ({ onUploadComplete }: DocumentPoolUploadProps
       <CardContent className="space-y-4">
         <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
           <Label className="text-base font-semibold">Seleziona Pipeline di Elaborazione</Label>
-          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a' | 'pipeline_a_hybrid' | 'pipeline_b')} disabled={uploading}>
-            <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
-              <RadioGroupItem value="pipeline_a" id="pipeline-a" className="mt-1" />
-              <div className="flex-1 space-y-1">
-                <Label htmlFor="pipeline-a" className="cursor-pointer font-semibold">
-                  Pipeline A (LlamaParse + Recursive Retrieval) ⭐
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Parsing intelligente con LlamaParse + Recursive Retrieval. Preserva tabelle atomiche, genera summary LLM, swap automatico. Zero information loss.
-                </p>
-              </div>
-            </div>
+          <RadioGroup value={selectedPipeline} onValueChange={(v) => setSelectedPipeline(v as 'pipeline_a_hybrid' | 'pipeline_b')} disabled={uploading}>
             <div className="flex items-start space-x-3 p-3 rounded-lg border bg-background hover:bg-accent/50 transition-colors">
               <RadioGroupItem value="pipeline_a_hybrid" id="pipeline-a-hybrid" className="mt-1" />
               <div className="flex-1 space-y-1">
                 <Label htmlFor="pipeline-a-hybrid" className="cursor-pointer font-semibold">
-                  Pipeline A-Hybrid (LlamaParse JSON + Document Reconstruction)
+                  Pipeline A-Hybrid (LlamaParse JSON + Document Reconstruction) ⭐ Raccomandato
                 </Label>
                 <p className="text-sm text-muted-foreground">
                   Parsing avanzato con LlamaParse JSON + Document Reconstructor. Reading order gerarchico (page → Y zones → X position), image descriptions da Vision API, ricostruzione Super-Document lineare.

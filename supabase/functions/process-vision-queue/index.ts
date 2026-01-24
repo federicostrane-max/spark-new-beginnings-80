@@ -229,6 +229,44 @@ serve(async (req) => {
                 .eq('id', item.chunk_id);
 
               console.log(`[Vision Queue] ✓ Generated embedding for visual chunk ${item.chunk_id}`);
+
+              // === EVENT-DRIVEN: Check if all chunks are now ready for this document ===
+              const { count: remainingNonReady } = await supabase
+                .from('pipeline_a_hybrid_chunks_raw')
+                .select('id', { count: 'exact', head: true })
+                .eq('document_id', item.document_id)
+                .neq('embedding_status', 'ready');
+
+              if (remainingNonReady === 0) {
+                console.log(`[Vision Queue] 🎯 All chunks ready for doc ${item.document_id}, finalizing immediately`);
+
+                // Update document status to ready
+                await supabase
+                  .from('pipeline_a_hybrid_documents')
+                  .update({ status: 'ready', updated_at: new Date().toISOString() })
+                  .eq('id', item.document_id);
+
+                // Trigger benchmark assignment if applicable
+                EdgeRuntime.waitUntil((async () => {
+                  const { data: benchmark } = await supabase
+                    .from('benchmark_datasets')
+                    .select('id')
+                    .eq('document_id', item.document_id)
+                    .limit(1);
+
+                  if (benchmark && benchmark.length > 0) {
+                    await fetch(`${supabaseUrl}/functions/v1/assign-benchmark-chunks`, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${supabaseKey}`,
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({ documentId: item.document_id }),
+                    });
+                    console.log(`[Vision Queue] 🎯 Triggered benchmark assignment for doc ${item.document_id}`);
+                  }
+                })());
+              }
             } catch (embErr: any) {
               console.error(`[Vision Queue] Failed to generate embedding for chunk ${item.chunk_id}:`, embErr);
               // Mark as pending so cron can retry
@@ -315,6 +353,42 @@ serve(async (req) => {
               } catch (embErr: any) {
                 console.error(`[Vision Queue] Failed to regenerate embedding for chunk ${chunk.id}:`, embErr);
               }
+            }
+
+            // === EVENT-DRIVEN: Check if all chunks are now ready for this document ===
+            const { count: remainingNonReady } = await supabase
+              .from('pipeline_a_hybrid_chunks_raw')
+              .select('id', { count: 'exact', head: true })
+              .eq('document_id', item.document_id)
+              .neq('embedding_status', 'ready');
+
+            if (remainingNonReady === 0) {
+              console.log(`[Vision Queue] 🎯 All chunks ready for doc ${item.document_id} (legacy mode), finalizing immediately`);
+
+              await supabase
+                .from('pipeline_a_hybrid_documents')
+                .update({ status: 'ready', updated_at: new Date().toISOString() })
+                .eq('id', item.document_id);
+
+              // Trigger benchmark assignment if applicable
+              EdgeRuntime.waitUntil((async () => {
+                const { data: benchmark } = await supabase
+                  .from('benchmark_datasets')
+                  .select('id')
+                  .eq('document_id', item.document_id)
+                  .limit(1);
+
+                if (benchmark && benchmark.length > 0) {
+                  await fetch(`${supabaseUrl}/functions/v1/assign-benchmark-chunks`, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${supabaseKey}`,
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ documentId: item.document_id }),
+                  });
+                }
+              })());
             }
           } else {
             console.log(`[Vision Queue] No chunks found with placeholder ${placeholder}`);
