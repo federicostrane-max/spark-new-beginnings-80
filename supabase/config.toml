@@ -300,3 +300,8 @@ timeout = 30
 [functions.check-llamaparse-credits]
 verify_jwt = false
 timeout = 30
+
+# ===== AI METADATA GENERATION =====
+[functions.pipeline-a-hybrid-analyze-document]
+verify_jwt = false
+timeout = 300

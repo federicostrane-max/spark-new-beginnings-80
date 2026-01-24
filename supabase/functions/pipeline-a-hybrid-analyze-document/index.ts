@@ -39,7 +39,7 @@ serve(async (req) => {
         .select('id, file_name')
         .eq('status', 'ready')
         .is('ai_summary', null)
-        .limit(10); // Process in batches
+        .limit(50); // Process 50 documents per batch
 
       if (fetchError) throw fetchError;
 

@@ -47,8 +47,30 @@ export const DocumentDetailsDialog = ({
   onRefresh,
 }: DocumentDetailsDialogProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
   
   if (!document) return null;
+
+  const handleGenerateMetadata = async () => {
+    if (!document.id) return;
+    setIsGeneratingMetadata(true);
+    try {
+      toast.info("Generazione metadata AI in corso...");
+      const { error } = await supabase.functions.invoke(
+        "pipeline-a-hybrid-analyze-document",
+        { body: { documentId: document.id } }
+      );
+      if (error) throw error;
+      toast.success("Metadata AI generati con successo!");
+      onOpenChange(false);
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error("Error generating metadata:", error);
+      toast.error("Errore nella generazione metadata");
+    } finally {
+      setIsGeneratingMetadata(false);
+    }
+  };
 
   const handleProcessDocument = async () => {
     if (!document.id) return;
@@ -154,10 +176,13 @@ export const DocumentDetailsDialog = ({
 
   const getComplexityColor = (level?: string) => {
     switch (level?.toLowerCase()) {
+      case "basic":
       case "low":
         return "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20";
+      case "intermediate":
       case "medium":
         return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20";
+      case "advanced":
       case "high":
         return "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20";
       default:
@@ -167,12 +192,15 @@ export const DocumentDetailsDialog = ({
 
   const getComplexityLabel = (level?: string) => {
     switch (level?.toLowerCase()) {
+      case "basic":
       case "low":
-        return "Basso";
+        return "Base";
+      case "intermediate":
       case "medium":
-        return "Medio";
+        return "Intermedio";
+      case "advanced":
       case "high":
-        return "Alto";
+        return "Avanzato";
       default:
         return "Non specificato";
     }
@@ -192,23 +220,32 @@ export const DocumentDetailsDialog = ({
                 {document.file_name}
               </DialogDescription>
             </div>
-            <Button
-              size="sm"
-              variant={(!document.ai_summary || document.ai_summary.trim() === "") ? "default" : "outline"}
-              onClick={handleProcessDocument}
-              disabled={isProcessing}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isProcessing ? 'animate-spin' : ''}`} />
-              {document.pipeline === 'a' 
-                ? "Riprocessa"
-                : document.pipeline === 'c' 
+            <div className="flex gap-2">
+              {document.pipeline === 'a-hybrid' && !document.ai_summary && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={handleGenerateMetadata}
+                  disabled={isGeneratingMetadata}
+                >
+                  <Hash className={`h-4 w-4 mr-2 ${isGeneratingMetadata ? 'animate-spin' : ''}`} />
+                  Genera Metadata AI
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={(!document.ai_summary || document.ai_summary.trim() === "") ? "default" : "outline"}
+                onClick={handleProcessDocument}
+                disabled={isProcessing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isProcessing ? 'animate-spin' : ''}`} />
+                {document.pipeline === 'a' || document.pipeline === 'a-hybrid' || document.pipeline === 'c' || document.pipeline === 'b'
                   ? "Riprocessa"
-                  : document.pipeline === 'b' 
-                    ? "Riprocessa" 
-                    : (!document.ai_summary || document.ai_summary.trim() === "") 
-                      ? "Elabora Documento" 
-                      : "Rigenera Summary"}
-            </Button>
+                  : (!document.ai_summary || document.ai_summary.trim() === "") 
+                    ? "Elabora Documento" 
+                    : "Rigenera Summary"}
+              </Button>
+            </div>
           </div>
         </DialogHeader>
 
