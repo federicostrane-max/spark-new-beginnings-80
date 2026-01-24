@@ -8,7 +8,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { FileText, Calendar, CheckCircle2, Hash, Tag, Gauge, RefreshCw } from "lucide-react";
+import { FileText, Calendar, CheckCircle2, Hash, Tag, Gauge, RefreshCw, AlertCircle, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
@@ -213,8 +213,55 @@ export const DocumentDetailsDialog = ({
         </DialogHeader>
 
         <div className="space-y-6 pt-4">
-          {/* AI Summary Section */}
-          {document.ai_summary && document.ai_summary.trim() !== "" ? (
+          {/* Status Section - Pipeline-aware */}
+          {document.pipeline ? (
+            // Pipeline moderne: usa status/processing_status
+            document.processing_status === 'ready_for_assignment' || document.status === 'ready' ? (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Documento Pronto
+                </h3>
+                <div className="text-sm text-muted-foreground leading-relaxed bg-green-500/10 border border-green-500/20 p-4 rounded-lg">
+                  <p>Questo documento è stato elaborato con successo ed è pronto per essere utilizzato dagli agenti.</p>
+                  {document.ai_summary && document.ai_summary.trim() !== "" && (
+                    <p className="mt-2 pt-2 border-t border-green-500/20">{document.ai_summary}</p>
+                  )}
+                </div>
+              </div>
+            ) : document.processing_status === 'processing' || document.status === 'processing' || document.status === 'chunked' ? (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold flex items-center gap-2 text-yellow-600">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Elaborazione in Corso
+                </h3>
+                <div className="text-sm text-muted-foreground leading-relaxed bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-lg">
+                  <p>Questo documento è attualmente in fase di elaborazione.</p>
+                </div>
+              </div>
+            ) : document.processing_status === 'failed' || document.status === 'failed' ? (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold flex items-center gap-2 text-red-500">
+                  <AlertCircle className="h-4 w-4" />
+                  Elaborazione Fallita
+                </h3>
+                <div className="text-sm text-muted-foreground leading-relaxed bg-red-500/10 border border-red-500/20 p-4 rounded-lg">
+                  <p>L'elaborazione di questo documento è fallita. Clicca su "Riprocessa" per riprovare.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold flex items-center gap-2 text-orange-500">
+                  <Clock className="h-4 w-4" />
+                  In Attesa di Elaborazione
+                </h3>
+                <div className="text-sm text-muted-foreground leading-relaxed bg-orange-500/10 border border-orange-500/20 p-4 rounded-lg">
+                  <p>Questo documento è in coda per l'elaborazione.</p>
+                </div>
+              </div>
+            )
+          ) : document.ai_summary && document.ai_summary.trim() !== "" ? (
+            // Legacy: mostra AI summary
             <div className="space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <FileText className="h-4 w-4" />
@@ -225,6 +272,7 @@ export const DocumentDetailsDialog = ({
               </p>
             </div>
           ) : (
+            // Legacy senza summary: non elaborato
             <div className="space-y-2">
               <h3 className="text-sm font-semibold flex items-center gap-2 text-red-500">
                 <FileText className="h-4 w-4" />
@@ -232,7 +280,7 @@ export const DocumentDetailsDialog = ({
               </h3>
               <div className="text-sm text-muted-foreground leading-relaxed bg-red-500/10 border border-red-500/20 p-4 rounded-lg">
                 <p className="mb-2">⚠️ Questo documento non è stato elaborato completamente e non è utilizzabile dagli agenti.</p>
-                <p className="text-xs">Clicca su "Elabora Documento" per avviare l'elaborazione completa (estrazione testo, chunking, embedding e analisi AI).</p>
+                <p className="text-xs">Clicca su "Elabora Documento" per avviare l'elaborazione completa.</p>
               </div>
             </div>
           )}
