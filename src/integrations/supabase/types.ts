@@ -2145,6 +2145,8 @@ export type Database = {
       }
       pipeline_a_hybrid_documents: {
         Row: {
+          ai_summary: string | null
+          complexity_level: string | null
           created_at: string | null
           error_message: string | null
           extraction_attempts: number | null
@@ -2155,6 +2157,7 @@ export type Database = {
           folder: string | null
           full_text: string | null
           id: string
+          keywords: string[] | null
           llamaparse_job_id: string | null
           page_count: number | null
           processed_at: string | null
@@ -2164,9 +2167,12 @@ export type Database = {
           source_type: string | null
           status: string | null
           storage_bucket: string | null
+          topics: string[] | null
           updated_at: string | null
         }
         Insert: {
+          ai_summary?: string | null
+          complexity_level?: string | null
           created_at?: string | null
           error_message?: string | null
           extraction_attempts?: number | null
@@ -2177,6 +2183,7 @@ export type Database = {
           folder?: string | null
           full_text?: string | null
           id?: string
+          keywords?: string[] | null
           llamaparse_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
@@ -2186,9 +2193,12 @@ export type Database = {
           source_type?: string | null
           status?: string | null
           storage_bucket?: string | null
+          topics?: string[] | null
           updated_at?: string | null
         }
         Update: {
+          ai_summary?: string | null
+          complexity_level?: string | null
           created_at?: string | null
           error_message?: string | null
           extraction_attempts?: number | null
@@ -2199,6 +2209,7 @@ export type Database = {
           folder?: string | null
           full_text?: string | null
           id?: string
+          keywords?: string[] | null
           llamaparse_job_id?: string | null
           page_count?: number | null
           processed_at?: string | null
@@ -2208,6 +2219,7 @@ export type Database = {
           source_type?: string | null
           status?: string | null
           storage_bucket?: string | null
+          topics?: string[] | null
           updated_at?: string | null
         }
         Relationships: []
