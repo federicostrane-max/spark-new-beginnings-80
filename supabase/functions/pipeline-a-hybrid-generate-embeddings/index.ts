@@ -495,6 +495,22 @@ serve(async (req) => {
     // Uses EdgeRuntime.waitUntil for fire-and-forget non-blocking execution
     for (const docId of documentsMarkedReady) {
       EdgeRuntime.waitUntil(triggerBenchmarkAssignment(supabase, docId));
+
+      // ✅ EVENT-DRIVEN: Trigger document metadata analysis (ai_summary, keywords, topics)
+      EdgeRuntime.waitUntil(
+        fetch(`${supabaseUrl}/functions/v1/pipeline-a-hybrid-analyze-document`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ documentId: docId }),
+        }).then(res => {
+          if (res.ok) {
+            console.log(`[Embeddings] 📊 Triggered metadata analysis for document ${docId}`);
+          }
+        }).catch(err => console.error(`[Embeddings] Failed to trigger metadata analysis for ${docId}:`, err))
+      );
     }
 
     // ✅ SELF-CONTINUATION: If more pending chunks exist, trigger another batch immediately
