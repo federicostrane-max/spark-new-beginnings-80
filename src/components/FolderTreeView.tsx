@@ -3,7 +3,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle, MoreVertical, Users, Trash2, FolderCheck, Edit2, FolderInput } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, CheckCircle2, XCircle, Clock, AlertCircle, MoreVertical, Users, Trash2, FolderCheck, Edit2, FolderInput, Info } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { it } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -302,6 +302,18 @@ function FolderNode({
                 <Badge variant={getStatusBadgeVariant(doc.validation_status, doc.processing_status)} className="text-xs flex-shrink-0">
                   {doc.processing_status === "ready_for_assignment" ? "✓" : "⏳"}
                 </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 flex-shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDocumentClick(doc);
+                  }}
+                  title="Vedi dettagli completi"
+                >
+                  <Info className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                </Button>
               </div>
             ))}
           </div>
