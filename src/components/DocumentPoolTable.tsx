@@ -488,20 +488,21 @@ export const DocumentPoolTable = () => {
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
         validation_reason: doc.error_message || null,
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
+        ai_summary: doc.ai_summary || null,
+        text_length: doc.text_length || null,
         page_count: doc.page_count || null,
         created_at: doc.created_at,
         agent_names: [],
         agents_count: 0,
-        keywords: [],
-        topics: [],
-        complexity_level: "",
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || "",
         agent_ids: [],
-        folder: null,
+        folder: doc.folder || null,
         search_query: null,
         source_url: null,
         pipeline: 'a-hybrid' as const,
+        status: doc.status,
         error_message: doc.error_message,
       }));
 
@@ -685,7 +686,7 @@ export const DocumentPoolTable = () => {
     // Query GitHub docs from Pipeline A-Hybrid (source_type='markdown' or 'code')
     const { data: githubDocsAHybrid, error: errorAHybrid } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('id, file_name, folder, status, created_at, page_count, error_message')
+      .select('id, file_name, folder, status, created_at, page_count, error_message, ai_summary, keywords, topics, complexity_level')
       .in('source_type', ['markdown', 'code'])
       .not('folder', 'is', null)
       .order('created_at', { ascending: false });
@@ -711,9 +712,13 @@ export const DocumentPoolTable = () => {
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
         created_at: doc.created_at,
         folder: doc.folder,
-        ai_summary: null,
-        text_length: null,
+        ai_summary: doc.ai_summary || null,
+        text_length: doc.text_length || null,
         page_count: doc.page_count,
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || "",
+        status: doc.status,
         agent_names: [], // No agent info in folder view for performance
       };
     };
@@ -954,18 +959,19 @@ export const DocumentPoolTable = () => {
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
         validation_reason: doc.error_message || "",
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
+        ai_summary: doc.ai_summary || null,
+        text_length: doc.text_length || null,
         page_count: doc.page_count,
         created_at: doc.created_at,
         agent_names: [],
         agents_count: 0,
         folder: doc.folder,
-        keywords: [],
-        topics: [],
-        complexity_level: "",
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || "",
         agent_ids: [],
         pipeline: 'a-hybrid' as const,
+        status: doc.status,
       }))
     ];
 
@@ -1153,18 +1159,19 @@ export const DocumentPoolTable = () => {
         validation_status: doc.status === 'ready' ? 'validated' : 'pending',
         validation_reason: doc.error_message || '',
         processing_status: doc.status === 'ready' ? 'ready_for_assignment' : doc.status,
-        ai_summary: null,
-        text_length: null,
+        ai_summary: doc.ai_summary || null,
+        text_length: doc.text_length || null,
         page_count: doc.page_count || null,
         created_at: doc.created_at,
         agent_names: [],
         agents_count: 0,
-        folder: null,
-        keywords: [],
-        topics: [],
-        complexity_level: '',
+        folder: doc.folder || null,
+        keywords: doc.keywords || [],
+        topics: doc.topics || [],
+        complexity_level: doc.complexity_level || '',
         agent_ids: [],
         pipeline: 'a-hybrid' as const,
+        status: doc.status,
         error_message: doc.error_message,
       }));
       allNoFolderDocs.push(...transformedPipelineAHybrid);
