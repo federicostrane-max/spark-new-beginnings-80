@@ -125,7 +125,7 @@ serve(async (req) => {
 });
 
 async function analyzeDocument(
-  supabase: ReturnType<typeof createClient>,
+  supabase: any,
   documentId: string,
   anthropicKey: string
 ): Promise<void> {
