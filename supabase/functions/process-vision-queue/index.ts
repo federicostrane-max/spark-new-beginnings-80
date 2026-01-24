@@ -422,6 +422,27 @@ serve(async (req) => {
 
       // Small delay between batches to avoid overwhelming the API
       await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // ===== EVENT-DRIVEN: Trigger embedding generation for processed documents =====
+      // Collect unique document IDs from this batch
+      const processedDocIds = [...new Set(queueItems.filter(q => q.status !== 'failed').map(q => q.document_id))];
+
+      if (processedDocIds.length > 0) {
+        console.log(`[Process Vision Queue] 🎯 Triggering embeddings for ${processedDocIds.length} document(s)`);
+
+        for (const docId of processedDocIds) {
+          EdgeRuntime.waitUntil(
+            fetch(`${supabaseUrl}/functions/v1/pipeline-a-hybrid-generate-embeddings`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ documentId: docId }),
+            }).catch(err => console.error(`[Vision Queue] Failed to trigger embeddings for ${docId}:`, err))
+          );
+        }
+      }
     }
 
     if (iteration >= MAX_ITERATIONS) {
