@@ -60,6 +60,125 @@ export async function forceAlignmentAnalysis(agentId: string) {
   });
 }
 
+// Force trigger embedding generation for all pipelines
+// Call from browser console: (await import('@/integrations/supabase/client')).triggerAllEmbeddings()
+export async function triggerAllEmbeddings() {
+  console.log('🚀 Triggering embedding generation for all pipelines...\n');
+
+  const pipelines = [
+    'pipeline-a-generate-embeddings',
+    'pipeline-a-hybrid-generate-embeddings',
+    'pipeline-b-generate-embeddings',
+    'pipeline-c-generate-embeddings',
+  ];
+
+  for (const fn of pipelines) {
+    console.log(`Invoking ${fn}...`);
+    try {
+      const { data, error } = await supabase.functions.invoke(fn, { body: {} });
+      if (error) {
+        console.error(`  ❌ Error: ${error.message}`);
+      } else {
+        console.log(`  ✅ Result:`, data);
+      }
+    } catch (e) {
+      console.error(`  ❌ Exception:`, e);
+    }
+  }
+
+  console.log('\n✅ All embedding functions triggered.');
+}
+
+// Debug function to diagnose stuck documents in queue
+// Call from browser console: (await import('@/integrations/supabase/client')).diagnoseStuckDocuments()
+export async function diagnoseStuckDocuments() {
+  console.log('🔍 Diagnosing stuck documents...\n');
+
+  // Check all pipelines for chunked documents
+  const pipelines = [
+    { name: 'Pipeline A', table: 'pipeline_a_documents', chunksTable: 'pipeline_a_chunks_raw' },
+    { name: 'Pipeline A-Hybrid', table: 'pipeline_a_hybrid_documents', chunksTable: 'pipeline_a_hybrid_chunks_raw' },
+    { name: 'Pipeline B', table: 'pipeline_b_documents', chunksTable: 'pipeline_b_chunks_raw' },
+    { name: 'Pipeline C', table: 'pipeline_c_documents', chunksTable: 'pipeline_c_chunks_raw' },
+  ];
+
+  for (const pipeline of pipelines) {
+    const { data: chunkedDocs } = await supabase
+      .from(pipeline.table)
+      .select('id, file_name, status, created_at, updated_at')
+      .eq('status', 'chunked');
+
+    if (chunkedDocs && chunkedDocs.length > 0) {
+      console.log(`\n📁 ${pipeline.name}: ${chunkedDocs.length} document(s) in 'chunked' status`);
+
+      for (const doc of chunkedDocs) {
+        // Get chunk stats for this document
+        const { count: totalChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id);
+
+        const { count: pendingChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'pending');
+
+        const { count: readyChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'ready');
+
+        const { count: failedChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'failed');
+
+        const { count: processingChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'processing');
+
+        const { count: waitingEnrichmentChunks } = await supabase
+          .from(pipeline.chunksTable)
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'waiting_enrichment');
+
+        console.log(`  📄 ${doc.file_name}`);
+        console.log(`     ID: ${doc.id}`);
+        console.log(`     Created: ${doc.created_at}`);
+        console.log(`     Updated: ${doc.updated_at}`);
+        console.log(`     Chunks: total=${totalChunks || 0}, pending=${pendingChunks || 0}, ready=${readyChunks || 0}, failed=${failedChunks || 0}, processing=${processingChunks || 0}, waiting_enrichment=${waitingEnrichmentChunks || 0}`);
+
+        if ((totalChunks || 0) === 0) {
+          console.log(`     ⚠️ PROBLEM: Document has NO chunks! Should be reset to 'ingested'`);
+        } else if ((pendingChunks || 0) === 0 && (readyChunks || 0) < (totalChunks || 0)) {
+          console.log(`     ⚠️ PROBLEM: No pending chunks but not all ready. Check failed/processing/waiting_enrichment`);
+        }
+      }
+    }
+  }
+
+  // Check cron jobs
+  console.log('\n📅 Checking cron job history (last invocations)...');
+  const { data: cronJobs } = await supabase
+    .from('cron.job')
+    .select('jobname, schedule, active')
+    .ilike('jobname', '%pipeline%');
+
+  if (cronJobs) {
+    console.log('Cron jobs found:', cronJobs);
+  } else {
+    console.log('⚠️ Could not query cron jobs (may need service role key)');
+  }
+
+  console.log('\n✅ Diagnosis complete. Check results above.');
+}
+
 // Helper to force re-extraction with cache invalidation
 export async function forceReExtraction(agentId: string) {
   // Step 1: Restore all removed chunks FIRST (fresh start)
