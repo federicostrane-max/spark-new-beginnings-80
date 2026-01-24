@@ -327,6 +327,51 @@ serve(async (req) => {
       }
     }
 
+    // ============================================================
+    // WAITING_ENRICHMENT RECOVERY: Chunks stuck waiting for vision processing
+    // If a chunk is in 'waiting_enrichment' for >30 minutes without a pending job,
+    // mark it as 'ready' with placeholder content (visual description unavailable)
+    // ============================================================
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+    const { data: stuckEnrichmentChunks } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id, document_id, content')
+      .eq('embedding_status', 'waiting_enrichment')
+      .lt('updated_at', thirtyMinutesAgo)
+      .limit(50);
+
+    if (stuckEnrichmentChunks && stuckEnrichmentChunks.length > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] Found ${stuckEnrichmentChunks.length} chunks stuck in 'waiting_enrichment' for >30 min`);
+
+      for (const chunk of stuckEnrichmentChunks) {
+        // Check if there's a pending job in visual_enrichment_queue for this chunk
+        const { data: pendingJob } = await supabase
+          .from('visual_enrichment_queue')
+          .select('id')
+          .eq('chunk_id', chunk.id)
+          .in('status', ['pending', 'processing'])
+          .limit(1);
+
+        if (pendingJob && pendingJob.length > 0) {
+          console.log(`[Pipeline A-Hybrid Embeddings] Chunk ${chunk.id} has pending vision job, skipping`);
+          continue;
+        }
+
+        // No pending job - mark as ready with placeholder content
+        // The chunk will be embedded with its current content (placeholder description)
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .update({
+            embedding_status: 'pending',
+            content: chunk.content || '[Visual element - description unavailable]',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chunk.id);
+        console.log(`[Pipeline A-Hybrid Embeddings] Reset stuck enrichment chunk ${chunk.id} to pending (no vision job found)`);
+      }
+    }
+
     // Fetch pending chunks with document file_name via JOIN
     let query = supabase
       .from('pipeline_a_hybrid_chunks_raw')
