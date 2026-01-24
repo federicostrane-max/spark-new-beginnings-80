@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +30,18 @@ export function AssignToFolderDialog({
   const [newFolderName, setNewFolderName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+
+  // Quando il dialog si apre, se non ci sono cartelle passa automaticamente a "Nuova Cartella"
+  useEffect(() => {
+    if (open) {
+      if (availableFolders.length === 0) {
+        setIsCreatingNew(true);
+      }
+      // Reset states quando si apre
+      setSelectedFolder("");
+      setNewFolderName("");
+    }
+  }, [open, availableFolders.length]);
 
   const handleAssign = async () => {
     let folderToAssign = selectedFolder;
