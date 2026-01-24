@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Loader2, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
-import { updateAgentPrompt, forceAlignmentAnalysis } from "@/integrations/supabase/client";
+import { updateAgentPrompt, forceAlignmentAnalysis } from "@/lib/supabaseHelpers";
 import { toast } from "sonner";
 
 const DOCUMENT_FINDER_PROMPT = `## IDENTITÀ
