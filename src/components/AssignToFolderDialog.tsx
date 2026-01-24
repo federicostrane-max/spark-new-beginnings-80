@@ -100,7 +100,14 @@ export function AssignToFolderDialog({
       
       // Determina quali pipeline sono coinvolte dai documentIds
       for (const docId of documentIds) {
-        // Prova Pipeline A
+        // Prova Pipeline A-Hybrid (nuova pipeline principale)
+        const { data: docAHybrid } = await supabase.from('pipeline_a_hybrid_documents').select('id').eq('id', docId).maybeSingle();
+        if (docAHybrid) {
+          updatePromises.push(supabase.from('pipeline_a_hybrid_documents').update({ folder: folderToAssign }).eq('id', docId));
+          continue;
+        }
+        
+        // Prova Pipeline A (legacy)
         const { data: docA } = await supabase.from('pipeline_a_documents').select('id').eq('id', docId).maybeSingle();
         if (docA) {
           updatePromises.push(supabase.from('pipeline_a_documents').update({ folder: folderToAssign }).eq('id', docId));

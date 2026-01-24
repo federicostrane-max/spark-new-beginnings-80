@@ -81,6 +81,10 @@ export function RenameFolderDialog({
       // Update folder field in documents across all pipelines
       await Promise.all([
         supabase
+          .from('pipeline_a_hybrid_documents')
+          .update({ folder: trimmedName })
+          .eq('folder', currentName),
+        supabase
           .from('pipeline_a_documents')
           .update({ folder: trimmedName })
           .eq('folder', currentName),
