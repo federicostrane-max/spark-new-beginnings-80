@@ -28,6 +28,34 @@ serve(async (req) => {
 
     console.log('[Pipeline C Embeddings] Starting embedding generation cycle');
 
+    // ============================================================
+    // STUCK CHUNK RECOVERY: Reset chunks stuck in 'failed' for >10 minutes
+    // This allows automatic retry for transient errors (API timeouts, rate limits)
+    // ============================================================
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const { data: failedChunks } = await supabase
+      .from('pipeline_c_chunks_raw')
+      .select('id, document_id')
+      .eq('embedding_status', 'failed')
+      .lt('updated_at', tenMinutesAgo)
+      .limit(50);
+
+    if (failedChunks && failedChunks.length > 0) {
+      console.log(`[Pipeline C Embeddings] Found ${failedChunks.length} failed chunks older than 10 min, resetting to pending for retry`);
+
+      for (const chunk of failedChunks) {
+        await supabase
+          .from('pipeline_c_chunks_raw')
+          .update({
+            embedding_status: 'pending',
+            embedding_error: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chunk.id);
+      }
+    }
+
     // Status reconciliation: find documents stuck in intermediate states
     const { data: stuckDocs, error: stuckError } = await supabase
       .from('pipeline_c_documents')
@@ -36,25 +64,24 @@ serve(async (req) => {
 
     if (!stuckError && stuckDocs && stuckDocs.length > 0) {
       console.log(`[Pipeline C Embeddings] Reconciling ${stuckDocs.length} documents`);
-      
+
       for (const doc of stuckDocs) {
-        // First check if document has ANY chunks
+        // Get all chunks for document with their statuses
         const { data: allChunks } = await supabase
           .from('pipeline_c_chunks_raw')
-          .select('id')
-          .eq('document_id', doc.id)
-          .limit(1);
+          .select('id, embedding_status')
+          .eq('document_id', doc.id);
 
         // CRITICAL FIX: If document is in advanced state (chunked/processing) but has NO chunks
         // This is an inconsistent state - reset to 'ingested' for reprocessing
         if (!allChunks || allChunks.length === 0) {
           if (doc.status === 'chunked' || doc.status === 'processing') {
             console.log(`[Pipeline C Embeddings] ⚠️ Document ${doc.id} in status '${doc.status}' but has 0 chunks - resetting to 'ingested'`);
-            
+
             await supabase
               .from('pipeline_c_documents')
-              .update({ 
-                status: 'ingested', 
+              .update({
+                status: 'ingested',
                 error_message: null,
                 updated_at: new Date().toISOString()
               })
@@ -65,22 +92,28 @@ serve(async (req) => {
           continue;
         }
 
-        // Document has chunks - check if any are pending embedding
-        const { data: pendingChunks } = await supabase
-          .from('pipeline_c_chunks_raw')
-          .select('id')
-          .eq('document_id', doc.id)
-          .neq('embedding_status', 'ready')
-          .limit(1);
+        // Check chunk statuses
+        const allReady = allChunks.every(c => c.embedding_status === 'ready');
+        const allFailed = allChunks.every(c => c.embedding_status === 'failed');
 
-        // If all chunks are ready (no pending), mark document ready
-        if (!pendingChunks || pendingChunks.length === 0) {
+        if (allReady) {
           await supabase
             .from('pipeline_c_documents')
             .update({ status: 'ready', processed_at: new Date().toISOString() })
             .eq('id', doc.id);
-          
+
           console.log(`[Pipeline C Embeddings] ✅ Reconciled document ${doc.id} to ready`);
+        } else if (allFailed) {
+          // All chunks failed - mark document as failed
+          await supabase
+            .from('pipeline_c_documents')
+            .update({
+              status: 'failed',
+              error_message: 'All chunks failed embedding generation',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', doc.id);
+          console.log(`[Pipeline C Embeddings] ❌ Marked document ${doc.id} as 'failed' (all chunks failed)`);
         }
       }
     }

@@ -70,10 +70,38 @@ serve(async (req) => {
 
     console.log('[Pipeline A Embeddings] Starting embedding generation...');
 
+    // ============================================================
+    // STUCK CHUNK RECOVERY: Reset chunks stuck in 'failed' for >10 minutes
+    // This allows automatic retry for transient errors (API timeouts, rate limits)
+    // ============================================================
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const { data: failedChunks } = await supabase
+      .from('pipeline_a_chunks_raw')
+      .select('id, document_id')
+      .eq('embedding_status', 'failed')
+      .lt('updated_at', tenMinutesAgo)
+      .limit(50);
+
+    if (failedChunks && failedChunks.length > 0) {
+      console.log(`[Pipeline A Embeddings] Found ${failedChunks.length} failed chunks older than 10 min, resetting to pending for retry`);
+
+      for (const chunk of failedChunks) {
+        await supabase
+          .from('pipeline_a_chunks_raw')
+          .update({
+            embedding_status: 'pending',
+            embedding_error: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chunk.id);
+      }
+    }
+
     // Status reconciliation: fix stuck documents
     const { data: stuckDocs } = await supabase
       .from('pipeline_a_documents')
-      .select('id')
+      .select('id, status')
       .in('status', ['ingested', 'chunked', 'processing'])
       .neq('status', 'ready')
       .neq('status', 'failed');
@@ -86,19 +114,35 @@ serve(async (req) => {
           .eq('document_id', doc.id);
 
         if (!chunks || chunks.length === 0) {
-          await supabase
-            .from('pipeline_a_documents')
-            .update({ status: 'ingested' })
-            .eq('id', doc.id);
-          console.log(`[Pipeline A Embeddings] Reset document ${doc.id} to 'ingested' (no chunks)`);
+          // Document in chunked/processing state but has no chunks - reset to ingested
+          if (doc.status === 'chunked' || doc.status === 'processing') {
+            await supabase
+              .from('pipeline_a_documents')
+              .update({ status: 'ingested', updated_at: new Date().toISOString() })
+              .eq('id', doc.id);
+            console.log(`[Pipeline A Embeddings] Reset document ${doc.id} to 'ingested' (no chunks)`);
+          }
         } else {
           const allReady = chunks.every(c => c.embedding_status === 'ready');
+          const allFailed = chunks.every(c => c.embedding_status === 'failed');
+
           if (allReady) {
             await supabase
               .from('pipeline_a_documents')
-              .update({ status: 'ready' })
+              .update({ status: 'ready', updated_at: new Date().toISOString() })
               .eq('id', doc.id);
             console.log(`[Pipeline A Embeddings] Reconciled document ${doc.id} to 'ready'`);
+          } else if (allFailed) {
+            // All chunks failed - mark document as failed
+            await supabase
+              .from('pipeline_a_documents')
+              .update({
+                status: 'failed',
+                error_message: 'All chunks failed embedding generation',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', doc.id);
+            console.log(`[Pipeline A Embeddings] Marked document ${doc.id} as 'failed' (all chunks failed)`);
           }
         }
       }

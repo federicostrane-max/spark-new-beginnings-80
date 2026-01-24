@@ -53,6 +53,34 @@ serve(async (req) => {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const targetDocumentId = body.documentId;
 
+    // ============================================================
+    // STUCK CHUNK RECOVERY: Reset chunks stuck in 'failed' for >10 minutes
+    // This allows automatic retry for transient errors (API timeouts, rate limits)
+    // ============================================================
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    const { data: failedChunks } = await supabase
+      .from('pipeline_b_chunks_raw')
+      .select('id, document_id')
+      .eq('embedding_status', 'failed')
+      .lt('updated_at', tenMinutesAgo)
+      .limit(50);
+
+    if (failedChunks && failedChunks.length > 0) {
+      console.log(`🔄 Found ${failedChunks.length} failed chunks older than 10 min, resetting to pending for retry`);
+
+      for (const chunk of failedChunks) {
+        await supabase
+          .from('pipeline_b_chunks_raw')
+          .update({
+            embedding_status: 'pending',
+            embedding_error: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chunk.id);
+      }
+    }
+
     // STEP 1: Reconcile documents with all chunks ready but wrong status
     console.log('🔄 Reconciling document statuses...');
     const { data: stuckDocs } = await supabase
@@ -62,32 +90,46 @@ serve(async (req) => {
 
     if (stuckDocs && stuckDocs.length > 0) {
       console.log(`📋 Checking ${stuckDocs.length} documents for reconciliation`);
-      
-      for (const doc of stuckDocs) {
-        const { data: pendingChunks } = await supabase
-          .from('pipeline_b_chunks_raw')
-          .select('id')
-          .eq('document_id', doc.id)
-          .neq('embedding_status', 'ready')
-          .limit(1);
 
-        if (!pendingChunks || pendingChunks.length === 0) {
-          // Verify document actually has chunks
-          const { data: anyChunk } = await supabase
-            .from('pipeline_b_chunks_raw')
-            .select('id')
-            .eq('document_id', doc.id)
-            .limit(1);
-          
-          if (anyChunk && anyChunk.length > 0) {
-            // All chunks ready, update document
+      for (const doc of stuckDocs) {
+        // Get all chunks for document
+        const { data: allChunks } = await supabase
+          .from('pipeline_b_chunks_raw')
+          .select('id, embedding_status')
+          .eq('document_id', doc.id);
+
+        if (!allChunks || allChunks.length === 0) {
+          // Document in chunked/processing state but has no chunks - reset to ingested
+          if (doc.status === 'chunked' || doc.status === 'processing') {
             await supabase
               .from('pipeline_b_documents')
-              .update({ status: 'ready' })
+              .update({ status: 'ingested', updated_at: new Date().toISOString() })
               .eq('id', doc.id);
-            
-            console.log(`✅ Reconciled ${doc.file_name} → status='ready'`);
+            console.log(`⚠️ Reset ${doc.file_name} to 'ingested' (no chunks)`);
           }
+          continue;
+        }
+
+        const allReady = allChunks.every(c => c.embedding_status === 'ready');
+        const allFailed = allChunks.every(c => c.embedding_status === 'failed');
+
+        if (allReady) {
+          await supabase
+            .from('pipeline_b_documents')
+            .update({ status: 'ready', updated_at: new Date().toISOString() })
+            .eq('id', doc.id);
+          console.log(`✅ Reconciled ${doc.file_name} → status='ready'`);
+        } else if (allFailed) {
+          // All chunks failed - mark document as failed
+          await supabase
+            .from('pipeline_b_documents')
+            .update({
+              status: 'failed',
+              error_message: 'All chunks failed embedding generation',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', doc.id);
+          console.log(`❌ Marked ${doc.file_name} as 'failed' (all chunks failed)`);
         }
       }
     }

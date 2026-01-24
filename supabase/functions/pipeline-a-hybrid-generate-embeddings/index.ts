@@ -183,13 +183,13 @@ serve(async (req) => {
     // Status reconciliation
     const { data: stuckDocs } = await supabase
       .from('pipeline_a_hybrid_documents')
-      .select('id')
+      .select('id, status')
       .neq('status', 'ready')
       .neq('status', 'failed');
 
     if (stuckDocs && stuckDocs.length > 0) {
       for (const doc of stuckDocs) {
-        // Verifica che esistano chunks E siano TUTTI ready
+        // Verifica che esistano chunks E conta i vari stati
         const { count: totalChunks } = await supabase
           .from('pipeline_a_hybrid_chunks_raw')
           .select('id', { count: 'exact', head: true })
@@ -201,13 +201,42 @@ serve(async (req) => {
           .eq('document_id', doc.id)
           .eq('embedding_status', 'ready');
 
+        const { count: failedChunks } = await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .select('id', { count: 'exact', head: true })
+          .eq('document_id', doc.id)
+          .eq('embedding_status', 'failed');
+
+        // Document in chunked/processing state but has no chunks - reset to ingested
+        if (!totalChunks || totalChunks === 0) {
+          if (doc.status === 'chunked' || doc.status === 'processing') {
+            await supabase
+              .from('pipeline_a_hybrid_documents')
+              .update({ status: 'ingested', updated_at: new Date().toISOString() })
+              .eq('id', doc.id);
+            console.log(`[Pipeline A-Hybrid Embeddings] ⚠️ Reset document ${doc.id} to 'ingested' (no chunks)`);
+          }
+          continue;
+        }
+
         // Solo se ha chunks E sono tutti ready
-        if (totalChunks && totalChunks > 0 && readyChunks === totalChunks) {
+        if (readyChunks === totalChunks) {
           await supabase
             .from('pipeline_a_hybrid_documents')
             .update({ status: 'ready', updated_at: new Date().toISOString() })
             .eq('id', doc.id);
-          console.log(`[Pipeline A-Hybrid Embeddings] Reconciled document ${doc.id} to ready (${readyChunks}/${totalChunks} chunks ready)`);
+          console.log(`[Pipeline A-Hybrid Embeddings] ✅ Reconciled document ${doc.id} to ready (${readyChunks}/${totalChunks} chunks ready)`);
+        } else if (failedChunks === totalChunks) {
+          // All chunks failed - mark document as failed
+          await supabase
+            .from('pipeline_a_hybrid_documents')
+            .update({
+              status: 'failed',
+              error_message: 'All chunks failed embedding generation',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', doc.id);
+          console.log(`[Pipeline A-Hybrid Embeddings] ❌ Marked document ${doc.id} as 'failed' (all chunks failed)`);
         }
       }
     }
@@ -217,6 +246,7 @@ serve(async (req) => {
     // Uses updated_at which is set when status changes to 'processing'
     // ============================================================
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
     // Find stuck chunks that can still be retried (retry_count < 3)
     const { data: stuckChunks, error: stuckError } = await supabase
@@ -228,12 +258,12 @@ serve(async (req) => {
 
     if (stuckChunks && stuckChunks.length > 0) {
       console.log(`[Pipeline A-Hybrid Embeddings] Found ${stuckChunks.length} stuck chunks (< 3 retries), resetting to pending`);
-      
+
       for (const stuck of stuckChunks) {
         const newRetryCount = (stuck.embedding_retry_count || 0) + 1;
         await supabase
           .from('pipeline_a_hybrid_chunks_raw')
-          .update({ 
+          .update({
             embedding_status: 'pending',
             embedding_retry_count: newRetryCount,
             embedding_error: `Retry #${newRetryCount}: stuck in processing for >5 minutes`
@@ -245,25 +275,55 @@ serve(async (req) => {
 
     // Find chunks that exceeded retry limit AND have been stuck for >5 minutes
     // ✅ Race condition fix: include updated_at filter to give full 5 minutes before marking failed
-    const { data: failedChunks } = await supabase
+    const { data: exceededRetryChunks } = await supabase
       .from('pipeline_a_hybrid_chunks_raw')
       .select('id, document_id')
       .eq('embedding_status', 'processing')
       .lt('updated_at', fiveMinutesAgo)
       .gte('embedding_retry_count', 3);
 
-    if (failedChunks && failedChunks.length > 0) {
-      console.log(`[Pipeline A-Hybrid Embeddings] ${failedChunks.length} chunks exceeded retry limit, marking as failed`);
-      
-      for (const failed of failedChunks) {
+    if (exceededRetryChunks && exceededRetryChunks.length > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] ${exceededRetryChunks.length} chunks exceeded retry limit, marking as failed`);
+
+      for (const failed of exceededRetryChunks) {
         await supabase
           .from('pipeline_a_hybrid_chunks_raw')
-          .update({ 
+          .update({
             embedding_status: 'failed',
             embedding_error: 'Exceeded maximum retry attempts (3) after being stuck in processing'
           })
           .eq('id', failed.id);
         console.log(`[Pipeline A-Hybrid Embeddings] Marked chunk ${failed.id} as failed (exceeded 3 retries)`);
+      }
+    }
+
+    // ============================================================
+    // FAILED CHUNK RECOVERY: Reset chunks in 'failed' for >10 minutes
+    // This allows automatic retry for transient errors (API timeouts, rate limits)
+    // ============================================================
+    const { data: failedChunksToRetry } = await supabase
+      .from('pipeline_a_hybrid_chunks_raw')
+      .select('id, document_id, embedding_retry_count')
+      .eq('embedding_status', 'failed')
+      .lt('updated_at', tenMinutesAgo)
+      .lt('embedding_retry_count', 3)
+      .limit(50);
+
+    if (failedChunksToRetry && failedChunksToRetry.length > 0) {
+      console.log(`[Pipeline A-Hybrid Embeddings] Found ${failedChunksToRetry.length} failed chunks older than 10 min (< 3 retries), resetting to pending`);
+
+      for (const chunk of failedChunksToRetry) {
+        const newRetryCount = (chunk.embedding_retry_count || 0) + 1;
+        await supabase
+          .from('pipeline_a_hybrid_chunks_raw')
+          .update({
+            embedding_status: 'pending',
+            embedding_retry_count: newRetryCount,
+            embedding_error: `Retry #${newRetryCount}: previously failed, auto-retry after 10 min`,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', chunk.id);
+        console.log(`[Pipeline A-Hybrid Embeddings] Reset failed chunk ${chunk.id} to pending (retry ${newRetryCount}/3)`);
       }
     }
 
