@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { updateAgentPrompt, forceAlignmentAnalysis } from "@/integrations/supabase/client";
+import { updateAgentPrompt, forceAlignmentAnalysis } from "@/lib/supabaseHelpers";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
