@@ -1,150 +1,62 @@
 
-# Piano: Completare Backfill Metadata + Pulsante Generazione Manuale
+# Piano: Aggiungere Icona "i" per Dettagli Documento nella Vista Cartelle
 
-## Diagnosi Confermata
+## Situazione Attuale
 
-| Componente | Stato Attuale |
-|------------|---------------|
-| Documenti `ready` con metadata | 18 |
-| Documenti `ready` senza metadata | **1355** |
-| Documento `2311.09735v3.pdf` | Nessun metadata (tutti `null`) |
-| Batch size corrente | 10 documenti per chiamata |
+| Vista | Icona Info | Come aprire dettagli |
+|-------|------------|---------------------|
+| Tabella | ✅ Presente | Click su icona "i" |
+| Cartelle | ❌ Mancante | Click su tutta la riga |
 
-Il documento nello screenshot non ha metadata perché il backfill iniziale ha processato solo 18 documenti. Servono **~136 chiamate manuali** per completare con batch di 10, oppure ~27 chiamate con batch di 50.
+Nella vista cartelle, l'utente deve cliccare sull'intera riga del documento per aprire i dettagli. Nella vista tabella invece c'è un'icona "ⓘ" dedicata a fine riga.
 
-## Modifiche da Implementare
+## Modifica da Implementare
 
-### 1. Aumentare Batch Size (Edge Function)
+**File:** `src/components/FolderTreeView.tsx`
 
-**File:** `supabase/functions/pipeline-a-hybrid-analyze-document/index.ts`
+### 1. Importare l'icona Info
 
-Modificare linea 42:
-```typescript
-// Da:
-.limit(10); // Process in batches
+Aggiungere `Info` agli import di lucide-react (riga 6).
 
-// A:
-.limit(50); // Process 50 documents per batch
-```
+### 2. Aggiungere Pulsante Info per ogni documento
 
-### 2. Aggiungere Pulsante "Genera Metadata AI"
-
-**File:** `src/components/DocumentDetailsDialog.tsx`
-
-Aggiungere stato e handler per generazione metadata:
-```typescript
-const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
-
-const handleGenerateMetadata = async () => {
-  if (!document.id) return;
-  setIsGeneratingMetadata(true);
-  try {
-    toast.info("Generazione metadata AI in corso...");
-    const { error } = await supabase.functions.invoke(
-      "pipeline-a-hybrid-analyze-document",
-      { body: { documentId: document.id } }
-    );
-    if (error) throw error;
-    toast.success("Metadata AI generati con successo!");
-    onOpenChange(false);
-    if (onRefresh) onRefresh();
-  } catch (error) {
-    toast.error("Errore nella generazione metadata");
-  } finally {
-    setIsGeneratingMetadata(false);
-  }
-};
-```
-
-Aggiungere pulsante nel header (accanto a "Riprocessa") per documenti A-Hybrid senza metadata:
-```typescript
-{document.pipeline === 'a-hybrid' && !document.ai_summary && (
-  <Button
-    size="sm"
-    variant="default"
-    onClick={handleGenerateMetadata}
-    disabled={isGeneratingMetadata}
-  >
-    <Hash className={`h-4 w-4 mr-2 ${isGeneratingMetadata ? 'animate-spin' : ''}`} />
-    Genera Metadata AI
-  </Button>
-)}
-```
-
-### 3. Fix Complexity Level Labels
-
-Le funzioni `getComplexityColor` e `getComplexityLabel` usano `low/medium/high`, ma Claude genera `basic/intermediate/advanced`. Aggiornare per supportare entrambi:
+Nella sezione render dei documenti (righe 277-305), aggiungere un pulsante con icona "Info" a fine riga, accanto al Badge di stato:
 
 ```typescript
-const getComplexityColor = (level?: string) => {
-  switch (level?.toLowerCase()) {
-    case "basic":
-    case "low":
-      return "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20";
-    case "intermediate":
-    case "medium":
-      return "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20";
-    case "advanced":
-    case "high":
-      return "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-};
-
-const getComplexityLabel = (level?: string) => {
-  switch (level?.toLowerCase()) {
-    case "basic":
-    case "low":
-      return "Base";
-    case "intermediate":
-    case "medium":
-      return "Intermedio";
-    case "advanced":
-    case "high":
-      return "Avanzato";
-    default:
-      return "Non specificato";
-  }
-};
+// Dopo il Badge (riga 302-304), aggiungere:
+<Button
+  variant="ghost"
+  size="sm"
+  className="h-7 w-7 p-0 flex-shrink-0"
+  onClick={(e) => {
+    e.stopPropagation();
+    onDocumentClick(doc);
+  }}
+  title="Vedi dettagli completi"
+>
+  <Info className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+</Button>
 ```
 
-### 4. Aggiungere Config per Edge Function
+## Layout Risultante per ogni Documento
 
-**File:** `supabase/config.toml`
-
-```toml
-[functions.pipeline-a-hybrid-analyze-document]
-verify_jwt = false
-timeout = 300
+```text
+[☐] [✓] [📄] Nome documento.pdf        [Badge] [ⓘ]
+              5 giorni fa • 10 pagine
 ```
+
+## Comportamento
+
+- **Click sull'icona "i"**: Apre il dialog `DocumentDetailsDialog` con tutti i dettagli (summary, keywords, topics, complessita)
+- **Click sulla riga**: Continua a funzionare come prima (stesso comportamento)
+- L'icona ha tooltip "Vedi dettagli completi"
 
 ## File da Modificare
 
 | File | Modifica |
 |------|----------|
-| `supabase/functions/pipeline-a-hybrid-analyze-document/index.ts` | `.limit(10)` → `.limit(50)` |
-| `src/components/DocumentDetailsDialog.tsx` | Pulsante "Genera Metadata AI" + fix labels complessità |
-| `supabase/config.toml` | Aggiungere configurazione funzione |
-
-## Sequenza di Esecuzione
-
-```text
-1. Modifiche codice
-   ↓
-2. Deploy automatico edge functions
-   ↓
-3. Eseguire backfill completo
-   POST /functions/v1/pipeline-a-hybrid-analyze-document
-   Body: {"backfill": true}
-   (ripetere ~27 volte con batch di 50)
-   ↓
-4. Tutti i 1355 documenti hanno metadata
-```
+| `src/components/FolderTreeView.tsx` | Aggiungere import `Info` e pulsante info per ogni documento |
 
 ## Risultato Atteso
 
-1. Il documento `2311.09735v3.pdf` mostrerà summary, keywords, topics e complessità
-2. Pulsante dedicato permette di generare metadata per singoli documenti on-demand
-3. I livelli di complessità (`basic`/`intermediate`/`advanced`) vengono visualizzati correttamente come "Base"/"Intermedio"/"Avanzato"
-4. Backfill completabile in ~27 chiamate invece di 136
+L'utente vedra l'icona "ⓘ" su ogni documento nella vista Cartelle, identica a quella della vista Tabella, per aprire rapidamente i dettagli del documento.
