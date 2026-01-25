@@ -934,14 +934,23 @@ export const DocumentPoolTable = () => {
   };
 
   const loadPDFFolders = async () => {
+    console.log('[loadPDFFolders] Starting...');
 
     // Get unique folder names from ALL pipelines with 'folder' column
     const [pipelineAFolders, pipelineBFolders, pipelineCFolders, pipelineAHybridFolders] = await Promise.all([
       supabase.from('pipeline_a_documents').select('folder').not('folder', 'is', null),
       supabase.from('pipeline_b_documents').select('folder').not('folder', 'is', null).neq('source_type', 'github'),
       supabase.from('pipeline_c_documents').select('folder').not('folder', 'is', null),
-      supabase.from('pipeline_a_hybrid_documents').select('folder').not('folder', 'is', null).not('source_type', 'in', '("markdown","code")')
+      supabase.from('pipeline_a_hybrid_documents').select('folder').not('folder', 'is', null).not('source_type', 'eq', 'markdown').not('source_type', 'eq', 'code')
     ]);
+
+    console.log('[loadPDFFolders] Folder queries completed:', {
+      pipelineA: pipelineAFolders.data?.length || 0,
+      pipelineB: pipelineBFolders.data?.length || 0,
+      pipelineC: pipelineCFolders.data?.length || 0,
+      pipelineAHybrid: pipelineAHybridFolders.data?.length || 0,
+      pipelineAHybridError: pipelineAHybridFolders.error,
+    });
 
     if (pipelineAFolders.error) throw pipelineAFolders.error;
     if (pipelineBFolders.error) throw pipelineBFolders.error;
@@ -953,15 +962,24 @@ export const DocumentPoolTable = () => {
       if (doc.folder) uniqueFolderNames.add(doc.folder);
     });
 
-    
+    console.log('[loadPDFFolders] Unique folder names:', Array.from(uniqueFolderNames));
 
     // Query ALL pipelines for documents with folder
     const [pipelineAWithFolder, pipelineBWithFolder, pipelineCWithFolder, pipelineAHybridWithFolder] = await Promise.all([
       supabase.from('pipeline_a_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
       supabase.from('pipeline_b_documents').select('*').not('folder', 'is', null).neq('source_type', 'github').order('created_at', { ascending: false }),
       supabase.from('pipeline_c_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
-      supabase.from('pipeline_a_hybrid_documents').select('*').not('folder', 'is', null).not('source_type', 'in', '("markdown","code")').order('created_at', { ascending: false })
+      supabase.from('pipeline_a_hybrid_documents').select('*').not('folder', 'is', null).not('source_type', 'eq', 'markdown').not('source_type', 'eq', 'code').order('created_at', { ascending: false })
     ]);
+
+    console.log('[loadPDFFolders] Document queries completed:', {
+      pipelineA: pipelineAWithFolder.data?.length || 0,
+      pipelineB: pipelineBWithFolder.data?.length || 0,
+      pipelineC: pipelineCWithFolder.data?.length || 0,
+      pipelineAHybrid: pipelineAHybridWithFolder.data?.length || 0,
+      pipelineAHybridError: pipelineAHybridWithFolder.error,
+      pipelineAHybridSample: pipelineAHybridWithFolder.data?.slice(0, 3).map(d => ({ folder: d.folder, source_type: d.source_type })),
+    });
 
     if (pipelineAWithFolder.error) throw pipelineAWithFolder.error;
     if (pipelineBWithFolder.error) throw pipelineBWithFolder.error;
