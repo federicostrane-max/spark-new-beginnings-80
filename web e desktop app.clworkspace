@@ -1,0 +1,29 @@
+{
+  "id": "e9e02fdc-0760-4f50-8c90-60daae0bcb64",
+  "name": "web e desktop app",
+  "createdAt": 1769064439262,
+  "updatedAt": 1769064439262,
+  "sessions": [
+    {
+      "projectPath": "D:\\downloads\\Lux\\claude-launcher-electron",
+      "projectName": "claude-launcher-electron",
+      "sessionType": "new",
+      "claudeSessionId": "1b817c11-c443-4ed2-a137-812e9e24bf44",
+      "sessionName": "claude-launcher-electron"
+    },
+    {
+      "projectPath": "D:\\downloads\\Lux\\claude-launcher-electron",
+      "projectName": "claude-launcher-electron",
+      "sessionType": "resume",
+      "claudeSessionId": "d594101f-fef1-442f-84a0-9285a2e60484",
+      "sessionName": "claude-launcher-electron"
+    },
+    {
+      "projectPath": "D:\\downloads\\Lux\\claude-launcher-electron",
+      "projectName": "claude-launcher-electron",
+      "sessionType": "resume",
+      "claudeSessionId": "188caf57-85c6-457d-9397-6f32c9a2440d",
+      "sessionName": "modifiche ui"
+    }
+  ]
+}
