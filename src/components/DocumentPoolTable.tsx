@@ -956,7 +956,15 @@ export const DocumentPoolTable = () => {
       pipelineB: pipelineBFolders.data?.length || 0,
       pipelineC: pipelineCFolders.data?.length || 0,
       pipelineAHybrid: pipelineAHybridFolders.data?.length || 0,
+      pipelineAHybridFolders: pipelineAHybridFolders.data?.map(d => d.folder) || [],
       pipelineAHybridError: pipelineAHybridFolders.error,
+    });
+
+    // Check specifically for GEO folder
+    const geoFolders = pipelineAHybridFolders.data?.filter(d => d.folder === 'GEO') || [];
+    console.log('[loadPDFFolders] GEO folder check:', {
+      found: geoFolders.length,
+      allFolders: [...new Set(pipelineAHybridFolders.data?.map(d => d.folder) || [])]
     });
 
     if (pipelineAFolders.error) throw pipelineAFolders.error;
