@@ -1,9 +1,11 @@
 /**
  * Console Capture System
  *
- * Cattura tutti i log della console e li salva in localStorage.
- * Claude può leggere questi log tramite una edge function o esportandoli.
+ * Cattura tutti i log della console e li salva in localStorage e Supabase.
+ * Claude può leggere questi log dalla tabella debug_logs in Supabase.
  */
+
+import { supabase } from "@/integrations/supabase/client";
 
 interface LogEntry {
   timestamp: string;
@@ -14,9 +16,12 @@ interface LogEntry {
 
 const MAX_LOGS = 500; // Mantieni solo gli ultimi 500 log
 const STORAGE_KEY = 'claude_console_logs';
+const SYNC_INTERVAL = 3000; // Sync to Supabase every 3 seconds
 
 let logs: LogEntry[] = [];
 let isCapturing = false;
+let syncIntervalId: ReturnType<typeof setInterval> | null = null;
+let lastSyncedLength = 0;
 
 // Salva i log originali
 const originalConsole = {
@@ -68,6 +73,35 @@ function captureLog(level: LogEntry['level'], args: any[]) {
   }
 }
 
+// Sync logs to Supabase for Claude to read
+async function syncToSupabase() {
+  // Only sync if there are new logs
+  if (logs.length === lastSyncedLength) return;
+
+  try {
+    const { error } = await supabase
+      .from('debug_logs')
+      .upsert({
+        id: 'default',
+        logs: logs as any,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'id'
+      });
+
+    if (error) {
+      // Table might not exist yet, silently ignore
+      if (!error.message.includes('does not exist')) {
+        originalConsole.warn('[ConsoleCapture] Supabase sync error:', error.message);
+      }
+    } else {
+      lastSyncedLength = logs.length;
+    }
+  } catch (e) {
+    // Silently fail - don't want to spam console
+  }
+}
+
 export function startConsoleCapture() {
   if (isCapturing) return;
   isCapturing = true;
@@ -108,12 +142,32 @@ export function startConsoleCapture() {
     originalConsole.debug.apply(console, args);
   };
 
-  originalConsole.log('[ConsoleCapture] Started capturing console logs');
+  // Start periodic sync to Supabase
+  syncIntervalId = setInterval(syncToSupabase, SYNC_INTERVAL);
+
+  // Also sync on page unload
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', syncToSupabase);
+  }
+
+  // Initial sync
+  setTimeout(syncToSupabase, 1000);
+
+  originalConsole.log('[ConsoleCapture] Started capturing console logs (syncing to Supabase)');
 }
 
 export function stopConsoleCapture() {
   if (!isCapturing) return;
   isCapturing = false;
+
+  // Stop sync interval
+  if (syncIntervalId) {
+    clearInterval(syncIntervalId);
+    syncIntervalId = null;
+  }
+
+  // Final sync
+  syncToSupabase();
 
   // Ripristina console originale
   console.log = originalConsole.log;
@@ -137,7 +191,10 @@ export function getLogsAsText(): string {
 
 export function clearLogs() {
   logs = [];
+  lastSyncedLength = 0;
   localStorage.removeItem(STORAGE_KEY);
+  // Also clear from Supabase
+  supabase.from('debug_logs').delete().eq('id', 'default').then(() => {});
 }
 
 export function exportLogsToFile() {
@@ -151,6 +208,13 @@ export function exportLogsToFile() {
   URL.revokeObjectURL(url);
 }
 
+// Force immediate sync (useful for debugging)
+export async function forceSyncNow() {
+  lastSyncedLength = 0; // Force sync even if no new logs
+  await syncToSupabase();
+  return logs.length;
+}
+
 // Esponi globalmente per debug
 if (typeof window !== 'undefined') {
   (window as any).__consoleLogs = {
@@ -158,6 +222,7 @@ if (typeof window !== 'undefined') {
     getLogsAsText,
     clearLogs,
     exportLogsToFile,
+    forceSyncNow,
     // Esporta in un file nella cartella del progetto (per Claude)
     saveToProject: async () => {
       const text = getLogsAsText();
