@@ -652,7 +652,34 @@ export const DocumentPoolTable = () => {
       console.log('[DocumentPoolTable] PDF folders loaded:', pdfFolders?.length || 0);
 
       const allFolders = [...(githubFolders || []), ...(pdfFolders || [])];
-      console.log('[DocumentPoolTable] ✅ Total folders:', allFolders.length);
+      
+      // Aggiungi cartelle vuote dalla tabella folders che non hanno ancora documenti
+      try {
+        const { data: allFolderRecords } = await supabase
+          .from('folders')
+          .select('name');
+        
+        const folderNamesFromDocs = new Set(allFolders.map(f => f.name));
+        
+        // Aggiungi cartelle vuote (esistono in folders ma non hanno documenti)
+        for (const record of (allFolderRecords || [])) {
+          if (record.name && !folderNamesFromDocs.has(record.name)) {
+            console.log('[DocumentPoolTable] Adding empty folder from DB:', record.name);
+            allFolders.push({
+              id: `empty-${record.name}`,
+              name: record.name,
+              documentCount: 0,
+              totalDocumentCount: 0,
+              documents: [],
+              children: undefined,
+            });
+          }
+        }
+      } catch (emptyFolderError) {
+        console.warn('[DocumentPoolTable] Could not load empty folders:', emptyFolderError);
+      }
+      
+      console.log('[DocumentPoolTable] ✅ Total folders (including empty):', allFolders.length);
       
       setFoldersData(allFolders);
     } catch (error: any) {

@@ -63,14 +63,18 @@ export function AssignToFolderDialog({
         return;
       }
 
-      if (availableFolders.includes(trimmedName)) {
-        toast.error("Cartella esistente", {
-          description: "Una cartella con questo nome esiste già",
-        });
-        return;
-      }
+      // Controllo case-insensitive: se la cartella esiste già, usala direttamente
+      const existingFolder = availableFolders.find(
+        f => f.toLowerCase() === trimmedName.toLowerCase()
+      );
 
-      folderToAssign = trimmedName;
+      if (existingFolder) {
+        // La cartella esiste già (potrebbe essere vuota), usala direttamente
+        folderToAssign = existingFolder;
+        console.log('[AssignToFolderDialog] Folder exists, reusing:', existingFolder);
+      } else {
+        folderToAssign = trimmedName;
+      }
     } else if (!selectedFolder) {
       toast.error("Seleziona una cartella", {
         description: "Scegli una cartella di destinazione",
@@ -81,8 +85,12 @@ export function AssignToFolderDialog({
     setIsLoading(true);
 
     try {
-      // Se sta creando una nuova cartella, crearla prima nella tabella folders
-      if (isCreatingNew) {
+      // Se sta creando una nuova cartella E non esiste già, crearla nella tabella folders
+      const folderExistsInList = availableFolders.find(
+        f => f.toLowerCase() === folderToAssign.toLowerCase()
+      );
+      
+      if (isCreatingNew && !folderExistsInList) {
         const { error: folderError } = await supabase
           .from('folders')
           .insert({ name: folderToAssign });
