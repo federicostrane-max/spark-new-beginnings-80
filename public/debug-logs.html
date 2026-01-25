@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Console Logs - Debug</title>
+  <style>
+    body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+    pre { white-space: pre-wrap; word-wrap: break-word; }
+    .log { color: #d4d4d4; }
+    .warn { color: #dcdcaa; }
+    .error { color: #f48771; }
+    .info { color: #9cdcfe; }
+    button { margin: 10px 5px 10px 0; padding: 10px 20px; cursor: pointer; }
+    #logs { margin-top: 20px; border: 1px solid #444; padding: 10px; max-height: 80vh; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>Console Logs Viewer</h1>
+  <button onclick="loadLogs()">Refresh Logs</button>
+  <button onclick="clearLogs()">Clear Logs</button>
+  <button onclick="copyLogs()">Copy to Clipboard</button>
+  <button onclick="downloadLogs()">Download</button>
+  <div id="logs"><pre>Click "Refresh Logs" to load...</pre></div>
+
+  <script>
+    function loadLogs() {
+      const logs = localStorage.getItem('claude_console_logs');
+      const container = document.getElementById('logs');
+
+      if (!logs) {
+        container.innerHTML = '<pre>No logs found. Make sure the app is running.</pre>';
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(logs);
+        const html = parsed.map(entry => {
+          const cls = entry.level || 'log';
+          return `<div class="${cls}">[${entry.timestamp}] [${entry.level.toUpperCase()}] ${escapeHtml(entry.message)}</div>`;
+        }).join('');
+        container.innerHTML = html || '<pre>No logs</pre>';
+        container.scrollTop = container.scrollHeight;
+      } catch (e) {
+        container.innerHTML = '<pre>Error parsing logs: ' + e.message + '</pre>';
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function clearLogs() {
+      localStorage.removeItem('claude_console_logs');
+      document.getElementById('logs').innerHTML = '<pre>Logs cleared</pre>';
+    }
+
+    function copyLogs() {
+      const logs = localStorage.getItem('claude_console_logs');
+      if (!logs) return alert('No logs');
+
+      try {
+        const parsed = JSON.parse(logs);
+        const text = parsed.map(e => `[${e.timestamp}] [${e.level.toUpperCase()}] ${e.message}`).join('\n');
+        navigator.clipboard.writeText(text);
+        alert('Logs copied to clipboard!');
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    function downloadLogs() {
+      const logs = localStorage.getItem('claude_console_logs');
+      if (!logs) return alert('No logs');
+
+      try {
+        const parsed = JSON.parse(logs);
+        const text = parsed.map(e => `[${e.timestamp}] [${e.level.toUpperCase()}] ${e.message}`).join('\n');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'console-logs.txt';
+        a.click();
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    // Auto-load on page open
+    loadLogs();
+
+    // Auto-refresh every 2 seconds
+    setInterval(loadLogs, 2000);
+  </script>
+</body>
+</html>
