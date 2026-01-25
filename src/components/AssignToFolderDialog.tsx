@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Folder, FolderPlus } from "lucide-react";
+import { toast } from "sonner";
 
 interface AssignToFolderDialogProps {
   open: boolean;
@@ -29,7 +29,6 @@ export function AssignToFolderDialog({
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { toast } = useToast();
 
   // Quando il dialog si apre, se non ci sono cartelle passa automaticamente a "Nuova Cartella"
   useEffect(() => {
@@ -51,38 +50,30 @@ export function AssignToFolderDialog({
       const trimmedName = newFolderName.trim();
       
       if (!trimmedName) {
-        toast({
-          title: "Nome obbligatorio",
+        toast.error("Nome obbligatorio", {
           description: "Inserisci un nome per la nuova cartella",
-          variant: "destructive",
         });
         return;
       }
 
       if (!/^[a-zA-Z0-9_\-\s]+$/.test(trimmedName)) {
-        toast({
-          title: "Nome non valido",
+        toast.error("Nome non valido", {
           description: "Usa solo lettere, numeri, underscore e trattini",
-          variant: "destructive",
         });
         return;
       }
 
       if (availableFolders.includes(trimmedName)) {
-        toast({
-          title: "Cartella esistente",
+        toast.error("Cartella esistente", {
           description: "Una cartella con questo nome esiste già",
-          variant: "destructive",
         });
         return;
       }
 
       folderToAssign = trimmedName;
     } else if (!selectedFolder) {
-      toast({
-        title: "Seleziona una cartella",
+      toast.error("Seleziona una cartella", {
         description: "Scegli una cartella di destinazione",
-        variant: "destructive",
       });
       return;
     }
@@ -98,10 +89,8 @@ export function AssignToFolderDialog({
 
         if (folderError) {
           console.error('[AssignToFolderDialog] Error creating folder:', folderError);
-          toast({
-            title: "Errore creazione cartella",
+          toast.error("Errore creazione cartella", {
             description: folderError.message,
-            variant: "destructive",
           });
           return;
         }
@@ -144,8 +133,7 @@ export function AssignToFolderDialog({
       const errors = results.filter(r => r.error);
       if (errors.length > 0) throw errors[0].error;
 
-      toast({
-        title: "Documenti assegnati",
+      toast.success("Documenti assegnati", {
         description: `${documentIds.length} documento/i assegnato/i a "${folderToAssign}"`,
       });
 
@@ -156,10 +144,8 @@ export function AssignToFolderDialog({
       onOpenChange(false);
     } catch (error) {
       console.error("Errore nell'assegnazione:", error);
-      toast({
-        title: "Errore",
+      toast.error("Errore", {
         description: "Impossibile assegnare i documenti alla cartella",
-        variant: "destructive",
       });
     } finally {
       setIsLoading(false);
