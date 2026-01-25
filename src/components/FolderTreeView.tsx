@@ -93,6 +93,18 @@ function FolderNode({
   const allFolderDocs = getAllDocsIncludingChildren(folder);
   const selectedInFolder = allFolderDocs.filter(doc => selectedDocuments.has(doc.id)).length;
 
+  // Debug log per cartelle
+  console.log(`[FolderNode] Rendering "${folder.name}":`, {
+    id: folder.id,
+    documentCount: folder.documentCount,
+    totalDocumentCount: folder.totalDocumentCount,
+    directDocs: folderDocs.length,
+    allDocsIncludingChildren: allFolderDocs.length,
+    hasChildren: !!(folder.children && folder.children.length > 0),
+    childrenCount: folder.children?.length || 0,
+    children: folder.children?.map(c => c.name) || []
+  });
+
   const isRootLevel = depth === 0;
 
   return (
@@ -342,10 +354,14 @@ export function FolderTreeView({
   // Raccoglie ricorsivamente TUTTI i documenti (parent + children)
   const getAllDocsIncludingChildren = (folder: FolderData): KnowledgeDocument[] => {
     let allDocs = [...folder.documents];
-    
+
+    console.log(`[getAllDocsIncludingChildren] "${folder.name}": direct=${folder.documents.length}, children=${folder.children?.length || 0}`);
+
     if (folder.children && folder.children.length > 0) {
       folder.children.forEach(child => {
-        allDocs = [...allDocs, ...getAllDocsIncludingChildren(child)];
+        const childDocs = getAllDocsIncludingChildren(child);
+        console.log(`[getAllDocsIncludingChildren] "${folder.name}" -> child "${child.name}": found ${childDocs.length} docs`);
+        allDocs = [...allDocs, ...childDocs];
       });
     }
     
