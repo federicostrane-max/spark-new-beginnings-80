@@ -852,9 +852,10 @@ export const DocumentPoolTable = () => {
     };
 
     // Costruisci la foresta di root folders
+    // Non filtrare le cartelle vuote - mostra sempre tutte le cartelle
     const hierarchicalFolders = Array.from(rootPaths).map(rootPath => {
       return buildFolderTree(rootPath);
-    }).filter(folder => folder && (folder.totalDocumentCount || folder.documentCount) > 0);
+    }).filter(folder => folder !== null && folder !== undefined);
 
     console.log('[loadGitHubFolders] Built hierarchical folders:', hierarchicalFolders.length, hierarchicalFolders);
 
@@ -1071,9 +1072,10 @@ export const DocumentPoolTable = () => {
     };
 
     // Costruisci la foresta di root folders
+    // Non filtrare le cartelle vuote - mostra sempre tutte le cartelle
     const hierarchicalFolders = Array.from(rootPaths).map(rootPath => {
       return buildFolderTree(rootPath);
-    }).filter(folder => folder && (folder.totalDocumentCount || folder.documentCount) > 0);
+    }).filter(folder => folder !== null && folder !== undefined);
 
     // Add "Senza Cartella" for ALL pipelines (no folder OR folder IS NULL)
     const [pipelineADocs, pipelineBDocs, pipelineCDocs, pipelineAHybridDocs] = await Promise.all([

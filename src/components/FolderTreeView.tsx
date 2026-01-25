@@ -118,15 +118,11 @@ function FolderNode({
               }
             }}
             onCheckedChange={() => {
-              // Se la cartella non ha documenti propri ma ha totalDocumentCount > 0,
-              // significa che i children hanno documenti - espandi e seleziona quelli
-              if (allFolderDocs.length === 0 && (folder.totalDocumentCount || 0) > 0) {
-                console.log(`[FolderTreeView] Empty folder ${folder.name} clicked, but has ${folder.totalDocumentCount} docs in children - this shouldn't happen if children are properly populated`);
-              }
               handleFolderCheckboxChange(allFolderDocs, selectedInFolder, folder.fullName || folder.name);
             }}
             onClick={(e) => e.stopPropagation()}
-            className="mr-1"
+            title={allFolderDocs.length === 0 ? "Cartella vuota - nessun documento da selezionare" : `Seleziona tutti i ${allFolderDocs.length} documenti`}
+            className={cn("mr-1", allFolderDocs.length === 0 && "opacity-50")}
           />
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className={cn(
