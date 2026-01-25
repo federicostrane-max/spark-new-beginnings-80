@@ -111,7 +111,7 @@ function FolderNode({
       )}>
         <div className="flex items-center gap-2 flex-1">
           <Checkbox
-            checked={selectedInFolder === allFolderDocs.length && allFolderDocs.length > 0}
+            checked={allFolderDocs.length > 0 && selectedInFolder === allFolderDocs.length}
             disabled={allFolderDocs.length === 0}
             ref={(el: any) => {
               if (el && selectedInFolder > 0 && selectedInFolder < allFolderDocs.length) {
@@ -120,7 +120,7 @@ function FolderNode({
             }}
             onCheckedChange={() => handleFolderCheckboxChange(allFolderDocs, selectedInFolder, folder.fullName || folder.name)}
             onClick={(e) => e.stopPropagation()}
-            className={cn("mr-1", allFolderDocs.length === 0 && "opacity-30 cursor-not-allowed")}
+            className={cn("mr-1", allFolderDocs.length === 0 && "opacity-50 cursor-not-allowed")}
           />
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className={cn(
