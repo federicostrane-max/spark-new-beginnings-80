@@ -79,11 +79,12 @@ async function syncToSupabase() {
   if (logs.length === lastSyncedLength) return;
 
   try {
-    const { error } = await supabase
+    // Use 'as any' cast because debug_logs table types haven't been regenerated yet
+    const { error } = await (supabase as any)
       .from('debug_logs')
       .upsert({
         id: 'default',
-        logs: logs as any,
+        logs: logs,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'id'
@@ -194,7 +195,7 @@ export function clearLogs() {
   lastSyncedLength = 0;
   localStorage.removeItem(STORAGE_KEY);
   // Also clear from Supabase
-  supabase.from('debug_logs').delete().eq('id', 'default').then(() => {});
+  (supabase as any).from('debug_logs').delete().eq('id', 'default').then(() => {});
 }
 
 export function exportLogsToFile() {
