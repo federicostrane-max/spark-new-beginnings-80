@@ -652,33 +652,104 @@ export const DocumentPoolTable = () => {
       console.log('[DocumentPoolTable] PDF folders loaded:', pdfFolders?.length || 0);
 
       const allFolders = [...(githubFolders || []), ...(pdfFolders || [])];
-      
-      // Aggiungi cartelle vuote dalla tabella folders che non hanno ancora documenti
+
+      // Integra cartelle vuote dalla tabella folders nella struttura gerarchica
       try {
         const { data: allFolderRecords } = await supabase
           .from('folders')
           .select('name');
-        
-        const folderNamesFromDocs = new Set(allFolders.map(f => f.name));
-        
-        // Aggiungi cartelle vuote (esistono in folders ma non hanno documenti)
+
+        // Raccogli tutti i fullName esistenti (inclusi i children)
+        const getAllFullNames = (folders: any[]): Set<string> => {
+          const names = new Set<string>();
+          folders.forEach(f => {
+            if (f.fullName) names.add(f.fullName);
+            if (f.name) names.add(f.name);
+            if (f.children) {
+              f.children.forEach((child: any) => {
+                if (child.fullName) names.add(child.fullName);
+                // Ricorsivamente per children nested
+                const childNames = getAllFullNames([child]);
+                childNames.forEach(n => names.add(n));
+              });
+            }
+          });
+          return names;
+        };
+
+        const existingFolderNames = getAllFullNames(allFolders);
+
+        // Per ogni cartella vuota, integrala nella gerarchia
         for (const record of (allFolderRecords || [])) {
-          if (record.name && !folderNamesFromDocs.has(record.name)) {
-            console.log('[DocumentPoolTable] Adding empty folder from DB:', record.name);
-            allFolders.push({
-              id: `empty-${record.name}`,
-              name: record.name,
-              documentCount: 0,
-              totalDocumentCount: 0,
-              documents: [],
-              children: undefined,
-            });
+          if (record.name && !existingFolderNames.has(record.name)) {
+            console.log('[DocumentPoolTable] Integrating empty folder:', record.name);
+
+            const parts = record.name.split('/');
+
+            if (parts.length === 1) {
+              // È una root - aggiungi come root
+              allFolders.push({
+                id: `empty-${record.name}`,
+                name: record.name,
+                fullName: record.name,
+                documentCount: 0,
+                totalDocumentCount: 0,
+                documents: [],
+                children: undefined,
+              });
+            } else {
+              // È gerarchica - trova o crea il parent
+              const parentPath = parts.slice(0, -1).join('/');
+              const folderName = parts[parts.length - 1];
+
+              // Funzione per trovare e aggiungere al parent
+              const addToParent = (folders: any[], parentPath: string, newChild: any): boolean => {
+                for (const folder of folders) {
+                  const folderFullName = folder.fullName || folder.name;
+                  if (folderFullName === parentPath) {
+                    if (!folder.children) folder.children = [];
+                    folder.children.push(newChild);
+                    // Aggiorna totalDocumentCount del parent
+                    folder.totalDocumentCount = (folder.totalDocumentCount || 0) + (newChild.totalDocumentCount || 0);
+                    return true;
+                  }
+                  if (folder.children && folder.children.length > 0) {
+                    if (addToParent(folder.children, parentPath, newChild)) {
+                      return true;
+                    }
+                  }
+                }
+                return false;
+              };
+
+              const newEmptyFolder = {
+                id: `empty-${record.name}`,
+                name: folderName,
+                fullName: record.name,
+                documentCount: 0,
+                totalDocumentCount: 0,
+                documents: [],
+                children: undefined,
+                isChild: true,
+              };
+
+              // Prova ad aggiungerla al parent
+              if (!addToParent(allFolders, parentPath, newEmptyFolder)) {
+                // Se il parent non esiste, aggiungi come root con nome completo
+                console.log('[DocumentPoolTable] Parent not found, adding as root:', record.name);
+                allFolders.push({
+                  ...newEmptyFolder,
+                  name: record.name, // Usa il path completo come nome
+                  isChild: false,
+                });
+              }
+            }
           }
         }
       } catch (emptyFolderError) {
         console.warn('[DocumentPoolTable] Could not load empty folders:', emptyFolderError);
       }
-      
+
       console.log('[DocumentPoolTable] ✅ Total folders (including empty):', allFolders.length);
       
       setFoldersData(allFolders);
