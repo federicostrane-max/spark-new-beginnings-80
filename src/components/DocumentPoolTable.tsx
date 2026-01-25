@@ -883,31 +883,6 @@ export const DocumentPoolTable = () => {
 
     
 
-    // Separate parent and child folders
-    const parentFolders = new Map();
-    const childFoldersByParent = new Map();
-    
-    Array.from(uniqueFolderNames).forEach(folderName => {
-      const pathParts = folderName.split('/');
-      if (pathParts.length > 1) {
-        const parentPath = pathParts.slice(0, -1).join('/');
-        if (!childFoldersByParent.has(parentPath)) {
-          childFoldersByParent.set(parentPath, []);
-        }
-        childFoldersByParent.get(parentPath).push({
-          id: `virtual-${folderName}`,
-          name: folderName,
-          parent_folder: parentPath,
-        });
-      } else {
-        parentFolders.set(folderName, {
-          id: `virtual-${folderName}`,
-          name: folderName,
-          parent_folder: null,
-        });
-      }
-    });
-
     // Query ALL pipelines for documents with folder
     const [pipelineAWithFolder, pipelineBWithFolder, pipelineCWithFolder, pipelineAHybridWithFolder] = await Promise.all([
       supabase.from('pipeline_a_documents').select('*').not('folder', 'is', null).order('created_at', { ascending: false }),
@@ -1002,7 +977,7 @@ export const DocumentPoolTable = () => {
       }))
     ];
 
-    // Raggruppa i documenti per cartella in memoria (molto più veloce)
+    // Raggruppa i documenti per cartella
     const docsByFolder = new Map<string, any[]>();
     allTransformedDocs.forEach(doc => {
       if (!docsByFolder.has(doc.folder)) {
@@ -1011,66 +986,94 @@ export const DocumentPoolTable = () => {
       docsByFolder.get(doc.folder)!.push(doc);
     });
 
-    const hierarchicalFolders = [];
-    const processedFolderNames = new Set<string>();
-    
-    for (const [parentName, parentFolder] of parentFolders) {
-      const children = childFoldersByParent.get(parentName) || [];
-      
-      // Ottieni documenti parent dalla mappa
-      const parentDocs = docsByFolder.get(parentName) || [];
-      
-      // Elabora children
-      const childrenWithDocs = children.map(child => {
-        const childDocs = docsByFolder.get(child.name) || [];
-        const childShortName = child.name.replace(`${parentName}/`, '');
+    console.log('[loadPDFFolders] Docs by folder:', docsByFolder.size, 'unique folders');
 
-        return {
-          id: child.id,
-          name: childShortName,
-          fullName: child.name,
-          documentCount: childDocs.length,
-          documents: childDocs,
-          isChild: true
-        };
-      });
-      
-      const allChildDocs = childrenWithDocs.flatMap(child => child.documents);
-      const allDocs = [...parentDocs, ...allChildDocs];
-      
-      if (allDocs.length > 0) {
-        hierarchicalFolders.push({
-          id: parentFolder.id,
-          name: parentName,
-          documentCount: parentDocs.length, // Solo documenti DIRETTI
-          totalDocumentCount: parentDocs.length + allChildDocs.length, // Totale RICORSIVO
-          documents: parentDocs,
-          children: childrenWithDocs
-        });
-        
-        processedFolderNames.add(parentName);
-      }
-    }
-    
-    // Aggiungi cartelle standalone (senza figli) dalla mappa in memoria
-    const standaloneFolders = Array.from(parentFolders.values())
-      .filter(folder => !childFoldersByParent.has(folder.name) && !processedFolderNames.has(folder.name))
-      .map(folder => {
-        const docs = docsByFolder.get(folder.name) || [];
-        
-        if (docs.length > 0) {
-          return {
-            id: folder.id,
-            name: folder.name,
-            documentCount: docs.length,
-            documents: docs,
-          };
+    // Costruisci albero gerarchico ricorsivo (come loadGitHubFolders)
+    const allFolderPaths = Array.from(docsByFolder.keys()).sort();
+
+    // PRE-PROCESSAMENTO: Aggiungi tutti i path intermedi mancanti
+    // Se abbiamo "A/B/C/D", dobbiamo assicurarci che esistano anche "A", "A/B", "A/B/C"
+    const allPathsWithIntermediates = new Set<string>(allFolderPaths);
+    allFolderPaths.forEach(path => {
+      const parts = path.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const intermediatePath = parts.slice(0, i).join('/');
+        if (!allPathsWithIntermediates.has(intermediatePath)) {
+          allPathsWithIntermediates.add(intermediatePath);
+          // Aggiungi anche alla mappa con array vuoto (nessun documento diretto)
+          if (!docsByFolder.has(intermediatePath)) {
+            docsByFolder.set(intermediatePath, []);
+          }
         }
-        return null;
-      })
-      .filter(f => f !== null);
-    
-    hierarchicalFolders.push(...standaloneFolders);
+      }
+    });
+
+    const completePathList = Array.from(allPathsWithIntermediates).sort();
+
+    // Trova tutte le root folders (quelle senza slash o il primo livello)
+    const rootPaths = new Set<string>();
+    completePathList.forEach(path => {
+      const parts = path.split('/');
+      rootPaths.add(parts[0]);
+    });
+
+    // Funzione ricorsiva per costruire gerarchia
+    const buildFolderTree = (parentPath: string, depth: number = 0): any => {
+      const children: any[] = [];
+      const parentDocs = docsByFolder.get(parentPath) || [];
+
+      // Trova tutte le sottocartelle DIRETTE di parentPath (quelle senza ulteriori slash)
+      const childPaths = completePathList.filter(path => {
+        if (!path.startsWith(parentPath + '/')) return false;
+
+        // Verifica che sia un figlio diretto, non un nipote
+        const remainder = path.substring(parentPath.length + 1);
+        return !remainder.includes('/');
+      });
+
+      // Costruisci ricorsivamente ogni sottocartella
+      childPaths.forEach(childPath => {
+        const childTree = buildFolderTree(childPath, depth + 1);
+        if (childTree) {
+          const childName = childPath.substring(parentPath.length + 1);
+          children.push({
+            ...childTree,
+            name: childName,
+            isChild: true,
+          });
+        }
+      });
+
+      // Conta tutti i documenti (diretti + in sottocartelle)
+      const getAllDocs = (node: any): any[] => {
+        let docs = [...(node.documents || [])];
+        if (node.children) {
+          node.children.forEach((child: any) => {
+            docs = [...docs, ...getAllDocs(child)];
+          });
+        }
+        return docs;
+      };
+
+      const totalDocs = parentDocs.length + children.reduce((sum, child) => {
+        return sum + getAllDocs(child).length;
+      }, 0);
+
+      return {
+        id: `virtual-${parentPath}`,
+        name: parentPath,
+        fullName: parentPath,
+        documentCount: parentDocs.length, // Solo documenti DIRETTI
+        totalDocumentCount: totalDocs, // Totale RICORSIVO (include sottocartelle)
+        documents: parentDocs,
+        children: children.length > 0 ? children : undefined,
+      };
+    };
+
+    // Costruisci la foresta di root folders
+    const hierarchicalFolders = Array.from(rootPaths).map(rootPath => {
+      return buildFolderTree(rootPath);
+    }).filter(folder => folder && (folder.totalDocumentCount || folder.documentCount) > 0);
 
     // Add "Senza Cartella" for ALL pipelines (no folder OR folder IS NULL)
     const [pipelineADocs, pipelineBDocs, pipelineCDocs, pipelineAHybridDocs] = await Promise.all([
