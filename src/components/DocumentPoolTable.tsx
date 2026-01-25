@@ -618,11 +618,11 @@ export const DocumentPoolTable = () => {
       const [githubFolders, pdfFolders] = await Promise.all([
         loadGitHubFolders().catch(err => {
           // Check for AbortError - don't log as error if it's just cleanup
-          const isAbortError = 
-            err.name === 'AbortError' || 
+          const isAbortError =
+            err.name === 'AbortError' ||
             err.message?.includes('AbortError') ||
             err.code === '20';
-          
+
           if (isAbortError) {
             console.log('[DocumentPoolTable] GitHub folders query aborted (cleanup)');
           } else {
@@ -632,19 +632,26 @@ export const DocumentPoolTable = () => {
         }),
         loadPDFFolders().catch(err => {
           // Check for AbortError - don't log as error if it's just cleanup
-          const isAbortError = 
-            err.name === 'AbortError' || 
+          const isAbortError =
+            err.name === 'AbortError' ||
             err.message?.includes('AbortError') ||
             err.code === '20';
-          
+
           if (isAbortError) {
             console.log('[DocumentPoolTable] PDF folders query aborted (cleanup)');
           } else {
-            console.error('[DocumentPoolTable] PDF folders error:', err);
+            console.error('[DocumentPoolTable] ❌ PDF folders error:', err);
           }
           return [];
         })
       ]);
+
+      console.log('[DocumentPoolTable] 📊 Folders loaded:', {
+        githubFolders: githubFolders?.length || 0,
+        githubFolderNames: githubFolders?.map(f => f.name) || [],
+        pdfFolders: pdfFolders?.length || 0,
+        pdfFolderNames: pdfFolders?.map(f => f.name) || [],
+      });
 
       clearTimeout(timeout);
 
