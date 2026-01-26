@@ -33,6 +33,7 @@ import {
 import { toolServerClient, sessionManager, Orchestrator, Plan, TOOL_SERVER_URL_CHANGED_EVENT } from "@/lib/tool-server";
 import { ToolServerSettings } from "@/components/ToolServerSettings";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ToolActivityPanel, ToolActivity, parseClawdbotMessage, isClawdbotMessage } from "@/components/ToolActivityPanel";
 
 interface Agent {
   id: string;
@@ -116,6 +117,9 @@ export default function MultiAgentConsultant() {
   // Tool Server connection status (ora include 'not_configured')
   const [toolServerStatus, setToolServerStatus] = useState<'connected' | 'disconnected' | 'not_configured' | 'checking'>('checking');
   const [showToolServerDialog, setShowToolServerDialog] = useState(false);
+  // Tool Activity Panel state (for Clawdbot messages)
+  const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
+  const [showToolActivityPanel, setShowToolActivityPanel] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout>();
   const currentConversationRef = useRef<string | null>(null);
@@ -488,7 +492,18 @@ export default function MultiAgentConsultant() {
               }
               return; // Don't add this system message to the UI
             }
-            
+
+            // 🔧 Check for Clawdbot/Tool messages - route to Tool Activity Panel
+            if (isClawdbotMessage(msg.content)) {
+              console.log('🔧 [REALTIME] Clawdbot message detected, routing to Tool Activity Panel');
+              const activity = parseClawdbotMessage(msg.content);
+              if (activity) {
+                setToolActivities(prev => [...prev, activity]);
+                setShowToolActivityPanel(true);
+              }
+              return; // Don't add Clawdbot messages to the main chat
+            }
+
             // Add new message if it doesn't exist (prevents duplicates)
             setMessages(prev => {
               const exists = prev.some(m => m.id === msg.id);
@@ -2154,8 +2169,8 @@ export default function MultiAgentConsultant() {
                 <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
                 <div className="text-sm">
                   <div className="font-medium">
-                    {localExecutionStatus.tool === 'browser_orchestrator' 
-                      ? 'Executing Browser Automation...' 
+                    {localExecutionStatus.tool === 'browser_orchestrator'
+                      ? 'Executing Browser Automation...'
                       : `Executing: ${localExecutionStatus.tool}`}
                   </div>
                   <div className="text-xs opacity-80">
@@ -2164,6 +2179,14 @@ export default function MultiAgentConsultant() {
                 </div>
               </div>
             )}
+
+            {/* Tool Activity Panel (Clawdbot messages) */}
+            <ToolActivityPanel
+              activities={toolActivities}
+              isVisible={showToolActivityPanel}
+              onClose={() => setShowToolActivityPanel(false)}
+              onClear={() => setToolActivities([])}
+            />
           </>
         ) : (
           <div className="flex h-full items-center justify-center p-4">
