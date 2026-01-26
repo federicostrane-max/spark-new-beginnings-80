@@ -5,7 +5,7 @@
 
 import { toolServerClient } from './client';
 import { supabase } from '@/integrations/supabase/client';
-import { ClawdbotClient } from '@/lib/clawdbot/client';
+import { ClawdbotClient } from '@/lib/clawdbot';
 import type {
   ToolUse,
   ToolResult,
