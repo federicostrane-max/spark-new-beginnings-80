@@ -1,126 +1,97 @@
 
-# Piano: Fix "Cartella Esistente" per Cartelle Vuote
+# Piano: Fix Errori TypeScript Clawdbot Library
 
 ## Problema
 
-Quando l'utente cerca di creare la cartella "GEO":
-1. Il sistema dice "Una cartella con questo nome esiste già"
-2. Ma nella vista Cartelle "GEO" non appare
+Gli errori di build sono causati da incompatibilità di tipi TypeScript. Le interfacce come `WaitParams`, `NavigateParams`, ecc. non possono essere passate a `createTask()` che richiede `Record<string, unknown>`.
 
-**Causa**: La cartella "GEO" esiste nella tabella `folders` ma non ha documenti associati. La vista Cartelle mostra solo cartelle con documenti, mentre il controllo di validazione verifica la tabella `folders`.
-
-## Situazione Attuale
-
-```text
-┌─────────────────┐     ┌──────────────────────────┐
-│  Tabella folders │     │    Vista Cartelle        │
-├─────────────────┤     ├──────────────────────────┤
-│ GEO ✓           │     │ Lovable-Docs (19 doc) ✓  │
-│ list ✓          │     │ list (52 doc) ✓          │
-│ lux-desktop ✓   │     │ lux-desktop (65 doc) ✓   │
-│ ...             │     │ ...                      │
-└─────────────────┘     │ (GEO non appare - 0 doc) │
-                        └──────────────────────────┘
+```
+error TS2345: Argument of type 'WaitParams' is not assignable to 
+parameter of type 'Record<string, unknown>'.
+Index signature for type 'string' is missing in type 'WaitParams'.
 ```
 
-## File da Modificare
+## Causa Tecnica
 
-| File | Modifica |
-|------|----------|
-| `src/components/AssignToFolderDialog.tsx` | Se la cartella esiste già, usala direttamente invece di fallire |
-| `src/components/DocumentPoolTable.tsx` | Includere cartelle vuote dalla tabella `folders` nella vista Cartelle |
-
-## Modifiche Tecniche
-
-### 1. AssignToFolderDialog.tsx - Usare cartella esistente (righe 66-97)
-
-Se il nome esiste già in `availableFolders`, invece di mostrare errore, riutilizzare quella cartella:
+TypeScript interfaces non hanno un index signature implicito, quindi non sono compatibili con `Record<string, unknown>`. Per esempio:
 
 ```typescript
-// Se sta creando una nuova cartella
-if (isCreatingNew) {
-  const trimmedName = newFolderName.trim();
-  
-  if (!trimmedName) {
-    toast.error("Nome obbligatorio", {
-      description: "Inserisci un nome per la nuova cartella",
-    });
-    return;
-  }
-
-  if (!/^[a-zA-Z0-9_\-\s]+$/.test(trimmedName)) {
-    toast.error("Nome non valido", {
-      description: "Usa solo lettere, numeri, underscore e trattini",
-    });
-    return;
-  }
-
-  // Controllo case-insensitive
-  const existingFolder = availableFolders.find(
-    f => f.toLowerCase() === trimmedName.toLowerCase()
-  );
-
-  if (existingFolder) {
-    // La cartella esiste già, usala direttamente
-    folderToAssign = existingFolder;
-    // Salta la creazione cartella (isCreatingNew verrà ignorato dopo)
-  } else {
-    folderToAssign = trimmedName;
-  }
+interface WaitParams {
+  timeMs?: number;
+  text?: string;
 }
 
-// Nella sezione creazione cartella:
-if (isCreatingNew && !availableFolders.find(
-  f => f.toLowerCase() === folderToAssign.toLowerCase()
-)) {
-  // Crea solo se NON esiste già
-  const { error: folderError } = await supabase
-    .from('folders')
-    .insert({ name: folderToAssign });
-  // ...
+// Errore: WaitParams non ha [key: string]: unknown
+const params: Record<string, unknown> = waitParams; // ❌
+```
+
+## Soluzione
+
+Aggiungere un index signature a tutte le interfacce dei parametri nel file `types.ts`:
+
+```typescript
+export interface WaitParams {
+  timeMs?: number;
+  text?: string;
+  selector?: string;
+  url?: string;
+  loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+  [key: string]: unknown;  // ← Aggiungere questo
 }
 ```
 
-### 2. DocumentPoolTable.tsx - Mostrare cartelle vuote nella vista Cartelle
+## Modifiche
 
-Nella funzione `loadFolders` (righe 608-676), dopo aver caricato le cartelle dai documenti, aggiungere quelle dalla tabella `folders` che non hanno documenti:
+### File: `src/lib/clawdbot/types.ts`
+
+Aggiungere `[key: string]: unknown;` a queste interfacce (9 totali):
+
+| Interfaccia | Riga | Modifica |
+|-------------|------|----------|
+| `NavigateParams` | 63-66 | Aggiungere index signature |
+| `ClickParams` | 68-73 | Aggiungere index signature |
+| `TypeParams` | 75-81 | Aggiungere index signature |
+| `HoverParams` | 83-86 | Aggiungere index signature |
+| `ScrollParams` | 88-91 | Aggiungere index signature |
+| `SelectParams` | 93-97 | Aggiungere index signature |
+| `ScreenshotParams` | 99-103 | Aggiungere index signature |
+| `WaitParams` | 117-123 | Aggiungere index signature |
+| `PressParams` | 125-129 | Aggiungere index signature |
+| `DragParams` | 131-135 | Aggiungere index signature |
+| `StorageParams` | 137-141 | Aggiungere index signature |
+| `UploadParams` | 143-147 | Aggiungere index signature |
+| `EvaluateParams` | 149-153 | Aggiungere index signature |
+| `SnapshotParams` | 105-115 | Aggiungere index signature |
+
+## Esempio Modifica Completa
 
 ```typescript
-const loadFolders = async () => {
-  // ... codice esistente per caricare cartelle dai documenti ...
-  
-  // Aggiungi cartelle vuote dalla tabella folders
-  const { data: allFolderRecords } = await supabase
-    .from('folders')
-    .select('name');
-  
-  const folderNamesFromDocs = new Set(allFolders.map(f => f.folderName));
-  
-  // Aggiungi cartelle vuote (esistono in folders ma non hanno documenti)
-  for (const record of (allFolderRecords || [])) {
-    if (!folderNamesFromDocs.has(record.name)) {
-      allFolders.push({
-        folderName: record.name,
-        documents: [],
-        totalDocs: 0,
-        // ... altri campi con valori default
-      });
-    }
-  }
-  
-  setFoldersData(allFolders);
-};
+// PRIMA:
+export interface WaitParams {
+  timeMs?: number;
+  text?: string;
+  selector?: string;
+  url?: string;
+  loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+}
+
+// DOPO:
+export interface WaitParams {
+  timeMs?: number;
+  text?: string;
+  selector?: string;
+  url?: string;
+  loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+  [key: string]: unknown;
+}
 ```
 
-## Comportamento Dopo la Modifica
+## Riepilogo
 
-1. **Utente digita "GEO"** → Il sistema trova che esiste già → Usa la cartella esistente
-2. **Documenti assegnati** → I documenti vengono spostati nella cartella "GEO"
-3. **Vista Cartelle** → "GEO" appare ora con i documenti assegnati
-4. **Cartelle vuote** → Appaiono nella vista con "(0 documenti)"
+| File | Azione |
+|------|--------|
+| `src/lib/clawdbot/types.ts` | Aggiungere `[key: string]: unknown;` a 14 interfacce parametri |
 
-## Risultato Atteso
+## Risultato
 
-- Nessun errore "Cartella esistente" quando la cartella esiste ma è vuota
-- Le cartelle vuote sono visibili nella vista Cartelle
-- L'assegnazione documenti funziona sempre
+Dopo questa modifica, tutte le interfacce saranno compatibili con `Record<string, unknown>` e gli errori TypeScript saranno risolti.
