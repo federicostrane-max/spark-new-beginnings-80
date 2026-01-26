@@ -46,80 +46,127 @@ const VIEWPORT_HEIGHT = 700;
 
 const TOOLS = [
   // ════════════════════════════════════════════════════════
-  // CUSTOM TOOLS (Tool Server)
+  // CLAWDBOT: Browser Automation (Primary - use this for web!)
   // ════════════════════════════════════════════════════════
   {
-    name: 'tool_server_action',
-    description: `Execute actions on the local desktop app (Tool Server port 8766).
+    name: 'clawdbot_action',
+    description: `🌐 PRIMARY TOOL FOR WEB AUTOMATION - Uses Clawdbot Service (port 8767).
 
 AVAILABLE ACTIONS:
-- browser_start: Open URL in Edge (persistent profile, keeps logins)
-- screenshot: Capture current screen state
-- dom_tree: Get page structure with ref IDs (e.g., "- button 'Submit' [ref=e3]")
-- click_by_ref: Click element by ref ID (e.g., ref="e3") - NO coordinates needed!
-- element_rect: Find element coordinates by selector/text/role
-- click: Click at coordinates (x, y)
-- type: Type text into focused element
-- scroll: Scroll page (up/down)
-- keypress: Press keys (Enter, Tab, Ctrl+A, etc.)
-- hold_key: Hold a key for duration
-- wait: Wait for specified duration (seconds)
-- browser_navigate: Go to URL
-- browser_stop: Close browser
+- navigate: Go to a URL
+- snapshot: Get page DOM with ref IDs for AI interaction (use mode="ai")
+- click: Click element by ref ID (e.g., ref="e3")
+- type: Type text into element (requires ref + text)
+- hover: Hover over element by ref
+- scroll: Scroll element into view by ref
+- select: Select dropdown option by ref + values
+- press: Press keyboard key (Enter, Tab, Escape, etc.)
+- drag: Drag from one ref to another ref
+- wait: Wait for time/text/selector/url
+- screenshot: Take screenshot (fullPage optional)
+- evaluate: Execute JavaScript in page
+- upload: Upload files
 
 RECOMMENDED WORKFLOW:
-1. browser_start → open URL
-2. dom_tree → get page structure with refs
-3. click_by_ref → click using ref ID (FASTEST, no vision needed!)
-4. type/keypress → input text
-5. screenshot → verify result (if needed)
+1. navigate → go to URL
+2. snapshot → get DOM with ref IDs
+3. click/type → interact using refs (e.g., click ref="e5")
+4. snapshot → verify result
 
-COORDINATE SYSTEMS (for click action):
-- viewport: Pixel coordinates in ${VIEWPORT_WIDTH}x${VIEWPORT_HEIGHT}
-- lux_sdk: From Lux Actor (1:1 with viewport)
-- normalized: 0-999 range (auto-converted)`,
+IMPORTANT:
+- Always get a snapshot first to see available refs!
+- Refs are like "e1", "e2", "e3" - short identifiers for elements
+- This tool is async: returns task_id, then poll for result`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['screenshot', 'dom_tree', 'element_rect', 'click', 'click_by_ref', 'type', 'scroll', 'keypress',
-                 'hold_key', 'wait', 'browser_start', 'browser_navigate', 'browser_stop'],
+          enum: ['navigate', 'snapshot', 'click', 'type', 'hover', 'scroll', 'select',
+                 'press', 'drag', 'wait', 'screenshot', 'evaluate', 'upload'],
+          description: 'Action to execute'
+        },
+        // Navigation
+        url: { type: 'string', description: 'URL for navigate action' },
+        // Element interaction (most actions use ref)
+        ref: { type: 'string', description: 'Element ref ID from snapshot (e.g., "e3")' },
+        text: { type: 'string', description: 'Text to type (for type action)' },
+        submit: { type: 'boolean', description: 'Press Enter after typing (default: false)' },
+        // Click options
+        doubleClick: { type: 'boolean', description: 'Double click (default: false)' },
+        button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button (default: left)' },
+        // Select options
+        values: { type: 'array', items: { type: 'string' }, description: 'Values to select (for select action)' },
+        // Press options
+        key: { type: 'string', description: 'Key to press (e.g., "Enter", "Tab", "Escape")' },
+        // Drag options
+        from: { type: 'string', description: 'Source ref for drag' },
+        to: { type: 'string', description: 'Target ref for drag' },
+        // Wait options
+        timeMs: { type: 'number', description: 'Wait time in milliseconds' },
+        selector: { type: 'string', description: 'CSS selector to wait for' },
+        waitText: { type: 'string', description: 'Text to wait for on page' },
+        loadState: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'Page load state to wait for' },
+        // Snapshot options
+        mode: { type: 'string', enum: ['ai', 'aria'], description: 'Snapshot mode (default: ai)' },
+        // Screenshot options
+        fullPage: { type: 'boolean', description: 'Capture full page (default: false)' },
+        // Evaluate options
+        script: { type: 'string', description: 'JavaScript to execute' },
+        // Upload options
+        files: { type: 'array', items: { type: 'string' }, description: 'File paths to upload' }
+      },
+      required: ['action']
+    }
+  },
+
+  // ════════════════════════════════════════════════════════
+  // TOOL SERVER: Desktop Actions Only (fallback)
+  // ════════════════════════════════════════════════════════
+  {
+    name: 'tool_server_action',
+    description: `🖥️ DESKTOP AUTOMATION ONLY - Use for non-browser desktop apps.
+For web/browser automation, use clawdbot_action instead!
+
+This tool controls the desktop via pyautogui (coordinates-based).
+Use scope="desktop" for all actions.
+
+AVAILABLE ACTIONS:
+- screenshot: Capture desktop screen
+- click: Click at coordinates (x, y) on desktop
+- type: Type text (desktop level)
+- scroll: Scroll at current position
+- keypress: Press keys (desktop level)
+- hold_key: Hold a key for duration
+
+WHEN TO USE:
+- Interacting with native desktop apps (not in browser)
+- When you need coordinate-based clicking on desktop`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['screenshot', 'click', 'type', 'scroll', 'keypress', 'hold_key'],
           description: 'Action to execute'
         },
         scope: {
           type: 'string',
-          enum: ['browser', 'desktop'],
-          description: 'Scope: browser (viewport) or desktop (full screen)'
-        },
-        session_id: {
-          type: 'string',
-          description: 'Browser session ID (auto-managed)'
+          enum: ['desktop'],
+          description: 'Must be "desktop" for this tool'
         },
         x: { type: 'number', description: 'X coordinate for click' },
         y: { type: 'number', description: 'Y coordinate for click' },
-        coordinate_origin: {
-          type: 'string',
-          enum: ['viewport', 'lux_sdk', 'normalized'],
-          description: 'Coordinate system'
-        },
         click_type: {
           type: 'string',
           enum: ['single', 'double', 'right', 'triple'],
           description: 'Click type (default: single)'
         },
-        ref: { type: 'string', description: 'Element ref ID from dom_tree (e.g., "e3") for click_by_ref' },
-        text: { type: 'string', description: 'Text to type, or text to find element' },
+        text: { type: 'string', description: 'Text to type' },
         direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction' },
         amount: { type: 'number', description: 'Scroll amount in pixels (default: 500)' },
         keys: { type: 'string', description: 'Keys to press (e.g., "Enter", "Control+A")' },
-        duration: { type: 'number', description: 'Duration in seconds for hold_key/wait' },
-        start_url: { type: 'string', description: 'Initial URL for browser_start' },
-        url: { type: 'string', description: 'URL for browser_navigate' },
-        selector: { type: 'string', description: 'CSS selector for element_rect' },
-        role: { type: 'string', description: 'ARIA role to find element' },
-        label: { type: 'string', description: 'Accessible label to find element' },
-        placeholder: { type: 'string', description: 'Input placeholder to find element' }
+        duration: { type: 'number', description: 'Duration in seconds for hold_key' }
       },
       required: ['action']
     }

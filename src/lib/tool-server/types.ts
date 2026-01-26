@@ -137,3 +137,66 @@ export interface AgentMessage {
   role: 'user' | 'assistant' | 'tool';
   content: string | ToolResult[];
 }
+
+// ============================================================
+// Clawdbot Action Types
+// ============================================================
+
+export type ClawdbotActionType =
+  | 'navigate'
+  | 'snapshot'
+  | 'click'
+  | 'type'
+  | 'hover'
+  | 'scroll'
+  | 'select'
+  | 'press'
+  | 'drag'
+  | 'wait'
+  | 'screenshot'
+  | 'evaluate'
+  | 'upload';
+
+export interface ClawdbotActionInput {
+  action: ClawdbotActionType;
+
+  // Navigation
+  url?: string;
+
+  // Element interaction
+  ref?: string;
+  text?: string;
+  submit?: boolean;
+
+  // Click options
+  doubleClick?: boolean;
+  button?: 'left' | 'right' | 'middle';
+
+  // Select options
+  values?: string[];
+
+  // Press options
+  key?: string;
+
+  // Drag options
+  from?: string;
+  to?: string;
+
+  // Wait options
+  timeMs?: number;
+  selector?: string;
+  waitText?: string;
+  loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+
+  // Snapshot options
+  mode?: 'ai' | 'aria';
+
+  // Screenshot options
+  fullPage?: boolean;
+
+  // Evaluate options
+  script?: string;
+
+  // Upload options
+  files?: string[];
+}

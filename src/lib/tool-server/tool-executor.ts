@@ -5,10 +5,12 @@
 
 import { toolServerClient } from './client';
 import { supabase } from '@/integrations/supabase/client';
+import { ClawdbotClient } from '@/lib/clawdbot/client';
 import type {
   ToolUse,
   ToolResult,
   ToolServerActionInput,
+  ClawdbotActionInput,
   LuxActorInput,
   GeminiVisionInput,
 } from './types';
@@ -30,8 +32,22 @@ export async function executeToolUse(
 
     switch (name) {
       // ════════════════════════════════════════════════════
-      // LOCAL: Tool Server Actions (eseguite nel browser)
-      // CRITICAL: Blocca se non configurato!
+      // CLAWDBOT: Browser Automation (PRIMARY for web!)
+      // ════════════════════════════════════════════════════
+      case 'clawdbot_action':
+        if (!toolServerClient.isConfigured()) {
+          console.warn('⛔ Tool Server non configurato, blocco azione Clawdbot:', input);
+          result = {
+            success: false,
+            error: 'Tool Server non configurato. Apri le impostazioni (icona 🟡 in alto) e salva il tuo URL ngrok.',
+          };
+          break;
+        }
+        result = await executeClawdbotAction(input as unknown as ClawdbotActionInput);
+        break;
+
+      // ════════════════════════════════════════════════════
+      // TOOL SERVER: Desktop Actions Only (fallback)
       // ════════════════════════════════════════════════════
       case 'tool_server_action':
         // ⛔ GUARD: Blocca TUTTE le azioni locali se non configurato
@@ -305,5 +321,174 @@ Respond ONLY with valid JSON:
     source: 'gemini_computer_use',
     viewport: { width: 1260, height: 700 },
     usage_hint: 'Use these coordinates with tool_server_action click and coordinate_origin="viewport"',
+  };
+}
+
+// ──────────────────────────────────────────────────────────
+// Clawdbot Action (via Tool Server proxy → port 8767)
+// ──────────────────────────────────────────────────────────
+
+async function executeClawdbotAction(input: ClawdbotActionInput): Promise<Record<string, unknown>> {
+  const baseUrl = toolServerClient.getConfiguredUrl();
+  const client = new ClawdbotClient(baseUrl, '', false); // Use proxy via Tool Server
+
+  console.log(`🤖 [Clawdbot] Executing action: ${input.action}`, input);
+
+  try {
+    let task;
+
+    switch (input.action) {
+      case 'navigate':
+        if (!input.url) throw new Error('url required for navigate');
+        task = await client.navigate(input.url);
+        break;
+
+      case 'snapshot':
+        task = await client.snapshot(input.mode || 'ai');
+        break;
+
+      case 'click':
+        if (!input.ref) throw new Error('ref required for click (e.g., "e3")');
+        task = await client.click(input.ref, {
+          doubleClick: input.doubleClick,
+          button: input.button,
+        });
+        break;
+
+      case 'type':
+        if (!input.ref) throw new Error('ref required for type');
+        if (!input.text) throw new Error('text required for type');
+        task = await client.type(input.ref, input.text, {
+          submit: input.submit,
+        });
+        break;
+
+      case 'hover':
+        if (!input.ref) throw new Error('ref required for hover');
+        task = await client.hover(input.ref);
+        break;
+
+      case 'scroll':
+        if (!input.ref) throw new Error('ref required for scroll');
+        task = await client.scroll(input.ref);
+        break;
+
+      case 'select':
+        if (!input.ref) throw new Error('ref required for select');
+        if (!input.values || input.values.length === 0) throw new Error('values required for select');
+        task = await client.select(input.ref, input.values);
+        break;
+
+      case 'press':
+        if (!input.key) throw new Error('key required for press (e.g., "Enter")');
+        task = await client.press(input.key);
+        break;
+
+      case 'drag':
+        if (!input.from || !input.to) throw new Error('from and to refs required for drag');
+        task = await client.drag(input.from, input.to);
+        break;
+
+      case 'wait':
+        if (input.timeMs) {
+          task = await client.waitTime(input.timeMs);
+        } else if (input.waitText) {
+          task = await client.waitForText(input.waitText);
+        } else if (input.selector) {
+          task = await client.waitForSelector(input.selector);
+        } else if (input.loadState) {
+          task = await client.wait({ loadState: input.loadState });
+        } else {
+          throw new Error('wait requires timeMs, waitText, selector, or loadState');
+        }
+        break;
+
+      case 'screenshot':
+        task = await client.screenshot({ fullPage: input.fullPage });
+        break;
+
+      case 'evaluate':
+        if (!input.script) throw new Error('script required for evaluate');
+        task = await client.evaluate(input.script);
+        break;
+
+      case 'upload':
+        if (!input.files || input.files.length === 0) throw new Error('files required for upload');
+        task = await client.upload(input.files, input.ref);
+        break;
+
+      default:
+        throw new Error(`Unknown Clawdbot action: ${input.action}`);
+    }
+
+    // Poll for task completion
+    const result = await pollClawdbotTask(client, task.task_id);
+
+    console.log(`✅ [Clawdbot] Action ${input.action} completed:`, result.status);
+
+    if (result.status === 'failed') {
+      return {
+        success: false,
+        error: result.error || 'Task failed',
+        messages: result.messages,
+      };
+    }
+
+    return {
+      success: true,
+      task_id: result.task_id,
+      status: result.status,
+      result: result.result,
+      messages: result.messages,
+    };
+
+  } catch (error) {
+    console.error(`❌ [Clawdbot] Error:`, error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown Clawdbot error',
+    };
+  }
+}
+
+/**
+ * Poll Clawdbot task until completion
+ */
+async function pollClawdbotTask(
+  client: ClawdbotClient,
+  taskId: string,
+  maxAttempts = 60,
+  intervalMs = 500
+): Promise<{
+  task_id: string;
+  status: string;
+  messages: unknown[];
+  result?: unknown;
+  error?: string;
+}> {
+  let attempts = 0;
+  let lastMessageId = 0;
+
+  while (attempts < maxAttempts) {
+    const result = await client.getTaskStatus(taskId, lastMessageId);
+
+    if (result.status === 'completed' || result.status === 'failed' || result.status === 'cancelled') {
+      return result;
+    }
+
+    // Track last message for incremental polling
+    if (result.messages && result.messages.length > 0) {
+      lastMessageId = result.messages_since;
+    }
+
+    attempts++;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  return {
+    task_id: taskId,
+    status: 'timeout',
+    messages: [],
+    error: `Task did not complete within ${maxAttempts * intervalMs}ms`,
   };
 }
