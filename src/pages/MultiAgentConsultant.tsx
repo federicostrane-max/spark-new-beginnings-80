@@ -33,7 +33,7 @@ import {
 import { toolServerClient, sessionManager, Orchestrator, Plan, TOOL_SERVER_URL_CHANGED_EVENT } from "@/lib/tool-server";
 import { ToolServerSettings } from "@/components/ToolServerSettings";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ToolActivityPanel, ToolActivity, parseClawdbotMessage, isClawdbotMessage } from "@/components/ToolActivityPanel";
+import { ToolActivityPanel, ToolActivity, parseClawdbotMessage, isClawdbotMessage, extractClawdbotMessages } from "@/components/ToolActivityPanel";
 
 interface Agent {
   id: string;
@@ -1333,8 +1333,29 @@ export default function MultiAgentConsultant() {
               console.log("📨 Message started:", lastMessageId.slice(0, 8));
               
             } else if (parsed.type === "content" && parsed.text) {
+              // 🔧 Check for Clawdbot messages - route to Tool Activity Panel
+              let textToAdd = parsed.text;
+
+              if (isClawdbotMessage(parsed.text)) {
+                // Extract Clawdbot messages and get remaining content
+                const { activities, remainingContent } = extractClawdbotMessages(parsed.text);
+
+                if (activities.length > 0) {
+                  console.log(`🔧 [SSE] Found ${activities.length} Clawdbot message(s) in stream`);
+                  setToolActivities(prev => [...prev, ...activities]);
+                  setShowToolActivityPanel(true);
+                }
+
+                textToAdd = remainingContent;
+
+                // If nothing left after extracting Clawdbot messages, skip this chunk
+                if (!textToAdd.trim()) {
+                  continue;
+                }
+              }
+
               // ✅ THROTTLING: Accumula in ref invece di aggiornare subito React
-              accumulatedText += parsed.text;
+              accumulatedText += textToAdd;
               accumulatedTextRef.current = accumulatedText; // Salva in ref per throttling
               chunkCount++; // 🔍 Incrementa contatore chunk
               lastChunkTime = Date.now(); // 🔍 Aggiorna timestamp ultimo chunk

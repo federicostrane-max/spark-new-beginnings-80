@@ -387,5 +387,33 @@ export function parseClawdbotMessage(content: string): ToolActivity | null {
 
 // Helper to check if a message is a Clawdbot message
 export function isClawdbotMessage(content: string): boolean {
-  return /^\[Clawdbot/i.test(content.trim());
+  // Check if the content starts with [Clawdbot or contains a line starting with [Clawdbot
+  const trimmed = content.trim();
+  return /^\[Clawdbot/i.test(trimmed) || /\n\[Clawdbot/i.test(content);
+}
+
+// Helper to extract Clawdbot messages from a chunk and return the remaining content
+export function extractClawdbotMessages(content: string): {
+  activities: ToolActivity[];
+  remainingContent: string;
+} {
+  const lines = content.split('\n');
+  const activities: ToolActivity[] = [];
+  const remainingLines: string[] = [];
+
+  for (const line of lines) {
+    if (/^\[Clawdbot/i.test(line.trim())) {
+      const activity = parseClawdbotMessage(line);
+      if (activity) {
+        activities.push(activity);
+      }
+    } else {
+      remainingLines.push(line);
+    }
+  }
+
+  return {
+    activities,
+    remainingContent: remainingLines.join('\n')
+  };
 }
