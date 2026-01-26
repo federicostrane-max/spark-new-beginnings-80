@@ -63,6 +63,7 @@ export type ClawdbotAction =
 export interface NavigateParams {
   url: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface ClickParams {
@@ -70,6 +71,7 @@ export interface ClickParams {
   targetId?: string;
   doubleClick?: boolean;
   button?: 'left' | 'right' | 'middle';
+  [key: string]: unknown;
 }
 
 export interface TypeParams {
@@ -78,28 +80,33 @@ export interface TypeParams {
   targetId?: string;
   submit?: boolean;
   slowly?: boolean;
+  [key: string]: unknown;
 }
 
 export interface HoverParams {
   ref: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface ScrollParams {
   ref: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface SelectParams {
   ref: string;
   values: string[];
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface ScreenshotParams {
   targetId?: string;
   fullPage?: boolean;
   selector?: string;
+  [key: string]: unknown;
 }
 
 export interface SnapshotParams {
@@ -112,6 +119,7 @@ export interface SnapshotParams {
   depth?: number;
   selector?: string;
   labels?: boolean;
+  [key: string]: unknown;
 }
 
 export interface WaitParams {
@@ -120,36 +128,42 @@ export interface WaitParams {
   selector?: string;
   url?: string;
   loadState?: 'load' | 'domcontentloaded' | 'networkidle';
+  [key: string]: unknown;
 }
 
 export interface PressParams {
   key: string;
   targetId?: string;
   delayMs?: number;
+  [key: string]: unknown;
 }
 
 export interface DragParams {
   from: string;
   to: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface StorageParams {
   type: 'local' | 'session';
   targetId?: string;
   data?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface UploadParams {
   files: string[];
   ref?: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 export interface EvaluateParams {
   script: string;
   ref?: string;
   targetId?: string;
+  [key: string]: unknown;
 }
 
 // ============================================================================
