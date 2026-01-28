@@ -6,6 +6,7 @@
 import { toolServerClient } from './client';
 import { supabase } from '@/integrations/supabase/client';
 import { ClawdbotClient } from '@/lib/clawdbot';
+import { getLauncherClient } from '@/lib/launcher';
 import type {
   ToolUse,
   ToolResult,
@@ -14,6 +15,64 @@ import type {
   LuxActorInput,
   GeminiVisionInput,
 } from './types';
+
+// ──────────────────────────────────────────────────────────
+// PM Tool Input Types
+// ──────────────────────────────────────────────────────────
+
+interface DesktopApiCallInput {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  path: string;
+  body?: Record<string, unknown>;
+}
+
+interface DesktopCreateSessionInput {
+  projectPath: string;
+  sessionType?: 'new' | 'resume';
+  sessionName?: string;
+}
+
+interface DesktopSendMessageInput {
+  sessionId: string;
+  message: string;
+  files?: string[];
+}
+
+interface DesktopSearchSessionsInput {
+  query: string;
+  limit?: number;
+}
+
+interface KnowledgeReadInput {
+  category?: string;
+  search?: string;
+  limit?: number;
+}
+
+interface KnowledgeWriteInput {
+  category: string;
+  title: string;
+  content: string;
+  tags?: string[];
+}
+
+interface SessionMetadataGetInput {
+  sessionId: string;
+}
+
+interface SessionMetadataUpdateInput {
+  sessionId: string;
+  title?: string;
+  tags?: string[];
+  topics?: string[];
+  summary?: string;
+}
+
+interface FeatureRequestInput {
+  description: string;
+  priority?: 'low' | 'medium' | 'high';
+  context?: Record<string, unknown>;
+}
 
 // ──────────────────────────────────────────────────────────
 // Tool Router
@@ -74,6 +133,62 @@ export async function executeToolUse(
         break;
 
       // ════════════════════════════════════════════════════
+      // PM AGENT: Desktop App Integration
+      // ════════════════════════════════════════════════════
+      case 'desktop_api_call':
+        result = await executeDesktopApiCall(input as unknown as DesktopApiCallInput);
+        break;
+
+      case 'desktop_create_session':
+        result = await executeDesktopCreateSession(input as unknown as DesktopCreateSessionInput);
+        break;
+
+      case 'desktop_send_message':
+        result = await executeDesktopSendMessage(input as unknown as DesktopSendMessageInput);
+        break;
+
+      case 'desktop_search_sessions':
+        result = await executeDesktopSearchSessions(input as unknown as DesktopSearchSessionsInput);
+        break;
+
+      case 'desktop_get_orchestration_status':
+        result = await executeDesktopGetOrchestrationStatus();
+        break;
+
+      case 'desktop_restart':
+        result = await executeDesktopRestart();
+        break;
+
+      // ════════════════════════════════════════════════════
+      // PM AGENT: Knowledge Base (Supabase)
+      // ════════════════════════════════════════════════════
+      case 'knowledge_read':
+        result = await executeKnowledgeRead(input as unknown as KnowledgeReadInput);
+        break;
+
+      case 'knowledge_write':
+        result = await executeKnowledgeWrite(input as unknown as KnowledgeWriteInput);
+        break;
+
+      // ════════════════════════════════════════════════════
+      // PM AGENT: Session Metadata
+      // ════════════════════════════════════════════════════
+      case 'session_metadata_get':
+        result = await executeSessionMetadataGet(input as unknown as SessionMetadataGetInput);
+        break;
+
+      case 'session_metadata_update':
+        result = await executeSessionMetadataUpdate(input as unknown as SessionMetadataUpdateInput);
+        break;
+
+      // ════════════════════════════════════════════════════
+      // PM AGENT: Feature Requests
+      // ════════════════════════════════════════════════════
+      case 'feature_request':
+        result = await executeFeatureRequest(input as unknown as FeatureRequestInput);
+        break;
+
+      // ════════════════════════════════════════════════════
       // Unknown tool
       // ════════════════════════════════════════════════════
       default:
@@ -103,6 +218,220 @@ export async function executeToolUse(
       is_error: true,
     };
   }
+}
+
+// ──────────────────────────────────────────────────────────
+// PM Agent: Desktop App Handlers
+// ──────────────────────────────────────────────────────────
+
+async function executeDesktopApiCall(input: DesktopApiCallInput): Promise<Record<string, unknown>> {
+  const client = getLauncherClient();
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  
+  const token = client.getToken();
+  if (token) {
+    headers['X-API-Token'] = token;
+  }
+
+  const response = await fetch(`${client.getBaseUrl()}${input.path}`, {
+    method: input.method,
+    headers,
+    body: input.body ? JSON.stringify(input.body) : undefined,
+  });
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: `API error: ${response.status} ${response.statusText}`,
+    };
+  }
+
+  const data = await response.json();
+  return { success: true, data };
+}
+
+async function executeDesktopCreateSession(input: DesktopCreateSessionInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const session = await client.createSession(
+      input.projectPath,
+      input.sessionType || 'new',
+      input.sessionName
+    );
+    return { success: true, session };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create session',
+    };
+  }
+}
+
+async function executeDesktopSendMessage(input: DesktopSendMessageInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    await client.sendMessage(input.sessionId, input.message, input.files);
+    return { success: true, sessionId: input.sessionId };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to send message',
+    };
+  }
+}
+
+async function executeDesktopSearchSessions(input: DesktopSearchSessionsInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const results = await client.searchSessions(input.query, input.limit);
+    return { success: true, results, count: results.length };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to search sessions',
+    };
+  }
+}
+
+async function executeDesktopGetOrchestrationStatus(): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const status = await client.getOrchestrationStatus();
+    return { success: true, ...status };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get orchestration status',
+    };
+  }
+}
+
+async function executeDesktopRestart(): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    await client.restartDev();
+    const result = await client.waitForRestart();
+    return { success: result.success };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to restart',
+    };
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+// PM Agent: Knowledge Base Handlers
+// ──────────────────────────────────────────────────────────
+
+async function executeKnowledgeRead(input: KnowledgeReadInput): Promise<Record<string, unknown>> {
+  try {
+    let query = supabase
+      .from('agent_knowledge')
+      .select('*');
+
+    if (input.category && input.category !== 'all') {
+      query = query.eq('category', input.category);
+    }
+
+    if (input.search) {
+      query = query.textSearch('content', input.search);
+    }
+
+    const { data, error } = await query
+      .limit(input.limit || 10)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return { success: true, data, count: data?.length || 0 };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to read knowledge',
+    };
+  }
+}
+
+async function executeKnowledgeWrite(input: KnowledgeWriteInput): Promise<Record<string, unknown>> {
+  try {
+    const { data, error } = await supabase
+      .from('agent_knowledge')
+      .insert({
+        category: input.category,
+        document_name: input.title,
+        content: input.content,
+        // Note: tags would need a separate column or JSONB field
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, data };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to write knowledge',
+    };
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+// PM Agent: Session Metadata Handlers
+// ──────────────────────────────────────────────────────────
+
+async function executeSessionMetadataGet(input: SessionMetadataGetInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const metadata = await client.getSessionMetadata(input.sessionId);
+    return { success: true, metadata };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get session metadata',
+    };
+  }
+}
+
+async function executeSessionMetadataUpdate(input: SessionMetadataUpdateInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const { sessionId, ...updateData } = input;
+    const metadata = await client.updateSessionMetadata(sessionId, updateData);
+    return { success: true, metadata };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to update session metadata',
+    };
+  }
+}
+
+// ──────────────────────────────────────────────────────────
+// PM Agent: Feature Request Handler
+// ──────────────────────────────────────────────────────────
+
+async function executeFeatureRequest(input: FeatureRequestInput): Promise<Record<string, unknown>> {
+  // Note: feature_requests table would need to be created via migration
+  // For now, return a mock success with a generated ID
+  const featureId = crypto.randomUUID();
+  
+  console.log('[PM Agent] Feature request created:', {
+    id: featureId,
+    description: input.description,
+    priority: input.priority,
+    context: input.context,
+  });
+
+  return { 
+    success: true, 
+    featureId,
+    message: 'Feature request recorded. Note: Database table not yet configured.',
+  };
 }
 
 // ──────────────────────────────────────────────────────────

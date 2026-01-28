@@ -7,17 +7,28 @@
 
 import type {
   SessionMetadata,
-  SearchResult,
+  TerminalSession,
+  ParsedMessage,
+  SessionSearchResult,
   ApiDocsResponse,
   SearchResponse,
   SessionMessagesResponse,
   BulkMetadataResponse,
   RestartResponse,
+  OrchestrationStatus,
+  OrchestrationEvent,
+  WebhookConfig,
+  BroadcastResponse,
+  SessionsListResponse,
+  CreateSessionResponse,
+  SendMessageResponse,
+  WebhooksListResponse,
 } from './types';
 
 export class LauncherClient {
   private baseUrl: string;
   private apiToken: string;
+  private eventSource: EventSource | null = null;
 
   /**
    * Create a new Launcher client
@@ -28,6 +39,20 @@ export class LauncherClient {
   constructor(baseUrl: string = 'http://localhost:3847', apiToken: string = '') {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.apiToken = apiToken;
+  }
+
+  /**
+   * Get the base URL
+   */
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  /**
+   * Get the API token
+   */
+  getToken(): string {
+    return this.apiToken;
   }
 
   /**
@@ -82,6 +107,82 @@ export class LauncherClient {
   }
 
   // ============================================================================
+  // Sessions
+  // ============================================================================
+
+  /**
+   * Get all active sessions
+   */
+  async getSessions(): Promise<TerminalSession[]> {
+    const response = await this.request<SessionsListResponse>('/api/sessions');
+    return response.sessions;
+  }
+
+  /**
+   * Create a new session
+   *
+   * @param projectPath - Path to the project
+   * @param sessionType - 'new' or 'resume' (optional)
+   * @param sessionName - Custom session name (optional)
+   */
+  async createSession(
+    projectPath: string,
+    sessionType: 'new' | 'resume' = 'new',
+    sessionName?: string
+  ): Promise<TerminalSession> {
+    const response = await this.request<CreateSessionResponse>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectPath,
+        sessionType,
+        sessionName,
+      }),
+    });
+    return response.session;
+  }
+
+  /**
+   * Send a message to a session
+   *
+   * @param sessionId - Session ID
+   * @param message - Message content
+   * @param files - Optional file paths to attach
+   */
+  async sendMessage(
+    sessionId: string,
+    message: string,
+    files?: string[]
+  ): Promise<void> {
+    await this.request<SendMessageResponse>(`/api/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        files,
+      }),
+    });
+  }
+
+  /**
+   * Get last N messages from a session
+   *
+   * @param sessionId - Session ID
+   * @param limit - Maximum number of messages (optional)
+   */
+  async getSessionMessages(
+    sessionId: string,
+    limit?: number
+  ): Promise<ParsedMessage[]> {
+    const params = new URLSearchParams();
+    if (limit !== undefined) {
+      params.append('limit', limit.toString());
+    }
+    const queryString = params.toString();
+    const path = `/api/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
+    const response = await this.request<SessionMessagesResponse>(path);
+    return response.messages;
+  }
+
+  // ============================================================================
   // Search
   // ============================================================================
 
@@ -91,12 +192,13 @@ export class LauncherClient {
    * @param query - Search query string
    * @param limit - Maximum number of results (optional)
    */
-  async searchSessions(query: string, limit?: number): Promise<SearchResponse> {
+  async searchSessions(query: string, limit?: number): Promise<SessionSearchResult[]> {
     const params = new URLSearchParams({ q: query });
     if (limit !== undefined) {
       params.append('limit', limit.toString());
     }
-    return this.request<SearchResponse>(`/api/search?${params.toString()}`);
+    const response = await this.request<SearchResponse>(`/api/search?${params.toString()}`);
+    return response.results;
   }
 
   // ============================================================================
@@ -129,37 +231,125 @@ export class LauncherClient {
   }
 
   // ============================================================================
-  // Session Messages
-  // ============================================================================
-
-  /**
-   * Get last N messages from a session
-   *
-   * @param sessionId - Session ID
-   * @param limit - Maximum number of messages (optional)
-   */
-  async getSessionMessages(
-    sessionId: string,
-    limit?: number
-  ): Promise<SessionMessagesResponse> {
-    const params = new URLSearchParams();
-    if (limit !== undefined) {
-      params.append('limit', limit.toString());
-    }
-    const queryString = params.toString();
-    const path = `/api/sessions/${sessionId}/messages${queryString ? `?${queryString}` : ''}`;
-    return this.request<SessionMessagesResponse>(path);
-  }
-
-  // ============================================================================
   // Bulk Operations
   // ============================================================================
 
   /**
    * Get all session metadata (bulk)
    */
-  async getAllMetadata(): Promise<BulkMetadataResponse> {
-    return this.request<BulkMetadataResponse>('/api/metadata');
+  async getAllMetadata(): Promise<Record<string, SessionMetadata>> {
+    const response = await this.request<BulkMetadataResponse>('/api/metadata');
+    return response.metadata;
+  }
+
+  // ============================================================================
+  // Orchestration
+  // ============================================================================
+
+  /**
+   * Get orchestration status (all sessions overview)
+   */
+  async getOrchestrationStatus(): Promise<OrchestrationStatus> {
+    return this.request<OrchestrationStatus>('/api/orchestration/status');
+  }
+
+  /**
+   * Broadcast a message to multiple sessions
+   *
+   * @param message - Message to broadcast
+   * @param filter - Optional filter for target sessions
+   */
+  async broadcastMessage(
+    message: string,
+    filter?: { status?: string; projectPath?: string }
+  ): Promise<BroadcastResponse> {
+    return this.request<BroadcastResponse>('/api/orchestration/broadcast', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        filter,
+      }),
+    });
+  }
+
+  /**
+   * Subscribe to orchestration events via SSE
+   *
+   * @param onEvent - Callback for each event
+   * @returns Unsubscribe function
+   */
+  subscribeToEvents(
+    onEvent: (event: OrchestrationEvent) => void
+  ): () => void {
+    // Close existing connection if any
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    const url = new URL(`${this.baseUrl}/api/orchestration/events`);
+    if (this.apiToken) {
+      url.searchParams.set('token', this.apiToken);
+    }
+
+    this.eventSource = new EventSource(url.toString());
+
+    this.eventSource.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data) as OrchestrationEvent;
+        onEvent(parsed);
+      } catch (error) {
+        console.error('[LauncherClient] Failed to parse event:', error);
+      }
+    };
+
+    this.eventSource.onerror = (error) => {
+      console.error('[LauncherClient] SSE error:', error);
+    };
+
+    // Return unsubscribe function
+    return () => {
+      if (this.eventSource) {
+        this.eventSource.close();
+        this.eventSource = null;
+      }
+    };
+  }
+
+  // ============================================================================
+  // Webhooks
+  // ============================================================================
+
+  /**
+   * Get all registered webhooks
+   */
+  async getWebhooks(): Promise<WebhookConfig[]> {
+    const response = await this.request<WebhooksListResponse>('/api/webhooks');
+    return response.webhooks;
+  }
+
+  /**
+   * Create a new webhook
+   *
+   * @param config - Webhook configuration
+   */
+  async createWebhook(
+    config: Omit<WebhookConfig, 'id' | 'createdAt' | 'failureCount'>
+  ): Promise<WebhookConfig> {
+    return this.request<WebhookConfig>('/api/webhooks', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  /**
+   * Delete a webhook
+   *
+   * @param id - Webhook ID
+   */
+  async deleteWebhook(id: string): Promise<void> {
+    await this.request<void>(`/api/webhooks/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // ============================================================================
@@ -169,15 +359,70 @@ export class LauncherClient {
   /**
    * Restart the app in dev mode
    */
-  async restartDevApp(): Promise<RestartResponse> {
+  async restartDev(): Promise<RestartResponse> {
     return this.request<RestartResponse>('/api/app/restart-dev', {
       method: 'POST',
     });
   }
+
+  /**
+   * Wait for the app to restart and become available
+   *
+   * @param maxWaitMs - Maximum wait time in milliseconds (default: 30000)
+   */
+  async waitForRestart(maxWaitMs: number = 30000): Promise<{ success: boolean }> {
+    const startTime = Date.now();
+    const checkInterval = 500;
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        await this.getDocs();
+        return { success: true };
+      } catch {
+        // Server not ready yet, wait and retry
+        await new Promise(resolve => setTimeout(resolve, checkInterval));
+      }
+    }
+
+    return { success: false };
+  }
+}
+
+// ============================================================================
+// Singleton Instance & Factory
+// ============================================================================
+
+let launcherClientInstance: LauncherClient | null = null;
+
+/**
+ * Get the singleton LauncherClient instance
+ */
+export function getLauncherClient(): LauncherClient {
+  if (!launcherClientInstance) {
+    // Try to load config from localStorage
+    const savedUrl = localStorage.getItem('launcher_api_url');
+    const savedToken = localStorage.getItem('launcher_api_token');
+    
+    launcherClientInstance = new LauncherClient(
+      savedUrl || 'http://localhost:3847',
+      savedToken || ''
+    );
+  }
+  return launcherClientInstance;
 }
 
 /**
- * Create a Launcher client with default configuration
+ * Configure the singleton LauncherClient
+ */
+export function configureLauncherClient(baseUrl: string, apiToken: string): void {
+  localStorage.setItem('launcher_api_url', baseUrl);
+  localStorage.setItem('launcher_api_token', apiToken);
+  
+  launcherClientInstance = new LauncherClient(baseUrl, apiToken);
+}
+
+/**
+ * Create a new Launcher client (factory function)
  */
 export function createLauncherClient(
   baseUrl: string = 'http://localhost:3847',
