@@ -265,7 +265,11 @@ export const ToolServerSettings = () => {
 
     try {
       // v10.6.0: Include security token in test request
-      const headers: Record<string, string> = { 'Accept': 'application/json' };
+      // v10.6.1: Add ngrok-skip-browser-warning to bypass ngrok interstitial page
+      const headers: Record<string, string> = {
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true'
+      };
       const token = toolServerClient.getSecurityToken();
       if (token) {
         headers['X-Tool-Token'] = token;
