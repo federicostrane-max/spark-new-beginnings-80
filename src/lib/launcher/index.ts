@@ -38,4 +38,9 @@ export type {
   CreateSessionResponse,
   SendMessageResponse,
   WebhooksListResponse,
+  HealthCheckResponse,
+  TestWebhookResponse,
+  AnswerQuestionResponse,
+  GetSessionResponse,
+  UpdateWebhookResponse,
 } from './types';

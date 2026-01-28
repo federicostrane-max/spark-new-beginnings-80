@@ -164,3 +164,34 @@ export interface WebhooksListResponse {
   webhooks: WebhookConfig[];
   count: number;
 }
+
+// ============================================================
+// Additional Response Types
+// ============================================================
+
+export interface HealthCheckResponse {
+  healthy: boolean;
+  version?: string;
+  uptime?: number;
+}
+
+export interface TestWebhookResponse {
+  success: boolean;
+  statusCode?: number;
+  responseTime?: number;
+  error?: string;
+}
+
+export interface AnswerQuestionResponse {
+  success: boolean;
+  sessionId: string;
+}
+
+export interface GetSessionResponse {
+  session: TerminalSession;
+}
+
+export interface UpdateWebhookResponse {
+  webhook: WebhookConfig;
+  success: boolean;
+}

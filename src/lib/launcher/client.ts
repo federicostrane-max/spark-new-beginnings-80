@@ -23,6 +23,11 @@ import type {
   CreateSessionResponse,
   SendMessageResponse,
   WebhooksListResponse,
+  HealthCheckResponse,
+  TestWebhookResponse,
+  AnswerQuestionResponse,
+  GetSessionResponse,
+  UpdateWebhookResponse,
 } from './types';
 
 export class LauncherClient {
@@ -119,6 +124,16 @@ export class LauncherClient {
   }
 
   /**
+   * Get a specific session by ID
+   *
+   * @param sessionId - Session ID
+   */
+  async getSession(sessionId: string): Promise<TerminalSession> {
+    const response = await this.request<GetSessionResponse>(`/api/sessions/${sessionId}`);
+    return response.session;
+  }
+
+  /**
    * Create a new session
    *
    * @param projectPath - Path to the project
@@ -159,6 +174,22 @@ export class LauncherClient {
         message,
         files,
       }),
+    });
+  }
+
+  /**
+   * Answer a question in a session
+   *
+   * @param sessionId - Session ID
+   * @param answer - Answer content
+   */
+  async answerQuestion(
+    sessionId: string,
+    answer: string
+  ): Promise<AnswerQuestionResponse> {
+    return this.request<AnswerQuestionResponse>(`/api/sessions/${sessionId}/answer`, {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
     });
   }
 
@@ -273,41 +304,69 @@ export class LauncherClient {
   }
 
   /**
-   * Subscribe to orchestration events via SSE
+   * Subscribe to orchestration events via SSE with auto-reconnection
    *
    * @param onEvent - Callback for each event
+   * @param options - SSE options (reconnect, maxRetries)
    * @returns Unsubscribe function
    */
   subscribeToEvents(
-    onEvent: (event: OrchestrationEvent) => void
+    onEvent: (event: OrchestrationEvent) => void,
+    options: { reconnect?: boolean; maxRetries?: number } = {}
   ): () => void {
-    // Close existing connection if any
-    if (this.eventSource) {
-      this.eventSource.close();
-    }
+    const { reconnect = true, maxRetries = 5 } = options;
+    let retryCount = 0;
+    let shouldReconnect = true;
 
-    const url = new URL(`${this.baseUrl}/api/orchestration/events`);
-    if (this.apiToken) {
-      url.searchParams.set('token', this.apiToken);
-    }
-
-    this.eventSource = new EventSource(url.toString());
-
-    this.eventSource.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data) as OrchestrationEvent;
-        onEvent(parsed);
-      } catch (error) {
-        console.error('[LauncherClient] Failed to parse event:', error);
+    const connect = () => {
+      // Close existing connection if any
+      if (this.eventSource) {
+        this.eventSource.close();
       }
+
+      const url = new URL(`${this.baseUrl}/api/orchestration/events`);
+      if (this.apiToken) {
+        url.searchParams.set('token', this.apiToken);
+      }
+
+      this.eventSource = new EventSource(url.toString());
+
+      this.eventSource.onopen = () => {
+        console.log('[LauncherClient] SSE connected');
+        retryCount = 0; // Reset on successful connection
+      };
+
+      this.eventSource.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as OrchestrationEvent;
+          onEvent(parsed);
+        } catch (error) {
+          console.error('[LauncherClient] Failed to parse event:', error);
+        }
+      };
+
+      this.eventSource.onerror = () => {
+        console.error('[LauncherClient] SSE connection error');
+        this.eventSource?.close();
+        this.eventSource = null;
+
+        // Auto-reconnect with exponential backoff
+        if (reconnect && shouldReconnect && retryCount < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+          console.log(`[LauncherClient] Reconnecting in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
+          setTimeout(connect, delay);
+          retryCount++;
+        } else if (retryCount >= maxRetries) {
+          console.error('[LauncherClient] Max reconnection attempts reached');
+        }
+      };
     };
 
-    this.eventSource.onerror = (error) => {
-      console.error('[LauncherClient] SSE error:', error);
-    };
+    connect();
 
     // Return unsubscribe function
     return () => {
+      shouldReconnect = false;
       if (this.eventSource) {
         this.eventSource.close();
         this.eventSource = null;
@@ -342,6 +401,23 @@ export class LauncherClient {
   }
 
   /**
+   * Update a webhook
+   *
+   * @param id - Webhook ID
+   * @param updates - Partial webhook configuration
+   */
+  async updateWebhook(
+    id: string,
+    updates: Partial<Omit<WebhookConfig, 'id' | 'createdAt' | 'failureCount'>>
+  ): Promise<WebhookConfig> {
+    const response = await this.request<UpdateWebhookResponse>(`/api/webhooks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+    return response.webhook;
+  }
+
+  /**
    * Delete a webhook
    *
    * @param id - Webhook ID
@@ -349,6 +425,17 @@ export class LauncherClient {
   async deleteWebhook(id: string): Promise<void> {
     await this.request<void>(`/api/webhooks/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  /**
+   * Test a webhook
+   *
+   * @param id - Webhook ID
+   */
+  async testWebhook(id: string): Promise<TestWebhookResponse> {
+    return this.request<TestWebhookResponse>(`/api/webhooks/${id}/test`, {
+      method: 'POST',
     });
   }
 
@@ -376,7 +463,7 @@ export class LauncherClient {
 
     while (Date.now() - startTime < maxWaitMs) {
       try {
-        await this.getDocs();
+        await this.healthCheck();
         return { success: true };
       } catch {
         // Server not ready yet, wait and retry
@@ -385,6 +472,13 @@ export class LauncherClient {
     }
 
     return { success: false };
+  }
+
+  /**
+   * Health check endpoint
+   */
+  async healthCheck(): Promise<HealthCheckResponse> {
+    return this.request<HealthCheckResponse>('/api/health');
   }
 }
 

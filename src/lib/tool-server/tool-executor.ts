@@ -74,6 +74,28 @@ interface FeatureRequestInput {
   context?: Record<string, unknown>;
 }
 
+interface DesktopListSessionsInput {
+  // No required params
+}
+
+interface DesktopGetSessionInput {
+  sessionId: string;
+}
+
+interface DesktopGetSessionHistoryInput {
+  sessionId: string;
+  limit?: number;
+}
+
+interface DesktopAnswerQuestionInput {
+  sessionId: string;
+  answer: string;
+}
+
+interface FeatureRequestStatusInput {
+  featureId: string;
+}
+
 // ──────────────────────────────────────────────────────────
 // Tool Router
 // ──────────────────────────────────────────────────────────
@@ -159,6 +181,22 @@ export async function executeToolUse(
         result = await executeDesktopRestart();
         break;
 
+      case 'desktop_list_sessions':
+        result = await executeDesktopListSessions();
+        break;
+
+      case 'desktop_get_session':
+        result = await executeDesktopGetSession(input as unknown as DesktopGetSessionInput);
+        break;
+
+      case 'desktop_get_session_history':
+        result = await executeDesktopGetSessionHistory(input as unknown as DesktopGetSessionHistoryInput);
+        break;
+
+      case 'desktop_answer_question':
+        result = await executeDesktopAnswerQuestion(input as unknown as DesktopAnswerQuestionInput);
+        break;
+
       // ════════════════════════════════════════════════════
       // PM AGENT: Knowledge Base (Supabase)
       // ════════════════════════════════════════════════════
@@ -186,6 +224,10 @@ export async function executeToolUse(
       // ════════════════════════════════════════════════════
       case 'feature_request':
         result = await executeFeatureRequest(input as unknown as FeatureRequestInput);
+        break;
+
+      case 'feature_request_status':
+        result = await executeFeatureRequestStatus(input as unknown as FeatureRequestStatusInput);
         break;
 
       // ════════════════════════════════════════════════════
@@ -323,6 +365,58 @@ async function executeDesktopRestart(): Promise<Record<string, unknown>> {
   }
 }
 
+async function executeDesktopListSessions(): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const sessions = await client.getSessions();
+    return { success: true, sessions, count: sessions.length };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to list sessions',
+    };
+  }
+}
+
+async function executeDesktopGetSession(input: DesktopGetSessionInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const session = await client.getSession(input.sessionId);
+    return { success: true, session };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get session',
+    };
+  }
+}
+
+async function executeDesktopGetSessionHistory(input: DesktopGetSessionHistoryInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const messages = await client.getSessionMessages(input.sessionId, input.limit);
+    return { success: true, messages, count: messages.length };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get session history',
+    };
+  }
+}
+
+async function executeDesktopAnswerQuestion(input: DesktopAnswerQuestionInput): Promise<Record<string, unknown>> {
+  try {
+    const client = getLauncherClient();
+    const result = await client.answerQuestion(input.sessionId, input.answer);
+    return { success: true, ...result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to answer question',
+    };
+  }
+}
+
 // ──────────────────────────────────────────────────────────
 // PM Agent: Knowledge Base Handlers
 // ──────────────────────────────────────────────────────────
@@ -431,6 +525,19 @@ async function executeFeatureRequest(input: FeatureRequestInput): Promise<Record
     success: true, 
     featureId,
     message: 'Feature request recorded. Note: Database table not yet configured.',
+  };
+}
+
+async function executeFeatureRequestStatus(input: FeatureRequestStatusInput): Promise<Record<string, unknown>> {
+  // Note: feature_requests table would need to be created via migration
+  // For now, return a mock status
+  console.log('[PM Agent] Feature request status check:', input.featureId);
+
+  return { 
+    success: true, 
+    featureId: input.featureId,
+    status: 'pending',
+    message: 'Feature request status check. Note: Database table not yet configured.',
   };
 }
 
