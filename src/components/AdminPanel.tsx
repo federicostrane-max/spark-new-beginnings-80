@@ -15,6 +15,7 @@ import AlignmentMetricsMonitor from "./AlignmentMetricsMonitor";
 import { AirtopBrowserAutomation } from "./AirtopBrowserAutomation";
 import { LuxModeConfig } from "./LuxModeConfig";
 import { ToolServerSettings } from "./ToolServerSettings";
+import { DesktopAppSettings } from "./DesktopAppSettings";
 import { useNavigate } from "react-router-dom";
 
 interface ProcessingResult {
@@ -50,6 +51,7 @@ export const AdminPanel = () => {
     { value: "filter-prompt", label: "Filter Prompt" },
     { value: "alignment-prompt", label: "Alignment Prompt" },
     { value: "lux-config", label: "Lux Config" },
+    { value: "desktop-app", label: "Desktop App" },
     { value: "tool-server", label: "Tool Server" },
     { value: "airtop", label: "Airtop.ai" },
     { value: "docvqa", label: "DocVQA Test" },
@@ -148,7 +150,7 @@ export const AdminPanel = () => {
       </div>
 
       {/* Desktop: Horizontal Tabs */}
-      <TabsList className="hidden md:grid w-full grid-cols-11">
+      <TabsList className="hidden md:grid w-full grid-cols-12">
         {tabs.map((tab) => (
           <TabsTrigger key={tab.value} value={tab.value}>
             {tab.label}
@@ -347,6 +349,24 @@ export const AdminPanel = () => {
 
       <TabsContent value="lux-config">
         <LuxModeConfig />
+      </TabsContent>
+
+      <TabsContent value="desktop-app">
+        <div className="space-y-4">
+          <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+            <div className="p-6 space-y-2">
+              <h3 className="text-2xl font-semibold leading-none tracking-tight">
+                Desktop App API Configuration
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Configura la connessione tra la Web App e la Claude Launcher Desktop App per accedere alle sessioni, chat e workspace
+              </p>
+            </div>
+            <div className="p-6 pt-0">
+              <DesktopAppSettings />
+            </div>
+          </div>
+        </div>
       </TabsContent>
 
       <TabsContent value="tool-server">
