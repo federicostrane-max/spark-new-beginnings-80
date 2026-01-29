@@ -264,6 +264,11 @@ export const ToolServerSettings = () => {
     setConnectionStatus({ status: 'testing' });
 
     try {
+      // v10.6.2: Save security token before testing (so it's available for the request)
+      if (securityToken && securityToken.trim()) {
+        toolServerClient.setSecurityToken(securityToken);
+      }
+
       // v10.6.0: Include security token in test request
       // v10.6.1: Add ngrok-skip-browser-warning to bypass ngrok interstitial page
       const headers: Record<string, string> = {
