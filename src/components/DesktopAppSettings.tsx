@@ -38,8 +38,52 @@ export const DesktopAppSettings = () => {
 
     if (savedUrl && savedToken) {
       testConnectionInternal(savedUrl, savedToken);
+    } else {
+      // Try auto-pairing if no config exists
+      tryAutoPairing();
     }
   }, []);
+
+  /**
+   * Auto-pairing: Try to detect Desktop App on localhost and auto-configure
+   */
+  const tryAutoPairing = async () => {
+    try {
+      console.log('[DesktopApp] Attempting auto-pairing...');
+
+      // Try to fetch pairing info from localhost
+      const response = await fetch('http://localhost:3847/api/pairing/info', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Auto-configure with detected token
+        setApiUrl('http://localhost:3847');
+        setApiToken(data.token);
+
+        // Save to localStorage
+        localStorage.setItem('launcher_api_url', 'http://localhost:3847');
+        localStorage.setItem('launcher_api_token', data.token);
+
+        // Update client
+        updateConfig('http://localhost:3847', data.token);
+
+        // Test connection
+        testConnectionInternal('http://localhost:3847', data.token);
+
+        toast.success('Desktop App detected and configured automatically!');
+        console.log('[DesktopApp] Auto-pairing successful:', data);
+      }
+    } catch (error) {
+      // Silent fail - user can configure manually
+      console.log('[DesktopApp] Auto-pairing failed (Desktop App not running?)');
+    }
+  };
 
   const testConnectionInternal = async (url: string, token: string) => {
     if (!url.trim()) {
@@ -299,6 +343,13 @@ export const DesktopAppSettings = () => {
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           ) : null}
           Save
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={tryAutoPairing}
+          disabled={isTesting}
+        >
+          🔄 Auto-Pair
         </Button>
       </div>
 
