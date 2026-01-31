@@ -1,5 +1,5 @@
 /**
- * AutoPairingProvider - v10.4.1
+ * AutoPairingProvider - v10.4.2
  *
  * Componente invisibile che fa polling parallelo per rilevare e configurare
  * automaticamente sia il Tool Server (localhost:8766) che la Desktop App (localhost:3847).
@@ -157,7 +157,10 @@ export const AutoPairingProvider = ({ children }: { children: React.ReactNode })
           hasCompletedDesktopPairingRef.current = true;
           console.log('[AutoPairing:Desktop] Già configurato e connesso');
         } else if (isMounted) {
-          console.log('[AutoPairing:Desktop] Token salvato ma non raggiungibile, avvio polling...');
+          // Token vecchio/invalido - rimuovi per evitare 401 continui da altri hook
+          localStorage.removeItem('launcher_api_token');
+          localStorage.removeItem('launcher_api_url');
+          console.log('[AutoPairing:Desktop] Token invalido rimosso, avvio polling...');
           pollDesktopApp();
         }
       });
