@@ -1,5 +1,5 @@
 /**
- * AutoPairingProvider - v10.4.0
+ * AutoPairingProvider - v10.4.1
  *
  * Componente invisibile che fa polling parallelo per rilevare e configurare
  * automaticamente sia il Tool Server (localhost:8766) che la Desktop App (localhost:3847).
@@ -119,61 +119,55 @@ export const AutoPairingProvider = ({ children }: { children: React.ReactNode })
     if (!user) return;
     if (hasCompletedDesktopPairingRef.current) return;
 
-    // Se già configurato in localStorage con un token valido, verifica connessione una volta
+    let isMounted = true;
+
+    const pollDesktopApp = async () => {
+      while (isMounted && !hasCompletedDesktopPairingRef.current) {
+        try {
+          const response = await fetch(`${DESKTOP_APP_URL}/api/pairing/info`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('[AutoPairing:Desktop] Rilevata:', data);
+
+            if (data.token && data.enabled !== false) {
+              configureLauncherClient(DESKTOP_APP_URL, data.token);
+              hasCompletedDesktopPairingRef.current = true;
+              toast.success("Desktop App collegata automaticamente!");
+              console.log('[AutoPairing:Desktop] Completato');
+              break;
+            }
+          }
+        } catch (err) {
+          // Desktop App non raggiungibile, continua polling
+        }
+
+        await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
+      }
+    };
+
+    // Se già configurato in localStorage, verifica connessione prima
     const savedToken = localStorage.getItem('launcher_api_token');
     if (savedToken) {
       verifyDesktopConnection(savedToken).then(alive => {
         if (alive) {
           hasCompletedDesktopPairingRef.current = true;
           console.log('[AutoPairing:Desktop] Già configurato e connesso');
-        } else {
-          // Token salvato ma Desktop App non raggiungibile - avvia polling
+        } else if (isMounted) {
           console.log('[AutoPairing:Desktop] Token salvato ma non raggiungibile, avvio polling...');
-          startDesktopPolling();
+          pollDesktopApp();
         }
       });
-      return;
-    }
-
-    // Nessun token salvato - avvia polling
-    startDesktopPolling();
-
-    function startDesktopPolling() {
-      let isMounted = true;
-
-      const pollDesktopApp = async () => {
-        while (isMounted && !hasCompletedDesktopPairingRef.current) {
-          try {
-            const response = await fetch(`${DESKTOP_APP_URL}/api/pairing/info`, {
-              method: 'GET',
-              headers: { 'Accept': 'application/json' }
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              console.log('[AutoPairing:Desktop] Rilevata:', data);
-
-              if (data.token && data.enabled !== false) {
-                // Configura automaticamente
-                configureLauncherClient(DESKTOP_APP_URL, data.token);
-                hasCompletedDesktopPairingRef.current = true;
-                toast.success("Desktop App collegata automaticamente!");
-                console.log('[AutoPairing:Desktop] Completato');
-                break;
-              }
-            }
-          } catch (err) {
-            // Desktop App non raggiungibile, continua polling
-          }
-
-          await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
-        }
-      };
-
+    } else {
       pollDesktopApp();
-
-      // Cleanup non necessario qui perché il ref gestisce lo stop
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
   return <>{children}</>;
