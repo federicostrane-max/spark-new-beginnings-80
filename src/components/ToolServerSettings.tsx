@@ -528,7 +528,7 @@ export const ToolServerSettings = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="tool-server-settings">
       {/* Pairing Section (for logged in users) */}
       {user && (
         <div className="space-y-3">
@@ -595,6 +595,8 @@ export const ToolServerSettings = () => {
           placeholder="https://xxx.ngrok-free.app"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+          data-testid="tool-server-url-input"
+          name="tool-server-url"
         />
         <p className="text-xs text-muted-foreground">
           {user
@@ -616,6 +618,8 @@ export const ToolServerSettings = () => {
             value={securityToken}
             onChange={(e) => setSecurityToken(e.target.value)}
             className="pr-10 font-mono"
+            data-testid="security-token-input"
+            name="security-token"
           />
           <Button
             type="button"
@@ -670,6 +674,7 @@ export const ToolServerSettings = () => {
           variant="outline"
           onClick={handleTestConnection}
           disabled={isTesting || !url.trim()}
+          data-testid="test-connection-button"
         >
           {isTesting ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -681,6 +686,7 @@ export const ToolServerSettings = () => {
         <Button
           onClick={handleSave}
           disabled={isSaving}
+          data-testid="save-tool-server-button"
         >
           {isSaving ? (
             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -719,7 +725,7 @@ export const ToolServerSettings = () => {
 
       {/* Pairing Dialog */}
       <Dialog open={isPairingDialogOpen} onOpenChange={setIsPairingDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" data-testid="pairing-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Link2 className="h-5 w-5" />

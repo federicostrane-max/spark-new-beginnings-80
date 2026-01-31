@@ -413,7 +413,7 @@ export const ChatMessage = ({
   // System messages have special rendering
   if (isSystem) {
     return (
-      <div className="mb-4 flex justify-center">
+      <div className="mb-4 flex justify-center" data-testid="chat-message" data-message-id={id} data-message-role="system">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted/50 border border-border/50 text-sm text-muted-foreground">
           <Sparkles className="h-3 w-3" />
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -425,7 +425,7 @@ export const ChatMessage = ({
   }
 
   return (
-    <div 
+    <div
       className="mb-4 group relative touch-pan-y"
       onClick={selectionMode ? handleMessageClick : undefined}
       onTouchEnd={selectionMode ? handleMessageClick : handleLongPressEnd}
@@ -436,6 +436,12 @@ export const ChatMessage = ({
       onMouseMove={!selectionMode ? handleMouseMove : undefined}
       onMouseUp={handleLongPressEnd}
       onMouseLeave={handleLongPressEnd}
+      data-testid="chat-message"
+      data-message-id={id}
+      data-message-role={role}
+      data-is-selected={isSelected}
+      data-expanded={isExpanded}
+      data-is-streaming={isStreaming || false}
     >
       {selectionMode && (
         <div className="absolute left-0 top-1/2 -translate-y-1/2 z-10">
@@ -664,6 +670,8 @@ export const ChatMessage = ({
                   setIsManuallyExpanded(!currentState);
                 }}
                 className={cn("h-8 px-2 gap-1 pointer-events-auto", isUser && "hover:bg-primary-foreground/10")}
+                data-testid="toggle-message-expansion"
+                aria-label={!isExpanded ? "Expand message" : "Collapse message"}
               >
                 {!isExpanded ? (
                   <>
@@ -692,6 +700,8 @@ export const ChatMessage = ({
                     handleCopy();
                   }}
                   className={cn("h-8 px-2", isUser && "hover:bg-primary-foreground/10")}
+                  data-testid="copy-message-button"
+                  aria-label="Copy message content"
                 >
                   {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 </Button>
@@ -711,6 +721,8 @@ export const ChatMessage = ({
                     isUser && "hover:bg-primary-foreground/10",
                     status === 'loading' && currentMessageId === id && "opacity-50 cursor-not-allowed"
                   )}
+                  data-testid="tts-button"
+                  aria-label={isTTSPlaying ? "Stop audio" : "Play with voice"}
                   title={
                     status === 'loading' && currentMessageId === id
                       ? "Caricamento audio..."
@@ -740,6 +752,8 @@ export const ChatMessage = ({
                     }}
                     className={cn("h-8 px-2 gap-1")}
                     title="Crea presentazione"
+                    data-testid="presentation-button"
+                    aria-label="Create presentation"
                   >
                     <Presentation className="h-3 w-3" />
                     <span className="text-xs hidden sm:inline">Slideshow</span>

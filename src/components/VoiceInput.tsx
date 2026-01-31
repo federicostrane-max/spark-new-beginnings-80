@@ -96,6 +96,10 @@ export const VoiceInput = ({ onTranscription, disabled }: VoiceInputProps) => {
       className={`h-[50px] w-[50px] md:h-[60px] md:w-[60px] ${
         isProcessing ? 'cursor-wait' : ''
       }`}
+      data-testid="voice-input-button"
+      data-recording={isRecording}
+      data-processing={isProcessing}
+      aria-label={isRecording ? "Stop recording" : isProcessing ? "Processing audio" : "Start voice recording"}
     >
       {isRecording ? (
         <Square className="h-4 w-4 md:h-5 md:w-5 animate-pulse" />

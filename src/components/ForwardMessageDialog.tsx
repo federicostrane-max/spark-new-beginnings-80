@@ -124,7 +124,7 @@ export const ForwardMessageDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background flex flex-col">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] bg-background flex flex-col" data-testid="forward-message-dialog">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Inoltra messaggio</DialogTitle>
           <DialogDescription>
@@ -140,6 +140,8 @@ export const ForwardMessageDialog = ({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
+              data-testid="forward-agent-search"
+              name="forward-search"
             />
           </div>
 
@@ -164,6 +166,8 @@ export const ForwardMessageDialog = ({
                             "hover:bg-accent border-2",
                             selectedAgent === agent.id ? "border-primary bg-accent" : "border-transparent"
                           )}
+                          data-testid="forward-agent-item"
+                          data-agent-id={agent.id}
                         >
                           <div className="text-2xl flex-shrink-0">
                             {agent.avatar || "🤖"}
@@ -195,6 +199,7 @@ export const ForwardMessageDialog = ({
               onClick={() => onOpenChange(false)}
               className="flex-1"
               disabled={forwarding}
+              data-testid="cancel-forward-button"
             >
               Annulla
             </Button>
@@ -202,6 +207,7 @@ export const ForwardMessageDialog = ({
               onClick={handleForward}
               className="flex-1"
               disabled={!selectedAgent || forwarding}
+              data-testid="forward-submit-button"
             >
               {forwarding ? (
                 <>

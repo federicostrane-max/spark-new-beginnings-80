@@ -235,7 +235,7 @@ export const AgentsSidebar = ({
   // Sync function removed - synchronization now managed via Knowledge Base Manager
 
   return (
-    <div className="flex flex-col h-full bg-sidebar">
+    <nav className="flex flex-col h-full bg-sidebar" data-testid="agents-sidebar" aria-label="Agent list">
       {/* User Profile */}
       <div className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
@@ -254,10 +254,11 @@ export const AgentsSidebar = ({
 
       {/* Create Agent Button */}
       <div className="p-3">
-        <Button 
-          onClick={onCreateAgent} 
+        <Button
+          onClick={onCreateAgent}
           className="w-full justify-start gap-2"
           variant="default"
+          data-testid="create-agent-button"
         >
           <Plus className="h-4 w-4" />
           Create New Agent
@@ -273,6 +274,8 @@ export const AgentsSidebar = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 bg-sidebar-accent/50 border-sidebar-border text-sidebar-foreground placeholder:text-sidebar-foreground/50"
+            data-testid="agent-search-input"
+            name="agent-search"
           />
         </div>
         <TooltipProvider>
@@ -283,6 +286,8 @@ export const AgentsSidebar = ({
                 size="icon"
                 onClick={loadAgents}
                 className="shrink-0"
+                data-testid="refresh-agents-button"
+                aria-label="Refresh agent list"
               >
                 <RefreshCw className="h-4 w-4" />
               </Button>
@@ -331,6 +336,10 @@ export const AgentsSidebar = ({
                         : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
                     )}
                     onClick={() => onSelectAgent(agent)}
+                    data-testid="agent-item"
+                    data-agent-id={agent.id}
+                    data-agent-name={agent.name}
+                    aria-current={agent.id === currentAgentId ? "page" : undefined}
                   >
                     <div className="flex-1 min-w-0">
                       <p className="font-medium line-clamp-2 break-words">{agent.name}</p>
@@ -369,10 +378,11 @@ export const AgentsSidebar = ({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button 
-                variant="ghost" 
+              <Button
+                variant="ghost"
                 className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
                 onClick={() => navigate("/documents")}
+                data-testid="pool-documents-button"
               >
                 <Database className="h-4 w-4" />
                 <span className="flex-1 text-left">Pool Documenti</span>
@@ -406,10 +416,11 @@ export const AgentsSidebar = ({
             )}
           </Tooltip>
         </TooltipProvider>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
           onClick={() => navigate("/admin")}
+          data-testid="admin-panel-button"
         >
           <Settings className="h-4 w-4" />
           <span className="flex-1 text-left">Admin Panel</span>
@@ -419,10 +430,11 @@ export const AgentsSidebar = ({
             </Badge>
           )}
         </Button>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start gap-2 text-sidebar-foreground hover:bg-sidebar-accent"
           onClick={handleLogout}
+          data-testid="logout-button"
         >
           <LogOut className="h-4 w-4" />
           Logout
@@ -431,10 +443,11 @@ export const AgentsSidebar = ({
 
       {/* Knowledge Base Manager Dialog */}
       <Dialog open={!!selectedAgentForKB} onOpenChange={(open) => !open && setSelectedAgentForKB(null)}>
-        <DialogContent 
-          className="max-w-4xl max-h-[90vh]" 
+        <DialogContent
+          className="max-w-4xl max-h-[90vh]"
           onInteractOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
+          data-testid="knowledge-base-dialog"
         >
           <DialogHeader>
             <DialogTitle>Knowledge Base - {selectedAgentForKB?.name}</DialogTitle>
@@ -452,7 +465,7 @@ export const AgentsSidebar = ({
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!agentToDelete} onOpenChange={(open) => !open && setAgentToDelete(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent data-testid="delete-agent-confirmation-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -460,13 +473,13 @@ export const AgentsSidebar = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAgent} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogCancel data-testid="cancel-delete-agent-button">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteAgent} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" data-testid="confirm-delete-agent-button">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </nav>
   );
 };

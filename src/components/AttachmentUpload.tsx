@@ -91,6 +91,9 @@ export const AttachmentUpload = ({ onAttachmentAdded, disabled }: AttachmentUplo
         variant="outline"
         disabled={disabled || uploading}
         className="h-[50px] w-[50px] md:h-[60px] md:w-[60px] relative"
+        data-testid="attachment-upload-button"
+        data-uploading={uploading}
+        aria-label="Upload attachment"
       >
         <input
           type="file"

@@ -1904,10 +1904,10 @@ export default function MultiAgentConsultant() {
 
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden" data-testid="app-layout">
       {/* Desktop Sidebar - Always show AgentsSidebar */}
       {!isMobile && (
-        <div className="w-[280px] flex-shrink-0 flex flex-col border-r bg-sidebar">
+        <aside className="w-[280px] flex-shrink-0 flex flex-col border-r bg-sidebar" data-testid="agents-sidebar-container" aria-label="Agents navigation">
           <AgentsSidebar
             currentAgentId={currentAgent?.id || null}
             onSelectAgent={handleSelectAgent}
@@ -1918,7 +1918,7 @@ export default function MultiAgentConsultant() {
             }}
             agentUpdateTrigger={agentUpdateTrigger}
           />
-        </div>
+        </aside>
       )}
 
 
@@ -1968,25 +1968,25 @@ export default function MultiAgentConsultant() {
 
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20">
+      <main className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-background to-muted/20" data-testid="main-chat-area" aria-label="Chat conversation">
         {currentAgent ? (
           <>
             {/* Global Alerts */}
             <GlobalAlerts hasAgentIssues={agentHealth.hasAnyIssues()} />
 
             {/* Header with Settings */}
-            <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10">
+            <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10" data-testid="chat-header" data-selection-mode={selectionMode ? "active" : "inactive"}>
               <div className="max-w-4xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
                 {!selectionMode ? (
                   <>
                      {isMobile && (
-                      <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)}>
+                      <Button variant="ghost" size="icon" onClick={() => setDrawerOpen(true)} data-testid="mobile-menu-button" aria-label="Open navigation menu">
                         <Menu className="h-5 w-5" />
                       </Button>
                      )}
                      <div className="flex items-center gap-3 flex-1 min-w-0 mr-2">
                        <div className="min-w-0 flex-1">
-                         <h1 className="font-semibold truncate">{currentAgent.name}</h1>
+                         <h1 className="font-semibold truncate" data-testid="current-agent-name">{currentAgent.name}</h1>
                        </div>
                         </div>
                          <div className="flex items-center gap-2 flex-shrink-0">
@@ -1998,6 +1998,8 @@ export default function MultiAgentConsultant() {
                                 onClick={() => setAllMessagesExpanded(!allMessagesExpanded)}
                                 className="gap-2"
                                 title={allMessagesExpanded ? "Riduci tutti" : "Espandi tutti"}
+                                data-testid="expand-all-messages-button"
+                                aria-label={allMessagesExpanded ? "Collapse all messages" : "Expand all messages"}
                               >
                                 {allMessagesExpanded ? <ChevronsDown className="h-4 w-4" /> : <ChevronsUp className="h-4 w-4" />}
                               </Button>
@@ -2013,6 +2015,8 @@ export default function MultiAgentConsultant() {
                                     setShowCreateModal(true);
                                   }}
                                   className="relative"
+                                  data-testid="edit-agent-button"
+                                  aria-label="Edit agent"
                                 >
                                   <Edit className="h-4 w-4" />
                                   {unsyncedDocsCount > 0 && (
@@ -2032,9 +2036,12 @@ export default function MultiAgentConsultant() {
                             {/* Tool Server Status Indicator - CLICCABILE */}
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <div 
+                                <div
                                   className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted cursor-pointer"
                                   onClick={() => setShowToolServerDialog(true)}
+                                  data-testid="tool-server-indicator"
+                                  data-status={toolServerStatus}
+                                  aria-label={`Tool Server: ${toolServerStatus}`}
                                 >
                                   <div className={`w-2 h-2 rounded-full ${
                                     toolServerStatus === 'connected' ? 'bg-green-500' :
@@ -2059,7 +2066,7 @@ export default function MultiAgentConsultant() {
                   </>
                 ) : (
                   <>
-                    <Button variant="ghost" size="icon" onClick={handleCancelSelection}>
+                    <Button variant="ghost" size="icon" onClick={handleCancelSelection} data-testid="cancel-selection-button" aria-label="Cancel selection">
                       <X className="h-5 w-5" />
                     </Button>
                     <div className="flex items-center gap-2 flex-1">
@@ -2074,6 +2081,7 @@ export default function MultiAgentConsultant() {
                           size="sm"
                           onClick={handleSelectAll}
                           className="gap-2"
+                          data-testid="select-all-messages-button"
                         >
                           <span className="hidden md:inline">Seleziona tutti</span>
                           <span className="md:hidden">Tutti</span>
@@ -2083,6 +2091,7 @@ export default function MultiAgentConsultant() {
                         variant="destructive"
                         onClick={handleDeleteMessages}
                         className="gap-2"
+                        data-testid="delete-selected-messages-button"
                       >
                         <Trash2 className="h-4 w-4" />
                         <span className="hidden md:inline">{selectedMessages.length === 1 ? 'Elimina' : 'Elimina tutti'}</span>
@@ -2099,6 +2108,8 @@ export default function MultiAgentConsultant() {
                         <Button
                           onClick={handleForward}
                           className="gap-2"
+                          data-testid="forward-message-button"
+                          aria-label="Forward message"
                         >
                           <Forward className="h-4 w-4" />
                           <span className="hidden md:inline">Inoltra</span>
@@ -2108,10 +2119,10 @@ export default function MultiAgentConsultant() {
                   </>
                 )}
               </div>
-            </div>
+            </header>
 
             {/* Messages Container - CENTERED with max-width */}
-            <ScrollArea className="flex-1" onScroll={handleScroll}>
+            <ScrollArea className="flex-1" onScroll={handleScroll} data-testid="messages-area">
               {loadingMessages ? (
                 <div className="flex h-full items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -2154,7 +2165,7 @@ export default function MultiAgentConsultant() {
             </ScrollArea>
 
             {/* Chat Input - FIXED BOTTOM with max-width */}
-            <div className="border-t bg-background/95 backdrop-blur">
+            <footer className="border-t bg-background/95 backdrop-blur" data-testid="chat-input-container">
               <div className="max-w-4xl mx-auto px-4 md:px-6 py-4">
                 <ChatInput
                   onSend={handleSendMessage}
@@ -2163,7 +2174,7 @@ export default function MultiAgentConsultant() {
                   placeholder={`Message ${currentAgent.name}...`}
                 />
               </div>
-            </div>
+            </footer>
 
             {/* Long Response Progress Indicator */}
             {backgroundProgress && activeLongResponse && (
@@ -2225,7 +2236,7 @@ export default function MultiAgentConsultant() {
             </div>
           </div>
         )}
-      </div>
+      </main>
 
       {/* Create/Edit Agent Modal */}
       <CreateAgentModal 
@@ -2264,7 +2275,7 @@ export default function MultiAgentConsultant() {
 
       {/* Delete All Messages Confirmation */}
       <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
-        <AlertDialogContent>
+        <AlertDialogContent data-testid="delete-all-messages-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Cancellare tutti i messaggi?</AlertDialogTitle>
             <AlertDialogDescription>
@@ -2273,10 +2284,11 @@ export default function MultiAgentConsultant() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogCancel data-testid="cancel-delete-all-button">Annulla</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteAllMessages}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="confirm-delete-all-button"
             >
               Elimina tutti
             </AlertDialogAction>
@@ -2286,7 +2298,7 @@ export default function MultiAgentConsultant() {
       
       {/* Tool Server Settings Dialog */}
       <Dialog open={showToolServerDialog} onOpenChange={setShowToolServerDialog}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg" data-testid="tool-server-settings-dialog">
           <DialogHeader>
             <DialogTitle>Tool Server Configuration</DialogTitle>
           </DialogHeader>

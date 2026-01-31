@@ -421,7 +421,7 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid="chat-input-form">
       {/* Gemini Provider Badge */}
       {pendingProvider === 'gemini' && (
         <div className="flex gap-2 items-center p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
@@ -564,9 +564,10 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
       <div className="relative">
         {/* Agent Suggestions Dropdown */}
         {showAgentSuggestions && agentSuggestions.length > 0 && (
-          <div 
+          <div
             ref={suggestionsRef}
             className="absolute bottom-full left-0 mb-2 w-full max-w-md bg-background border rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
+            data-testid="agent-suggestions-dropdown"
           >
             {agentSuggestions.map((agent, index) => (
               <button
@@ -607,12 +608,14 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
             disabled={disabled}
             className="min-h-[44px] max-h-[200px] resize-none border-0 focus-visible:ring-0 shadow-none bg-transparent"
             rows={1}
+            data-testid="message-input"
+            name="message"
           />
           
           <div className="flex items-center gap-0.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" title="Azioni Agente" className="h-8 w-8">
+                <Button variant="ghost" size="icon" title="Azioni Agente" className="h-8 w-8" data-testid="agent-actions-trigger" aria-label="Agent actions">
                   <Zap className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -753,6 +756,9 @@ export const ChatInput = ({ onSend, disabled, sendDisabled, placeholder = "Type 
               disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
               size="icon"
               className="flex-shrink-0 h-8 w-8"
+              data-testid="send-message-button"
+              data-disabled={disabled || sendDisabled || (!input.trim() && attachments.length === 0)}
+              aria-label="Send message"
             >
               <Send className="h-4 w-4" />
             </Button>

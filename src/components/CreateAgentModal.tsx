@@ -427,7 +427,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="create-agent-modal">
         <DialogHeader>
           <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
         </DialogHeader>
@@ -435,43 +435,47 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
         {/* Invisible element to intercept autofocus */}
         <div tabIndex={0} style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" data-testid="agent-form">
           {/* Name */}
           <div>
             <Label htmlFor="name">Agent Name *</Label>
-            <Input 
+            <Input
               id="name"
+              name="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Marketing Guru"
               required
               disabled={loading}
               autoFocus={false}
+              data-testid="agent-name-input"
             />
           </div>
 
           {/* Description */}
           <div>
             <Label htmlFor="description">Description</Label>
-            <Textarea 
+            <Textarea
               id="description"
+              name="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Describe what this agent specializes in..."
               rows={3}
               disabled={loading}
+              data-testid="agent-description-input"
             />
           </div>
 
           {/* LLM Provider Selection */}
           <div>
             <Label htmlFor="llmProvider">AI Model Provider *</Label>
-            <Select 
-              value={llmProvider} 
+            <Select
+              value={llmProvider}
               onValueChange={setLlmProvider}
               disabled={loading}
             >
-              <SelectTrigger id="llmProvider">
+              <SelectTrigger id="llmProvider" data-testid="llm-provider-select">
                 <SelectValue placeholder="Select AI provider" />
               </SelectTrigger>
               <SelectContent>
@@ -764,8 +768,9 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 </Button>
               )}
             </div>
-            <Textarea 
+            <Textarea
               id="systemPrompt"
+              name="systemPrompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder="You are a marketing expert specialized in..."
@@ -773,6 +778,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
               className="font-mono text-sm"
               required
               disabled={loading}
+              data-testid="system-prompt-input"
             />
             <p className="text-xs text-muted-foreground mt-1">
               Define the agent's personality, expertise, and behavior
@@ -805,11 +811,12 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             {/* Sinistra: Delete Agent */}
             <div>
               {editingAgent && onDelete && (
-                <Button 
-                  type="button" 
+                <Button
+                  type="button"
                   variant="destructive"
                   onClick={() => setShowDeleteDialog(true)}
                   disabled={loading}
+                  data-testid="delete-agent-button"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
                   Delete Agent
@@ -820,25 +827,27 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             {/* Destra: Altre azioni */}
             <div className="flex gap-2">
               {editingAgent && (
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={handleClone}
                   disabled={loading}
+                  data-testid="clone-agent-button"
                 >
                   <Copy className="h-4 w-4 mr-2" />
                   Clone Agent
                 </Button>
               )}
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => onOpenChange(false)}
                 disabled={loading}
+                data-testid="cancel-agent-button"
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={loading}>
+              <Button type="submit" disabled={loading} data-testid="save-agent-button">
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -865,7 +874,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
+        <AlertDialogContent data-testid="delete-agent-confirmation-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <Trash2 className="h-5 w-5 text-destructive" />
@@ -882,7 +891,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogCancel data-testid="cancel-delete-button">Annulla</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (editingAgent && onDelete) {
@@ -892,6 +901,7 @@ export const CreateAgentModal = ({ open, onOpenChange, onSuccess, editingAgent, 
                 }
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="confirm-delete-button"
             >
               Elimina Definitivamente
             </AlertDialogAction>
